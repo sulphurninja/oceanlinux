@@ -121,6 +121,12 @@ const AdminSidebar = () => {
                                 Add IP Stock
                             </h1>
                         </Link>
+                        <Link href="/admin/manageIpStock" prefetch={false}>
+                            <h1 className="flex items-center gap-2 rounded-xl px-3 py-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-white -foreground">
+                                <ServerIcon className="h-5 w-5" />
+                                Manage IP Stock
+                            </h1>
+                        </Link>
                         <Collapsible className="grid gap-2">
                             <CollapsibleTrigger className="flex items-center justify-between rounded-xl px-3 py-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-white -foreground [&[data-state=open]>svg]:rotate-90">
                                 <div className="flex items-center gap-2">

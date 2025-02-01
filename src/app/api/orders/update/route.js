@@ -3,13 +3,14 @@ import connectDB from '../../../../lib/db';
 import Order from '../../../../models/orderModel';
 
 export async function POST(request) {
-    const { username, password, orderId } = await request.json();
+    const { username, password, ipAddress, orderId } = await request.json();
     await connectDB();
     try {
         await Order.findByIdAndUpdate(orderId,
             {
                 username,
                 password,
+                ipAddress,
                 status: 'Active'  // Set status to 'Active' when username and password are updated
             },
             { new: true }  // Option to return the updated document

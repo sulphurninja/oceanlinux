@@ -8,6 +8,7 @@ const orderSchema = new mongoose.Schema({
     price: { type: Number, required: true },
     paymentId: { type: String, required: true },
     status: { type: String, default: 'pending' },
+    ipAddress: { type: String, default: '' },  // Optional, to be filled by admin
     username: { type: String, default: '' },  // Optional, to be filled by admin
     password: { type: String, default: '' }   // Optional, to be filled by admin
 });

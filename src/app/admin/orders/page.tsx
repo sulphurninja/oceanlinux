@@ -17,6 +17,7 @@ interface OrderType {
     productName: string;
     memory: string;
     status: string;
+    ipAddress?: string;
     username?: string;
     password?: string;
 }
@@ -26,6 +27,10 @@ const AdminOrders = () => {
     const [orders, setOrders] = useState<OrderType[] | null>([]);
     const [selectedOrder, setSelectedOrder] = useState<OrderType | null>(null);
 
+    // ✅ Properly update state using setSelectedOrder instead of direct mutation
+    const handleInputChange = (field: keyof OrderType, value: string) => {
+        setSelectedOrder(prev => prev ? { ...prev, [field]: value } : null);
+    };
 
     useEffect(() => {
         fetch('/api/orders/all')
@@ -34,20 +39,29 @@ const AdminOrders = () => {
             .catch(error => console.error('Failed to load orders:', error));
     }, []);
 
-    const handleUpdate = (order: OrderType, username: string, password: string) => {
-        fetch(`/api/orders/update`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username, password, orderId: order._id })
-        })
-            .then(response => response.json())
-            .then(() => {
-                toast.success('Order updated successfully');
-                setSelectedOrder(null); // Close dialog after update
-                // Optionally refresh the list or update state to show new username/password
+    const handleUpdate = () => {
+        if (selectedOrder) {
+            fetch(`/api/orders/update`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    orderId: selectedOrder._id,
+                    username: selectedOrder.username,
+                    password: selectedOrder.password,
+                    ipAddress: selectedOrder.ipAddress,
+                })
             })
-            .catch(error => console.error('Error updating order:', error));
+                .then(response => response.json())
+                .then(() => {
+                    toast.success('Order updated successfully');
+                    setSelectedOrder(null); // Close dialog after update
+                    // Optionally refresh the list or update state to show new username/password
+                })
+                .catch(error => console.error('Error updating order:', error));
+        }
     };
+
+
 
     return (
         <div>
@@ -85,21 +99,26 @@ const AdminOrders = () => {
                     <DialogContent>
                         <DialogTitle>Update Order</DialogTitle>
                         <DialogDescription>
-                            Update username and password for the order.
+                            Update ip, username and password for the order.
                         </DialogDescription>
                         <Input
+                            placeholder="IP Address"
+                            value={selectedOrder.ipAddress || ''}
+                            onChange={(e) => handleInputChange('ipAddress', e.target.value)}
+                        />
+                        <Input
                             placeholder="Username"
-                            defaultValue={selectedOrder.username}
-                            onChange={(e) => selectedOrder.username = e.target.value}
+                            value={selectedOrder.username || ''}
+                            onChange={(e) => handleInputChange('username', e.target.value)}
                         />
                         <Input
                             type="password"
                             placeholder="Password"
-                            defaultValue={selectedOrder.password}
-                            onChange={(e) => selectedOrder.password = e.target.value}
+                            value={selectedOrder.password || ''}
+                            onChange={(e) => handleInputChange('password', e.target.value)}
                         />
                         <DialogFooter>
-                            <Button onClick={() => handleUpdate(selectedOrder, selectedOrder.username ?? "", selectedOrder.password ?? "")}>Save Changes</Button>
+                            <Button onClick={handleUpdate}>Save Changes</Button>
                             <DialogClose asChild>
                                 <Button><X />Close</Button>
                             </DialogClose>

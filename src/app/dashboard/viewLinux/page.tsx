@@ -21,9 +21,26 @@ interface Order {
     productName: string;
     memory: string;
     status: string;
+    ipAddress?: string;
     username?: string;
     password?: string;
 }
+
+function styleText(content: string) {
+    const regex = /(\([^)]*\)|[a-zA-Z]+)/g;
+    // Matches:
+    // 1. Any content inside (parentheses), including numbers
+    // 2. Any alphabet (a-zA-Z) outside parentheses
+
+    return content.split(regex).map((part, index) => {
+        if (part.match(/\([^)]*\)/) || part.match(/[a-zA-Z]/)) {
+            return <span key={index} className="text-red-500">{part}</span>;
+        } else {
+            return part; // Keeps numbers outside of parentheses unchanged
+        }
+    });
+}
+
 
 
 const ViewLinux = () => {
@@ -65,7 +82,7 @@ const ViewLinux = () => {
                     <TableBody>
                         {orders?.map(order => (
                             <TableRow key={order._id}>
-                                <TableCell>{order.productName}</TableCell>
+                                <TableCell>{styleText(order.productName)}</TableCell>
                                 <TableCell>{order.memory}</TableCell>
                                 <TableCell>{order.status}</TableCell>
                                 <TableCell>
@@ -88,7 +105,15 @@ const ViewLinux = () => {
                                     </div>
                                     {selectedOrder.username ? (
                                         <>
-                                            <div className='bg-background grid grid-cols-1 items-center rounded space-y-2 mt-4      p-4'>
+                                            <div className='bg-background grid grid-cols-1 items-center rounded space-y-2 mt-4 
+                                                 p-4'>
+                                                <div className='md:flex items-center gap-2'>
+                                                    <Label>ipAddress:</Label>
+                                                    <Input
+                                                        readOnly
+                                                        value={selectedOrder.ipAddress}
+                                                    />
+                                                </div>
                                                 <div className='md:flex items-center gap-2'>
                                                     <Label>Username:</Label>
                                                     <Input

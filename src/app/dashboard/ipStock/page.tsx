@@ -31,6 +31,22 @@ declare global {
     interface Window { Razorpay: any; }
 }
 
+function styleText(content: string) {
+    const regex = /(\([^)]*\)|[a-zA-Z]+)/g; 
+    // Matches:
+    // 1. Any content inside (parentheses), including numbers
+    // 2. Any alphabet (a-zA-Z) outside parentheses
+
+    return content.split(regex).map((part, index) => {
+        if (part.match(/\([^)]*\)/) || part.match(/[a-zA-Z]/)) {
+            return <span key={index} className="text-red-500">{part}</span>;
+        } else {
+            return part; // Keeps numbers outside of parentheses unchanged
+        }
+    });
+}
+
+
 
 const IPStockPage = () => {
     const [ipStocks, setIpStocks] = useState<IPStock[]>([]);
@@ -146,7 +162,7 @@ const IPStockPage = () => {
                     <TableBody>
                         {ipStocks.map((stock) => (
                             <TableRow key={stock._id}>
-                                <TableCell>{stock.name}</TableCell>
+                                <TableCell>{styleText(stock.name)}</TableCell>
                                 <TableCell>{stock.available ? 'Yes' : 'No'}</TableCell>
                                 {Object.entries(stock.memoryOptions).map(([memory, details]) => (
                                     <TableCell key={memory}>
