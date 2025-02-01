@@ -8,6 +8,9 @@ const inter = Inter({ subsets: ["latin"] });
 export const metadata: Metadata = {
   title: "OceanLinux - The Ocean of Linux ",
   description: "OceanLinux, the ocean of linux, never run out of linux distros!",
+  icons: {
+    icon: "/favicon.ico",
+  },
 };
 
 export default function RootLayout({
