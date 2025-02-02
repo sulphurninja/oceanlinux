@@ -1,4 +1,3 @@
-// src/pages/ipstock.tsx
 'use client'
 
 import { useEffect, useState } from 'react';
@@ -11,8 +10,7 @@ import {
     TableCell
 } from "@/components/ui/table";
 import { Button } from '@/components/ui/button';
-import { ServerIcon, ShoppingBag } from 'lucide-react';
-import Link from 'next/link';
+import { ServerIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
 
@@ -23,113 +21,83 @@ interface MemoryOptionDetails {
 interface IPStock {
     _id: string;
     name: string;
-    memoryOptions: Record<string, MemoryOptionDetails>; // Adjusted to a more descriptive type
+    memoryOptions: Record<string, MemoryOptionDetails>;
     available: boolean;
 }
 
 declare global {
-    interface Window { Razorpay: any; }
+    interface Window { Cashfree: any; }
 }
-
-function styleText(content: string) {
-    const regex = /(\([^)]*\)|[a-zA-Z]+)/g; 
-    // Matches:
-    // 1. Any content inside (parentheses), including numbers
-    // 2. Any alphabet (a-zA-Z) outside parentheses
-
-    return content.split(regex).map((part, index) => {
-        if (part.match(/\([^)]*\)/) || part.match(/[a-zA-Z]/)) {
-            return <span key={index} className="text-red-500">{part}</span>;
-        } else {
-            return part; // Keeps numbers outside of parentheses unchanged
-        }
-    });
-}
-
-
 
 const IPStockPage = () => {
     const [ipStocks, setIpStocks] = useState<IPStock[]>([]);
     const router = useRouter();
 
-    const loadRazorpayScript = (src: any) => {
-        return new Promise((resolve) => {
-            const script = document.createElement('script');
-            script.src = src;
-            script.onload = () => {
-                resolve(true);
-            };
-            script.onerror = () => {
-                resolve(false);
-            };
-            document.body.appendChild(script);
-        });
-    };
+    useEffect(() => {
+        const loadCashfreeScript = () => {
+            return new Promise((resolve, reject) => {
+                if (window.Cashfree) {
+                    console.log("Cashfree SDK already loaded");
+                    resolve(true);
+                    return;
+                }
 
-    const handleLoadRazorpay = async () => {
-        const res = await loadRazorpayScript('https://checkout.razorpay.com/v1/checkout.js');
-        if (!res) {
-            alert('Razorpay SDK failed to load. Are you online?');
-            return;
+                const script = document.createElement("script");
+                script.src = "https://sdk.cashfree.com/js/v3/cashfree.js";
+                script.async = true;
+                script.onload = () => {
+                    console.log("Cashfree SDK Loaded");
+                    resolve(true);
+                };
+                script.onerror = () => {
+                    console.error("Failed to load Cashfree SDK");
+                    reject(false);
+                };
+
+                document.body.appendChild(script);
+            });
+        };
+
+        loadCashfreeScript();
+    }, []);
+
+    const handleBuyNow = async (productName: string, memory: string, price: number) => {
+        try {
+            const orderResponse = await fetch('/api/createOrder', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ productName, memory, price })
+            });
+
+            const orderData = await orderResponse.json();
+
+            if (!orderData || !orderData.paymentSessionId) {
+                toast.error("Failed to initiate payment.");
+                return;
+            }
+
+            console.log("🔗 Redirecting to Cashfree Hosted Checkout:", orderData.paymentSessionId);
+
+
+            // ✅ Use window.Cashfree to avoid TypeScript errors
+            if (typeof window !== "undefined" && window.Cashfree) {
+                const cashfree = window.Cashfree({ mode: "production" }); // Change to "sandbox" in test mode
+                cashfree.checkout({
+                    paymentSessionId: orderData.paymentSessionId,
+                    redirectTarget: "_self" // Opens in the same tab
+                });
+            } else {
+                console.error("❌ Cashfree SDK not loaded.");
+                toast.error("Payment gateway not loaded. Please refresh the page.");
+            }
+
+        } catch (error) {
+            console.error("❌ Payment Error:", error);
+            toast.error("Something went wrong.");
         }
     };
 
 
-    useEffect(() => {
-        handleLoadRazorpay();
-    }, []);
-
-    const handleBuyNow = async (productName: string, memory: string, price: number): Promise<void> => {
-        const options = {
-            key: "rzp_test_GgS0pFyhBV7wHM", // Replace with your Razorpay Key ID
-            amount: price * 100, // Razorpay expects the amount in the smallest currency unit (paise)
-            currency: "INR",
-            name: productName,
-            description: `Purchase of ${memory} GB variant`,
-            handler: async (response: { razorpay_payment_id: string }) => {
-                const { razorpay_payment_id } = response;
-                const orderData = {
-                    productName,
-                    memory,
-                    price,
-                    paymentId: razorpay_payment_id,
-                    status: 'pending'
-                };
-
-                // After payment is successful, create an order in the database
-                await fetch('/api/createOrder', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${localStorage.getItem('token')}` // Ensure you're storing the JWT in localStorage or similar
-                    },
-                    body: JSON.stringify(orderData)
-                }).then(res => res.json())
-                    .then(data => {
-                        toast.success('Order created successfully!');
-                        console.log(data);
-                        router.push('/dashboard/viewLinux')
-                    })
-                    .catch(error => console.error('Error:', error));
-            },
-            modal: {
-                ondismiss: function () {
-                    alert('Payment cancelled by user.');
-                }
-            },
-            prefill: {
-                name: "Customer Name",
-                email: "customer_email@example.com",
-                contact: "9999999999"
-            },
-            theme: {
-                color: "#F37254"
-            }
-        };
-
-        const paymentObject = new window.Razorpay(options);
-        paymentObject.open();
-    };
 
 
 
@@ -144,12 +112,14 @@ const IPStockPage = () => {
 
     return (
         <div className='w-full'>
+            <div id="cashfree-container" className="mt-4"></div>
+
             <div className='h-[63px] flex gap-2 items-center border-b p-4'>
                 <ServerIcon />
                 <h1 className='text-xl'>IP Stock</h1>
             </div>
             <div className='mx-12 mt-6'>
-                <Table className='w-full  border'>
+                <Table className='w-full border'>
                     <TableHeader>
                         <TableRow>
                             <TableHead>Name</TableHead>
@@ -162,16 +132,15 @@ const IPStockPage = () => {
                     <TableBody>
                         {ipStocks.map((stock) => (
                             <TableRow key={stock._id}>
-                                <TableCell>{styleText(stock.name)}</TableCell>
+                                <TableCell>{stock.name}</TableCell>
                                 <TableCell>{stock.available ? 'Yes' : 'No'}</TableCell>
                                 {Object.entries(stock.memoryOptions).map(([memory, details]) => (
                                     <TableCell key={memory}>
-                                        <Button className='hover:border border hover:border-muted-foreground' onClick={() => handleBuyNow(stock.name, memory, details.price)}>
+                                        <Button onClick={() => handleBuyNow(stock.name, memory, details.price)}>
                                             Buy Now
                                         </Button>
                                     </TableCell>
                                 ))}
-
                             </TableRow>
                         ))}
                     </TableBody>
@@ -182,5 +151,3 @@ const IPStockPage = () => {
 };
 
 export default IPStockPage;
-
-
