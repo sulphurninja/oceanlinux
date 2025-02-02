@@ -1,13 +1,20 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 
 const PaymentSuccessPage = () => {
     const router = useRouter();
     const searchParams = useSearchParams();
-    const orderId = searchParams.get('order_id');
+    const [orderId, setOrderId] = useState<string | null>(null);
+
+    useEffect(() => {
+        if (typeof window !== "undefined") {
+            const id = searchParams.get('order_id');
+            setOrderId(id);
+        }
+    }, [searchParams]);
 
     useEffect(() => {
         if (orderId) {
