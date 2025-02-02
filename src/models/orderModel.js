@@ -11,6 +11,6 @@ const orderSchema = new mongoose.Schema({
     ipAddress: { type: String, default: '' },  // Optional, to be filled by admin
     username: { type: String, default: '' },  // Optional, to be filled by admin
     password: { type: String, default: '' }   // Optional, to be filled by admin
-});
+}, { timestamps: true }); // ✅ Automatically adds `createdAt` & `updatedAt`
 
 export default mongoose.models.Order || mongoose.model('Order', orderSchema);

@@ -18,6 +18,7 @@ interface OrderType {
     memory: string;
     status: string;
     ipAddress?: string;
+    updatedAt: string;
     username?: string;
     password?: string;
 }
@@ -35,7 +36,13 @@ const AdminOrders = () => {
     useEffect(() => {
         fetch('/api/orders/all')
             .then(response => response.json())
-            .then(setOrders)
+            .then(data => {
+                // ✅ Sort orders by createdAt (latest orders at the top)
+                const sortedOrders = data.sort((a: OrderType, b: OrderType) =>
+                    new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+                );
+                setOrders(sortedOrders);
+            })
             .catch(error => console.error('Failed to load orders:', error));
     }, []);
 

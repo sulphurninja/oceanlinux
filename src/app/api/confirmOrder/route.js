@@ -42,7 +42,7 @@ export async function POST(request) {
         }
 
         // ✅ Update order status in the database
-        existingOrder.status = "confirmed";
+        existingOrder.status = "paid";
         await existingOrder.save();
 
         return new NextResponse(JSON.stringify({ message: "Order confirmed.", order: existingOrder }), {

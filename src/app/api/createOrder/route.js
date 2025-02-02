@@ -47,7 +47,7 @@ export async function POST(request) {
                 customer_phone: '9999999999',
             },
             order_meta: {
-                return_url: `https://yourdomain.com/payment-success?order_id=${orderId}`
+                return_url: `https://oceanlinux.in/payment-success?order_id=${orderId}`
             }
         };
 
