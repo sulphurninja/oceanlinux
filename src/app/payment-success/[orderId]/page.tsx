@@ -1,20 +1,16 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 
-const PaymentSuccessPage = () => {
-    const router = useRouter();
-    const searchParams = useSearchParams();
-    const [orderId, setOrderId] = useState<string | null>(null);
+interface PaymentSuccessProps {
+    params: { orderId: string }; // ✅ Get `order_id` from dynamic route
+}
 
-    useEffect(() => {
-        if (typeof window !== "undefined") {
-            const id = searchParams.get('order_id');
-            setOrderId(id);
-        }
-    }, [searchParams]);
+const PaymentSuccessPage = ({ params }: PaymentSuccessProps) => {
+    const router = useRouter();
+    const { orderId } = params; // ✅ Extract `order_id` directly
 
     useEffect(() => {
         if (orderId) {
