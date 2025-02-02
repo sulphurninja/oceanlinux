@@ -1,8 +1,12 @@
 'use client';
 
+export const dynamic = 'force-dynamic';
+
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
+
+
 
 interface PaymentSuccessProps {
     params: { orderId: string }; // ✅ Get `order_id` from dynamic route
