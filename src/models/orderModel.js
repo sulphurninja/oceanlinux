@@ -1,4 +1,3 @@
-// models/orderModel.js
 import mongoose from 'mongoose';
 
 const orderSchema = new mongoose.Schema({
@@ -8,9 +7,14 @@ const orderSchema = new mongoose.Schema({
     price: { type: Number, required: true },
     paymentId: { type: String, required: true },
     status: { type: String, default: 'pending' },
-    ipAddress: { type: String, default: '' },  // Optional, to be filled by admin
+    ipAddress: { type: String, default: '' }, // Optional, to be filled by admin
     username: { type: String, default: '' },  // Optional, to be filled by admin
-    password: { type: String, default: '' }   // Optional, to be filled by admin
+    password: { type: String, default: '' },  // Optional, to be filled by admin
+    os: { 
+        type: String, 
+        enum: ['CentOS 7', 'Ubuntu 22'], 
+        default: 'CentOS 7' // Default OS
+    }
 }, { timestamps: true }); // ✅ Automatically adds `createdAt` & `updatedAt`
 
 export default mongoose.models.Order || mongoose.model('Order', orderSchema);
