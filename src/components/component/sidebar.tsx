@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetTrigger, SheetContent, SheetClose, SheetOverlay } from "@/components/ui/sheet";
-import { BadgeIndianRupee, ChevronDownIcon, LayoutDashboardIcon, LogOutIcon, LucideWaves, Menu, ReceiptIndianRupee, ReplyIcon, ServerIcon, UserIcon, XIcon } from 'lucide-react';
+import { BadgeIndianRupee, ChevronDownIcon, LayoutDashboardIcon, LogOutIcon, LucideWaves, Menu, NotebookText, ReceiptIndianRupee, ReplyIcon, ServerIcon, UserIcon, XIcon } from 'lucide-react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../ui/collapsible';
 import { useRouter } from 'next/navigation';
 
@@ -78,6 +78,12 @@ const ResponsiveSidebar = () => {
                     Order History
                   </h1>
                 </Link>
+                <Link href="/dashboard/scripts" prefetch={false}>
+                  <h1 className="flex items-center gap-2 rounded-xl px-3 py-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-white -foreground">
+                    <NotebookText className="h-5 w-5" />
+                    Scripts
+                  </h1>
+                </Link>
               </nav>
             </div>
             <div className="p-4 border-t">
@@ -126,6 +132,12 @@ const ResponsiveSidebar = () => {
               <h1 className="flex items-center gap-2 rounded-xl px-3 py-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-white -foreground">
                 <ReceiptIndianRupee className="h-5 w-5" />
                 Order History
+              </h1>
+            </Link>
+            <Link href="/dashboard/scripts" prefetch={false}>
+              <h1 className="flex items-center gap-2 rounded-xl px-3 py-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-white -foreground">
+                <NotebookText className="h-5 w-5" />
+                Scripts
               </h1>
             </Link>
             <Collapsible className="grid gap-2">
