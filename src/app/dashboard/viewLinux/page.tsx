@@ -19,6 +19,7 @@ import { Label } from '@/components/ui/label';
 interface Order {
     _id: string;
     productName: string;
+    os: string;
     memory: string;
     status: string;
     ipAddress?: string;
@@ -99,7 +100,7 @@ const ViewLinux = () => {
                                 <DialogTitle>Linux Details</DialogTitle>
                                 <DialogDescription>
                                     <div className='grid grid-cols-3  items-center gap-3 w-full'>
-                                        <p><Computer /> {`${selectedOrder.productName}`.slice(0, 10)}...</p>
+                                        <p><Computer /> {selectedOrder.os}</p>
                                         <p><MemoryStick /> Memory: {selectedOrder.memory}</p>
                                         <p><CheckCircle /> Status: {selectedOrder.status}</p>
                                     </div>
