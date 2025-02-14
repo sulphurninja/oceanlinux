@@ -9,7 +9,6 @@ export default function AdminDashboardPage({ }) {
             <div className='flex text-center m-auto justify-center h-screen '>
                Kuch nahi he idhar
             </div>
-
         </div>
 
     )

@@ -14,6 +14,8 @@ export default function TermsConditions() {
                 <p>Our services cannot be used for illegal activities, including but not limited to hacking, phishing, and spamming. Violations result in immediate suspension.</p>
                 <h2 className="text-2xl font-semibold mt-6">3. Payments & Billing</h2>
                 <p>All payments must be completed in advance. Failure to pay may result in suspension or termination.</p>
+                <p>We use <b>Cashfree</b> as our payment gateway. The registered banking entity for Cashfree transactions is <b>Sachin Pawar</b>.</p>
+
                 <h2 className="text-2xl font-semibold mt-6">4. Termination Policy</h2>
                 <p>We reserve the right to terminate accounts violating our policies without prior notice.</p>
             </div>

@@ -15,8 +15,9 @@ export default function PrivacyPolicy() {
                 <h2 className="text-2xl font-semibold mt-6">3. Security Measures</h2>
                 <p>We utilize advanced encryption and cybersecurity measures to protect your data. However, no online system is entirely risk-free.</p>
                 <h2 className="text-2xl font-semibold mt-6">4. Third-Party Services</h2>
-                <p>We integrate with third-party providers like Razorpay for payment processing. Their privacy policies apply to their respective services.</p>
-                <p className="mt-4">For privacy concerns, contact us at <b>support@oceanlinux.com</b>.</p>
+                <p>We integrate with third-party providers like Cashfree Payments Gateway for payment processing. Their privacy policies apply to their respective services.</p>
+                <p>The registered banking entity handling transactions for our Cashfree payments is <b>Sachin Pawar</b>.</p>
+                <p className="mt-4">For privacy concerns, contact us at <b>spenterprises8441@gmail.com</b>.</p>
             </div>
             <Footer />
         </>

@@ -6,6 +6,7 @@ import Header from "@/components/landing/Header";
 import Hero from "@/components/landing/Hero";
 import NetworkInfrastructure from "@/components/landing/NetworkInfrastructure";
 import Performance from "@/components/landing/Performance";
+import PricingSection from "@/components/landing/pricing";
 import Scalability from "@/components/landing/Scalability";
 import Security from "@/components/landing/Security";
 import SupportAndReliability from "@/components/landing/SupportAndReliability";
@@ -16,6 +17,8 @@ export default function LandingPage() {
     <div className="min-h-screen bg-background text-white">
       <Header />
       <Hero />
+      <PricingSection />
+
       <Features />
       <Performance />
       <Security />

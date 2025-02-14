@@ -47,7 +47,7 @@ sudo ./spi -rhel7`
 // Copy-to-clipboard function
 const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
-    toast.success("Copierd to clipboard!");
+    toast.success("Copied to clipboard!");
 };
 
 const ScriptsPage = () => {

@@ -135,11 +135,15 @@ const IPStockPage = () => {
                                 <TableCell>{stock.name}</TableCell>
                                 <TableCell>{stock.available ? 'Yes' : 'No'}</TableCell>
                                 {Object.entries(stock.memoryOptions).map(([memory, details]) => (
-                                    <TableCell key={memory}>
-                                        <Button onClick={() => handleBuyNow(stock.name, memory, details.price)}>
+                                    <TableCell key={memory} className="p-4 text-start">
+                                        <div className="text-lg font-semibold text-white -800">
+                                            ₹{details.price}
+                                        </div>
+                                        <Button className="mt-2 w-full" onClick={() => handleBuyNow(stock.name, memory, details.price)}>
                                             Buy Now
                                         </Button>
                                     </TableCell>
+
                                 ))}
                             </TableRow>
                         ))}

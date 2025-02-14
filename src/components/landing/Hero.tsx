@@ -5,7 +5,7 @@ export default function Hero() {
     return (
         <section className="py-20 px-4 sm:px-6 lg:px-8 text-center">
             <h1 className="text-4xl sm:text-5xl md:text-6xl font-extrabold mb-6">
-                Dive into Powerful VPS Hosting with Ocean Linux
+                Most Affordable VPS Hosting with Ocean Linux
             </h1>
             <p className="text-xl sm:text-2xl mb-8 max-w-3xl mx-auto">
                 Experience lightning-fast, secure, and scalable virtual private servers tailored for your needs.
