@@ -8,9 +8,9 @@ type Props = { children: React.ReactNode }
 export default function Layout({ children }: Props) {
     return (
         <AuthProvider>
-            <div className='flex overflow-hidden  w-full'>
+            <div className='flex overflow-hidden h-full  w-full'>
                 <ResponsiveSidebar />
-                <div className='w-full '>
+                <div className='w-full md:ml-64 '>
                     {children}
                 </div>
 

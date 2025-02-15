@@ -23,7 +23,7 @@ const ResponsiveSidebar = () => {
 
 
   return (
-    <div className="flex">
+    <div className="flex fixed">
       {/* Mobile Sidebar */}
       <Sheet open={open} onOpenChange={setOpen} >
         <SheetTrigger asChild className='lg:hidden'>
