@@ -1,46 +1,44 @@
-import connectDB from '../../../../lib/db';
-import mongoose from 'mongoose';
-
-const OrderSchema = new mongoose.Schema({}, { strict: false });
-const Order = mongoose.models.Order || mongoose.model("Order", OrderSchema);
+import { NextResponse } from 'next/server';
+import connectDB from '@/lib/db';
+import Order from '@/models/orderModel';
+// import { requireAdmin } from '@/helper/requireAdmin';
 
 export async function POST(request) {
-    await connectDB();
-    
-    try {
-        const { username, password, ipAddress, orderId } = await request.json();
+  await connectDB();
 
-        if (!orderId || !mongoose.Types.ObjectId.isValid(orderId)) {
-            return new Response(JSON.stringify({ message: 'Invalid order ID' }), {
-                status: 400,
-                headers: { 'Content-Type': 'application/json' }
-            });
-        }
+  try {
+    // requireAdmin(); // If you have an admin check, do it here
 
-        const updatedOrder = await Order.findByIdAndUpdate(orderId, {
-            username,
-            password,
-            ipAddress,
-            status: 'Active'  // Automatically mark as active when credentials are updated
-        }, { new: true });
-
-        if (!updatedOrder) {
-            return new Response(JSON.stringify({ message: 'Order not found' }), {
-                status: 404,
-                headers: { 'Content-Type': 'application/json' }
-            });
-        }
-
-        return new Response(JSON.stringify({ message: 'Order updated successfully', order: updatedOrder }), {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' }
-        });
-
-    } catch (error) {
-        console.error("❌ Error updating order:", error);
-        return new Response(JSON.stringify({ message: 'Error updating order', error: error.message }), {
-            status: 500,
-            headers: { 'Content-Type': 'application/json' }
-        });
+    const { orderId, ipAddress, username, password, status, os } = await request.json();
+    if (!orderId) {
+      return NextResponse.json(
+        { message: 'Missing orderId' },
+        { status: 400 }
+      );
     }
+
+    const updatedOrder = await Order.findByIdAndUpdate(
+      orderId,
+      {
+        ipAddress: ipAddress || '',
+        username: username || '',
+        password: password || '',
+        os: os || 'CentOS 7',
+        status: status || 'pending'
+      },
+      { new: true }
+    );
+
+    if (!updatedOrder) {
+      return NextResponse.json({ message: 'Order not found' }, { status: 404 });
+    }
+
+    return NextResponse.json(
+      { message: 'Order updated', order: updatedOrder },
+      { status: 200 }
+    );
+  } catch (error) {
+    console.error('Error updating order:', error);
+    return NextResponse.json({ message: 'Server error' }, { status: 500 });
+  }
 }

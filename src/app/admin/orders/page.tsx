@@ -1,140 +1,197 @@
-'use client'
+'use client';
 
 import React, { useEffect, useState } from 'react';
-import {
-    Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
-} from "@/components/ui/table";
-import { X } from "lucide-react";
-import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogTitle } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
-import { toast } from 'sonner';
 
-
-interface OrderType {
-    _id: string;
-    paymentId: string;
-    productName: string;
-    memory: string;
-    status: string;
-    ipAddress?: string;
-    updatedAt: string;
-    username?: string;
-    password?: string;
+interface Order {
+  _id: string;
+  user: any;
+  productName: string;
+  memory: string;
+  price: number;
+  transactionId: string;
+  status: string;
+  ipAddress: string;
+  username: string;
+  password: string;
+  os: string;
+  updatedAt: Date;
 }
 
-
 const AdminOrders = () => {
-    const [orders, setOrders] = useState<OrderType[] | null>([]);
-    const [selectedOrder, setSelectedOrder] = useState<OrderType | null>(null);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const dialogRef = React.useRef<HTMLDialogElement>(null);
 
-    // ✅ Properly update state using setSelectedOrder instead of direct mutation
-    const handleInputChange = (field: keyof OrderType, value: string) => {
-        setSelectedOrder(prev => prev ? { ...prev, [field]: value } : null);
-    };
+  // 1) Load all orders
+  useEffect(() => {
+    fetch('/api/orders/all')
+      .then(response => response.json())
+      .then((data: Order[]) => {
+        // Sort by newest updatedAt (if needed)
+        const sorted = data.sort((a, b) =>
+          new Date(b.updatedAt || '').getTime() - new Date(a.updatedAt || '').getTime()
+        );
+        setOrders(sorted);
+      })
+      .catch(error => console.error('Failed to load orders:', error));
+  }, []);
 
-    useEffect(() => {
-        fetch('/api/orders/all')
-            .then(response => response.json())
-            .then(data => {
-                // ✅ Sort orders by createdAt (latest orders at the top)
-                const sortedOrders = data.sort((a: OrderType, b: OrderType) =>
-                    new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-                );
-                setOrders(sortedOrders);
-            })
-            .catch(error => console.error('Failed to load orders:', error));
-    }, []);
+  // 2) Update local fields
+  const handleInputChange = (field: keyof Order, value: string) => {
+    if (!selectedOrder) return;
+    setSelectedOrder(prev => prev ? { ...prev, [field]: value } : null);
+  };
 
-    const handleUpdate = () => {
-        if (selectedOrder) {
-            fetch(`/api/orders/update`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    orderId: selectedOrder._id,
-                    username: selectedOrder.username,
-                    password: selectedOrder.password,
-                    ipAddress: selectedOrder.ipAddress,
-                })
-            })
-                .then(response => response.json())
-                .then(() => {
-                    toast.success('Order updated successfully');
-                    setSelectedOrder(null); // Close dialog after update
-                    // Optionally refresh the list or update state to show new username/password
-                })
-                .catch(error => console.error('Error updating order:', error));
+  // 3) Submit changes to the server
+  const handleUpdate = () => {
+    if (!selectedOrder) return;
+
+    fetch('/api/orders/update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        orderId: selectedOrder._id,
+        ipAddress: selectedOrder.ipAddress,
+        username: selectedOrder.username,
+        password: selectedOrder.password,
+        status: selectedOrder.status,
+        os: selectedOrder.os
+      })
+    })
+      .then(res => res.json())
+      .then(() => {
+        alert('Order updated successfully');
+        setSelectedOrder(null);
+        if (dialogRef.current) {
+          dialogRef.current.close();
         }
-    };
+        // Reload the list
+        return fetch('/api/orders/all');
+      })
+      .then(res => res.json())
+      .then((updatedList: Order[]) => setOrders(updatedList))
+      .catch(error => console.error('Error updating order:', error));
+  };
 
+  return (
+    <div className="p-4">
+      <h1 className="text-center text-xl font-bold border-b -gray-300 pb-4">
+        All Orders
+      </h1>
 
+      {/* Responsive table container */}
+      <div className="my-5 mx-auto w-full max-w-4xl border border-gray-300 rounded overflow-x-auto">
+        <table className="min-w-full table-auto">
+          <thead className="-gray-200">
+            <tr>
+              <th className="px-4 py-2">Txn ID</th>
+              <th className="px-4 py-2">Product</th>
+              <th className="px-4 py-2">Memory</th>
+              <th className="px-4 py-2">Price</th>
+              <th className="px-4 py-2">Status</th>
+              <th className="px-4 py-2">OS</th>
+              <th className="px-4 py-2">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {orders.map(order => (
+              <tr key={order._id} className="border-t">
+                <td className="px-4 py-2">{order.transactionId}</td>
+                <td className="px-4 py-2">{order.productName}</td>
+                <td className="px-4 py-2">{order.memory}</td>
+                <td className="px-4 py-2">{order.price}</td>
+                <td className="px-4 py-2">{order.status}</td>
+                <td className="px-4 py-2">{order.os}</td>
+                <td className="px-4 py-2">
+                  <button
+                    className="px-3 py-2 bg-blue-500 text-white rounded"
+                    onClick={() => {
+                      setSelectedOrder(order);
+                      dialogRef.current?.showModal();
+                    }}
+                  >
+                    Update
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
 
-    return (
-        <div>
-            <div className='p-4 text-lg border-b'>
-                <h1>All Orders - Update Credentials</h1>
-            </div>
-            <div className='border mt-6 mx-12'>
-                <Table>
-                    <TableHeader>
-                        <TableRow>
-                            <TableHead>Payment ID</TableHead>
-                            <TableHead>Product Name</TableHead>
-                            <TableHead>Memory</TableHead>
-                            <TableHead>Status</TableHead>
-                            <TableHead>Actions</TableHead>
-                        </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                        {orders?.map(order => (
-                            <TableRow key={order._id}>
-                                <TableCell>{order.paymentId}</TableCell>
-                                <TableCell>{order.productName}</TableCell>
-                                <TableCell>{order.memory}</TableCell>
-                                <TableCell>{order.status}</TableCell>
-                                <TableCell>
-                                    <Button onClick={() => setSelectedOrder(order)}>Update</Button>
-                                </TableCell>
-                            </TableRow>
-                        ))}
-                    </TableBody>
-                </Table>
-            </div>
-            {selectedOrder && (
-                <Dialog open={Boolean(selectedOrder)} onOpenChange={() => setSelectedOrder(null)}>
-                    <DialogContent>
-                        <DialogTitle>Update Order</DialogTitle>
-                        <DialogDescription>
-                            Update ip, username and password for the order.
-                        </DialogDescription>
-                        <Input
-                            placeholder="IP Address"
-                            value={selectedOrder.ipAddress || ''}
-                            onChange={(e) => handleInputChange('ipAddress', e.target.value)}
-                        />
-                        <Input
-                            placeholder="Username"
-                            value={selectedOrder.username || ''}
-                            onChange={(e) => handleInputChange('username', e.target.value)}
-                        />
-                        <Input
-                            type="password"
-                            placeholder="Password"
-                            value={selectedOrder.password || ''}
-                            onChange={(e) => handleInputChange('password', e.target.value)}
-                        />
-                        <DialogFooter>
-                            <Button onClick={handleUpdate}>Save Changes</Button>
-                            <DialogClose asChild>
-                                <Button><X />Close</Button>
-                            </DialogClose>
-                        </DialogFooter>
-                    </DialogContent>
-                </Dialog>
-            )}
-        </div>
-    );
+      {/* Modal Dialog for updating one order */}
+      {selectedOrder && (
+        <dialog ref={dialogRef} className="w-full max-w-sm p-4 rounded bg- shadow-md">
+          <h2 className="text-lg font-bold mb-2">Update Order</h2>
+          <p className="mb-2">Set IP, Username, Password, OS or update status.</p>
+
+          {/* Display the Transaction ID for better readability */}
+          <div className="text-center font-bold text-lg mb-2">
+            Transaction ID: {selectedOrder.transactionId}
+          </div>
+
+          <input
+            type="text"
+            placeholder="IP Address"
+            value={selectedOrder.ipAddress}
+            onChange={(e) => handleInputChange('ipAddress', e.target.value)}
+            className="w-full px-3 py-2 mb-2 border border-gray-300 rounded"
+          />
+          <input
+            type="text"
+            placeholder="Username"
+            value={selectedOrder.username}
+            onChange={(e) => handleInputChange('username', e.target.value)}
+            className="w-full px-3 py-2 mb-2 border border-gray-300 rounded"
+          />
+          <input
+            type="password"
+            placeholder="Password"
+            value={selectedOrder.password}
+            onChange={(e) => handleInputChange('password', e.target.value)}
+            className="w-full px-3 py-2 mb-2 border border-gray-300 rounded"
+          />
+
+          {/* OS Field */}
+          <select
+            value={selectedOrder.os}
+            onChange={(e) => handleInputChange('os', e.target.value)}
+            className="w-full px-3 py-2 mb-2 border border-gray-300 rounded"
+          >
+            <option value="CentOS 7">CentOS 7</option>
+            <option value="Ubuntu 22">Ubuntu 22</option>
+          </select>
+
+          {/* Status Field */}
+          <select
+            value={selectedOrder.status}
+            onChange={(e) => handleInputChange('status', e.target.value)}
+            className="w-full px-3 py-2 mb-2 border border-gray-300 rounded"
+          >
+            <option value="pending">Pending</option>
+            <option value="verified">Verified</option>
+            <option value="completed">Completed</option>
+            <option value="invalid">Invalid</option>
+          </select>
+
+          <div className="flex justify-between mt-4">
+            <button
+              className="px-4 py-2 bg-blue-500 text-white rounded"
+              onClick={handleUpdate}
+            >
+              Save Changes
+            </button>
+            <button
+              className="px-4 py-2 bg-red-500 text-white rounded"
+              onClick={() => dialogRef.current?.close()}
+            >
+              Close
+            </button>
+          </div>
+        </dialog>
+      )}
+    </div>
+  );
 };
 
 export default AdminOrders;

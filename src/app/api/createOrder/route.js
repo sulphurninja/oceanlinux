@@ -2,96 +2,53 @@ import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 import { getDataFromToken } from '@/helper/getDataFromToken';
-import axios from 'axios';
 
 export async function POST(request) {
-    await connectDB();
+  await connectDB();
 
-    try {
-        const userId = await getDataFromToken(request);
-        const reqBody = await request.json();
-        const { productName, memory, price } = reqBody;
-
-        const orderId = `order_${Date.now()}`;
-
-        // ✅ Ensure API Keys are loaded correctly
-        const clientId = process.env.CASHFREE_APP_ID;
-        const clientSecret = process.env.CASHFREE_SECRET_KEY;
-
-        if (!clientId || !clientSecret) {
-            console.error("❌ Missing API Credentials");
-            return new NextResponse(JSON.stringify({ message: "API Credentials Missing" }), {
-                status: 500,
-                headers: { 'Content-Type': 'application/json' }
-            });
-        }
-
-        // ✅ Save order in the database as pending
-        const newOrder = await Order.create({
-            user: userId,
-            productName,
-            memory,
-            price,
-            paymentId: orderId,
-            status: "pending"
-        });
-
-        // ✅ Prepare Order Data for Cashfree API
-        const orderData = {
-            order_id: orderId,
-            order_amount: price,
-            order_currency: 'INR',
-            customer_details: {
-                customer_id: userId,
-                customer_email: 'customer_email@example.com',
-                customer_phone: '9999999999',
-            },
-            order_meta: {
-                return_url: `https://oceanlinux.in/payment-success/${orderId}`
-            }
-        };
-
-        console.log("🔹 Sending Order Data to Cashfree:", orderData);
-
-        // ✅ Make API Call to Cashfree
-        const response = await axios.post(
-            'https://api.cashfree.com/pg/orders',
-            orderData,
-            {
-                headers: {
-                    'Content-Type': 'application/json',
-                    'x-api-version': '2023-08-01',
-                    'x-client-id': clientId,
-                    'x-client-secret': clientSecret,
-                },
-            }
-        );
-
-        console.log("✅ Cashfree API Response:", response.data);
-
-        const { payment_session_id } = response.data;
-
-        if (!payment_session_id) {
-            console.error("❌ Cashfree Response Missing `payment_session_id`:", response.data);
-            return new NextResponse(JSON.stringify({ message: "Failed to generate payment session.", error: response.data }), {
-                status: 500,
-                headers: { 'Content-Type': 'application/json' }
-            });
-        }
-
-        return new NextResponse(JSON.stringify({
-            orderId,
-            paymentSessionId: payment_session_id // ✅ Use `payment_session_id`
-        }), {
-            status: 201,
-            headers: { 'Content-Type': 'application/json' }
-        });
-
-    } catch (error) {
-        console.error("❌ Cashfree API Error:", error.response?.data || error.message);
-        return new NextResponse(JSON.stringify({ message: 'Cashfree API Error', error: error.response?.data || error.message }), {
-            status: 500,
-            headers: { 'Content-Type': 'application/json' }
-        });
+  try {
+    // 1. Check which user is making this purchase
+    const userId = await getDataFromToken(request);
+    if (!userId) {
+      return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
     }
+
+    // 2. Read request data
+    const reqBody = await request.json();
+    const { productName, memory, price, transactionId } = reqBody;
+
+    // 3. Basic validation
+    if (!productName || !memory || !price || !transactionId) {
+      return NextResponse.json(
+        { message: 'Missing required fields' },
+        { status: 400 }
+      );
+    }
+
+    // 4. Create a new order
+    const newOrder = await Order.create({
+      user: userId,
+      productName,
+      memory,
+      price,
+      transactionId,      // Store user-entered transaction reference
+      status: 'pending',   // Pending until admin verifies
+    });
+
+    // 5. Return success
+    return NextResponse.json(
+      {
+        message: 'Order created successfully',
+        order: newOrder
+      },
+      { status: 201 }
+    );
+
+  } catch (error) {
+    console.error('Error creating order:', error);
+    return NextResponse.json(
+      { message: 'Server error', error: error.message },
+      { status: 500 }
+    );
+  }
 }

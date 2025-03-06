@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
   Card,
@@ -21,14 +20,11 @@ import { ServerIcon } from "lucide-react";
 
 /** Convert a paragraph-style description into bullet points.
  *  This splits on the period + space (". ").
- *  Adjust if you need more sophisticated splitting.
  */
 function toBulletPoints(text: string) {
   if (!text) return [];
   const rawPoints = text.split(". ");
-  // Trim each point and remove empty strings
-  const finalPoints = rawPoints.map((p) => p.trim()).filter(Boolean);
-  return finalPoints;
+  return rawPoints.map((p) => p.trim()).filter(Boolean);
 }
 
 interface MemoryOptionDetails {
@@ -43,92 +39,81 @@ interface IPStock {
   memoryOptions: Record<string, MemoryOptionDetails>;
 }
 
-declare global {
-  interface Window {
-    Cashfree: any;
-  }
-}
-
 export default function IPStockPage() {
   const [ipStocks, setIpStocks] = useState<IPStock[]>([]);
-  const router = useRouter();
 
-  useEffect(() => {
-    const loadCashfreeScript = () => {
-      return new Promise((resolve, reject) => {
-        if (window.Cashfree) {
-          console.log("Cashfree SDK already loaded");
-          resolve(true);
-          return;
-        }
+  // For the modal
+  const [showModal, setShowModal] = useState(false);
+  const [transactionId, setTransactionId] = useState("");
+  const [selectedProduct, setSelectedProduct] = useState<{
+    name: string;
+    memory: string;
+    price: number;
+  } | null>(null);
 
-        const script = document.createElement("script");
-        script.src = "https://sdk.cashfree.com/js/v3/cashfree.js";
-        script.async = true;
-        script.onload = () => {
-          console.log("Cashfree SDK Loaded");
-          resolve(true);
-        };
-        script.onerror = () => {
-          console.error("Failed to load Cashfree SDK");
-          reject(false);
-        };
-
-        document.body.appendChild(script);
-      });
-    };
-    loadCashfreeScript();
-  }, []);
-
-  const handleBuyNow = async (productName: string, memory: string, price: number) => {
-    if (!price) {
-      toast.error("No price set for this plan.");
-      return;
-    }
-    try {
-      const orderResponse = await fetch("/api/createOrder", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ productName, memory, price })
-      });
-
-      const orderData = await orderResponse.json();
-
-      if (!orderData || !orderData.paymentSessionId) {
-        toast.error("Failed to initiate payment.");
-        return;
-      }
-
-      console.log("🔗 Redirecting to Cashfree Hosted Checkout:", orderData.paymentSessionId);
-
-      if (typeof window !== "undefined" && window.Cashfree) {
-        const cashfree = window.Cashfree({ mode: "production" });
-        // use "sandbox" if testing
-        cashfree.checkout({
-          paymentSessionId: orderData.paymentSessionId,
-          redirectTarget: "_self"
-        });
-      } else {
-        console.error("❌ Cashfree SDK not loaded.");
-        toast.error("Payment gateway not loaded. Please refresh the page.");
-      }
-    } catch (error) {
-      console.error("❌ Payment Error:", error);
-      toast.error("Something went wrong.");
-    }
-  };
-
+  // Fetch available IP stocks on mount
   useEffect(() => {
     const fetchIPStocks = async () => {
-      const response = await fetch("/api/ipstock");
-      const data = await response.json();
-      setIpStocks(data);
+      try {
+        const response = await fetch("/api/ipstock");
+        const data = await response.json();
+        setIpStocks(data);
+      } catch (error) {
+        toast.error("Failed to load plans.");
+        console.error(error);
+      }
     };
     fetchIPStocks();
   }, []);
 
+  // 1) Called when user clicks "Buy Now"
+  const handleBuyNow = (productName: string, memory: string, price: number) => {
+    // Store user’s selected plan in state, open modal
+    setSelectedProduct({ name: productName, memory, price });
+    setShowModal(true);
+  };
+
+  // 2) Called when user enters transaction ID and hits "Submit Payment"
+  const handleSubmitTransactionId = async () => {
+    if (!selectedProduct) return;
+
+    if (!transactionId) {
+      toast.error("Please enter your transaction ID.");
+      return;
+    }
+
+    try {
+      // Create the order in your DB
+      const res = await fetch("/api/createOrder", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          productName: selectedProduct.name,
+          memory: selectedProduct.memory,
+          price: selectedProduct.price,
+          transactionId
+        })
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        toast.error(data.message || "Order creation failed.");
+        return;
+      }
+
+      // Successfully created order
+      toast.success("Order created! Wait for admin verification.");
+      setShowModal(false);
+      setTransactionId("");
+      setSelectedProduct(null);
+    } catch (error) {
+      console.error("Error creating order:", error);
+      toast.error("Something went wrong. Please try again.");
+    }
+  };
+
   return (
-    <div className="w-full min-h-full  text-white">
+    <div className="w-full min-h-full text-white">
       {/* Header / Title */}
       <div className="flex items-center gap-2 border-b border-gray-700 p-4">
         <ServerIcon />
@@ -139,25 +124,13 @@ export default function IPStockPage() {
       <div className="grid md:grid-cols-2 gap-6 px-4 py-8">
         {ipStocks.map((stock) => {
           const memoryKeys = Object.keys(stock.memoryOptions || {});
-          // Turn the paragraph into bullet points
           const bulletPoints = toBulletPoints(stock.description || "");
 
           return (
             <Card key={stock._id} className="bg-gray-800 border border-gray-700">
               <CardHeader>
-                <CardTitle className="text-lg font-bold">
-                  {stock.name}
-                </CardTitle>
-
-                {bulletPoints.length > 0 && (
-                  <CardDescription className="text-gray-400 mt-2">
-                    <ul className="list-disc list-inside space-y-1 text-sm leading-5">
-                      {bulletPoints.map((point, idx) => (
-                        <li key={idx}>{point.endsWith(".") ? point : `${point}.`}</li>
-                      ))}
-                    </ul>
-                  </CardDescription>
-                )}
+                <CardTitle className="text-lg font-bold">{stock.name}</CardTitle>
+               
               </CardHeader>
               <CardContent>
                 {/* Availability */}
@@ -186,11 +159,7 @@ export default function IPStockPage() {
                     {memoryKeys.map((memKey) => {
                       const priceObj = stock.memoryOptions[memKey];
                       return (
-                        <TabsContent
-                          key={memKey}
-                          value={memKey}
-                          className="py-4"
-                        >
+                        <TabsContent key={memKey} value={memKey} className="py-4">
                           {priceObj?.price !== null ? (
                             <div className="flex flex-col space-y-2">
                               <div className="text-xl font-semibold">
@@ -198,7 +167,9 @@ export default function IPStockPage() {
                               </div>
                               <Button
                                 className="w-full"
-                                onClick={() => handleBuyNow(stock.name, memKey, priceObj.price!)}
+                                onClick={() =>
+                                  handleBuyNow(stock.name, memKey, priceObj.price!)
+                                }
                                 disabled={!stock.available}
                               >
                                 Buy Now
@@ -221,6 +192,47 @@ export default function IPStockPage() {
           );
         })}
       </div>
+
+      {/* Payment Modal: Show QR code & transaction ID input */}
+      {showModal && selectedProduct && (
+        <div className="fixed inset-0 flex items-center justify-center bg-black/50 p-4 z-50">
+          <div className="bg-gray-800 p-4 rounded shadow-md w-full max-w-sm relative">
+            <h2 className="text-lg font-bold mb-2">Complete Payment</h2>
+            <p className="text-sm text-gray-400 mb-4">
+              Scan this QR with your UPI app. Once paid, enter the transaction ID/UTR below.
+            </p>
+
+            {/* -- Example static QR code image from your public folder. 
+                 Replace '/qr-demo.png' with your real QR code image -- */}
+            <div className="flex justify-center mb-4">
+              <img
+                src="/qr.jpg"
+                alt="Payment QR Code"
+                className="max-w-xs"
+              />
+            </div>
+
+            <p className="text-xs text-gray-400 mb-2">
+              Product: {selectedProduct.name} – {selectedProduct.memory} – ₹{selectedProduct.price}
+            </p>
+
+            <input
+              type="text"
+              value={transactionId}
+              onChange={(e) => setTransactionId(e.target.value)}
+              placeholder="Transaction ID / UTR"
+              className="w-full p-2 mb-3 rounded text-black"
+            />
+
+            <Button className="w-full mb-2" onClick={handleSubmitTransactionId}>
+              Submit Payment
+            </Button>
+            <Button variant="secondary" className="w-full" onClick={() => setShowModal(false)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
