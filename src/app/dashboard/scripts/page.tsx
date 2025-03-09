@@ -58,6 +58,8 @@ const ScriptsPage = () => {
                 <TabsList className="flex gap-2  ">
                     <TabsTrigger value="ubuntu" className='text-md'>Ubuntu 22</TabsTrigger>
                     <TabsTrigger value="centos" className='text-md'>CentOS 7</TabsTrigger>
+                    <TabsTrigger value="terminal" className='text-md'>Terminal</TabsTrigger>
+                    <TabsTrigger value="tutorial" className='text-md'>Tutorial</TabsTrigger>
                 </TabsList>
 
                 {/* Ubuntu 22 Tab */}
@@ -81,7 +83,41 @@ const ScriptsPage = () => {
                         </Card>
                     ))}
                 </TabsContent>
+                <TabsContent value="terminal">
+                    <div className='h-screen'>
+                        <iframe
+                            src="https://sshterminal.advps.store/"
+                            style={{ width: '100%', height: '100%', border: 'none' }}
+                            title="SSH Terminal"
+                        />
+                    </div>
+                </TabsContent>
+                <TabsContent value="tutorial">
+                    <Card className="mb-4 p-6">
+                        <p>
+                            PUTTY SE IP KAISE BANATE HAIN IS VIDEO ME AAP SIKH JAOGE JAISE JAISE IS VIDEO ME BATAYA GAYA HAI WAISE STEPS FOLLOW KIJIYE
 
+                            ONLY 3 STEP DALO AAPKA IP BAN JAEGA
+
+                            SABSE PEHLE PUTTY SOFTWARE DOWNLOAD KARE
+
+                            PHIR PUTTY SOFTWARE OPEN KARE
+
+                            USKE BAAD IP ADDRESS ME JO AAPKO IP DIYA GAYA HAI WO DALKE OPEN BUTTON PE CLICK KARDE
+
+                            PHIR WAHA PE USERNAME MANGEGA
+
+                            USERNAME:= root
+
+                            PHIR WAHA PE PASSWORD MANGEGA TO AAPKO JO LINUX MILA HAI USME PASSWORD DIYA GAYA HAI WAHI PASSWORD COPY KARKE PUTTY ME KAHI BH EK BAAR RIGHT CLICK KARKE ENTER KARDE
+
+                            PHIR USKE BAAD YE 3 STEP DALKE IP BANA LE
+
+                            SCRIPT Apko Panel Me Diya Gaya he
+                        </p>
+                        <video src='/tutorial.mp4' controls autoPlay='true' className='h-screen w-full' />
+                    </Card>
+                </TabsContent>
                 {/* CentOS 7 Tab */}
                 <TabsContent value="centos">
                     {scripts.centos.map((script, index) => (
