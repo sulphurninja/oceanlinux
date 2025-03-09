@@ -115,7 +115,7 @@ const ScriptsPage = () => {
 
                             SCRIPT Apko Panel Me Diya Gaya he
                         </p>
-                        <video src='/tutorial.mp4' controls autoPlay='true' className='h-screen w-full' />
+                        <video src='/tutorial.mp4' controls autoPlay className='h-screen w-full' />
                     </Card>
                 </TabsContent>
                 {/* CentOS 7 Tab */}
