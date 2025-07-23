@@ -120,45 +120,51 @@ export default function IPStockPage() {
     setShowDialog(true);
   };
 
-  // Replace the existing handleSubmitTransactionId with this function
-  const handleProceedToPayment = async () => {
-    if (!selectedProduct) return;
-
-    setPaymentInitiating(true);
-    try {
-      const res = await fetch("/api/payment/create", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          productName: selectedProduct.name,
-          memory: selectedProduct.memory,
-          price: selectedProduct.price
-        })
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        toast.error(data.message || "Failed to initiate payment");
-        setPaymentInitiating(false);
-        return;
-      }
-
-      // Close the dialog and redirect to payment URL
-      setShowDialog(false);
-
-      // You can either redirect to the payment URL
-      window.location.href = data.paymentUrl;
-
-      // Or open in a new tab
-      // window.open(data.paymentUrl, "_blank");
-
-    } catch (error) {
-      console.error("Error initiating payment:", error);
-      toast.error("Something went wrong. Please try again");
+// Replace the handleProceedToPayment function with this enhanced version
+const handleProceedToPayment = async () => {
+  if (!selectedProduct) return;
+  
+  setPaymentInitiating(true);
+  try {
+    const res = await fetch("/api/payment/create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        productName: selectedProduct.name,
+        memory: selectedProduct.memory,
+        price: selectedProduct.price
+      })
+    });
+    
+    const data = await res.json();
+    
+    if (!res.ok) {
+      toast.error(data.message || "Failed to initiate payment");
       setPaymentInitiating(false);
+      return;
     }
-  };
+    
+    // Store the client transaction ID in localStorage for later verification
+    if (data.clientTxnId) {
+      localStorage.setItem('lastClientTxnId', data.clientTxnId);
+      console.log("Stored clientTxnId in localStorage:", data.clientTxnId);
+    }
+    
+    // Show a toast notification
+    toast.success("Redirecting to payment gateway...");
+    
+    // Close the dialog
+    setShowDialog(false);
+    
+    // Redirect to the payment URL
+    window.location.href = data.paymentUrl;
+    
+  } catch (error) {
+    console.error("Error initiating payment:", error);
+    toast.error("Something went wrong. Please try again");
+    setPaymentInitiating(false);
+  }
+};
   // Get a short version of the description
   const getShortDescription = (text: string) => {
     if (!text) return "";
