@@ -6,7 +6,7 @@ import Order from '@/models/orderModel';
 
 // Configure with your actual API key
 const UPI_GATEWAY_API_KEY = process.env.UPI_GATEWAY_API_KEY || "9502f310-cc59-4217-ad6c-e24924c01478";
-const UPI_GATEWAY_STATUS_URL = "https://api.ekqr.in/api/check_order_status";
+const UPI_GATEWAY_STATUS_URL = "https://api.ekqr.in/api/v2/check_order_status";
 
 export async function POST(request) {
   await connectDB();
