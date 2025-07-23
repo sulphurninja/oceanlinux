@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Loader2, CheckCircle2, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
-export default function PaymentCallbackPage() {
+// Create a client component that uses useSearchParams
+function PaymentCallbackContent() {
   const [status, setStatus] = useState<"loading" | "success" | "failed">("loading");
   const [message, setMessage] = useState("Processing your payment...");
   const router = useRouter();
@@ -93,5 +94,29 @@ export default function PaymentCallbackPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+// Fallback component to show while content is loading
+function PaymentCallbackFallback() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-900 text-white p-4">
+      <div className="max-w-md w-full bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-700">
+        <div className="flex flex-col items-center justify-center text-center space-y-4">
+          <Loader2 className="h-12 w-12 text-blue-500 animate-spin" />
+          <h1 className="text-xl font-bold">Loading Payment Status</h1>
+          <p className="text-gray-300">Please wait while we check your payment...</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Main page component with Suspense boundary
+export default function PaymentCallbackPage() {
+  return (
+    <Suspense fallback={<PaymentCallbackFallback />}>
+      <PaymentCallbackContent />
+    </Suspense>
   );
 }
