@@ -79,31 +79,40 @@ export async function POST(request) {
     // Check with the payment gateway
     console.log(`Checking payment status with gateway for order ${order._id}`);
     
-    // Format dates to try
-    const formatDate = (date) => {
-      return `${String(date.getDate()).padStart(2, '0')}-${String(date.getMonth() + 1).padStart(2, '0')}-${date.getFullYear()}`;
+    // Format dates using Indian Standard Time (IST)
+    const formatDateInIST = (date) => {
+      // Force the date to be formatted in Indian Standard Time (IST)
+      const options = { timeZone: 'Asia/Kolkata' };
+      const istDate = new Date(date.toLocaleString('en-US', options));
+      
+      return `${String(istDate.getDate()).padStart(2, '0')}-${String(istDate.getMonth() + 1).padStart(2, '0')}-${istDate.getFullYear()}`;
     };
     
-    // Generate multiple dates to try
+    // Generate multiple dates to try, all in IST
     const orderCreatedAt = new Date(order.createdAt);
-    const orderDateFormatted = formatDate(orderCreatedAt);
+    const orderDateFormatted = formatDateInIST(orderCreatedAt);
     
     const today = new Date();
-    const todayFormatted = formatDate(today);
+    const todayFormatted = formatDateInIST(today);
     
     const yesterday = new Date(today);
     yesterday.setDate(yesterday.getDate() - 1);
-    const yesterdayFormatted = formatDate(yesterday);
+    const yesterdayFormatted = formatDateInIST(yesterday);
+    
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowFormatted = formatDateInIST(tomorrow);
     
     // Log all date formats we'll try
     console.log(`Order date (original): ${order.createdAt}`);
-    console.log(`Order date (formatted): ${orderDateFormatted}`);
-    console.log(`Today's date (formatted): ${todayFormatted}`);
-    console.log(`Yesterday's date (formatted): ${yesterdayFormatted}`);
+    console.log(`Order date (IST formatted): ${orderDateFormatted}`);
+    console.log(`Today's date (IST formatted): ${todayFormatted}`);
+    console.log(`Yesterday's date (IST formatted): ${yesterdayFormatted}`);
+    console.log(`Tomorrow's date (IST formatted): ${tomorrowFormatted}`);
     
     // Try all possible date formats
-    const datesToTry = [orderDateFormatted, todayFormatted, yesterdayFormatted];
-    console.log(`Will try dates: ${JSON.stringify(datesToTry)}`);
+    const datesToTry = [orderDateFormatted, todayFormatted, yesterdayFormatted, tomorrowFormatted];
+    console.log(`Will try dates (IST): ${JSON.stringify(datesToTry)}`);
     
     let gatewaySuccess = false;
     let finalResponse = null;
