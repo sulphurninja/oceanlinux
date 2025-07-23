@@ -39,10 +39,10 @@ export async function POST(request) {
 
     // 5. Generate a unique transaction ID in the exact format from their example
     const clientTxnId = `${Date.now()}`.substring(0, 10);
-    
+
     // 6. Simplify product name to avoid special characters
     const simplifiedProductName = "Server Plan " + memory;
-    
+
     // 7. Create payment request using real values but in the working format
     const paymentData = {
       key: UPI_GATEWAY_API_KEY,
@@ -53,10 +53,12 @@ export async function POST(request) {
       customer_email: user.email,
       customer_mobile: "9876543210", // Using dummy mobile since we don't have it
       redirect_url: `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/payment/callback`,
-      udf1: "order-reference", 
+      udf1: "order-reference",
       udf2: memory,
       udf3: "server-plan"
     };
+
+
 
     // Log the payment data for debugging
     console.log("Real-values payment request:", paymentData);
@@ -76,7 +78,7 @@ export async function POST(request) {
 
     if (!paymentResponse.status) {
       return NextResponse.json(
-        { 
+        {
           message: paymentResponse.msg || 'Payment initiation failed',
           gatewayResponse: paymentResponse,
           sentData: paymentData
@@ -86,6 +88,10 @@ export async function POST(request) {
     }
 
     // 8. Create a pending order in our database
+    // Calculate expiry date (30 days from now)
+    const expiryDate = new Date();
+    expiryDate.setDate(expiryDate.getDate() + 30);
+
     const newOrder = await Order.create({
       user: userId,
       productName,
@@ -95,7 +101,8 @@ export async function POST(request) {
       gatewayOrderId: paymentResponse.data.order_id.toString(),
       status: 'pending',
       customerName: user.name,
-      customerEmail: user.email
+      customerEmail: user.email,
+      expiryDate: expiryDate, // Add the expiry date
     });
 
     // 9. Return success with payment URL for the frontend

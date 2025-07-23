@@ -3,20 +3,20 @@
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
-import { 
-  Eye, 
-  User, 
-  CheckCircle, 
-  XCircle, 
-  MemoryStick, 
-  Computer, 
-  ArrowLeft, 
-  Copy, 
-  Server, 
-  Lock, 
-  Clock, 
-  RefreshCw,
-  Shield
+import {
+    Eye,
+    User,
+    CheckCircle,
+    XCircle,
+    MemoryStick,
+    Computer,
+    ArrowLeft,
+    Copy,
+    Server,
+    Lock,
+    Clock,
+    RefreshCw,
+    Shield
 } from 'lucide-react';
 import {
     Dialog,
@@ -88,8 +88,8 @@ const ViewLinux = () => {
     const copyToClipboard = (text: string, field: string) => {
         navigator.clipboard.writeText(text);
         setCopied(field);
-        toast( "Copied to clipboard" );
-        
+        toast("Copied to clipboard");
+
         setTimeout(() => setCopied(null), 2000);
     };
 
@@ -113,9 +113,9 @@ const ViewLinux = () => {
     return (
         <div className='w-full'>
             <div className='h-[70px] flex items-center border-b gap-3 px-6 bg-background shadow-sm'>
-                <Button 
-                    variant="ghost" 
-                    size="icon" 
+                <Button
+                    variant="ghost"
+                    size="icon"
                     onClick={() => router.back()}
                     className="hover:bg-muted transition-colors"
                 >
@@ -124,16 +124,16 @@ const ViewLinux = () => {
                 <h1 className='text-xl font-semibold flex items-center gap-2'>
                     <Server className="h-5 w-5 text-primary" /> Linux Instances
                 </h1>
-                <Button 
-                    variant="outline" 
-                    size="sm" 
+                <Button
+                    variant="outline"
+                    size="sm"
                     className="ml-auto flex items-center gap-1"
                     onClick={fetchOrders}
                 >
                     <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> Refresh
                 </Button>
             </div>
-            
+
             <div className='mx-auto max-w-7xl p-6'>
                 <Card>
                     <CardHeader className="pb-3">
@@ -172,9 +172,9 @@ const ViewLinux = () => {
                                             <TableCell><MemoryStick className="inline mr-1.5 h-4 w-4" />{order.memory}</TableCell>
                                             <TableCell>{getStatusBadge(order.status)}</TableCell>
                                             <TableCell className="text-right">
-                                                <Button 
-                                                    variant="ghost" 
-                                                    size="sm" 
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
                                                     onClick={() => handleDialogOpen(order)}
                                                     className="hover:bg-primary/10 transition-colors"
                                                 >
@@ -188,7 +188,7 @@ const ViewLinux = () => {
                         )}
                     </CardContent>
                 </Card>
-                
+
                 {selectedOrder && (
                     <Dialog open={Boolean(selectedOrder)} onOpenChange={() => setSelectedOrder(null)}>
                         <DialogContent className='sm:max-w-[900px]'>
@@ -198,7 +198,7 @@ const ViewLinux = () => {
                                     Linux Server Details
                                 </DialogTitle>
                             </DialogHeader>
-                            
+
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 my-4">
                                 <Card className="overflow-hidden transition-all hover:shadow-md">
                                     <CardContent className="p-4 flex items-center gap-3">
@@ -211,7 +211,7 @@ const ViewLinux = () => {
                                         </div>
                                     </CardContent>
                                 </Card>
-                                
+
                                 <Card className="overflow-hidden transition-all hover:shadow-md">
                                     <CardContent className="p-4 flex items-center gap-3">
                                         <div className="bg-primary/10 p-2.5 rounded-full">
@@ -223,7 +223,7 @@ const ViewLinux = () => {
                                         </div>
                                     </CardContent>
                                 </Card>
-                                
+
                                 <Card className="overflow-hidden transition-all hover:shadow-md">
                                     <CardContent className="p-4 flex items-center gap-3">
                                         <div className="bg-primary/10 p-2.5 rounded-full">
@@ -240,7 +240,31 @@ const ViewLinux = () => {
                                     </CardContent>
                                 </Card>
                             </div>
-                            
+
+                            {/* Add the expiry date card */}
+                            {selectedOrder.expiryDate && (
+                                <Card className="mt-4 mb-4">
+                                    <CardContent className="p-4 flex items-center gap-3">
+                                        <div className="bg-red-100 p-2.5 rounded-full">
+                                            <Clock className="h-5 w-5 text-red-600" />
+                                        </div>
+                                        <div>
+                                            <p className="text-sm text-muted-foreground">Expires On</p>
+                                            <p className="font-medium">
+                                                {new Date(selectedOrder.expiryDate).toLocaleDateString('en-US', {
+                                                    year: 'numeric',
+                                                    month: 'long',
+                                                    day: 'numeric'
+                                                })}
+                                            </p>
+                                            <p className="text-xs text-muted-foreground mt-1">
+                                                Your server will automatically expire after this date
+                                            </p>
+                                        </div>
+                                    </CardContent>
+                                </Card>
+                            )}
+
                             {selectedOrder.username ? (
                                 <Card className="mt-2">
                                     <CardHeader className="pb-2">
@@ -257,8 +281,8 @@ const ViewLinux = () => {
                                                     value={selectedOrder.ipAddress}
                                                     className="font-mono"
                                                 />
-                                                <Button 
-                                                    variant="outline" 
+                                                <Button
+                                                    variant="outline"
                                                     size="icon"
                                                     className="ml-2"
                                                     onClick={() => copyToClipboard(selectedOrder.ipAddress || '', 'IP Address')}
@@ -267,7 +291,7 @@ const ViewLinux = () => {
                                                 </Button>
                                             </div>
                                         </div>
-                                        
+
                                         <div className="space-y-2">
                                             <Label className="flex items-center gap-1">
                                                 <User className="h-4 w-4" /> Username
@@ -278,8 +302,8 @@ const ViewLinux = () => {
                                                     value={selectedOrder.username}
                                                     className="font-mono"
                                                 />
-                                                <Button 
-                                                    variant="outline" 
+                                                <Button
+                                                    variant="outline"
                                                     size="icon"
                                                     className="ml-2"
                                                     onClick={() => copyToClipboard(selectedOrder.username || '', 'Username')}
@@ -288,7 +312,7 @@ const ViewLinux = () => {
                                                 </Button>
                                             </div>
                                         </div>
-                                        
+
                                         <div className="space-y-2">
                                             <Label className="flex items-center gap-1">
                                                 <Lock className="h-4 w-4" /> Password
@@ -300,8 +324,8 @@ const ViewLinux = () => {
                                                     value={selectedOrder.password}
                                                     className="font-mono"
                                                 />
-                                                <Button 
-                                                    variant="outline" 
+                                                <Button
+                                                    variant="outline"
                                                     size="icon"
                                                     className="ml-2"
                                                     onClick={() => copyToClipboard(selectedOrder.password || '', 'Password')}
@@ -328,7 +352,7 @@ const ViewLinux = () => {
                                     </CardContent>
                                 </Card>
                             )}
-                            
+
                             <DialogFooter>
                                 <Button variant="outline" onClick={() => setSelectedOrder(null)}>Close</Button>
                             </DialogFooter>

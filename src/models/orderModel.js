@@ -18,6 +18,7 @@ const orderSchema = new mongoose.Schema({
     // Add these fields to your Order model schema:
     clientTxnId: { type: String, required: true, unique: true },
     gatewayOrderId: { type: String },
+    expiryDate: { type: Date }, // New field for storing expiration date
 }, { timestamps: true }); // ✅ Automatically adds `createdAt` & `updatedAt`
 
 export default mongoose.models.Order || mongoose.model('Order', orderSchema);
