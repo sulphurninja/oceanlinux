@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
-import { getDataFromToken } from '@/helper/getDataFromToken';
+// Remove this import since we're not using it
+// import { getDataFromToken } from '@/helper/getDataFromToken';
 
 // Configure with your actual API key
 const UPI_GATEWAY_API_KEY = process.env.UPI_GATEWAY_API_KEY || "9502f310-cc59-4217-ad6c-e24924c01478";
@@ -12,18 +13,21 @@ export async function POST(request) {
   console.log("[PAYMENT-STATUS] Checking payment status...");
 
   try {
-    
+    // Remove user authentication check completely
+    // const userId = await getDataFromToken(request);
+    // if (!userId) {
+    //   return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
+    // }
 
-    // 2. Read request data
+    // Read request data
     const reqBody = await request.json();
     console.log("[PAYMENT-STATUS] Request body:", reqBody);
     const { clientTxnId, manualSuccess, checkAllPending } = reqBody;
 
-    // Special case: check all pending orders for this user
+    // If checking all pending orders, we need to modify this since we don't have userId
     if (checkAllPending) {
-      console.log(`[PAYMENT-STATUS] Checking all pending orders for user ${userId}`);
+      console.log(`[PAYMENT-STATUS] Checking all pending orders`);
       const pendingOrders = await Order.find({ 
-        user: userId,
         status: 'pending'
       }).sort({ createdAt: -1 });
       
@@ -65,11 +69,8 @@ export async function POST(request) {
 
     console.log(`[PAYMENT-STATUS] Looking for order with clientTxnId: ${clientTxnId}`);
 
-    // 3. Find the order in our database
-    const order = await Order.findOne({ 
-      clientTxnId,
-     
-    });
+    // Find the order without requiring user ID
+    const order = await Order.findOne({ clientTxnId });
     
     if (!order) {
       console.log(`[PAYMENT-STATUS] Order not found for clientTxnId: ${clientTxnId}`);
