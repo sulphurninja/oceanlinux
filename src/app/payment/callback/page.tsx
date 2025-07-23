@@ -63,7 +63,7 @@ function PaymentCallbackContent() {
 
           // Redirect after a short delay
           setTimeout(() => {
-            router.push("/dashboard/myOrders");
+            router.push("/dashboard/viewLinux");
           }, 3000);
         } else {
           // If gateway response shows success but our order is not confirmed
