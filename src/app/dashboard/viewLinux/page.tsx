@@ -44,6 +44,7 @@ interface Order {
     ipAddress?: string;
     username?: string;
     password?: string;
+    expiryDate?:Date;
 }
 
 function styleText(content: string) {
