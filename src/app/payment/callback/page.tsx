@@ -2,7 +2,7 @@
 
 import { useEffect, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Loader2, CheckCircle2, XCircle } from "lucide-react";
+import { Loader2, CheckCircle2, XCircle, AlertCircle } from "lucide-react";
 
 // Create a client component that uses the useSearchParams hook
 function PaymentCallbackContent() {
@@ -16,38 +16,72 @@ function PaymentCallbackContent() {
       try {
         // Get transaction ID from URL params
         const clientTxnId = searchParams.get("client_txn_id");
+        
+        console.log("URL params:", Object.fromEntries(searchParams.entries()));
+        console.log("Client TXN ID from URL:", clientTxnId);
 
-        if (!clientTxnId) {
+        // Try to get clientTxnId from localStorage if not in URL
+        const storedClientTxnId = localStorage.getItem('lastClientTxnId');
+        
+        const effectiveClientTxnId = clientTxnId || storedClientTxnId;
+        console.log("Effective client TXN ID:", effectiveClientTxnId);
+
+        if (!effectiveClientTxnId) {
           setStatus("failed");
-          setMessage("Invalid payment reference");
+          setMessage("Invalid payment reference. Could not find transaction ID.");
           return;
         }
+
+        // Wait a moment to allow the server to process the payment
+        await new Promise(resolve => setTimeout(resolve, 2000));
 
         // Verify payment with our backend
         const response = await fetch("/api/payment/status", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ clientTxnId })
+          body: JSON.stringify({ clientTxnId: effectiveClientTxnId })
         });
 
+        console.log("Status check response:", response.status);
+        
         if (!response.ok) {
-          throw new Error("Failed to verify payment");
+          const errorText = await response.text();
+          console.error("Error response:", errorText);
+          throw new Error(`Failed to verify payment: ${errorText}`);
         }
 
         const data = await response.json();
+        console.log("Payment status data:", data);
 
         // Check payment status
         if (data.order.status === "confirmed") {
           setStatus("success");
           setMessage("Payment successful! Your order has been confirmed.");
 
+          // Clear stored txn ID
+          localStorage.removeItem('lastClientTxnId');
+
           // Redirect after a short delay
           setTimeout(() => {
             router.push("/dashboard/myOrders");
           }, 3000);
         } else {
-          setStatus("failed");
-          setMessage("Payment is pending or failed. Check your orders page for details.");
+          // If gateway response shows success but our order is not confirmed
+          if (data.gatewayResponse?.status && data.gatewayResponse?.data?.status === 'success') {
+            setStatus("success");
+            setMessage("Payment received! Your order will be processed shortly.");
+            
+            // Clear stored txn ID
+            localStorage.removeItem('lastClientTxnId');
+            
+            // Redirect after a short delay
+            setTimeout(() => {
+              router.push("/dashboard/myOrders");
+            }, 3000);
+          } else {
+            setStatus("failed");
+            setMessage("Payment is pending or failed. Check your orders page for details.");
+          }
         }
       } catch (error) {
         console.error("Error verifying payment:", error);
@@ -62,7 +96,6 @@ function PaymentCallbackContent() {
   return (
     <div className="max-w-md w-full bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-700">
       <div className="flex flex-col items-center justify-center text-center space-y-4">
-        {/* ... existing UI code ... */}
         {status === "loading" && (
           <Loader2 className="h-12 w-12 text-blue-500 animate-spin" />
         )}
@@ -85,7 +118,7 @@ function PaymentCallbackContent() {
         {status !== "loading" && (
           <button
             className="mt-4 bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-md transition"
-            onClick={() => router.push("/dashboard/viewLinux")}
+            onClick={() => router.push("/dashboard/myOrders")}
           >
             View My Orders
           </button>
