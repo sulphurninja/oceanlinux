@@ -12,12 +12,7 @@ export async function POST(request) {
   console.log("[PAYMENT-STATUS] Checking payment status...");
 
   try {
-    // 1. Check authentication
-    const userId = await getDataFromToken(request);
-    if (!userId) {
-      console.log("[PAYMENT-STATUS] Unauthorized request");
-      return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
-    }
+    
 
     // 2. Read request data
     const reqBody = await request.json();
@@ -73,7 +68,7 @@ export async function POST(request) {
     // 3. Find the order in our database
     const order = await Order.findOne({ 
       clientTxnId,
-      user: userId  // Ensure the order belongs to the requesting user
+     
     });
     
     if (!order) {
