@@ -76,7 +76,7 @@ function PaymentCallbackContent() {
           setStatus("failed");
           setMessage(data.message || "Payment is pending or failed. Check your orders page for details.");
         }
-      } catch (error) {
+      } catch (error:any) {
         console.error("Error verifying payment:", error);
         setStatus("failed");
         setMessage(`Failed to verify payment status: ${error.message}`);
