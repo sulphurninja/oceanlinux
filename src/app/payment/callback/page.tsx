@@ -2,127 +2,98 @@
 
 import { useEffect, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Loader2, CheckCircle2, XCircle, AlertCircle } from "lucide-react";
+import { Loader2, Info } from "lucide-react";
 
 // Create a client component that uses the useSearchParams hook
 function PaymentCallbackContent() {
-  const [status, setStatus] = useState<"loading" | "success" | "failed">("loading");
-  const [message, setMessage] = useState("Processing your payment...");
+  const [message, setMessage] = useState("Your payment is being processed...");
+  const [orderId, setOrderId] = useState<string | null>(null);
   const router = useRouter();
   const searchParams = useSearchParams();
 
   useEffect(() => {
-    const verifyPayment = async () => {
+    const handlePaymentReturn = async () => {
       try {
-        // Get transaction ID from URL params
-        const clientTxnId = searchParams.get("client_txn_id");
-        
-        console.log("URL params:", Object.fromEntries(searchParams.entries()));
-        console.log("Client TXN ID from URL:", clientTxnId);
-
-        // Try to get clientTxnId from localStorage if not in URL
+        // Get transaction ID from URL params or localStorage
+        const clientTxnId = searchParams.get("client_txn_id") || searchParams.get("txn_id");
         const storedClientTxnId = localStorage.getItem('lastClientTxnId');
-        
         const effectiveClientTxnId = clientTxnId || storedClientTxnId;
-        console.log("Effective client TXN ID:", effectiveClientTxnId);
-
-        if (!effectiveClientTxnId) {
-          setStatus("failed");
-          setMessage("Invalid payment reference. Could not find transaction ID.");
-          return;
-        }
-
-        // Wait a moment to allow the server to process the payment
-        await new Promise(resolve => setTimeout(resolve, 2000));
-
-        // Verify payment with our backend
-        const response = await fetch("/api/payment/status", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ clientTxnId: effectiveClientTxnId })
-        });
-
-        console.log("Status check response:", response.status);
         
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error("Error response:", errorText);
-          throw new Error(`Failed to verify payment: ${errorText}`);
-        }
+        console.log("Transaction ID:", effectiveClientTxnId);
+        
+        // Clean up localStorage
+        localStorage.removeItem('lastClientTxnId');
 
-        const data = await response.json();
-        console.log("Payment status data:", data);
-
-        // Check payment status
-        if (data.order.status === "confirmed") {
-          setStatus("success");
-          setMessage("Payment successful! Your order has been confirmed.");
-
-          // Clear stored txn ID
-          localStorage.removeItem('lastClientTxnId');
-
-          // Redirect after a short delay
-          setTimeout(() => {
-            router.push("/dashboard/viewLinux");
-          }, 3000);
-        } else {
-          // If gateway response shows success but our order is not confirmed
-          if (data.gatewayResponse?.status && data.gatewayResponse?.data?.status === 'success') {
-            setStatus("success");
-            setMessage("Payment received! Your order will be processed shortly.");
+        // If we have a transaction ID, try to retrieve order info
+        if (effectiveClientTxnId) {
+          try {
+            const response = await fetch("/api/payment/status", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ 
+                clientTxnId: effectiveClientTxnId,
+                returnedFromPayment: true
+              })
+            });
             
-            // Clear stored txn ID
-            localStorage.removeItem('lastClientTxnId');
-            
-            // Redirect after a short delay
-            setTimeout(() => {
-              router.push("/dashboard/myOrders");
-            }, 3000);
-          } else {
-            setStatus("failed");
-            setMessage("Payment is pending or failed. Check your orders page for details.");
+            if (response.ok) {
+              const data = await response.json();
+              
+              if (data.order) {
+                setOrderId(data.order.id);
+              }
+            }
+          } catch (error) {
+            // Just log the error, keep processing state
+            console.error("Error retrieving order info:", error);
           }
         }
+        
+        // Redirect to orders page after a delay
+        setTimeout(() => {
+          router.push("/dashboard/viewLinux");
+        }, 4000);
+        
       } catch (error) {
-        console.error("Error verifying payment:", error);
-        setStatus("failed");
-        setMessage("Failed to verify payment status. Please check your orders page.");
+        console.error("Error in callback page:", error);
       }
     };
 
-    verifyPayment();
+    handlePaymentReturn();
   }, [router, searchParams]);
 
   return (
     <div className="max-w-md w-full bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-700">
       <div className="flex flex-col items-center justify-center text-center space-y-4">
-        {status === "loading" && (
-          <Loader2 className="h-12 w-12 text-blue-500 animate-spin" />
-        )}
-
-        {status === "success" && (
-          <CheckCircle2 className="h-12 w-12 text-green-500" />
-        )}
-
-        {status === "failed" && (
-          <XCircle className="h-12 w-12 text-red-500" />
-        )}
+        <Loader2 className="h-12 w-12 text-blue-500 animate-spin" />
 
         <h1 className="text-xl font-bold">
-          {status === "loading" ? "Processing Payment" :
-            status === "success" ? "Payment Successful" : "Payment Failed"}
+          Processing Your Payment
         </h1>
 
         <p className="text-gray-300">{message}</p>
 
-        {status !== "loading" && (
-          <button
-            className="mt-4 bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-md transition"
-            onClick={() => router.push("/dashboard/myOrders")}
-          >
-            View My Orders
-          </button>
+        <div className="bg-blue-900/30 p-3 rounded-lg border border-blue-700/50 text-sm text-left w-full mt-2">
+          <div className="flex gap-2">
+            <Info className="h-4 w-4 text-blue-400 flex-shrink-0 mt-0.5" />
+            <p className="text-blue-200">
+              Please wait while we verify your payment. You will be redirected to your orders page in a few seconds...
+            </p>
+          </div>
+        </div>
+
+        {orderId && (
+          <div className="text-gray-400 text-sm">
+            Order ID: {orderId}
+          </div>
         )}
+
+        <button
+          className="mt-4 bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-md transition"
+          onClick={() => router.push("/dashboard/myOrders")}
+        >
+          View My Orders
+        </button>
       </div>
     </div>
   );
@@ -134,8 +105,8 @@ function PaymentCallbackFallback() {
     <div className="max-w-md w-full bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-700">
       <div className="flex flex-col items-center justify-center text-center space-y-4">
         <Loader2 className="h-12 w-12 text-blue-500 animate-spin" />
-        <h1 className="text-xl font-bold">Loading Payment Details</h1>
-        <p className="text-gray-300">Please wait while we retrieve your payment information...</p>
+        <h1 className="text-xl font-bold">Processing Payment</h1>
+        <p className="text-gray-300">Please wait while we process your payment...</p>
       </div>
     </div>
   );
