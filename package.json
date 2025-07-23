@@ -30,7 +30,7 @@
     "cashfree-pg": "^4.3.10",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.1",
-    "framer-motion": "^12.6.2",
+    "framer-motion": "^12.23.7",
     "jsonwebtoken": "^9.0.2",
     "lucide-react": "^0.414.0",
     "mongodb": "^6.13.0",
@@ -41,7 +41,8 @@
     "recharts": "^2.12.7",
     "sonner": "^1.7.4",
     "tailwind-merge": "^2.4.0",
-    "tailwindcss-animate": "^1.0.7"
+    "tailwindcss-animate": "^1.0.7",
+    "zod": "^4.0.5"
   },
   "devDependencies": {
     "@types/jsonwebtoken": "^9.0.8",

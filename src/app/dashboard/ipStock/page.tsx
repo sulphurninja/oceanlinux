@@ -32,6 +32,7 @@ import {
 } from "lucide-react";
 import { z } from "zod";
 import { cn } from "@/lib/utils";
+import { useRouter } from "next/navigation";
 
 // Validation schema for transaction ID
 const transactionSchema = z.object({
@@ -86,6 +87,9 @@ export default function IPStockPage() {
     price: number;
   } | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // Add these state variables inside your component
+  const [paymentInitiating, setPaymentInitiating] = useState(false);
+  const router = useRouter();
 
   // Fetch available IP stocks on mount
   useEffect(() => {
@@ -110,64 +114,51 @@ export default function IPStockPage() {
     setExpandedItem(expandedItem === id ? null : id);
   };
 
-  // Handle "Buy Now" click
+  // Replace the handleBuyNow function with this one
   const handleBuyNow = (productName: string, memory: string, price: number) => {
     setSelectedProduct({ name: productName, memory, price });
-    setTransactionId("");
-    setTransactionError("");
     setShowDialog(true);
   };
 
-  // Validate transaction ID
-  const validateTransactionId = () => {
-    try {
-      transactionSchema.parse({ transactionId });
-      setTransactionError("");
-      return true;
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        setTransactionError(error.errors[0].message);
-      }
-      return false;
-    }
-  };
-
-  // Handle payment submission
-  const handleSubmitTransactionId = async () => {
+  // Replace the existing handleSubmitTransactionId with this function
+  const handleProceedToPayment = async () => {
     if (!selectedProduct) return;
-    if (!validateTransactionId()) return;
 
-    setSubmitting(true);
+    setPaymentInitiating(true);
     try {
-      const res = await fetch("/api/createOrder", {
+      const res = await fetch("/api/payment/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           productName: selectedProduct.name,
           memory: selectedProduct.memory,
-          price: selectedProduct.price,
-          transactionId
+          price: selectedProduct.price
         })
       });
+
       const data = await res.json();
 
       if (!res.ok) {
-        toast.error(data.message || "Order creation failed");
+        toast.error(data.message || "Failed to initiate payment");
+        setPaymentInitiating(false);
         return;
       }
 
-      toast.success("Order created! Wait for admin verification");
+      // Close the dialog and redirect to payment URL
       setShowDialog(false);
-      setTransactionId("");
-      setSelectedProduct(null);
+
+      // You can either redirect to the payment URL
+      window.location.href = data.paymentUrl;
+
+      // Or open in a new tab
+      // window.open(data.paymentUrl, "_blank");
+
     } catch (error) {
-      console.error("Error creating order:", error);
+      console.error("Error initiating payment:", error);
       toast.error("Something went wrong. Please try again");
-    } finally {
-      setSubmitting(false);
+      setPaymentInitiating(false);
     }
   };
-
   // Get a short version of the description
   const getShortDescription = (text: string) => {
     if (!text) return "";
@@ -319,13 +310,13 @@ export default function IPStockPage() {
         )}
       </div>
 
-      {/* Payment Dialog */}
+
       <Dialog open={showDialog} onOpenChange={setShowDialog}>
-        <DialogContent className="bg-gray-800 h-fit max-h-screen m-auto overflow-y-scroll  border border-gray-700 text-white sm:max-w-md">
+        <DialogContent className="bg-gray-800 h-fit max-h-screen m-auto overflow-y-scroll border border-gray-700 text-white sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="text-lg font-bold">Complete Your Purchase</DialogTitle>
             <DialogDescription className="text-gray-300">
-              Scan QR with any UPI app and enter the transaction ID
+              Proceed to UPI payment gateway to complete your order
             </DialogDescription>
           </DialogHeader>
 
@@ -351,43 +342,11 @@ export default function IPStockPage() {
               </div>
             )}
 
-            {/* QR Code */}
-            <div className="flex justify-center">
-              <div className="bg-white p-3 rounded-lg">
-                <img
-                  src="/qr.jpg"
-                  alt="Payment QR Code"
-                  className="w-full max-w-[180px] object-contain"
-                />
-              </div>
-            </div>
-
-            {/* Transaction ID input */}
-            <div className="space-y-2">
-              <Label htmlFor="transactionId" className="text-sm">
-                UPI Transaction ID / Reference Number
-              </Label>
-              <Input
-                id="transactionId"
-                value={transactionId}
-                onChange={(e) => {
-                  setTransactionId(e.target.value);
-                  if (transactionError) validateTransactionId();
-                }}
-                placeholder="e.g., 123456789012 or UPI123456789012"
-                className={`bg-gray-700 border ${transactionError ? "border-red-500" : "border-gray-600"
-                  }`}
-              />
-              {transactionError && (
-                <p className="text-red-500 text-xs flex items-center mt-1">
-                  <AlertCircle className="h-3 w-3 mr-1" /> {transactionError}
-                </p>
-              )}
-              <div className="flex items-start mt-1">
-                <Info className="h-3 w-3 text-gray-400 mr-1 mt-0.5 flex-shrink-0" />
-                <p className="text-xs text-gray-400">
-                  Enter the 12+ digit Transaction ID or Reference Number from your UPI payment confirmation.
-                  This typically starts with numbers or may include your bank's code.
+            <div className="bg-blue-900/30 p-3 rounded-lg border border-blue-700/50">
+              <div className="flex gap-2">
+                <Info className="h-5 w-5 text-blue-400 flex-shrink-0" />
+                <p className="text-sm text-blue-200">
+                  You will be redirected to a secure UPI payment page. Complete the payment using any UPI app like PhonePe, Google Pay, or others.
                 </p>
               </div>
             </div>
@@ -401,18 +360,22 @@ export default function IPStockPage() {
             >
               Cancel
             </Button>
+
             <Button
-              onClick={handleSubmitTransactionId}
-              disabled={submitting}
+              onClick={handleProceedToPayment}
+              disabled={paymentInitiating}
               className="bg-blue-600 hover:bg-blue-700"
             >
-              {submitting ? (
+              {paymentInitiating ? (
                 <span className="flex items-center gap-2">
                   <Loader2 className="h-4 w-4 animate-spin" />
                   Processing...
                 </span>
               ) : (
-                "Submit Payment"
+                <span className="flex items-center gap-2">
+                  <CreditCard className="h-4 w-4" />
+                  Proceed to Payment
+                </span>
               )}
             </Button>
           </DialogFooter>

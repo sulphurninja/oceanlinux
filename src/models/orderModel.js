@@ -14,7 +14,10 @@ const orderSchema = new mongoose.Schema({
         type: String,
         enum: ['CentOS 7', 'Ubuntu 22'],
         default: 'CentOS 7' // Default OS
-    }
+    },
+    // Add these fields to your Order model schema:
+    clientTxnId: { type: String, required: true, unique: true },
+    gatewayOrderId: { type: String },
 }, { timestamps: true }); // ✅ Automatically adds `createdAt` & `updatedAt`
 
 export default mongoose.models.Order || mongoose.model('Order', orderSchema);
