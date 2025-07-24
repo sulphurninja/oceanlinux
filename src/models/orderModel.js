@@ -12,8 +12,8 @@ const orderSchema = new mongoose.Schema({
     password: { type: String, default: '' },  // Optional, to be filled by admin
     os: {
         type: String,
-        enum: ['CentOS 7', 'Ubuntu 22'],
-        default: 'CentOS 7' // Default OS
+        enum: ['CentOS 7', 'Ubuntu 22', 'Windows 2022 64'],
+        default: 'Ubuntu 22' // Default OS
     },
     // Add these fields to your Order model schema:
     clientTxnId: { type: String, required: true, unique: true },

@@ -63,13 +63,13 @@ const ResponsiveSidebar = () => {
                 <Link href="/dashboard/viewLinux" prefetch={false}>
                   <h1 className="flex items-center gap-2 rounded-md p-2 ">
                     <ReplyIcon className="h-5 w-5" />
-                    View Linux
+                    View Orders
                   </h1>
                 </Link>
                 <Link href="/dashboard/ipStock" prefetch={false}>
                   <h1 className="flex items-center gap-2 rounded-md p-2 ">
                     <ServerIcon className="h-5 w-5" />
-                    IP Stock
+                    IP Stock (Buy Now)
                   </h1>
                 </Link>
                 <Link href="/dashboard/orders" prefetch={false}>
@@ -119,13 +119,13 @@ const ResponsiveSidebar = () => {
             <Link href="/dashboard/viewLinux" prefetch={false}>
               <h1 className="flex items-center gap-2 rounded-xl px-3 py-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-white -foreground">
                 <ReplyIcon className="h-5 w-5" />
-                View Linux
+                View Orders
               </h1>
             </Link>
             <Link href="/dashboard/ipStock" prefetch={false}>
               <h1 className="flex items-center gap-2 rounded-xl px-3 py-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-white -foreground">
                 <ServerIcon className="h-5 w-5" />
-                IP Stock
+                IP Stock (Buy Now)
               </h1>
             </Link>
             <Link href="/dashboard/orders" prefetch={false}>
