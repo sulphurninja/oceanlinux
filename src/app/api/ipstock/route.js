@@ -5,15 +5,14 @@ import IPStock from '@/models/ipStockModel';
 export async function POST(request) {
     await connectDB();
 
-    console.log('Received body:', request.body);
-
     try {
         const reqBody = await request.json();
-        const { name, available, memoryOptions, promoCodes } = reqBody;
+        const { name, available, serverType, memoryOptions, promoCodes } = reqBody; // Add serverType
 
         const newIPStock = new IPStock({
             name,
             available,
+            serverType, // Include serverType
             memoryOptions,
             promoCodes: promoCodes || []
         });
@@ -33,6 +32,7 @@ export async function POST(request) {
     }
 }
 
+// GET method remains the same
 // ... existing GET method remains the same ...
 export async function GET(request) {
     await connectDB();

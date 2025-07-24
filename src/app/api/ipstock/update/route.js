@@ -5,14 +5,15 @@ import IPStock from '../../../../models/ipStockModel';
 
 export async function PUT(req, res) {
     const reqBody = await req.json();
-    const { _id, name, available, memoryOptions, promoCodes } = reqBody;
-    
+    const { _id, name, available, serverType, memoryOptions, promoCodes } = reqBody; // Add serverType
+
     await connectDB();
 
     try {
         const updatedStock = await IPStock.findByIdAndUpdate(_id, {
             name,
             available,
+            serverType, // Include serverType
             memoryOptions,
             promoCodes
         }, { new: true });
@@ -29,6 +30,8 @@ export async function PUT(req, res) {
         return NextResponse.json({ message: 'Failed to update IP Stock', error: error.message });
     }
 }
+
+// DELETE method remains the same
 
 // ... existing DELETE method remains the same ...
 export async function DELETE(req, res) {

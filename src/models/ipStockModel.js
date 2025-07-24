@@ -5,16 +5,22 @@ const IPStockSchema = new mongoose.Schema({
   name: { type: String, required: true },
   description: { type: String, default: "" },
   available: { type: Boolean, default: true },
+  // Add server type field
+  serverType: { 
+    type: String, 
+    enum: ['VPS', 'Linux'], 
+    required: true,
+    default: 'Linux'
+  },
   memoryOptions: {
     type: Map,
     of: new mongoose.Schema({
       price: Number
     }, { _id: false })
   },
-  // Add promo codes array
   promoCodes: [{
     code: { type: String, required: true },
-    discount: { type: Number, required: true, min: 0, max: 100 }, // Percentage discount
+    discount: { type: Number, required: true, min: 0, max: 100 },
     isActive: { type: Boolean, default: true },
     createdAt: { type: Date, default: Date.now }
   }]

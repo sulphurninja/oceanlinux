@@ -15,6 +15,8 @@ import {
     DialogClose,
     DialogHeader,
 } from '@/components/ui/dialog';
+import { Badge } from '@/components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 interface MemoryOptionDetails {
     price: number;
@@ -32,6 +34,7 @@ interface IPStock {
     name: string;
     memoryOptions: Record<string, MemoryOptionDetails>;
     available: boolean;
+    serverType: string; // Add this field
     promoCodes: PromoCode[];
 }
 
@@ -143,7 +146,7 @@ const ManageIpStock = () => {
 
     const togglePromoCodeActive = (index: number) => {
         if (currentStock) {
-            const updatedPromoCodes = currentStock.promoCodes.map((promo, i) => 
+            const updatedPromoCodes = currentStock.promoCodes.map((promo, i) =>
                 i === index ? { ...promo, isActive: !promo.isActive } : promo
             );
             setCurrentStock({
@@ -160,9 +163,11 @@ const ManageIpStock = () => {
             </div>
             <div className='mx-12 mt-6'>
                 <Table className='w-full border'>
+                   {/* // In the table header, add Server Type column: */}
                     <TableHeader>
                         <TableRow>
                             <TableHead>Name</TableHead>
+                            <TableHead>Type</TableHead> {/* Add this */}
                             <TableHead>Available</TableHead>
                             <TableHead>4 GB</TableHead>
                             <TableHead>8 GB</TableHead>
@@ -172,10 +177,16 @@ const ManageIpStock = () => {
                             <TableHead>Delete</TableHead>
                         </TableRow>
                     </TableHeader>
+
                     <TableBody>
                         {ipStocks.map(stock => (
                             <TableRow key={stock._id}>
                                 <TableCell>{stock.name}</TableCell>
+                                <TableCell>
+                                    <Badge variant={stock.serverType === 'VPS' ? 'default' : 'secondary'}>
+                                        {stock.serverType}
+                                    </Badge>
+                                </TableCell> {/* Add this */}
                                 <TableCell>{stock.available ? 'Yes' : 'No'}</TableCell>
                                 {Object.entries(stock.memoryOptions).map(([memory, details]) => (
                                     <TableCell key={memory}>₹{details.price}</TableCell>
@@ -225,14 +236,26 @@ const ManageIpStock = () => {
                                 </div>
                                 <div>
                                     <Label>Available:</Label>
-                                    <select 
-                                        className='flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1' 
-                                        value={currentStock.available.toString()} 
+                                    <select
+                                        className='flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1'
+                                        value={currentStock.available.toString()}
                                         onChange={(e) => handleAvailableChange(e.target.value)}
                                     >
                                         <option value="true">Yes</option>
                                         <option value="false">No</option>
                                     </select>
+                                </div>
+                                <div>
+                                    <Label>Server Type:</Label>
+                                    <Select value={currentStock.serverType} onValueChange={(value) => setCurrentStock({ ...currentStock, serverType: value })}>
+                                        <SelectTrigger>
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="Linux">Linux</SelectItem>
+                                            <SelectItem value="VPS">VPS</SelectItem>
+                                        </SelectContent>
+                                    </Select>
                                 </div>
                                 {Object.keys(currentStock.memoryOptions).map((size) => (
                                     <div key={size}>
@@ -267,7 +290,7 @@ const ManageIpStock = () => {
                                         />
                                         <Button type="button" onClick={addPromoCode}>Add</Button>
                                     </div>
-                                    
+
                                     {currentStock.promoCodes && currentStock.promoCodes.length > 0 && (
                                         <div className="border rounded p-2 max-h-32 overflow-y-auto">
                                             {currentStock.promoCodes.map((promo, index) => (
@@ -276,18 +299,18 @@ const ManageIpStock = () => {
                                                         <span className={promo.isActive ? '' : 'line-through text-gray-500'}>
                                                             {promo.code} - {promo.discount}% off
                                                         </span>
-                                                        <Button 
-                                                            type="button" 
-                                                            variant="outline" 
+                                                        <Button
+                                                            type="button"
+                                                            variant="outline"
                                                             size="sm"
                                                             onClick={() => togglePromoCodeActive(index)}
                                                         >
                                                             {promo.isActive ? 'Deactivate' : 'Activate'}
                                                         </Button>
                                                     </div>
-                                                    <Button 
-                                                        type="button" 
-                                                        variant="destructive" 
+                                                    <Button
+                                                        type="button"
+                                                        variant="destructive"
                                                         size="sm"
                                                         onClick={() => removePromoCode(index)}
                                                     >

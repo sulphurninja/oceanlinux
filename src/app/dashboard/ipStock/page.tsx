@@ -30,11 +30,15 @@ import {
   Info,
   CreditCard,
   Tag,
-  Percent
+  Percent,
+  Filter,
+  Server,
+  Cloud
 } from "lucide-react";
 import { z } from "zod";
 import { cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 // Validation schema for transaction ID
 const transactionSchema = z.object({
@@ -73,11 +77,13 @@ interface PromoCode {
   createdAt?: string;
 }
 
+// Update the interface
 interface IPStock {
   _id: string;
   name: string;
   description?: string;
   available: boolean;
+  serverType: string; // Add this field
   memoryOptions: Record<string, MemoryOptionDetails>;
   promoCodes?: PromoCode[];
 }
@@ -97,14 +103,14 @@ export default function IPStockPage() {
   } | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [paymentInitiating, setPaymentInitiating] = useState(false);
-  
+
   // Promo code states
   const [promoCode, setPromoCode] = useState("");
   const [promoDiscount, setPromoDiscount] = useState(0);
   const [promoMessage, setPromoMessage] = useState("");
   const [promoValidating, setPromoValidating] = useState(false);
   const [promoApplied, setPromoApplied] = useState(false);
-  
+
   const router = useRouter();
 
   // Fetch available IP stocks on mount
@@ -125,6 +131,14 @@ export default function IPStockPage() {
     fetchIPStocks();
   }, []);
 
+  // Add filter state
+  const [serverTypeFilter, setServerTypeFilter] = useState<string>('all');
+  // Filter the ipStocks based on selected type
+  const filteredIpStocks = ipStocks.filter(stock => {
+    if (serverTypeFilter === 'all') return true;
+    return stock.serverType === serverTypeFilter;
+  });
+
   // Toggle expanded state for a list item
   const toggleExpanded = (id: string) => {
     setExpandedItem(expandedItem === id ? null : id);
@@ -144,7 +158,7 @@ export default function IPStockPage() {
   // Validate promo code
   const validatePromoCode = async () => {
     if (!promoCode.trim() || !selectedProduct) return;
-    
+
     setPromoValidating(true);
     try {
       const response = await fetch("/api/validate-promo", {
@@ -155,9 +169,9 @@ export default function IPStockPage() {
           ipStockId: selectedProduct.ipStockId
         })
       });
-      
+
       const data = await response.json();
-      
+
       if (data.valid) {
         setPromoDiscount(data.discount);
         setPromoMessage(data.message);
@@ -197,11 +211,11 @@ export default function IPStockPage() {
   // Handle proceed to payment with promo code data
   const handleProceedToPayment = async () => {
     if (!selectedProduct) return;
-    
+
     setPaymentInitiating(true);
     try {
       const finalPrice = getDiscountedPrice();
-      
+
       const res = await fetch("/api/payment/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -215,24 +229,24 @@ export default function IPStockPage() {
           ipStockId: selectedProduct.ipStockId
         })
       });
-      
+
       const data = await res.json();
-      
+
       if (!res.ok) {
         toast.error(data.message || "Failed to initiate payment");
         setPaymentInitiating(false);
         return;
       }
-      
+
       if (data.clientTxnId) {
         localStorage.setItem('lastClientTxnId', data.clientTxnId);
         console.log("Stored clientTxnId in localStorage:", data.clientTxnId);
       }
-      
+
       toast.success("Redirecting to payment gateway...");
       setShowDialog(false);
       window.location.href = data.paymentUrl;
-      
+
     } catch (error) {
       console.error("Error initiating payment:", error);
       toast.error("Something went wrong. Please try again");
@@ -252,32 +266,64 @@ export default function IPStockPage() {
       <div className="flex items-center justify-between border-b border-gray-800 p-4">
         <div className="flex items-center gap-2">
           <ServerIcon className="h-5 w-5 text-blue-400" />
-          <h1 className="text-xl font-semibold">Linux Server Plans</h1>
+          <h1 className="text-xl font-semibold">Server Plans</h1>
         </div>
       </div>
 
+
+
       {/* Main Content - Compact List Layout */}
-      <div className="max-w-5xl mx-auto p-4">
+      <div className=" mx-auto p-4">
         {isLoading ? (
           <div className="flex justify-center items-center h-40">
             <Loader2 className="h-8 w-8 text-blue-500 animate-spin" />
           </div>
         ) : (
+
           <div className="space-y-3 mt-2">
-            {ipStocks.length === 0 ? (
+            {/* Add Filter Section */}
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <Filter className="h-4 w-4 text-gray-400" />
+                <Label className="text-sm text-gray-400">Filter:</Label>
+                <Select value={serverTypeFilter} onValueChange={setServerTypeFilter}>
+                  <SelectTrigger className="w-32 h-8 bg-gray-800 border-gray-700 text-white">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-gray-800 border-gray-700">
+                    <SelectItem value="all" className="text-white hover:bg-gray-700">All Types</SelectItem>
+                    <SelectItem value="Linux" className="text-white hover:bg-gray-700">
+                      <div className="flex items-center gap-2">
+                        <Server className="h-3 w-3" />
+                        Linux
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="VPS" className="text-white hover:bg-gray-700">
+                      <div className="flex items-center gap-2">
+                        <Cloud className="h-3 w-3" />
+                        VPS
+                      </div>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            {filteredIpStocks.length === 0 ? (
               <div className="text-center py-8 bg-gray-800/50 rounded-lg border border-gray-700">
                 <AlertCircle className="h-10 w-10 text-gray-500 mx-auto mb-2" />
                 <p className="text-gray-400">No server plans available at this time</p>
               </div>
             ) : (
               <div className="bg-gray-800/30 rounded-lg border border-gray-700 overflow-hidden">
-                <div className="grid grid-cols-12 p-4 text-xs uppercase text-gray-500 font-medium border-b border-gray-700/50">
-                  <div className="col-span-5 sm:col-span-6">Plan</div>
+                <div className="grid grid-cols-12 p-4 text-xs uppercase text-gray-500 font-medium border-b items-center border-gray-700/50">
+                  <div className="col-span-5 text-ce sm:col-span-6">Plan</div>
+                  <div className="col-span-2 sm:col-span-1 text-center">Type</div>
                   <div className="col-span-3 sm:col-span-2 text-center">Status</div>
-                  <div className="col-span-4 sm:col-span-4 text-right pr-2">Actions</div>
+               
+  
                 </div>
 
-                {ipStocks.map((stock) => {
+                {filteredIpStocks.map((stock) => {
                   const isExpanded = expandedItem === stock._id;
                   const memoryKeys = Object.keys(stock.memoryOptions || {});
                   const shortDesc = getShortDescription(stock.description || "");
@@ -304,7 +350,7 @@ export default function IPStockPage() {
                                 {hasPromoCodes && (
                                   <Badge variant="secondary" className="text-xs bg-green-600/20 text-green-400 border-green-500">
                                     <Tag className="h-3 w-3 mr-1" />
-                                    Promo Available
+                                    Promo
                                   </Badge>
                                 )}
                               </div>
@@ -314,7 +360,20 @@ export default function IPStockPage() {
                             </div>
                           </div>
                         </div>
-
+                        {/* Add Server Type Column */}
+                        <div className="col-span-2 sm:col-span-1 flex justify-center">
+                          <Badge
+                            variant={stock.serverType === 'VPS' ? 'default' : 'secondary'}
+                            className="text-xs h-6 flex items-center gap-1"
+                          >
+                            {stock.serverType === 'VPS' ? (
+                              <Cloud className="h-3 w-3" />
+                            ) : (
+                              <Server className="h-3 w-3" />
+                            )}
+                            {stock.serverType}
+                          </Badge>
+                        </div>
                         <div className="col-span-3 sm:col-span-2 flex justify-center">
                           <Badge
                             variant={stock.available ? "outline" : "destructive"}
@@ -335,9 +394,9 @@ export default function IPStockPage() {
                           </Badge>
                         </div>
 
-                        <div className="col-span-4 sm:col-span-4 text-right pr-2">
+                        <div className="col-span-3 text-right pr-2">
                           <span className="text-xs text-gray-400">
-                            {memoryKeys.length} configurations available
+                            {memoryKeys.length} conf. available
                           </span>
                         </div>
                       </div>
@@ -531,6 +590,6 @@ export default function IPStockPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </div >
   );
 }

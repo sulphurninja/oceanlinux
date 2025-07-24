@@ -31,6 +31,7 @@ type PromoCode = {
 const AddIPStockPage = () => {
     const [name, setName] = useState('');
     const [available, setAvailable] = useState('true');
+    const [serverType, setServerType] = useState('Linux'); // Add server type state
     const [prices, setPrices] = useState<MemoryOptions>({
         '4GB': '',
         '8GB': '',
@@ -80,12 +81,14 @@ const AddIPStockPage = () => {
             const response = await axios.post('/api/ipstock', {
                 name,
                 available: available === 'true',
+                serverType, // Include server type
                 memoryOptions,
                 promoCodes,
             });
 
             console.log('Submission Successful:', response.data);
             setName("");
+            setServerType('Linux');
             setPrices({ '4GB': '', '8GB': '', '16GB': '' });
             setPromoCodes([]);
             toast.success("IP Stock created successfully!")
@@ -116,18 +119,34 @@ const AddIPStockPage = () => {
                                     onChange={(e) => setName(e.target.value)}
                                 />
                             </div>
+
+                            {/* Add Server Type Selection */}
+                            <div className="mb-4">
+                                <Label className="block text-sm font-medium mb-1">Server Type:</Label>
+                                <Select value={serverType} onValueChange={setServerType}>
+                                    <SelectTrigger>
+                                        <SelectValue placeholder="Select Server Type" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="Linux">Linux</SelectItem>
+                                        <SelectItem value="VPS">VPS</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+
                             <div className="mb-4">
                                 <label className="block text-sm font-medium mb-1">Available:</label>
-                                <Select>
+                                <Select value={available} onValueChange={setAvailable}>
                                     <SelectTrigger className="select-none">
                                         <SelectValue placeholder="Select Availability" />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        <SelectItem value='Yes' onSelect={() => setAvailable('true')}>Yes</SelectItem>
-                                        <SelectItem value='No' onSelect={() => setAvailable('false')}>No</SelectItem>
+                                        <SelectItem value='true'>Yes</SelectItem>
+                                        <SelectItem value='false'>No</SelectItem>
                                     </SelectContent>
                                 </Select>
                             </div>
+
                             {Object.keys(prices).map(size => (
                                 <div key={size} className="mb-4">
                                     <Label className="block text-sm font-medium mb-1">Price for {size}:</Label>
@@ -141,7 +160,7 @@ const AddIPStockPage = () => {
                                 </div>
                             ))}
                             
-                            {/* Promo Codes Section */}
+                            {/* Promo Codes Section - keep existing code */}
                             <div className="mb-4">
                                 <Label className="block text-sm font-medium mb-2">Promo Codes:</Label>
                                 <div className="flex gap-2 mb-2">
@@ -164,12 +183,11 @@ const AddIPStockPage = () => {
                                     <Button type="button" onClick={addPromoCode}>Add</Button>
                                 </div>
                                 
-                                {/* Display added promo codes */}
                                 {promoCodes.length > 0 && (
                                     <div className="border rounded p-2">
                                         <h4 className="text-sm font-medium mb-2">Added Promo Codes:</h4>
                                         {promoCodes.map((promo, index) => (
-                                            <div key={index} className="flex justify-between items-center mb-1 p-2 bg--50 rounded">
+                                            <div key={index} className="flex justify-between items-center mb-1 p-2 bg-gray-50 rounded">
                                                 <span>{promo.code} - {promo.discount}% off</span>
                                                 <Button 
                                                     type="button" 
