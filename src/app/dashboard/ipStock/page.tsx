@@ -33,7 +33,8 @@ import {
   Percent,
   Filter,
   Server,
-  Cloud
+  Cloud,
+  Grid3X3
 } from "lucide-react";
 import { z } from "zod";
 import { cn } from "@/lib/utils";
@@ -112,6 +113,8 @@ export default function IPStockPage() {
   const [promoApplied, setPromoApplied] = useState(false);
 
   const router = useRouter();
+  // Change filter state to use tabs
+  const [activeTab, setActiveTab] = useState<string>('all');
 
   // Fetch available IP stocks on mount
   useEffect(() => {
@@ -133,11 +136,21 @@ export default function IPStockPage() {
 
   // Add filter state
   const [serverTypeFilter, setServerTypeFilter] = useState<string>('all');
-  // Filter the ipStocks based on selected type
+  // Filter the ipStocks based on selected tab
   const filteredIpStocks = ipStocks.filter(stock => {
-    if (serverTypeFilter === 'all') return true;
-    return stock.serverType === serverTypeFilter;
+    if (activeTab === 'all') return true;
+    return stock.serverType === activeTab;
   });
+
+  // Get counts for each tab
+  const getCounts = () => {
+    const all = ipStocks.length;
+    const linux = ipStocks.filter(stock => stock.serverType === 'Linux').length;
+    const vps = ipStocks.filter(stock => stock.serverType === 'VPS').length;
+    return { all, linux, vps };
+  };
+
+  const counts = getCounts();
 
   // Toggle expanded state for a list item
   const toggleExpanded = (id: string) => {
@@ -268,11 +281,79 @@ export default function IPStockPage() {
           <ServerIcon className="h-5 w-5 text-blue-400" />
           <h1 className="text-xl font-semibold">Server Plans</h1>
         </div>
+       
       </div>
 
+ {/* Tabs */}
+        <div className="flex space-x-1 justify-center w-full bg-gray-800/50 p-2 rounded-lg ">
+          <button
+            onClick={() => setActiveTab('all')}
+            className={cn(
+              "flex items-center border gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors",
+              activeTab === 'all'
+                ? "bg-blue-600 text-white shadow-sm"
+                : "text-gray-400 hover:text-white hover:bg-gray-700/50"
+            )}
+          >
+            <Grid3X3 className="h-4 w-4" />
+            All Plans
+            <Badge
+              variant="secondary"
+              className={cn(
+                "ml-1 text-xs",
+                activeTab === 'all' ? "bg-blue-500/20 text-blue-100" : "bg-gray-600 text-gray-300"
+              )}
+            >
+              {counts.all}
+            </Badge>
+          </button>
 
+          <button
+            onClick={() => setActiveTab('Linux')}
+            className={cn(
+              "flex items-center border gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors",
+              activeTab === 'Linux'
+                ? "bg-blue-600 text-white shadow-sm"
+                : "text-gray-400 hover:text-white hover:bg-gray-700/50"
+            )}
+          >
+            <Server className="h-4 w-4" />
+             LINUX
+            <Badge
+              variant="secondary"
+              className={cn(
+                "ml-1 text-xs",
+                activeTab === 'Linux' ? "bg-blue-500/20 text-blue-100" : "bg-gray-600 text-gray-300"
+              )}
+            >
+              {counts.linux}
+            </Badge>
+          </button>
 
-      {/* Main Content - Compact List Layout */}
+          <button
+            onClick={() => setActiveTab('VPS')}
+            className={cn(
+              "flex items-center border gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors",
+              activeTab === 'VPS'
+                ? "bg-blue-600 text-white shadow-sm"
+                : "text-gray-400 hover:text-white hover:bg-gray-700/50"
+            )}
+          >
+            <Cloud className="h-4 w-4" />
+            VPS
+            <Badge
+              variant="secondary"
+              className={cn(
+                "ml-1 text-xs",
+                activeTab === 'VPS' ? "bg-blue-500/20 text-blue-100" : "bg-gray-600 text-gray-300"
+              )}
+            >
+              {counts.vps}
+            </Badge>
+          </button>
+        </div>
+
+      {/* Main Content - Compact List Layout */ }
       <div className=" mx-auto p-4">
         {isLoading ? (
           <div className="flex justify-center items-center h-40">
@@ -281,33 +362,7 @@ export default function IPStockPage() {
         ) : (
 
           <div className="space-y-3 mt-2">
-            {/* Add Filter Section */}
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2">
-                <Filter className="h-4 w-4 text-gray-400" />
-                <Label className="text-sm text-gray-400">Filter:</Label>
-                <Select value={serverTypeFilter} onValueChange={setServerTypeFilter}>
-                  <SelectTrigger className="w-32 h-8 bg-gray-800 border-gray-700 text-white">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="bg-gray-800 border-gray-700">
-                    <SelectItem value="all" className="text-white hover:bg-gray-700">All Types</SelectItem>
-                    <SelectItem value="Linux" className="text-white hover:bg-gray-700">
-                      <div className="flex items-center gap-2">
-                        <Server className="h-3 w-3" />
-                        Linux
-                      </div>
-                    </SelectItem>
-                    <SelectItem value="VPS" className="text-white hover:bg-gray-700">
-                      <div className="flex items-center gap-2">
-                        <Cloud className="h-3 w-3" />
-                        VPS
-                      </div>
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
+          
             {filteredIpStocks.length === 0 ? (
               <div className="text-center py-8 bg-gray-800/50 rounded-lg border border-gray-700">
                 <AlertCircle className="h-10 w-10 text-gray-500 mx-auto mb-2" />
@@ -319,8 +374,8 @@ export default function IPStockPage() {
                   <div className="col-span-5 text-ce sm:col-span-6">Plan</div>
                   <div className="col-span-2 sm:col-span-1 text-center">Type</div>
                   <div className="col-span-3 sm:col-span-2 text-center">Status</div>
-               
-  
+
+
                 </div>
 
                 {filteredIpStocks.map((stock) => {
