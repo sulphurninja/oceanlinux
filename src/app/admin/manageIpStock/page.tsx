@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { X } from 'lucide-react';
 
 interface MemoryOptionDetails {
     price: number;
@@ -29,14 +30,18 @@ interface PromoCode {
     createdAt?: string;
 }
 
+// Update interface
 interface IPStock {
     _id: string;
     name: string;
     memoryOptions: Record<string, MemoryOptionDetails>;
     available: boolean;
-    serverType: string; // Add this field
+    serverType: string;
+    tags: string[]; // Add tags field
     promoCodes: PromoCode[];
 }
+
+
 
 const ManageIpStock = () => {
     const [ipStocks, setIpStocks] = useState<IPStock[]>([]);
@@ -44,7 +49,8 @@ const ManageIpStock = () => {
     const [isDialogOpen, setIsDialogOpen] = useState(false);
     const [newPromoCode, setNewPromoCode] = useState('');
     const [newPromoDiscount, setNewPromoDiscount] = useState('');
-
+    // In the component, add tag management state
+    const [newTag, setNewTag] = useState('');
     useEffect(() => {
         const fetchIPStocks = async () => {
             const response = await fetch('/api/ipstock');
@@ -53,7 +59,25 @@ const ManageIpStock = () => {
         };
         fetchIPStocks();
     }, []);
+    // Add tag management functions
+    const addTag = () => {
+        if (currentStock && newTag.trim() && !currentStock.tags.includes(newTag.trim().toLowerCase())) {
+            setCurrentStock({
+                ...currentStock,
+                tags: [...currentStock.tags, newTag.trim().toLowerCase()]
+            });
+            setNewTag('');
+        }
+    };
 
+    const removeTag = (tagToRemove: string) => {
+        if (currentStock) {
+            setCurrentStock({
+                ...currentStock,
+                tags: currentStock.tags.filter(tag => tag !== tagToRemove)
+            });
+        }
+    };
     const handleEdit = (stock: IPStock) => {
         setCurrentStock({ ...stock });
         setIsDialogOpen(true);
@@ -163,7 +187,7 @@ const ManageIpStock = () => {
             </div>
             <div className='mx-12 mt-6'>
                 <Table className='w-full border'>
-                   {/* // In the table header, add Server Type column: */}
+                    {/* // In the table header, add Server Type column: */}
                     <TableHeader>
                         <TableRow>
                             <TableHead>Name</TableHead>
@@ -267,7 +291,38 @@ const ManageIpStock = () => {
                                         />
                                     </div>
                                 ))}
+                                <div>
+                                    <Label className="text-base font-semibold">Tags:</Label>
+                                    <div className="flex gap-2 mb-2">
+                                        <Input
+                                            type="text"
+                                            placeholder="Add tag"
+                                            value={newTag}
+                                            onChange={(e) => setNewTag(e.target.value)}
+                                            className="flex-1"
+                                            onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), addTag())}
+                                        />
+                                        <Button type="button" onClick={addTag}>Add</Button>
+                                    </div>
 
+                                    {currentStock.tags && currentStock.tags.length > 0 && (
+                                        <div className="flex flex-wrap gap-2">
+                                            {currentStock.tags.map((tag, index) => (
+                                                <Badge
+                                                    key={index}
+                                                    variant="secondary"
+                                                    className="flex items-center gap-1"
+                                                >
+                                                    {tag}
+                                                    <X
+                                                        className="h-3 w-3 cursor-pointer"
+                                                        onClick={() => removeTag(tag)}
+                                                    />
+                                                </Badge>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
                                 {/* Promo Codes Management */}
                                 <div>
                                     <Label className="text-base font-semibold">Promo Codes:</Label>

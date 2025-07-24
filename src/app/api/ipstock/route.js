@@ -7,12 +7,13 @@ export async function POST(request) {
 
     try {
         const reqBody = await request.json();
-        const { name, available, serverType, memoryOptions, promoCodes } = reqBody; // Add serverType
+        const { name, available, serverType, tags, memoryOptions, promoCodes } = reqBody; // Add tags
 
         const newIPStock = new IPStock({
             name,
             available,
-            serverType, // Include serverType
+            serverType,
+            tags: tags || [], // Include tags
             memoryOptions,
             promoCodes: promoCodes || []
         });
@@ -31,7 +32,6 @@ export async function POST(request) {
         });
     }
 }
-
 // GET method remains the same
 // ... existing GET method remains the same ...
 export async function GET(request) {

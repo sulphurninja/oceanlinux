@@ -5,13 +5,18 @@ const IPStockSchema = new mongoose.Schema({
   name: { type: String, required: true },
   description: { type: String, default: "" },
   available: { type: Boolean, default: true },
-  // Add server type field
   serverType: { 
     type: String, 
     enum: ['VPS', 'Linux'], 
     required: true,
     default: 'Linux'
   },
+  // Add tags field
+  tags: [{
+    type: String,
+    trim: true,
+    lowercase: true
+  }],
   memoryOptions: {
     type: Map,
     of: new mongoose.Schema({

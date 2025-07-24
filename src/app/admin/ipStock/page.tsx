@@ -13,6 +13,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
+import { X } from 'lucide-react'; // Add this import
 import axios from 'axios';
 import { toast } from 'sonner';
 
@@ -31,7 +33,7 @@ type PromoCode = {
 const AddIPStockPage = () => {
     const [name, setName] = useState('');
     const [available, setAvailable] = useState('true');
-    const [serverType, setServerType] = useState('Linux'); // Add server type state
+    const [serverType, setServerType] = useState('Linux');
     const [prices, setPrices] = useState<MemoryOptions>({
         '4GB': '',
         '8GB': '',
@@ -40,6 +42,11 @@ const AddIPStockPage = () => {
     const [promoCodes, setPromoCodes] = useState<PromoCode[]>([]);
     const [newPromoCode, setNewPromoCode] = useState('');
     const [newPromoDiscount, setNewPromoDiscount] = useState('');
+    
+    // Add tags state
+    const [tags, setTags] = useState<string[]>([]);
+    const [newTag, setNewTag] = useState('');
+    
     const router = useRouter();
 
     const handlePriceChange = (size: keyof MemoryOptions, value: string) => {
@@ -70,6 +77,18 @@ const AddIPStockPage = () => {
         setPromoCodes(prev => prev.filter((_, i) => i !== index));
     };
 
+    // Add tag functions
+    const addTag = () => {
+        if (newTag.trim() && !tags.includes(newTag.trim().toLowerCase())) {
+            setTags(prev => [...prev, newTag.trim().toLowerCase()]);
+            setNewTag('');
+        }
+    };
+
+    const removeTag = (tagToRemove: string) => {
+        setTags(prev => prev.filter(tag => tag !== tagToRemove));
+    };
+
     const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
         event.preventDefault();
         const memoryOptions = {
@@ -81,7 +100,8 @@ const AddIPStockPage = () => {
             const response = await axios.post('/api/ipstock', {
                 name,
                 available: available === 'true',
-                serverType, // Include server type
+                serverType,
+                tags, // Include tags
                 memoryOptions,
                 promoCodes,
             });
@@ -89,6 +109,7 @@ const AddIPStockPage = () => {
             console.log('Submission Successful:', response.data);
             setName("");
             setServerType('Linux');
+            setTags([]); // Reset tags
             setPrices({ '4GB': '', '8GB': '', '16GB': '' });
             setPromoCodes([]);
             toast.success("IP Stock created successfully!")
@@ -120,7 +141,6 @@ const AddIPStockPage = () => {
                                 />
                             </div>
 
-                            {/* Add Server Type Selection */}
                             <div className="mb-4">
                                 <Label className="block text-sm font-medium mb-1">Server Type:</Label>
                                 <Select value={serverType} onValueChange={setServerType}>
@@ -132,6 +152,40 @@ const AddIPStockPage = () => {
                                         <SelectItem value="VPS">VPS</SelectItem>
                                     </SelectContent>
                                 </Select>
+                            </div>
+
+                            {/* Add Tags Section */}
+                            <div className="mb-4">
+                                <Label className="block text-sm font-medium mb-2">Tags:</Label>
+                                <div className="flex gap-2 mb-2">
+                                    <Input
+                                        type="text"
+                                        placeholder="Add tag (e.g., premium, budget, ssd)"
+                                        value={newTag}
+                                        onChange={(e) => setNewTag(e.target.value)}
+                                        className="flex-1"
+                                        onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), addTag())}
+                                    />
+                                    <Button type="button" onClick={addTag}>Add Tag</Button>
+                                </div>
+                                
+                                {tags.length > 0 && (
+                                    <div className="flex flex-wrap gap-2">
+                                        {tags.map((tag, index) => (
+                                            <Badge 
+                                                key={index} 
+                                                variant="secondary" 
+                                                className="flex items-center gap-1"
+                                            >
+                                                {tag}
+                                                <X 
+                                                    className="h-3 w-3 cursor-pointer" 
+                                                    onClick={() => removeTag(tag)}
+                                                />
+                                            </Badge>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
 
                             <div className="mb-4">

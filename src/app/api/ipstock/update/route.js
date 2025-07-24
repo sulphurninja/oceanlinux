@@ -5,7 +5,7 @@ import IPStock from '../../../../models/ipStockModel';
 
 export async function PUT(req, res) {
     const reqBody = await req.json();
-    const { _id, name, available, serverType, memoryOptions, promoCodes } = reqBody; // Add serverType
+    const { _id, name, available, serverType, tags, memoryOptions, promoCodes } = reqBody; // Add tags
 
     await connectDB();
 
@@ -13,7 +13,8 @@ export async function PUT(req, res) {
         const updatedStock = await IPStock.findByIdAndUpdate(_id, {
             name,
             available,
-            serverType, // Include serverType
+            serverType,
+            tags, // Include tags
             memoryOptions,
             promoCodes
         }, { new: true });

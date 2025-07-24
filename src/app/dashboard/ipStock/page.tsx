@@ -31,7 +31,6 @@ import {
   CreditCard,
   Tag,
   Percent,
-  Filter,
   Server,
   Cloud,
   Grid3X3
@@ -39,7 +38,6 @@ import {
 import { z } from "zod";
 import { cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 // Validation schema for transaction ID
 const transactionSchema = z.object({
@@ -78,13 +76,13 @@ interface PromoCode {
   createdAt?: string;
 }
 
-// Update the interface
 interface IPStock {
   _id: string;
   name: string;
   description?: string;
   available: boolean;
-  serverType: string; // Add this field
+  serverType: string;
+  tags: string[];
   memoryOptions: Record<string, MemoryOptionDetails>;
   promoCodes?: PromoCode[];
 }
@@ -104,17 +102,18 @@ export default function IPStockPage() {
   } | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [paymentInitiating, setPaymentInitiating] = useState(false);
-
+  
   // Promo code states
   const [promoCode, setPromoCode] = useState("");
   const [promoDiscount, setPromoDiscount] = useState(0);
   const [promoMessage, setPromoMessage] = useState("");
   const [promoValidating, setPromoValidating] = useState(false);
   const [promoApplied, setPromoApplied] = useState(false);
-
-  const router = useRouter();
-  // Change filter state to use tabs
+  
+  // Tab filter state
   const [activeTab, setActiveTab] = useState<string>('all');
+  
+  const router = useRouter();
 
   // Fetch available IP stocks on mount
   useEffect(() => {
@@ -134,8 +133,6 @@ export default function IPStockPage() {
     fetchIPStocks();
   }, []);
 
-  // Add filter state
-  const [serverTypeFilter, setServerTypeFilter] = useState<string>('all');
   // Filter the ipStocks based on selected tab
   const filteredIpStocks = ipStocks.filter(stock => {
     if (activeTab === 'all') return true;
@@ -151,6 +148,27 @@ export default function IPStockPage() {
   };
 
   const counts = getCounts();
+
+  // Group stocks by tags
+  const groupStocksByTags = (stocks: IPStock[]) => {
+    const grouped: { [key: string]: IPStock[] } = {};
+    const untagged: IPStock[] = [];
+
+    stocks.forEach(stock => {
+      if (!stock.tags || stock.tags.length === 0) {
+        untagged.push(stock);
+      } else {
+        // Use the first tag as the primary grouping tag
+        const primaryTag = stock.tags[0];
+        if (!grouped[primaryTag]) {
+          grouped[primaryTag] = [];
+        }
+        grouped[primaryTag].push(stock);
+      }
+    });
+
+    return { grouped, untagged };
+  };
 
   // Toggle expanded state for a list item
   const toggleExpanded = (id: string) => {
@@ -171,7 +189,7 @@ export default function IPStockPage() {
   // Validate promo code
   const validatePromoCode = async () => {
     if (!promoCode.trim() || !selectedProduct) return;
-
+    
     setPromoValidating(true);
     try {
       const response = await fetch("/api/validate-promo", {
@@ -182,9 +200,9 @@ export default function IPStockPage() {
           ipStockId: selectedProduct.ipStockId
         })
       });
-
+      
       const data = await response.json();
-
+      
       if (data.valid) {
         setPromoDiscount(data.discount);
         setPromoMessage(data.message);
@@ -224,11 +242,11 @@ export default function IPStockPage() {
   // Handle proceed to payment with promo code data
   const handleProceedToPayment = async () => {
     if (!selectedProduct) return;
-
+    
     setPaymentInitiating(true);
     try {
       const finalPrice = getDiscountedPrice();
-
+      
       const res = await fetch("/api/payment/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -242,24 +260,24 @@ export default function IPStockPage() {
           ipStockId: selectedProduct.ipStockId
         })
       });
-
+      
       const data = await res.json();
-
+      
       if (!res.ok) {
         toast.error(data.message || "Failed to initiate payment");
         setPaymentInitiating(false);
         return;
       }
-
+      
       if (data.clientTxnId) {
         localStorage.setItem('lastClientTxnId', data.clientTxnId);
         console.log("Stored clientTxnId in localStorage:", data.clientTxnId);
       }
-
+      
       toast.success("Redirecting to payment gateway...");
       setShowDialog(false);
       window.location.href = data.paymentUrl;
-
+      
     } catch (error) {
       console.error("Error initiating payment:", error);
       toast.error("Something went wrong. Please try again");
@@ -276,29 +294,27 @@ export default function IPStockPage() {
   return (
     <div className="w-full min-h-full text-white bg-gray-900">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-gray-800 p-4">
-        <div className="flex items-center gap-2">
+      <div className="border-b border-gray-800 p-4">
+        <div className="flex items-center gap-2 mb-4">
           <ServerIcon className="h-5 w-5 text-blue-400" />
           <h1 className="text-xl font-semibold">Server Plans</h1>
         </div>
-       
-      </div>
-
- {/* Tabs */}
-        <div className="flex space-x-1 justify-center w-full bg-gray-800/50 p-2 rounded-lg ">
+        
+        {/* Tabs */}
+        <div className="flex space-x-1 bg-gray-800/50 p-1 rounded-lg w-fit">
           <button
             onClick={() => setActiveTab('all')}
             className={cn(
-              "flex items-center border gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors",
+              "flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors",
               activeTab === 'all'
                 ? "bg-blue-600 text-white shadow-sm"
                 : "text-gray-400 hover:text-white hover:bg-gray-700/50"
             )}
           >
             <Grid3X3 className="h-4 w-4" />
-            All Plans
-            <Badge
-              variant="secondary"
+            All Types
+            <Badge 
+              variant="secondary" 
               className={cn(
                 "ml-1 text-xs",
                 activeTab === 'all' ? "bg-blue-500/20 text-blue-100" : "bg-gray-600 text-gray-300"
@@ -307,20 +323,20 @@ export default function IPStockPage() {
               {counts.all}
             </Badge>
           </button>
-
+          
           <button
             onClick={() => setActiveTab('Linux')}
             className={cn(
-              "flex items-center border gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors",
+              "flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors",
               activeTab === 'Linux'
                 ? "bg-blue-600 text-white shadow-sm"
                 : "text-gray-400 hover:text-white hover:bg-gray-700/50"
             )}
           >
             <Server className="h-4 w-4" />
-             LINUX
-            <Badge
-              variant="secondary"
+            Linux
+            <Badge 
+              variant="secondary" 
               className={cn(
                 "ml-1 text-xs",
                 activeTab === 'Linux' ? "bg-blue-500/20 text-blue-100" : "bg-gray-600 text-gray-300"
@@ -329,11 +345,11 @@ export default function IPStockPage() {
               {counts.linux}
             </Badge>
           </button>
-
+          
           <button
             onClick={() => setActiveTab('VPS')}
             className={cn(
-              "flex items-center border gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors",
+              "flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors",
               activeTab === 'VPS'
                 ? "bg-blue-600 text-white shadow-sm"
                 : "text-gray-400 hover:text-white hover:bg-gray-700/50"
@@ -341,8 +357,8 @@ export default function IPStockPage() {
           >
             <Cloud className="h-4 w-4" />
             VPS
-            <Badge
-              variant="secondary"
+            <Badge 
+              variant="secondary" 
               className={cn(
                 "ml-1 text-xs",
                 activeTab === 'VPS' ? "bg-blue-500/20 text-blue-100" : "bg-gray-600 text-gray-300"
@@ -352,162 +368,209 @@ export default function IPStockPage() {
             </Badge>
           </button>
         </div>
+      </div>
 
-      {/* Main Content - Compact List Layout */ }
-      <div className=" mx-auto p-4">
+      {/* Main Content */}
+      <div className="max-w-5xl mx-auto p-4">
         {isLoading ? (
           <div className="flex justify-center items-center h-40">
             <Loader2 className="h-8 w-8 text-blue-500 animate-spin" />
           </div>
         ) : (
-
           <div className="space-y-3 mt-2">
-          
             {filteredIpStocks.length === 0 ? (
               <div className="text-center py-8 bg-gray-800/50 rounded-lg border border-gray-700">
                 <AlertCircle className="h-10 w-10 text-gray-500 mx-auto mb-2" />
-                <p className="text-gray-400">No server plans available at this time</p>
+                <p className="text-gray-400">
+                  {activeTab === 'all' 
+                    ? 'No server plans available at this time'
+                    : `No ${activeTab} plans available at this time`
+                  }
+                </p>
               </div>
             ) : (
               <div className="bg-gray-800/30 rounded-lg border border-gray-700 overflow-hidden">
-                <div className="grid grid-cols-12 p-4 text-xs uppercase text-gray-500 font-medium border-b items-center border-gray-700/50">
-                  <div className="col-span-5 text-ce sm:col-span-6">Plan</div>
+                <div className="grid grid-cols-12 p-4 text-xs uppercase text-gray-500 font-medium border-b border-gray-700/50">
+                  <div className="col-span-4 sm:col-span-5">Plan</div>
                   <div className="col-span-2 sm:col-span-1 text-center">Type</div>
-                  <div className="col-span-3 sm:col-span-2 text-center">Status</div>
-
-
+                  <div className="col-span-2 sm:col-span-2 text-center">Status</div>
+                  <div className="col-span-4 sm:col-span-4 text-right pr-2">Actions</div>
                 </div>
 
-                {filteredIpStocks.map((stock) => {
-                  const isExpanded = expandedItem === stock._id;
-                  const memoryKeys = Object.keys(stock.memoryOptions || {});
-                  const shortDesc = getShortDescription(stock.description || "");
-                  const hasPromoCodes = stock.promoCodes && stock.promoCodes.length > 0;
+                {(() => {
+                  const { grouped, untagged } = groupStocksByTags(filteredIpStocks);
+                  const tagKeys = Object.keys(grouped).sort();
+                  const allStocks = [
+                    ...tagKeys.flatMap(tag => grouped[tag]),
+                    ...untagged
+                  ];
 
-                  return (
-                    <div key={stock._id} className="border-b border-gray-700/50 last:border-b-0">
-                      {/* Main Row - Always visible */}
-                      <div
-                        className={cn(
-                          "grid grid-cols-12 p-4 items-center hover:bg-gray-800/60 transition-colors cursor-pointer",
-                          isExpanded && "bg-gray-800/40"
-                        )}
-                        onClick={() => toggleExpanded(stock._id)}
-                      >
-                        <div className="col-span-5 sm:col-span-6">
-                          <div className="flex items-center gap-3">
-                            <div className="text-blue-500">
-                              {isExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-                            </div>
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <h3 className="font-medium text-white">{stock.name}</h3>
-                                {hasPromoCodes && (
-                                  <Badge variant="secondary" className="text-xs bg-green-600/20 text-green-400 border-green-500">
-                                    <Tag className="h-3 w-3 mr-1" />
-                                    Promo
-                                  </Badge>
-                                )}
-                              </div>
-                              <p className="text-sm text-gray-400 mt-0.5 hidden sm:block">
-                                {shortDesc}
-                              </p>
+                  let currentTag = '';
+                  
+                  return allStocks.map((stock, index) => {
+                    const isExpanded = expandedItem === stock._id;
+                    const memoryKeys = Object.keys(stock.memoryOptions || {});
+                    const shortDesc = getShortDescription(stock.description || "");
+                    const hasPromoCodes = stock.promoCodes && stock.promoCodes.length > 0;
+                    
+                    // Check if this is the first stock of a new tag group
+                    const stockPrimaryTag = stock.tags?.[0] || 'untagged';
+                    const isNewTagGroup = stockPrimaryTag !== currentTag;
+                    currentTag = stockPrimaryTag;
+
+                    return (
+                      <div key={stock._id}>
+                        {/* Tag separator - only show when starting a new tag group */}
+                        {isNewTagGroup && stockPrimaryTag !== 'untagged' && (
+                          <div className="bg-gray-700/50 px-4 py-2 border-b border-gray-600/50">
+                            <div className="flex items-center gap-2">
+                              <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                              <span className="text-sm font-medium text-blue-300 capitalize">
+                                {stockPrimaryTag} Plans
+                              </span>
+                              <Badge variant="outline" className="bg-blue-600/20 text-blue-300 border-blue-500 text-xs">
+                                {grouped[stockPrimaryTag]?.length || 0}
+                              </Badge>
                             </div>
                           </div>
-                        </div>
-                        {/* Add Server Type Column */}
-                        <div className="col-span-2 sm:col-span-1 flex justify-center">
-                          <Badge
-                            variant={stock.serverType === 'VPS' ? 'default' : 'secondary'}
-                            className="text-xs h-6 flex items-center gap-1"
-                          >
-                            {stock.serverType === 'VPS' ? (
-                              <Cloud className="h-3 w-3" />
-                            ) : (
-                              <Server className="h-3 w-3" />
-                            )}
-                            {stock.serverType}
-                          </Badge>
-                        </div>
-                        <div className="col-span-3 sm:col-span-2 flex justify-center">
-                          <Badge
-                            variant={stock.available ? "outline" : "destructive"}
+                        )}
+                        
+                        {/* Stock row */}
+                        <div className="border-b border-gray-700/50 last:border-b-0">
+                          <div
                             className={cn(
-                              "text-xs h-6",
-                              stock.available ? "border-green-500 text-green-400" : ""
+                              "grid grid-cols-12 p-4 items-center hover:bg-gray-800/60 transition-colors cursor-pointer",
+                              isExpanded && "bg-gray-800/40"
                             )}
+                            onClick={() => toggleExpanded(stock._id)}
                           >
-                            {stock.available ? (
-                              <span className="flex items-center gap-1">
-                                <Check className="h-3 w-3" /> Available
-                              </span>
-                            ) : (
-                              <span className="flex items-center gap-1">
-                                <X className="h-3 w-3" /> Sold Out
-                              </span>
-                            )}
-                          </Badge>
-                        </div>
+                            <div className="col-span-4 sm:col-span-5">
+                              <div className="flex items-center gap-3">
+                                <div className="text-blue-500">
+                                  {isExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                                </div>
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <h3 className="font-medium text-white">{stock.name}</h3>
+                                    {hasPromoCodes && (
+                                      <Badge variant="secondary" className="text-xs bg-green-600/20 text-green-400 border-green-500">
+                                        <Tag className="h-3 w-3 mr-1" />
+                                        Promo
+                                      </Badge>
+                                    )}
+                                  </div>
+                                  <p className="text-sm text-gray-400 mt-0.5 hidden sm:block">
+                                    {shortDesc}
+                                  </p>
+                                  {/* Show all tags for this stock */}
+                                  {stock.tags && stock.tags.length > 0 && (
+                                    <div className="flex flex-wrap gap-1 mt-1">
+                                      {stock.tags.map((tag, idx) => (
+                                        <Badge key={idx} variant="outline" className="text-xs bg-gray-700/50 text-gray-300 border-gray-600">
+                                          {tag}
+                                        </Badge>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
 
-                        <div className="col-span-3 text-right pr-2">
-                          <span className="text-xs text-gray-400">
-                            {memoryKeys.length} conf. available
-                          </span>
+                            <div className="col-span-2 sm:col-span-1 flex justify-center">
+                              <Badge 
+                                variant={stock.serverType === 'VPS' ? 'default' : 'secondary'}
+                                className="text-xs h-6 flex items-center gap-1"
+                              >
+                                {stock.serverType === 'VPS' ? (
+                                  <Cloud className="h-3 w-3" />
+                                ) : (
+                                  <Server className="h-3 w-3" />
+                                )}
+                                {stock.serverType}
+                              </Badge>
+                            </div>
+
+                            <div className="col-span-2 sm:col-span-2 flex justify-center">
+                              <Badge
+                                variant={stock.available ? "outline" : "destructive"}
+                                className={cn(
+                                  "text-xs h-6",
+                                  stock.available ? "border-green-500 text-green-400" : ""
+                                )}
+                              >
+                                {stock.available ? (
+                                  <span className="flex items-center gap-1">
+                                    <Check className="h-3 w-3" /> Available
+                                  </span>
+                                ) : (
+                                  <span className="flex items-center gap-1">
+                                    <X className="h-3 w-3" /> Sold Out
+                                  </span>
+                                )}
+                              </Badge>
+                            </div>
+
+                            <div className="col-span-4 sm:col-span-4 text-right pr-2">
+                              <span className="text-xs text-gray-400">
+                                {memoryKeys.length} configurations available
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Expanded Section - Memory Options */}
+                          {isExpanded && (
+                            <div className="p-4 pt-0 bg-gray-800/10">
+                              <div className="pl-8 mb-2">
+                                <p className="text-sm text-gray-300">{stock.description}</p>
+                              </div>
+
+                              <div className="mt-3 pl-8 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                {memoryKeys.map((memKey) => {
+                                  const priceObj = stock.memoryOptions[memKey];
+                                  return (
+                                    <Card
+                                      key={memKey}
+                                      className={cn(
+                                        "bg-gray-800 border-gray-700",
+                                        priceObj?.price === null && "opacity-60"
+                                      )}
+                                    >
+                                      <CardContent className="p-3 flex justify-between items-center">
+                                        <div>
+                                          <h4 className="font-medium">{memKey}</h4>
+                                          {priceObj?.price !== null ? (
+                                            <div className="text-blue-400 font-bold">₹{priceObj.price}</div>
+                                          ) : (
+                                            <div className="text-gray-500 text-sm">Not available</div>
+                                          )}
+                                        </div>
+
+                                        {priceObj?.price !== null && (
+                                          <Button
+                                            size="sm"
+                                            className="bg-blue-600 hover:bg-blue-700 h-8 px-3"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              handleBuyNow(stock.name, memKey, priceObj.price!, stock._id);
+                                            }}
+                                            disabled={!stock.available}
+                                          >
+                                            <CreditCard className="h-3.5 w-3.5 mr-1" />
+                                            Buy
+                                          </Button>
+                                        )}
+                                      </CardContent>
+                                    </Card>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </div>
-
-                      {/* Expanded Section - Memory Options */}
-                      {isExpanded && (
-                        <div className="p-4 pt-0 bg-gray-800/10">
-                          <div className="pl-8 mb-2">
-                            <p className="text-sm text-gray-300">{stock.description}</p>
-                          </div>
-
-                          <div className="mt-3 pl-8 grid grid-cols-1 sm:grid-cols-3 gap-3">
-                            {memoryKeys.map((memKey) => {
-                              const priceObj = stock.memoryOptions[memKey];
-                              return (
-                                <Card
-                                  key={memKey}
-                                  className={cn(
-                                    "bg-gray-800 border-gray-700",
-                                    priceObj?.price === null && "opacity-60"
-                                  )}
-                                >
-                                  <CardContent className="p-3 flex justify-between items-center">
-                                    <div>
-                                      <h4 className="font-medium">{memKey}</h4>
-                                      {priceObj?.price !== null ? (
-                                        <div className="text-blue-400 font-bold">₹{priceObj.price}</div>
-                                      ) : (
-                                        <div className="text-gray-500 text-sm">Not available</div>
-                                      )}
-                                    </div>
-
-                                    {priceObj?.price !== null && (
-                                      <Button
-                                        size="sm"
-                                        className="bg-blue-600 hover:bg-blue-700 h-8 px-3"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          handleBuyNow(stock.name, memKey, priceObj.price!, stock._id);
-                                        }}
-                                        disabled={!stock.available}
-                                      >
-                                        <CreditCard className="h-3.5 w-3.5 mr-1" />
-                                        Buy
-                                      </Button>
-                                    )}
-                                  </CardContent>
-                                </Card>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+                    );
+                  });
+                })()}
               </div>
             )}
           </div>
@@ -645,6 +708,6 @@ export default function IPStockPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div >
+    </div>
   );
 }
