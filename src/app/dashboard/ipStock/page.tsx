@@ -371,7 +371,7 @@ export default function IPStockPage() {
       </div>
 
       {/* Main Content */}
-      <div className="max-w-5xl mx-auto p-4">
+      <div className="max- mx-auto p-4">
         {isLoading ? (
           <div className="flex justify-center items-center h-40">
             <Loader2 className="h-8 w-8 text-blue-500 animate-spin" />
