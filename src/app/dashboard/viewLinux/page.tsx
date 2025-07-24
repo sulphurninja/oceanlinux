@@ -22,7 +22,8 @@ import {
     HardDrive,
     Activity,
     Check,
-    Terminal
+    Terminal,
+    TerminalIcon
 } from 'lucide-react';
 import {
     Dialog,
@@ -278,7 +279,7 @@ const ViewLinux = () => {
                                 {/* Server Overview */}
                                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                                     <div className="flex items-center gap-3 p-3 bg- -50 rounded-lg">
-                                        <Terminal os={selectedOrder.os} className="h-8 w-8" />
+                                        <TerminalIcon className="h-8 w-8" />
                                         <div>
                                             <p className="text-xs text-muted-foreground uppercase tracking-wide">Template</p>
                                             <p className="font-medium text-sm">{selectedOrder.os}</p>
