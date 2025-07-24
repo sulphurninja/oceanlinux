@@ -23,13 +23,14 @@ interface MemoryOptionDetails {
     price: number;
 }
 
+// Update the PromoCode interface
 interface PromoCode {
     code: string;
     discount: number;
+    discountType: 'percentage' | 'fixed';
     isActive: boolean;
     createdAt?: string;
 }
-
 // Update interface
 interface IPStock {
     _id: string;
@@ -49,6 +50,8 @@ const ManageIpStock = () => {
     const [isDialogOpen, setIsDialogOpen] = useState(false);
     const [newPromoCode, setNewPromoCode] = useState('');
     const [newPromoDiscount, setNewPromoDiscount] = useState('');
+    // Add state for discount type in new promo codes
+    const [newPromoDiscountType, setNewPromoDiscountType] = useState<'percentage' | 'fixed'>('fixed');
     // In the component, add tag management state
     const [newTag, setNewTag] = useState('');
     useEffect(() => {
@@ -137,13 +140,20 @@ const ManageIpStock = () => {
         }
     };
 
+    // Update the addPromoCode function
     const addPromoCode = () => {
         if (currentStock && newPromoCode && newPromoDiscount) {
             const discount = parseFloat(newPromoDiscount);
-            if (discount >= 0 && discount <= 100) {
+            if (discount >= 0) {
+                if (newPromoDiscountType === 'percentage' && discount > 100) {
+                    toast.error('Percentage discount cannot exceed 100%');
+                    return;
+                }
+
                 const updatedPromoCodes = [...(currentStock.promoCodes || []), {
                     code: newPromoCode.toUpperCase(),
                     discount,
+                    discountType: newPromoDiscountType,
                     isActive: true
                 }];
                 setCurrentStock({
@@ -153,10 +163,11 @@ const ManageIpStock = () => {
                 setNewPromoCode('');
                 setNewPromoDiscount('');
             } else {
-                toast.error('Discount must be between 0 and 100');
+                toast.error('Discount must be a positive number');
             }
         }
     };
+
 
     const removePromoCode = (index: number) => {
         if (currentStock) {
@@ -215,12 +226,13 @@ const ManageIpStock = () => {
                                 {Object.entries(stock.memoryOptions).map(([memory, details]) => (
                                     <TableCell key={memory}>₹{details.price}</TableCell>
                                 ))}
+
                                 <TableCell>
                                     {stock.promoCodes?.length > 0 ? (
                                         <div className="text-xs">
                                             {stock.promoCodes.slice(0, 2).map((promo, idx) => (
                                                 <div key={idx}>
-                                                    {promo.code} ({promo.discount}%)
+                                                    {promo.code} ({promo.discountType === 'fixed' ? `₹${promo.discount}` : `${promo.discount}%`})
                                                 </div>
                                             ))}
                                             {stock.promoCodes.length > 2 && (
@@ -231,6 +243,8 @@ const ManageIpStock = () => {
                                         'No promo codes'
                                     )}
                                 </TableCell>
+
+
                                 <TableCell>
                                     <Button onClick={() => handleEdit(stock)}>Edit</Button>
                                 </TableCell>
@@ -326,33 +340,42 @@ const ManageIpStock = () => {
                                 {/* Promo Codes Management */}
                                 <div>
                                     <Label className="text-base font-semibold">Promo Codes:</Label>
-                                    <div className="flex gap-2 mb-2">
+                                    <div className="grid grid-cols-12 gap-2 mb-2">
                                         <Input
                                             type="text"
                                             placeholder="Promo Code"
                                             value={newPromoCode}
                                             onChange={(e) => setNewPromoCode(e.target.value)}
-                                            className="flex-1"
+                                            className="col-span-4"
                                         />
+                                        <Select value={newPromoDiscountType} onValueChange={(value: 'percentage' | 'fixed') => setNewPromoDiscountType(value)}>
+                                            <SelectTrigger className="col-span-3">
+                                                <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="fixed">₹ Fixed Amount</SelectItem>
+                                                <SelectItem value="percentage">% Percentage</SelectItem>
+                                            </SelectContent>
+                                        </Select>
                                         <Input
                                             type="number"
-                                            placeholder="Discount %"
+                                            placeholder={newPromoDiscountType === 'fixed' ? "Amount in ₹" : "Percentage"}
                                             min="0"
-                                            max="100"
+                                            max={newPromoDiscountType === 'percentage' ? "100" : undefined}
                                             value={newPromoDiscount}
                                             onChange={(e) => setNewPromoDiscount(e.target.value)}
-                                            className="w-24"
+                                            className="col-span-3"
                                         />
-                                        <Button type="button" onClick={addPromoCode}>Add</Button>
+                                        <Button type="button" onClick={addPromoCode} className="col-span-2">Add</Button>
                                     </div>
 
                                     {currentStock.promoCodes && currentStock.promoCodes.length > 0 && (
                                         <div className="border rounded p-2 max-h-32 overflow-y-auto">
                                             {currentStock.promoCodes.map((promo, index) => (
-                                                <div key={index} className="flex justify-between items-center mb-1 p-2  rounded">
+                                                <div key={index} className="flex justify-between items-center mb-1 p-2 bg--50 rounded">
                                                     <div className="flex items-center gap-2">
                                                         <span className={promo.isActive ? '' : 'line-through text-gray-500'}>
-                                                            {promo.code} - {promo.discount}% off
+                                                            {promo.code} - {promo.discountType === 'fixed' ? `₹${promo.discount} off` : `${promo.discount}% off`}
                                                         </span>
                                                         <Button
                                                             type="button"

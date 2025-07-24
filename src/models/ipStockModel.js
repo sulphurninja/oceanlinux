@@ -11,7 +11,6 @@ const IPStockSchema = new mongoose.Schema({
     required: true,
     default: 'Linux'
   },
-  // Add tags field
   tags: [{
     type: String,
     trim: true,
@@ -25,7 +24,8 @@ const IPStockSchema = new mongoose.Schema({
   },
   promoCodes: [{
     code: { type: String, required: true },
-    discount: { type: Number, required: true, min: 0, max: 100 },
+    discount: { type: Number, required: true, min: 0 }, // Remove max limit, now it's in rupees
+    discountType: { type: String, enum: ['percentage', 'fixed'], default: 'fixed' }, // Add discount type
     isActive: { type: Boolean, default: true },
     createdAt: { type: Date, default: Date.now }
   }]

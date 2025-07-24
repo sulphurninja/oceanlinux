@@ -14,7 +14,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { X } from 'lucide-react'; // Add this import
+import { X } from 'lucide-react';
 import axios from 'axios';
 import { toast } from 'sonner';
 
@@ -27,6 +27,7 @@ type MemoryOptions = {
 type PromoCode = {
     code: string;
     discount: number;
+    discountType: 'percentage' | 'fixed';
     isActive: boolean;
 };
 
@@ -42,8 +43,8 @@ const AddIPStockPage = () => {
     const [promoCodes, setPromoCodes] = useState<PromoCode[]>([]);
     const [newPromoCode, setNewPromoCode] = useState('');
     const [newPromoDiscount, setNewPromoDiscount] = useState('');
+    const [newPromoDiscountType, setNewPromoDiscountType] = useState<'percentage' | 'fixed'>('fixed');
     
-    // Add tags state
     const [tags, setTags] = useState<string[]>([]);
     const [newTag, setNewTag] = useState('');
     
@@ -59,16 +60,23 @@ const AddIPStockPage = () => {
     const addPromoCode = () => {
         if (newPromoCode && newPromoDiscount) {
             const discount = parseFloat(newPromoDiscount);
-            if (discount >= 0 && discount <= 100) {
+            if (discount >= 0) {
+                // Validate based on discount type
+                if (newPromoDiscountType === 'percentage' && discount > 100) {
+                    toast.error('Percentage discount cannot exceed 100%');
+                    return;
+                }
+                
                 setPromoCodes(prev => [...prev, {
                     code: newPromoCode.toUpperCase(),
                     discount,
+                    discountType: newPromoDiscountType,
                     isActive: true
                 }]);
                 setNewPromoCode('');
                 setNewPromoDiscount('');
             } else {
-                toast.error('Discount must be between 0 and 100');
+                toast.error('Discount must be a positive number');
             }
         }
     };
@@ -77,7 +85,6 @@ const AddIPStockPage = () => {
         setPromoCodes(prev => prev.filter((_, i) => i !== index));
     };
 
-    // Add tag functions
     const addTag = () => {
         if (newTag.trim() && !tags.includes(newTag.trim().toLowerCase())) {
             setTags(prev => [...prev, newTag.trim().toLowerCase()]);
@@ -101,7 +108,7 @@ const AddIPStockPage = () => {
                 name,
                 available: available === 'true',
                 serverType,
-                tags, // Include tags
+                tags,
                 memoryOptions,
                 promoCodes,
             });
@@ -109,7 +116,7 @@ const AddIPStockPage = () => {
             console.log('Submission Successful:', response.data);
             setName("");
             setServerType('Linux');
-            setTags([]); // Reset tags
+            setTags([]);
             setPrices({ '4GB': '', '8GB': '', '16GB': '' });
             setPromoCodes([]);
             toast.success("IP Stock created successfully!")
@@ -154,7 +161,6 @@ const AddIPStockPage = () => {
                                 </Select>
                             </div>
 
-                            {/* Add Tags Section */}
                             <div className="mb-4">
                                 <Label className="block text-sm font-medium mb-2">Tags:</Label>
                                 <div className="flex gap-2 mb-2">
@@ -214,27 +220,36 @@ const AddIPStockPage = () => {
                                 </div>
                             ))}
                             
-                            {/* Promo Codes Section - keep existing code */}
+                            {/* Updated Promo Codes Section */}
                             <div className="mb-4">
                                 <Label className="block text-sm font-medium mb-2">Promo Codes:</Label>
-                                <div className="flex gap-2 mb-2">
+                                <div className="grid grid-cols-12 gap-2 mb-2">
                                     <Input
                                         type="text"
                                         placeholder="Promo Code"
                                         value={newPromoCode}
                                         onChange={(e) => setNewPromoCode(e.target.value)}
-                                        className="flex-1"
+                                        className="col-span-4"
                                     />
+                                    <Select value={newPromoDiscountType} onValueChange={(value: 'percentage' | 'fixed') => setNewPromoDiscountType(value)}>
+                                        <SelectTrigger className="col-span-3">
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="fixed">₹ Fixed Amount</SelectItem>
+                                            <SelectItem value="percentage">% Percentage</SelectItem>
+                                        </SelectContent>
+                                    </Select>
                                     <Input
                                         type="number"
-                                        placeholder="Discount %"
+                                        placeholder={newPromoDiscountType === 'fixed' ? "Amount in ₹" : "Percentage"}
                                         min="0"
-                                        max="100"
+                                        max={newPromoDiscountType === 'percentage' ? "100" : undefined}
                                         value={newPromoDiscount}
                                         onChange={(e) => setNewPromoDiscount(e.target.value)}
-                                        className="w-24"
+                                        className="col-span-3"
                                     />
-                                    <Button type="button" onClick={addPromoCode}>Add</Button>
+                                    <Button type="button" onClick={addPromoCode} className="col-span-2">Add</Button>
                                 </div>
                                 
                                 {promoCodes.length > 0 && (
@@ -242,7 +257,9 @@ const AddIPStockPage = () => {
                                         <h4 className="text-sm font-medium mb-2">Added Promo Codes:</h4>
                                         {promoCodes.map((promo, index) => (
                                             <div key={index} className="flex justify-between items-center mb-1 p-2 bg-gray-50 rounded">
-                                                <span>{promo.code} - {promo.discount}% off</span>
+                                                <span>
+                                                    {promo.code} - {promo.discountType === 'fixed' ? `₹${promo.discount} off` : `${promo.discount}% off`}
+                                                </span>
                                                 <Button 
                                                     type="button" 
                                                     variant="destructive" 

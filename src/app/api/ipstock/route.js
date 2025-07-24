@@ -7,13 +7,13 @@ export async function POST(request) {
 
     try {
         const reqBody = await request.json();
-        const { name, available, serverType, tags, memoryOptions, promoCodes } = reqBody; // Add tags
+        const { name, available, serverType, tags, memoryOptions, promoCodes } = reqBody;
 
         const newIPStock = new IPStock({
             name,
             available,
             serverType,
-            tags: tags || [], // Include tags
+            tags: tags || [],
             memoryOptions,
             promoCodes: promoCodes || []
         });
@@ -33,7 +33,6 @@ export async function POST(request) {
     }
 }
 // GET method remains the same
-// ... existing GET method remains the same ...
 export async function GET(request) {
     await connectDB();
 

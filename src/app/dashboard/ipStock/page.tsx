@@ -72,6 +72,7 @@ interface MemoryOptionDetails {
 interface PromoCode {
   code: string;
   discount: number;
+  discountType: 'percentage' | 'fixed';
   isActive: boolean;
   createdAt?: string;
 }
@@ -102,17 +103,17 @@ export default function IPStockPage() {
   } | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [paymentInitiating, setPaymentInitiating] = useState(false);
-  
+
   // Promo code states
   const [promoCode, setPromoCode] = useState("");
   const [promoDiscount, setPromoDiscount] = useState(0);
   const [promoMessage, setPromoMessage] = useState("");
   const [promoValidating, setPromoValidating] = useState(false);
   const [promoApplied, setPromoApplied] = useState(false);
-  
+
   // Tab filter state
   const [activeTab, setActiveTab] = useState<string>('all');
-  
+
   const router = useRouter();
 
   // Fetch available IP stocks on mount
@@ -186,10 +187,10 @@ export default function IPStockPage() {
     setPromoApplied(false);
   };
 
-  // Validate promo code
+  // Update the validatePromoCode function
   const validatePromoCode = async () => {
     if (!promoCode.trim() || !selectedProduct) return;
-    
+
     setPromoValidating(true);
     try {
       const response = await fetch("/api/validate-promo", {
@@ -197,17 +198,18 @@ export default function IPStockPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           promoCode: promoCode.trim(),
-          ipStockId: selectedProduct.ipStockId
+          ipStockId: selectedProduct.ipStockId,
+          productPrice: selectedProduct.price // Add product price for calculation
         })
       });
-      
+
       const data = await response.json();
-      
+
       if (data.valid) {
-        setPromoDiscount(data.discount);
+        setPromoDiscount(data.discountAmount); // Store the actual discount amount
         setPromoMessage(data.message);
         setPromoApplied(true);
-        toast.success(`Promo code applied! ${data.discount}% discount`);
+        toast.success(data.message);
       } else {
         setPromoDiscount(0);
         setPromoMessage(data.message);
@@ -232,21 +234,20 @@ export default function IPStockPage() {
     setPromoApplied(false);
   };
 
-  // Calculate discounted price
+  // Update the getDiscountedPrice function
   const getDiscountedPrice = () => {
     if (!selectedProduct || !promoApplied) return selectedProduct?.price || 0;
-    const discount = (selectedProduct.price * promoDiscount) / 100;
-    return selectedProduct.price - discount;
+    return Math.max(0, selectedProduct.price - promoDiscount); // Ensure price doesn't go below 0
   };
 
   // Handle proceed to payment with promo code data
   const handleProceedToPayment = async () => {
     if (!selectedProduct) return;
-    
+
     setPaymentInitiating(true);
     try {
       const finalPrice = getDiscountedPrice();
-      
+
       const res = await fetch("/api/payment/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -260,24 +261,24 @@ export default function IPStockPage() {
           ipStockId: selectedProduct.ipStockId
         })
       });
-      
+
       const data = await res.json();
-      
+
       if (!res.ok) {
         toast.error(data.message || "Failed to initiate payment");
         setPaymentInitiating(false);
         return;
       }
-      
+
       if (data.clientTxnId) {
         localStorage.setItem('lastClientTxnId', data.clientTxnId);
         console.log("Stored clientTxnId in localStorage:", data.clientTxnId);
       }
-      
+
       toast.success("Redirecting to payment gateway...");
       setShowDialog(false);
       window.location.href = data.paymentUrl;
-      
+
     } catch (error) {
       console.error("Error initiating payment:", error);
       toast.error("Something went wrong. Please try again");
@@ -299,7 +300,7 @@ export default function IPStockPage() {
           <ServerIcon className="h-5 w-5 text-blue-400" />
           <h1 className="text-xl font-semibold">Server Plans</h1>
         </div>
-        
+
         {/* Tabs */}
         <div className="flex space-x-1 bg-gray-800/50 p-1 rounded-lg w-fit">
           <button
@@ -313,8 +314,8 @@ export default function IPStockPage() {
           >
             <Grid3X3 className="h-4 w-4" />
             All Types
-            <Badge 
-              variant="secondary" 
+            <Badge
+              variant="secondary"
               className={cn(
                 "ml-1 text-xs",
                 activeTab === 'all' ? "bg-blue-500/20 text-blue-100" : "bg-gray-600 text-gray-300"
@@ -323,7 +324,7 @@ export default function IPStockPage() {
               {counts.all}
             </Badge>
           </button>
-          
+
           <button
             onClick={() => setActiveTab('Linux')}
             className={cn(
@@ -335,8 +336,8 @@ export default function IPStockPage() {
           >
             <Server className="h-4 w-4" />
             Linux
-            <Badge 
-              variant="secondary" 
+            <Badge
+              variant="secondary"
               className={cn(
                 "ml-1 text-xs",
                 activeTab === 'Linux' ? "bg-blue-500/20 text-blue-100" : "bg-gray-600 text-gray-300"
@@ -345,7 +346,7 @@ export default function IPStockPage() {
               {counts.linux}
             </Badge>
           </button>
-          
+
           <button
             onClick={() => setActiveTab('VPS')}
             className={cn(
@@ -357,8 +358,8 @@ export default function IPStockPage() {
           >
             <Cloud className="h-4 w-4" />
             VPS
-            <Badge 
-              variant="secondary" 
+            <Badge
+              variant="secondary"
               className={cn(
                 "ml-1 text-xs",
                 activeTab === 'VPS' ? "bg-blue-500/20 text-blue-100" : "bg-gray-600 text-gray-300"
@@ -382,7 +383,7 @@ export default function IPStockPage() {
               <div className="text-center py-8 bg-gray-800/50 rounded-lg border border-gray-700">
                 <AlertCircle className="h-10 w-10 text-gray-500 mx-auto mb-2" />
                 <p className="text-gray-400">
-                  {activeTab === 'all' 
+                  {activeTab === 'all'
                     ? 'No server plans available at this time'
                     : `No ${activeTab} plans available at this time`
                   }
@@ -406,13 +407,13 @@ export default function IPStockPage() {
                   ];
 
                   let currentTag = '';
-                  
+
                   return allStocks.map((stock, index) => {
                     const isExpanded = expandedItem === stock._id;
                     const memoryKeys = Object.keys(stock.memoryOptions || {});
                     const shortDesc = getShortDescription(stock.description || "");
                     const hasPromoCodes = stock.promoCodes && stock.promoCodes.length > 0;
-                    
+
                     // Check if this is the first stock of a new tag group
                     const stockPrimaryTag = stock.tags?.[0] || 'untagged';
                     const isNewTagGroup = stockPrimaryTag !== currentTag;
@@ -434,7 +435,7 @@ export default function IPStockPage() {
                             </div>
                           </div>
                         )}
-                        
+
                         {/* Stock row */}
                         <div className="border-b border-gray-700/50 last:border-b-0">
                           <div
@@ -477,7 +478,7 @@ export default function IPStockPage() {
                             </div>
 
                             <div className="col-span-2 sm:col-span-1 flex justify-center">
-                              <Badge 
+                              <Badge
                                 variant={stock.serverType === 'VPS' ? 'default' : 'secondary'}
                                 className="text-xs h-6 flex items-center gap-1"
                               >
@@ -654,9 +655,9 @@ export default function IPStockPage() {
                       <div className="flex justify-between text-green-400">
                         <span className="flex items-center gap-1">
                           <Percent className="h-3 w-3" />
-                          Discount ({promoDiscount}%):
+                          Discount:
                         </span>
-                        <span>-₹{((selectedProduct.price * promoDiscount) / 100).toFixed(2)}</span>
+                        <span>-₹{promoDiscount.toFixed(2)}</span>
                       </div>
                     </>
                   )}

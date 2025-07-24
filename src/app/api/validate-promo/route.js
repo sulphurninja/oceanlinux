@@ -4,7 +4,7 @@ import IPStock from '../../../models/ipStockModel';
 
 export async function POST(req) {
     try {
-        const { promoCode, ipStockId } = await req.json();
+        const { promoCode, ipStockId, productPrice } = await req.json(); // Add productPrice
         
         await connectDB();
         
@@ -22,10 +22,23 @@ export async function POST(req) {
         );
         
         if (promo) {
+            let discountAmount = 0;
+            let discountMessage = '';
+            
+            if (promo.discountType === 'fixed') {
+                discountAmount = promo.discount;
+                discountMessage = `₹${promo.discount} discount applied!`;
+            } else {
+                discountAmount = (productPrice * promo.discount) / 100;
+                discountMessage = `${promo.discount}% discount applied!`;
+            }
+            
             return NextResponse.json({ 
                 valid: true, 
                 discount: promo.discount,
-                message: `${promo.discount}% discount applied!`
+                discountType: promo.discountType,
+                discountAmount: discountAmount,
+                message: discountMessage
             });
         } else {
             return NextResponse.json({ 
