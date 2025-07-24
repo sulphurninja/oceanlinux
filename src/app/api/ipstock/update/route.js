@@ -1,19 +1,20 @@
 // src/app/api/ipstock/update.js
 import { NextResponse } from 'next/server';
-import connectDB from '../../../../lib/db';  // Adjust the path as necessary
-import IPStock from '../../../../models/ipStockModel';  // Adjust the path as necessary
+import connectDB from '../../../../lib/db';
+import IPStock from '../../../../models/ipStockModel';
 
 export async function PUT(req, res) {
     const reqBody = await req.json();
-    const { _id, name, available, memoryOptions } = reqBody;
-    // console.log(reqBody, 'body')
+    const { _id, name, available, memoryOptions, promoCodes } = reqBody;
+    
     await connectDB();
 
     try {
         const updatedStock = await IPStock.findByIdAndUpdate(_id, {
             name,
             available,
-            memoryOptions
+            memoryOptions,
+            promoCodes
         }, { new: true });
 
         if (!updatedStock) {
@@ -25,12 +26,14 @@ export async function PUT(req, res) {
         });
 
     } catch (error) {
-        NextResponse.json({ message: 'Failed to update IP Stock', error: error.message });
+        return NextResponse.json({ message: 'Failed to update IP Stock', error: error.message });
     }
 }
 
+// ... existing DELETE method remains the same ...
 export async function DELETE(req, res) {
-    const { _id } = req.body;
+    const reqBody = await req.json();
+    const { _id } = reqBody;
 
     await connectDB();
 
@@ -39,8 +42,8 @@ export async function DELETE(req, res) {
         if (!deletedStock) {
             return NextResponse.json({ message: 'IP Stock not found' });
         }
-        NextResponse.json({ message: 'IP Stock deleted successfully' });
+        return NextResponse.json({ message: 'IP Stock deleted successfully' });
     } catch (error) {
-        NextResponse.json({ message: 'Failed to delete IP Stock', error: error.message });
+        return NextResponse.json({ message: 'Failed to delete IP Stock', error: error.message });
     }
 }

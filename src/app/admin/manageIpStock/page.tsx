@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import {
     Dialog,
@@ -13,11 +14,17 @@ import {
     DialogFooter,
     DialogClose,
     DialogHeader,
-} from '@/components/ui/dialog'; // Adjusted path if necessary
-import { Select } from '@/components/ui/select';
+} from '@/components/ui/dialog';
 
 interface MemoryOptionDetails {
     price: number;
+}
+
+interface PromoCode {
+    code: string;
+    discount: number;
+    isActive: boolean;
+    createdAt?: string;
 }
 
 interface IPStock {
@@ -25,12 +32,15 @@ interface IPStock {
     name: string;
     memoryOptions: Record<string, MemoryOptionDetails>;
     available: boolean;
+    promoCodes: PromoCode[];
 }
 
 const ManageIpStock = () => {
     const [ipStocks, setIpStocks] = useState<IPStock[]>([]);
     const [currentStock, setCurrentStock] = useState<IPStock | null>(null);
     const [isDialogOpen, setIsDialogOpen] = useState(false);
+    const [newPromoCode, setNewPromoCode] = useState('');
+    const [newPromoDiscount, setNewPromoDiscount] = useState('');
 
     useEffect(() => {
         const fetchIPStocks = async () => {
@@ -100,6 +110,49 @@ const ManageIpStock = () => {
         }
     };
 
+    const addPromoCode = () => {
+        if (currentStock && newPromoCode && newPromoDiscount) {
+            const discount = parseFloat(newPromoDiscount);
+            if (discount >= 0 && discount <= 100) {
+                const updatedPromoCodes = [...(currentStock.promoCodes || []), {
+                    code: newPromoCode.toUpperCase(),
+                    discount,
+                    isActive: true
+                }];
+                setCurrentStock({
+                    ...currentStock,
+                    promoCodes: updatedPromoCodes
+                });
+                setNewPromoCode('');
+                setNewPromoDiscount('');
+            } else {
+                toast.error('Discount must be between 0 and 100');
+            }
+        }
+    };
+
+    const removePromoCode = (index: number) => {
+        if (currentStock) {
+            const updatedPromoCodes = currentStock.promoCodes.filter((_, i) => i !== index);
+            setCurrentStock({
+                ...currentStock,
+                promoCodes: updatedPromoCodes
+            });
+        }
+    };
+
+    const togglePromoCodeActive = (index: number) => {
+        if (currentStock) {
+            const updatedPromoCodes = currentStock.promoCodes.map((promo, i) => 
+                i === index ? { ...promo, isActive: !promo.isActive } : promo
+            );
+            setCurrentStock({
+                ...currentStock,
+                promoCodes: updatedPromoCodes
+            });
+        }
+    };
+
     return (
         <div className='w-full'>
             <div className='h-[63px] flex gap-2 items-center border-b p-4'>
@@ -114,6 +167,7 @@ const ManageIpStock = () => {
                             <TableHead>4 GB</TableHead>
                             <TableHead>8 GB</TableHead>
                             <TableHead>16 GB</TableHead>
+                            <TableHead>Promo Codes</TableHead>
                             <TableHead>Edit</TableHead>
                             <TableHead>Delete</TableHead>
                         </TableRow>
@@ -124,8 +178,24 @@ const ManageIpStock = () => {
                                 <TableCell>{stock.name}</TableCell>
                                 <TableCell>{stock.available ? 'Yes' : 'No'}</TableCell>
                                 {Object.entries(stock.memoryOptions).map(([memory, details]) => (
-                                    <TableCell key={memory}>{details.price}</TableCell>
+                                    <TableCell key={memory}>₹{details.price}</TableCell>
                                 ))}
+                                <TableCell>
+                                    {stock.promoCodes?.length > 0 ? (
+                                        <div className="text-xs">
+                                            {stock.promoCodes.slice(0, 2).map((promo, idx) => (
+                                                <div key={idx}>
+                                                    {promo.code} ({promo.discount}%)
+                                                </div>
+                                            ))}
+                                            {stock.promoCodes.length > 2 && (
+                                                <div>+{stock.promoCodes.length - 2} more</div>
+                                            )}
+                                        </div>
+                                    ) : (
+                                        'No promo codes'
+                                    )}
+                                </TableCell>
                                 <TableCell>
                                     <Button onClick={() => handleEdit(stock)}>Edit</Button>
                                 </TableCell>
@@ -138,31 +208,97 @@ const ManageIpStock = () => {
                 </Table>
                 {isDialogOpen && currentStock && (
                     <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-                        <DialogContent>
+                        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
                             <DialogHeader>
                                 <DialogTitle>Edit IP Stock</DialogTitle>
                             </DialogHeader>
                             <DialogDescription>
                                 Update the details of the IP stock.
                             </DialogDescription>
-                            <Input
-                                value={currentStock.name}
-                                onChange={(e) => setCurrentStock({ ...currentStock, name: e.target.value })}
-                            />
-                            <select className='flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1' value={currentStock.available.toString()} onChange={(e) => handleAvailableChange(e.target.value)}>
-                                <option value="true">Yes</option>
-                                <option value="false">No</option>
-                            </select>
-                            {Object.keys(currentStock.memoryOptions).map((size) => (
-                                <div key={size}>
-                                    <label>{size} Price:</label>
+                            <div className="space-y-4">
+                                <div>
+                                    <Label>Name:</Label>
                                     <Input
-                                        type="number"
-                                        value={currentStock.memoryOptions[size].price}
-                                        onChange={(e) => handlePriceChange(size as keyof MemoryOptionDetails, e.target.value)}
+                                        value={currentStock.name}
+                                        onChange={(e) => setCurrentStock({ ...currentStock, name: e.target.value })}
                                     />
                                 </div>
-                            ))}
+                                <div>
+                                    <Label>Available:</Label>
+                                    <select 
+                                        className='flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1' 
+                                        value={currentStock.available.toString()} 
+                                        onChange={(e) => handleAvailableChange(e.target.value)}
+                                    >
+                                        <option value="true">Yes</option>
+                                        <option value="false">No</option>
+                                    </select>
+                                </div>
+                                {Object.keys(currentStock.memoryOptions).map((size) => (
+                                    <div key={size}>
+                                        <Label>{size} Price:</Label>
+                                        <Input
+                                            type="number"
+                                            value={currentStock.memoryOptions[size].price}
+                                            onChange={(e) => handlePriceChange(size as keyof MemoryOptionDetails, e.target.value)}
+                                        />
+                                    </div>
+                                ))}
+
+                                {/* Promo Codes Management */}
+                                <div>
+                                    <Label className="text-base font-semibold">Promo Codes:</Label>
+                                    <div className="flex gap-2 mb-2">
+                                        <Input
+                                            type="text"
+                                            placeholder="Promo Code"
+                                            value={newPromoCode}
+                                            onChange={(e) => setNewPromoCode(e.target.value)}
+                                            className="flex-1"
+                                        />
+                                        <Input
+                                            type="number"
+                                            placeholder="Discount %"
+                                            min="0"
+                                            max="100"
+                                            value={newPromoDiscount}
+                                            onChange={(e) => setNewPromoDiscount(e.target.value)}
+                                            className="w-24"
+                                        />
+                                        <Button type="button" onClick={addPromoCode}>Add</Button>
+                                    </div>
+                                    
+                                    {currentStock.promoCodes && currentStock.promoCodes.length > 0 && (
+                                        <div className="border rounded p-2 max-h-32 overflow-y-auto">
+                                            {currentStock.promoCodes.map((promo, index) => (
+                                                <div key={index} className="flex justify-between items-center mb-1 p-2  rounded">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className={promo.isActive ? '' : 'line-through text-gray-500'}>
+                                                            {promo.code} - {promo.discount}% off
+                                                        </span>
+                                                        <Button 
+                                                            type="button" 
+                                                            variant="outline" 
+                                                            size="sm"
+                                                            onClick={() => togglePromoCodeActive(index)}
+                                                        >
+                                                            {promo.isActive ? 'Deactivate' : 'Activate'}
+                                                        </Button>
+                                                    </div>
+                                                    <Button 
+                                                        type="button" 
+                                                        variant="destructive" 
+                                                        size="sm"
+                                                        onClick={() => removePromoCode(index)}
+                                                    >
+                                                        Remove
+                                                    </Button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
                             <DialogFooter>
                                 <Button onClick={handleUpdate}>Update</Button>
                                 <DialogClose asChild>

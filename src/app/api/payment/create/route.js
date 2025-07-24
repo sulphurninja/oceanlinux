@@ -25,9 +25,17 @@ export async function POST(request) {
       return NextResponse.json({ message: 'User not found' }, { status: 404 });
     }
 
-    // 3. Read request data
+    // 3. Read request data with promo code info
     const reqBody = await request.json();
-    const { productName, memory, price } = reqBody;
+    const { 
+      productName, 
+      memory, 
+      price, 
+      originalPrice, 
+      promoCode, 
+      promoDiscount, 
+      ipStockId 
+    } = reqBody;
 
     // 4. Basic validation
     if (!productName || !memory || !price) {
@@ -47,7 +55,7 @@ export async function POST(request) {
     const paymentData = {
       key: UPI_GATEWAY_API_KEY,
       client_txn_id: clientTxnId,
-      amount: String(parseInt(price, 10)),
+      amount: String(Math.round(price)), // Ensure it's rounded to avoid decimal issues
       p_info: simplifiedProductName,
       customer_name: user.name,
       customer_email: user.email,
@@ -57,8 +65,6 @@ export async function POST(request) {
       udf2: memory,
       udf3: "server-plan"
     };
-
-
 
     // Log the payment data for debugging
     console.log("Real-values payment request:", paymentData);
@@ -87,7 +93,7 @@ export async function POST(request) {
       );
     }
 
-    // 8. Create a pending order in our database
+    // 8. Create a pending order in our database with promo code info
     // Calculate expiry date (30 days from now)
     const expiryDate = new Date();
     expiryDate.setDate(expiryDate.getDate() + 30);
@@ -96,13 +102,17 @@ export async function POST(request) {
       user: userId,
       productName,
       memory,
-      price: parseInt(price, 10),
+      price: Math.round(price),
+      originalPrice: originalPrice || price,
+      promoCode: promoCode || null,
+      promoDiscount: promoDiscount || 0,
+      ipStockId: ipStockId || null,
       clientTxnId,
       gatewayOrderId: paymentResponse.data.order_id.toString(),
       status: 'pending',
       customerName: user.name,
       customerEmail: user.email,
-      expiryDate: expiryDate, // Add the expiry date
+      expiryDate: expiryDate,
     });
 
     // 9. Return success with payment URL for the frontend
@@ -110,7 +120,8 @@ export async function POST(request) {
       message: 'Payment initiated',
       orderId: newOrder._id,
       paymentUrl: paymentResponse.data.payment_url,
-      upiIntents: paymentResponse.data.upi_intent || null
+      upiIntents: paymentResponse.data.upi_intent || null,
+      clientTxnId: clientTxnId
     });
 
   } catch (error) {

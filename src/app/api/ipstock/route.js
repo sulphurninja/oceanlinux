@@ -1,22 +1,21 @@
 // pages/api/ipstock.js
 import connectDB from '@/lib/db';
-import IPStock from '@/models/ipStockModel';  // Ensure correct import path
+import IPStock from '@/models/ipStockModel';
 
 export async function POST(request) {
     await connectDB();
 
-    console.log('Received body:', request.body); // Log the raw body to see what is received
+    console.log('Received body:', request.body);
 
     try {
         const reqBody = await request.json();
-
-        // Next.js should automatically parse JSON body, thus req.body should be directly usable.
-        const { name, available, memoryOptions } = reqBody;
+        const { name, available, memoryOptions, promoCodes } = reqBody;
 
         const newIPStock = new IPStock({
             name,
             available,
-            memoryOptions
+            memoryOptions,
+            promoCodes: promoCodes || []
         });
 
         await newIPStock.save();
@@ -26,7 +25,7 @@ export async function POST(request) {
             headers: { 'Content-Type': 'application/json' }
         });
     } catch (error) {
-        console.error('Error parsing JSON or saving to DB:', error); // More detailed error logging
+        console.error('Error parsing JSON or saving to DB:', error);
         return new Response(JSON.stringify({ error: 'Failed to create IP Stock', details: error.message }), {
             status: 400,
             headers: { 'Content-Type': 'application/json' }
@@ -34,6 +33,7 @@ export async function POST(request) {
     }
 }
 
+// ... existing GET method remains the same ...
 export async function GET(request) {
     await connectDB();
 

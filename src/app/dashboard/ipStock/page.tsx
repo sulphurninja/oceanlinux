@@ -28,7 +28,9 @@ import {
   ChevronDown,
   ChevronUp,
   Info,
-  CreditCard
+  CreditCard,
+  Tag,
+  Percent
 } from "lucide-react";
 import { z } from "zod";
 import { cn } from "@/lib/utils";
@@ -46,7 +48,6 @@ const transactionSchema = z.object({
     )
     .refine(
       (val) => {
-        // Additional check for common patterns
         const commonPatterns = [
           /^\d{12,}$/, // Pure numeric (12+ digits)
           /^[A-Za-z0-9]{8,}-[A-Za-z0-9]{4,}$/, // Format with hyphen
@@ -61,9 +62,15 @@ const transactionSchema = z.object({
     )
 });
 
-
 interface MemoryOptionDetails {
   price: number | null;
+}
+
+interface PromoCode {
+  code: string;
+  discount: number;
+  isActive: boolean;
+  createdAt?: string;
 }
 
 interface IPStock {
@@ -72,6 +79,7 @@ interface IPStock {
   description?: string;
   available: boolean;
   memoryOptions: Record<string, MemoryOptionDetails>;
+  promoCodes?: PromoCode[];
 }
 
 export default function IPStockPage() {
@@ -85,10 +93,18 @@ export default function IPStockPage() {
     name: string;
     memory: string;
     price: number;
+    ipStockId: string;
   } | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  // Add these state variables inside your component
   const [paymentInitiating, setPaymentInitiating] = useState(false);
+  
+  // Promo code states
+  const [promoCode, setPromoCode] = useState("");
+  const [promoDiscount, setPromoDiscount] = useState(0);
+  const [promoMessage, setPromoMessage] = useState("");
+  const [promoValidating, setPromoValidating] = useState(false);
+  const [promoApplied, setPromoApplied] = useState(false);
+  
   const router = useRouter();
 
   // Fetch available IP stocks on mount
@@ -114,57 +130,116 @@ export default function IPStockPage() {
     setExpandedItem(expandedItem === id ? null : id);
   };
 
-  // Replace the handleBuyNow function with this one
-  const handleBuyNow = (productName: string, memory: string, price: number) => {
-    setSelectedProduct({ name: productName, memory, price });
+  // Handle buy now with ipStockId
+  const handleBuyNow = (productName: string, memory: string, price: number, ipStockId: string) => {
+    setSelectedProduct({ name: productName, memory, price, ipStockId });
     setShowDialog(true);
+    // Reset promo code states when opening dialog
+    setPromoCode("");
+    setPromoDiscount(0);
+    setPromoMessage("");
+    setPromoApplied(false);
   };
 
-// Replace the handleProceedToPayment function with this enhanced version
-const handleProceedToPayment = async () => {
-  if (!selectedProduct) return;
-  
-  setPaymentInitiating(true);
-  try {
-    const res = await fetch("/api/payment/create", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        productName: selectedProduct.name,
-        memory: selectedProduct.memory,
-        price: selectedProduct.price
-      })
-    });
+  // Validate promo code
+  const validatePromoCode = async () => {
+    if (!promoCode.trim() || !selectedProduct) return;
     
-    const data = await res.json();
+    setPromoValidating(true);
+    try {
+      const response = await fetch("/api/validate-promo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          promoCode: promoCode.trim(),
+          ipStockId: selectedProduct.ipStockId
+        })
+      });
+      
+      const data = await response.json();
+      
+      if (data.valid) {
+        setPromoDiscount(data.discount);
+        setPromoMessage(data.message);
+        setPromoApplied(true);
+        toast.success(`Promo code applied! ${data.discount}% discount`);
+      } else {
+        setPromoDiscount(0);
+        setPromoMessage(data.message);
+        setPromoApplied(false);
+        toast.error(data.message);
+      }
+    } catch (error) {
+      toast.error("Failed to validate promo code");
+      setPromoDiscount(0);
+      setPromoMessage("Error validating promo code");
+      setPromoApplied(false);
+    } finally {
+      setPromoValidating(false);
+    }
+  };
+
+  // Remove promo code
+  const removePromoCode = () => {
+    setPromoCode("");
+    setPromoDiscount(0);
+    setPromoMessage("");
+    setPromoApplied(false);
+  };
+
+  // Calculate discounted price
+  const getDiscountedPrice = () => {
+    if (!selectedProduct || !promoApplied) return selectedProduct?.price || 0;
+    const discount = (selectedProduct.price * promoDiscount) / 100;
+    return selectedProduct.price - discount;
+  };
+
+  // Handle proceed to payment with promo code data
+  const handleProceedToPayment = async () => {
+    if (!selectedProduct) return;
     
-    if (!res.ok) {
-      toast.error(data.message || "Failed to initiate payment");
+    setPaymentInitiating(true);
+    try {
+      const finalPrice = getDiscountedPrice();
+      
+      const res = await fetch("/api/payment/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          productName: selectedProduct.name,
+          memory: selectedProduct.memory,
+          price: finalPrice,
+          originalPrice: selectedProduct.price,
+          promoCode: promoApplied ? promoCode : null,
+          promoDiscount: promoApplied ? promoDiscount : 0,
+          ipStockId: selectedProduct.ipStockId
+        })
+      });
+      
+      const data = await res.json();
+      
+      if (!res.ok) {
+        toast.error(data.message || "Failed to initiate payment");
+        setPaymentInitiating(false);
+        return;
+      }
+      
+      if (data.clientTxnId) {
+        localStorage.setItem('lastClientTxnId', data.clientTxnId);
+        console.log("Stored clientTxnId in localStorage:", data.clientTxnId);
+      }
+      
+      toast.success("Redirecting to payment gateway...");
+      setShowDialog(false);
+      window.location.href = data.paymentUrl;
+      
+    } catch (error) {
+      console.error("Error initiating payment:", error);
+      toast.error("Something went wrong. Please try again");
       setPaymentInitiating(false);
-      return;
     }
-    
-    // Store the client transaction ID in localStorage for later verification
-    if (data.clientTxnId) {
-      localStorage.setItem('lastClientTxnId', data.clientTxnId);
-      console.log("Stored clientTxnId in localStorage:", data.clientTxnId);
-    }
-    
-    // Show a toast notification
-    toast.success("Redirecting to payment gateway...");
-    
-    // Close the dialog
-    setShowDialog(false);
-    
-    // Redirect to the payment URL
-    window.location.href = data.paymentUrl;
-    
-  } catch (error) {
-    console.error("Error initiating payment:", error);
-    toast.error("Something went wrong. Please try again");
-    setPaymentInitiating(false);
-  }
-};
+  };
+
   // Get a short version of the description
   const getShortDescription = (text: string) => {
     if (!text) return "";
@@ -206,6 +281,7 @@ const handleProceedToPayment = async () => {
                   const isExpanded = expandedItem === stock._id;
                   const memoryKeys = Object.keys(stock.memoryOptions || {});
                   const shortDesc = getShortDescription(stock.description || "");
+                  const hasPromoCodes = stock.promoCodes && stock.promoCodes.length > 0;
 
                   return (
                     <div key={stock._id} className="border-b border-gray-700/50 last:border-b-0">
@@ -223,7 +299,15 @@ const handleProceedToPayment = async () => {
                               {isExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
                             </div>
                             <div>
-                              <h3 className="font-medium text-white">{stock.name}</h3>
+                              <div className="flex items-center gap-2">
+                                <h3 className="font-medium text-white">{stock.name}</h3>
+                                {hasPromoCodes && (
+                                  <Badge variant="secondary" className="text-xs bg-green-600/20 text-green-400 border-green-500">
+                                    <Tag className="h-3 w-3 mr-1" />
+                                    Promo Available
+                                  </Badge>
+                                )}
+                              </div>
                               <p className="text-sm text-gray-400 mt-0.5 hidden sm:block">
                                 {shortDesc}
                               </p>
@@ -292,7 +376,7 @@ const handleProceedToPayment = async () => {
                                         className="bg-blue-600 hover:bg-blue-700 h-8 px-3"
                                         onClick={(e) => {
                                           e.stopPropagation();
-                                          handleBuyNow(stock.name, memKey, priceObj.price!);
+                                          handleBuyNow(stock.name, memKey, priceObj.price!, stock._id);
                                         }}
                                         disabled={!stock.available}
                                       >
@@ -316,17 +400,60 @@ const handleProceedToPayment = async () => {
         )}
       </div>
 
-
       <Dialog open={showDialog} onOpenChange={setShowDialog}>
         <DialogContent className="bg-gray-800 h-fit max-h-screen m-auto overflow-y-scroll border border-gray-700 text-white sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="text-lg font-bold">Complete Your Purchase</DialogTitle>
             <DialogDescription className="text-gray-300">
-              Proceed to UPI payment gateway to complete your order
+              Apply promo codes and proceed to UPI payment gateway
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-2">
+            {/* Promo Code Section */}
+            <div className="bg-gray-700/40 p-3 rounded-lg">
+              <Label className="text-sm font-medium mb-2 block">Promo Code (Optional)</Label>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="Enter promo code"
+                  value={promoCode}
+                  onChange={(e) => setPromoCode(e.target.value.toUpperCase())}
+                  className="bg-gray-700 border-gray-600 text-white"
+                  disabled={promoApplied}
+                />
+                {!promoApplied ? (
+                  <Button
+                    onClick={validatePromoCode}
+                    disabled={!promoCode.trim() || promoValidating}
+                    size="sm"
+                    className="bg-green-600 hover:bg-green-700"
+                  >
+                    {promoValidating ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      "Apply"
+                    )}
+                  </Button>
+                ) : (
+                  <Button
+                    onClick={removePromoCode}
+                    size="sm"
+                    variant="destructive"
+                  >
+                    Remove
+                  </Button>
+                )}
+              </div>
+              {promoMessage && (
+                <p className={cn(
+                  "text-xs mt-2",
+                  promoApplied ? "text-green-400" : "text-red-400"
+                )}>
+                  {promoMessage}
+                </p>
+              )}
+            </div>
+
             {/* Order summary */}
             {selectedProduct && (
               <div className="bg-gray-700/40 p-3 rounded-lg">
@@ -339,10 +466,27 @@ const handleProceedToPayment = async () => {
                     <span className="text-gray-400">Memory:</span>
                     <span>{selectedProduct.memory}</span>
                   </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">Original Price:</span>
+                    <span className={promoApplied ? "line-through text-gray-500" : ""}>
+                      ₹{selectedProduct.price}
+                    </span>
+                  </div>
+                  {promoApplied && (
+                    <>
+                      <div className="flex justify-between text-green-400">
+                        <span className="flex items-center gap-1">
+                          <Percent className="h-3 w-3" />
+                          Discount ({promoDiscount}%):
+                        </span>
+                        <span>-₹{((selectedProduct.price * promoDiscount) / 100).toFixed(2)}</span>
+                      </div>
+                    </>
+                  )}
                   <Separator className="my-2 bg-gray-600" />
                   <div className="flex justify-between font-medium">
                     <span>Total:</span>
-                    <span className="text-lg text-blue-400">₹{selectedProduct.price}</span>
+                    <span className="text-lg text-blue-400">₹{getDiscountedPrice().toFixed(2)}</span>
                   </div>
                 </div>
               </div>
@@ -380,7 +524,7 @@ const handleProceedToPayment = async () => {
               ) : (
                 <span className="flex items-center gap-2">
                   <CreditCard className="h-4 w-4" />
-                  Proceed to Payment
+                  Pay ₹{getDiscountedPrice().toFixed(2)}
                 </span>
               )}
             </Button>
