@@ -54,17 +54,24 @@ export async function POST(request) {
 // Get orders that can be auto-provisioned
 export async function GET(request) {
   await connectDB();
-
   try {
     const { searchParams } = new URL(request.url);
-    const status = searchParams.get('status') || 'paid';
+    const status = searchParams.get('status') || 'confirmed'; // Changed from 'paid' to 'confirmed'
 
-    // Find orders that are paid but not auto-provisioned or failed auto-provisioning
+    // Find orders that are confirmed but not auto-provisioned or failed auto-provisioning
     const orders = await Order.find({
-      status,
       $or: [
-        { autoProvisioned: { $ne: true } },
-        { provisioningStatus: 'failed' }
+        { status: 'confirmed' },
+        { status: 'paid' },
+        { status: 'active' }
+      ],
+      $and: [
+        {
+          $or: [
+            { autoProvisioned: { $ne: true } },
+            { provisioningStatus: 'failed' }
+          ]
+        }
       ]
     }).populate('user', 'name email').sort({ createdAt: -1 });
 

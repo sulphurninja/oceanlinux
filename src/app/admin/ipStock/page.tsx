@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
     Card,
     CardHeader,
@@ -37,7 +37,9 @@ type PromoCode = {
     isActive: boolean;
 };
 
-const AddIPStockPage = () => {
+const IPStockFormWithParams = () => {
+    const searchParams = useSearchParams();
+    const prefilledProductId = searchParams.get('hostycare_product_id');
     const [name, setName] = useState('');
     const [description, setDescription] = useState('');
     const [available, setAvailable] = useState('true');
@@ -64,6 +66,19 @@ const AddIPStockPage = () => {
     const [newTag, setNewTag] = useState('');
 
     const router = useRouter();
+
+    useEffect(() => {
+        if (prefilledProductId) {
+            // Pre-fill all memory options with the same product ID
+            setHostycareProductIds({
+                '4GB': prefilledProductId,
+                '8GB': prefilledProductId,
+                '16GB': prefilledProductId
+            });
+
+            toast.info(`Pre-filled with Hostycare Product ID: ${prefilledProductId}`);
+        }
+    }, [prefilledProductId]);
 
     const handlePriceChange = (size: keyof MemoryOptions, value: string) => {
         setPrices(prev => ({
@@ -274,7 +289,7 @@ const AddIPStockPage = () => {
                                                     <Input
                                                         type="number"
                                                         placeholder={`Price for ${size}`}
-                                                      value={prices[size as keyof MemoryOptions]}
+                                                        value={prices[size as keyof MemoryOptions]}
                                                         onChange={(e) => handlePriceChange(size as keyof MemoryOptions, e.target.value)}
                                                         className="text-sm"
                                                     />
@@ -359,6 +374,31 @@ const AddIPStockPage = () => {
                 </Card>
             </div>
         </div>
+    );
+};
+
+// Loading component for Suspense fallback
+const IPStockFormLoading = () => (
+    <div className='w-full'>
+        <div className='h-[63px] flex gap-2 items-center border-b p-4'>
+            <h1 className='text-xl'>Add IP Stock</h1>
+        </div>
+        <div className='mx-12 mt-6'>
+            <div className="animate-pulse">
+                <div className="h-8 bg-gray-200 rounded mb-4"></div>
+                <div className="h-32 bg-gray-200 rounded mb-4"></div>
+                <div className="h-8 bg-gray-200 rounded mb-4"></div>
+            </div>
+        </div>
+    </div>
+);
+
+// Main component with Suspense wrapper
+const AddIPStockPage = () => {
+    return (
+        <Suspense fallback={<IPStockFormLoading />}>
+            <IPStockFormWithParams />
+        </Suspense>
     );
 };
 
