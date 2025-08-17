@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
-import { RefreshCw, ExternalLink, Copy, Search, Plus, Eye } from 'lucide-react';
+import { RefreshCw, ExternalLink, Copy, Search, Plus, Eye, AlertCircle } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 
 interface HostycareProduct {
@@ -40,6 +40,7 @@ const HostycareProductsPage = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedProduct, setSelectedProduct] = useState<HostycareProduct | null>(null);
   const [showDetailsDialog, setShowDetailsDialog] = useState(false);
+  const [debugInfo, setDebugInfo] = useState<any>(null);
 
   useEffect(() => {
     fetchHostycareData();
@@ -51,8 +52,8 @@ const HostycareProductsPage = () => {
       setFilteredProducts(products);
     } else {
       const filtered = products.filter(product =>
-        product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        product.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        product.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        product.id?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         product.description?.toLowerCase().includes(searchTerm.toLowerCase())
       );
       setFilteredProducts(filtered);
@@ -62,24 +63,36 @@ const HostycareProductsPage = () => {
   const fetchHostycareData = async () => {
     setLoading(true);
     try {
-      const response = await fetch('/api/admin/hostycare/test');
+      console.log('Fetching Hostycare products...');
+      const response = await fetch('/api/admin/hostycare/products');
       const data = await response.json();
 
+      console.log('API Response:', data);
+
       if (data.success) {
-        const productsData = data.products?.data || data.products || [];
-        const creditData = data.credit?.data || data.credit || null;
+        const productsData = data.products || [];
+        const creditData = data.credit || null;
+
+        console.log('Products data:', productsData);
+        console.log('Products count:', productsData.length);
 
         setProducts(productsData);
         setFilteredProducts(productsData);
         setCredit(creditData);
+        setDebugInfo(data.debug);
 
-        toast.success(`Loaded ${productsData.length} Hostycare products`);
+        if (productsData.length > 0) {
+          toast.success(`✅ Loaded ${productsData.length} Hostycare products`);
+        } else {
+          toast.warning('⚠️ No products found - check API response structure');
+        }
       } else {
-        toast.error('Failed to load Hostycare products: ' + data.error);
+        toast.error('❌ Failed to load Hostycare products: ' + data.error);
         console.error('Hostycare API Error:', data);
+        setDebugInfo(data);
       }
     } catch (error) {
-      toast.error('Error fetching Hostycare products');
+      toast.error('❌ Error fetching Hostycare products');
       console.error('Fetch Error:', error);
     } finally {
       setLoading(false);
@@ -88,13 +101,13 @@ const HostycareProductsPage = () => {
 
   const copyProductId = (productId: string) => {
     navigator.clipboard.writeText(productId);
-    toast.success(`Product ID "${productId}" copied to clipboard`);
+    toast.success(`✅ Product ID "${productId}" copied to clipboard`);
   };
 
   const copyProductInfo = (product: HostycareProduct) => {
-    const info = `Product ID: ${product.id}\nName: ${product.name}\nMonthly Price: $${product.pricing?.monthly || 'N/A'}`;
+    const info = `Product ID: ${product.id}\nName: ${product.name}\nMonthly Price: ${product.pricing?.monthly || 'N/A'}`;
     navigator.clipboard.writeText(info);
-    toast.success('Product information copied to clipboard');
+    toast.success('✅ Product information copied to clipboard');
   };
 
   const openCreateIPStock = (productId: string) => {
@@ -111,10 +124,15 @@ const HostycareProductsPage = () => {
     return price ? `${currency}${price}` : 'N/A';
   };
 
+  // Fix the categories calculation
+  const uniqueCategories = Array.from(
+    new Set(products.map(p => p.category).filter(Boolean))
+  );
+
   const stats = {
     total: products.length,
     withPricing: products.filter(p => p.pricing?.monthly).length,
-    categories: [...new Set(products.map(p => p.category).filter(Boolean))].length
+    categories: uniqueCategories.length
   };
 
   return (
@@ -122,15 +140,35 @@ const HostycareProductsPage = () => {
       <div className="h-[63px] flex gap-2 items-center border-b p-4">
         <h1 className="text-xl flex items-center gap-2">
           <ExternalLink className="h-5 w-5" />
-          Hostycare Products Browser
+          Hostycare Products & IDs
         </h1>
         <Button variant="outline" onClick={fetchHostycareData} disabled={loading}>
           <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-          Refresh
+          Refresh Products
         </Button>
       </div>
 
       <div className="p-6">
+        {/* Debug Info (show if no products found) */}
+        {!loading && products.length === 0 && debugInfo && (
+          <Card className="mb-6 border-orange-200 bg-orange-50">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-orange-700">
+                <AlertCircle className="h-5 w-5" />
+                Debug Information
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <pre className="text-xs bg-white p-3 rounded border overflow-auto max-h-40">
+                {JSON.stringify(debugInfo, null, 2)}
+              </pre>
+              <p className="text-sm text-orange-700 mt-2">
+                If you see data above but no products in the table, the API response structure might be different than expected.
+              </p>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Account Info */}
         {credit && (
           <Card className="mb-6">
@@ -204,29 +242,47 @@ const HostycareProductsPage = () => {
         {/* Products Table */}
         <Card>
           <CardHeader>
-            <CardTitle>Available Products</CardTitle>
+            <CardTitle>Available Products with IDs</CardTitle>
             <p className="text-sm text-gray-600">
-              Click on Product IDs to copy them for use in IP Stock creation
+              📋 Click on Product IDs to copy them for IP Stock creation
             </p>
           </CardHeader>
           <CardContent className="p-0">
             {loading ? (
               <div className="flex justify-center py-10">
-                <RefreshCw className="animate-spin h-8 w-8 text-muted-foreground" />
+                <div className="text-center">
+                  <RefreshCw className="animate-spin h-8 w-8 text-muted-foreground mx-auto mb-2" />
+                  <p className="text-sm text-gray-600">Loading products from Hostycare...</p>
+                </div>
               </div>
             ) : filteredProducts.length === 0 ? (
               <div className="text-center py-10 text-muted-foreground">
                 <ExternalLink className="h-12 w-12 mx-auto mb-3 opacity-20" />
-                <p>
+                <p className="text-lg font-medium mb-2">
                   {searchTerm ? `No products found matching "${searchTerm}"` : 'No products available'}
                 </p>
-                {searchTerm && (
+                <p className="text-sm">
+                  {searchTerm
+                    ? 'Try a different search term or clear the search filter'
+                    : 'Check your Hostycare API connection or account status'
+                  }
+                </p>
+                {searchTerm ? (
                   <Button
                     variant="outline"
                     onClick={() => setSearchTerm('')}
-                    className="mt-2"
+                    className="mt-4"
                   >
-                    Clear search
+                    Clear Search
+                  </Button>
+                ) : (
+                  <Button
+                    variant="outline"
+                    onClick={fetchHostycareData}
+                    className="mt-4"
+                  >
+                    <RefreshCw className="w-4 h-4 mr-2" />
+                    Retry Loading
                   </Button>
                 )}
               </div>
@@ -235,14 +291,14 @@ const HostycareProductsPage = () => {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-24">Product ID</TableHead>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Description</TableHead>
-                      <TableHead>Monthly</TableHead>
-                      <TableHead>Setup Fee</TableHead>
-                      <TableHead>Category</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="w-32">Actions</TableHead>
+                      <TableHead className="w-24">📋 Product ID</TableHead>
+                      <TableHead>🏷️ Name</TableHead>
+                      <TableHead>📄 Description</TableHead>
+                      <TableHead>💰 Monthly</TableHead>
+                      <TableHead>🔧 Setup Fee</TableHead>
+                      <TableHead>📂 Category</TableHead>
+                      <TableHead>✅ Status</TableHead>
+                      <TableHead className="w-32">⚡ Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -254,7 +310,7 @@ const HostycareProductsPage = () => {
                               variant="outline"
                               size="sm"
                               onClick={() => copyProductId(product.id)}
-                              className="font-mono text-xs px-2 py-1 h-auto"
+                              className="font-mono text-xs px-2 py-1 h-auto bg-blue-50 hover:bg-blue-100 border-blue-200"
                               title="Click to copy Product ID"
                             >
                               {product.id}
@@ -273,7 +329,7 @@ const HostycareProductsPage = () => {
                           </div>
                         </TableCell>
                         <TableCell>
-                          <span className="font-semibold">
+                          <span className="font-semibold text-green-600">
                             {formatPrice(product.pricing?.monthly, credit?.currency || '$')}
                           </span>
                         </TableCell>
@@ -331,7 +387,7 @@ const HostycareProductsPage = () => {
         </Card>
       </div>
 
-      {/* Product Details Dialog */}
+      {/* Rest of your existing dialog code remains the same */}
       {selectedProduct && (
         <Dialog open={showDetailsDialog} onOpenChange={setShowDetailsDialog}>
           <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
@@ -343,7 +399,7 @@ const HostycareProductsPage = () => {
             </DialogHeader>
 
             <div className="space-y-6">
-              {/* Basic Info */}
+              {/* Your existing dialog content */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="text-sm font-medium text-gray-600">Product ID</label>
@@ -422,28 +478,6 @@ const HostycareProductsPage = () => {
                       </div>
                     )}
                   </div>
-                </div>
-              )}
-
-              {/* Configuration Options */}
-              {selectedProduct.configOptions && (
-                <div>
-                  <label className="text-sm font-medium text-gray-600">Configuration Options</label>
-                  <pre className="mt-2 bg-gray-100 p-3 rounded-lg text-xs overflow-x-auto">
-                    {JSON.stringify(selectedProduct.configOptions, null, 2)}
-                  </pre>
-                </div>
-              )}
-
-              {/* Features */}
-              {selectedProduct.features && selectedProduct.features.length > 0 && (
-                <div>
-                  <label className="text-sm font-medium text-gray-600">Features</label>
-                  <ul className="mt-2 list-disc list-inside space-y-1 text-sm">
-                    {selectedProduct.features.map((feature, index) => (
-                      <li key={index}>{feature}</li>
-                    ))}
-                  </ul>
                 </div>
               )}
 
