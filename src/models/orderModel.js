@@ -5,20 +5,43 @@ const orderSchema = new mongoose.Schema({
     productName: { type: String, required: true },
     memory: { type: String, required: true },
     price: { type: Number, required: true },
+    originalPrice: { type: Number }, // For promo code tracking
+    promoCode: { type: String }, // Applied promo code
+    promoDiscount: { type: Number, default: 0 }, // Discount amount
+    ipStockId: { type: String }, // Reference to IP Stock
     transactionId: { type: String, default: '' },
     status: { type: String, default: 'pending' },
-    ipAddress: { type: String, default: '' }, // Optional, to be filled by admin
-    username: { type: String, default: '' },  // Optional, to be filled by admin
-    password: { type: String, default: '' },  // Optional, to be filled by admin
+    ipAddress: { type: String, default: '' },
+    username: { type: String, default: '' },
+    password: { type: String, default: '' },
     os: {
         type: String,
         enum: ['CentOS 7', 'Ubuntu 22', 'Windows 2022 64'],
-        default: 'Ubuntu 22' // Default OS
+        default: 'Ubuntu 22'
     },
-    // Add these fields to your Order model schema:
     clientTxnId: { type: String, required: true, unique: true },
     gatewayOrderId: { type: String },
-    expiryDate: { type: Date }, // New field for storing expiration date
-}, { timestamps: true }); // ✅ Automatically adds `createdAt` & `updatedAt`
+    expiryDate: { type: Date },
+
+    // Customer info from payment
+    customerName: { type: String },
+    customerEmail: { type: String },
+
+    // Webhook data
+    webhookAmount: { type: String },
+    webhookCustomerName: { type: String },
+    webhookCustomerEmail: { type: String },
+
+    // Hostycare integration fields
+    hostycareServiceId: { type: String },
+    hostycareProductId: { type: String },
+    provisioningStatus: {
+        type: String,
+        enum: ['pending', 'provisioning', 'active', 'failed', 'suspended', 'terminated'],
+        default: 'pending'
+    },
+    provisioningError: { type: String, default: '' },
+    autoProvisioned: { type: Boolean, default: false },
+}, { timestamps: true });
 
 export default mongoose.models.Order || mongoose.model('Order', orderSchema);

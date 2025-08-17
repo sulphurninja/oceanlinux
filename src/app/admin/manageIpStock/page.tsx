@@ -17,13 +17,14 @@ import {
 } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { X } from 'lucide-react';
+import { X, ExternalLink } from 'lucide-react';
 
 interface MemoryOptionDetails {
     price: number;
+    hostycareProductId?: string;
+    hostycareProductName?: string;
 }
 
-// Update the PromoCode interface
 interface PromoCode {
     code: string;
     discount: number;
@@ -31,18 +32,18 @@ interface PromoCode {
     isActive: boolean;
     createdAt?: string;
 }
-// Update interface
+
 interface IPStock {
     _id: string;
     name: string;
+    description?: string;
     memoryOptions: Record<string, MemoryOptionDetails>;
     available: boolean;
     serverType: string;
-    tags: string[]; // Add tags field
+    tags: string[];
     promoCodes: PromoCode[];
+    defaultConfigurations?: Record<string, any>;
 }
-
-
 
 const ManageIpStock = () => {
     const [ipStocks, setIpStocks] = useState<IPStock[]>([]);
@@ -50,10 +51,9 @@ const ManageIpStock = () => {
     const [isDialogOpen, setIsDialogOpen] = useState(false);
     const [newPromoCode, setNewPromoCode] = useState('');
     const [newPromoDiscount, setNewPromoDiscount] = useState('');
-    // Add state for discount type in new promo codes
     const [newPromoDiscountType, setNewPromoDiscountType] = useState<'percentage' | 'fixed'>('fixed');
-    // In the component, add tag management state
     const [newTag, setNewTag] = useState('');
+
     useEffect(() => {
         const fetchIPStocks = async () => {
             const response = await fetch('/api/ipstock');
@@ -62,7 +62,7 @@ const ManageIpStock = () => {
         };
         fetchIPStocks();
     }, []);
-    // Add tag management functions
+
     const addTag = () => {
         if (currentStock && newTag.trim() && !currentStock.tags.includes(newTag.trim().toLowerCase())) {
             setCurrentStock({
@@ -81,6 +81,7 @@ const ManageIpStock = () => {
             });
         }
     };
+
     const handleEdit = (stock: IPStock) => {
         setCurrentStock({ ...stock });
         setIsDialogOpen(true);
@@ -121,15 +122,35 @@ const ManageIpStock = () => {
         }
     };
 
-    const handlePriceChange = (size: keyof MemoryOptionDetails, value: string) => {
+    const handlePriceChange = (size: string, value: string) => {
         if (currentStock) {
-            const updatedPrices = {
+            const updatedMemoryOptions = {
                 ...currentStock.memoryOptions,
-                [size]: { ...currentStock.memoryOptions[size], price: parseFloat(value) }
+                [size]: {
+                    ...currentStock.memoryOptions[size],
+                    price: parseFloat(value) || 0
+                }
             };
             setCurrentStock({
                 ...currentStock,
-                memoryOptions: updatedPrices
+                memoryOptions: updatedMemoryOptions
+            });
+        }
+    };
+
+    const handleHostycareProductIdChange = (size: string, value: string) => {
+        if (currentStock) {
+            const updatedMemoryOptions = {
+                ...currentStock.memoryOptions,
+                [size]: {
+                    ...currentStock.memoryOptions[size],
+                    hostycareProductId: value,
+                    hostycareProductName: value ? `${currentStock.name} ${size}` : undefined
+                }
+            };
+            setCurrentStock({
+                ...currentStock,
+                memoryOptions: updatedMemoryOptions
             });
         }
     };
@@ -140,7 +161,6 @@ const ManageIpStock = () => {
         }
     };
 
-    // Update the addPromoCode function
     const addPromoCode = () => {
         if (currentStock && newPromoCode && newPromoDiscount) {
             const discount = parseFloat(newPromoDiscount);
@@ -168,7 +188,6 @@ const ManageIpStock = () => {
         }
     };
 
-
     const removePromoCode = (index: number) => {
         if (currentStock) {
             const updatedPromoCodes = currentStock.promoCodes.filter((_, i) => i !== index);
@@ -191,6 +210,19 @@ const ManageIpStock = () => {
         }
     };
 
+    const getHostycareStatus = (memoryOptions: Record<string, MemoryOptionDetails>) => {
+        const totalConfigs = Object.keys(memoryOptions).length;
+        const configuredCount = Object.values(memoryOptions).filter(option => option.hostycareProductId).length;
+
+        if (configuredCount === 0) {
+            return <Badge variant="destructive">No Auto-Provision</Badge>;
+        } else if (configuredCount === totalConfigs) {
+            return <Badge className="bg-green-50 text-green-700 border-green-200">Full Auto-Provision</Badge>;
+        } else {
+            return <Badge className="bg-orange-50 text-orange-700 border-orange-200">Partial Auto-Provision</Badge>;
+        }
+    };
+
     return (
         <div className='w-full'>
             <div className='h-[63px] flex gap-2 items-center border-b p-4'>
@@ -198,15 +230,15 @@ const ManageIpStock = () => {
             </div>
             <div className='mx-12 mt-6'>
                 <Table className='w-full border'>
-                    {/* // In the table header, add Server Type column: */}
                     <TableHeader>
                         <TableRow>
                             <TableHead>Name</TableHead>
-                            <TableHead>Type</TableHead> {/* Add this */}
+                            <TableHead>Type</TableHead>
                             <TableHead>Available</TableHead>
                             <TableHead>4 GB</TableHead>
                             <TableHead>8 GB</TableHead>
                             <TableHead>16 GB</TableHead>
+                            <TableHead>Auto-Provision</TableHead>
                             <TableHead>Promo Codes</TableHead>
                             <TableHead>Edit</TableHead>
                             <TableHead>Delete</TableHead>
@@ -216,16 +248,39 @@ const ManageIpStock = () => {
                     <TableBody>
                         {ipStocks.map(stock => (
                             <TableRow key={stock._id}>
-                                <TableCell>{stock.name}</TableCell>
+                                <TableCell>
+                                    <div>
+                                        <div className="font-medium">{stock.name}</div>
+                                        {stock.description && (
+                                            <div className="text-sm text-gray-500 max-w-xs truncate">
+                                                {stock.description}
+                                            </div>
+                                        )}
+                                    </div>
+                                </TableCell>
                                 <TableCell>
                                     <Badge variant={stock.serverType === 'VPS' ? 'default' : 'secondary'}>
                                         {stock.serverType}
                                     </Badge>
-                                </TableCell> {/* Add this */}
+                                </TableCell>
                                 <TableCell>{stock.available ? 'Yes' : 'No'}</TableCell>
                                 {Object.entries(stock.memoryOptions).map(([memory, details]) => (
-                                    <TableCell key={memory}>₹{details.price}</TableCell>
+                                    <TableCell key={memory}>
+                                        <div>
+                                            <div className="font-medium">₹{details.price}</div>
+                                            {details.hostycareProductId && (
+                                                <div className="text-xs text-blue-600 flex items-center gap-1">
+                                                    <ExternalLink className="w-3 h-3" />
+                                                    ID: {details.hostycareProductId}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </TableCell>
                                 ))}
+
+                                <TableCell>
+                                    {getHostycareStatus(stock.memoryOptions)}
+                                </TableCell>
 
                                 <TableCell>
                                     {stock.promoCodes?.length > 0 ? (
@@ -244,7 +299,6 @@ const ManageIpStock = () => {
                                     )}
                                 </TableCell>
 
-
                                 <TableCell>
                                     <Button onClick={() => handleEdit(stock)}>Edit</Button>
                                 </TableCell>
@@ -255,34 +309,48 @@ const ManageIpStock = () => {
                         ))}
                     </TableBody>
                 </Table>
+
                 {isDialogOpen && currentStock && (
                     <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-                        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+                        <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
                             <DialogHeader>
                                 <DialogTitle>Edit IP Stock</DialogTitle>
                             </DialogHeader>
                             <DialogDescription>
-                                Update the details of the IP stock.
+                                Update the details of the IP stock and Hostycare integration.
                             </DialogDescription>
                             <div className="space-y-4">
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <Label>Name:</Label>
+                                        <Input
+                                            value={currentStock.name}
+                                            onChange={(e) => setCurrentStock({ ...currentStock, name: e.target.value })}
+                                        />
+                                    </div>
+                                    <div>
+                                        <Label>Available:</Label>
+                                        <select
+                                            className='flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1'
+                                            value={currentStock.available.toString()}
+                                            onChange={(e) => handleAvailableChange(e.target.value)}
+                                        >
+                                            <option value="true">Yes</option>
+                                            <option value="false">No</option>
+                                        </select>
+                                    </div>
+                                </div>
+
                                 <div>
-                                    <Label>Name:</Label>
-                                    <Input
-                                        value={currentStock.name}
-                                        onChange={(e) => setCurrentStock({ ...currentStock, name: e.target.value })}
+                                    <Label>Description:</Label>
+                                    <textarea
+                                        className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                                        value={currentStock.description || ''}
+                                        onChange={(e) => setCurrentStock({ ...currentStock, description: e.target.value })}
+                                        placeholder="Server description..."
                                     />
                                 </div>
-                                <div>
-                                    <Label>Available:</Label>
-                                    <select
-                                        className='flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1'
-                                        value={currentStock.available.toString()}
-                                        onChange={(e) => handleAvailableChange(e.target.value)}
-                                    >
-                                        <option value="true">Yes</option>
-                                        <option value="false">No</option>
-                                    </select>
-                                </div>
+
                                 <div>
                                     <Label>Server Type:</Label>
                                     <Select value={currentStock.serverType} onValueChange={(value) => setCurrentStock({ ...currentStock, serverType: value })}>
@@ -295,16 +363,41 @@ const ManageIpStock = () => {
                                         </SelectContent>
                                     </Select>
                                 </div>
-                                {Object.keys(currentStock.memoryOptions).map((size) => (
-                                    <div key={size}>
-                                        <Label>{size} Price:</Label>
-                                        <Input
-                                            type="number"
-                                            value={currentStock.memoryOptions[size].price}
-                                            onChange={(e) => handlePriceChange(size as keyof MemoryOptionDetails, e.target.value)}
-                                        />
+
+                                {/* Memory Options and Hostycare Mapping */}
+                                <div>
+                                    <Label className="text-base font-semibold">Memory Configuration & Hostycare Mapping:</Label>
+                                    <div className="bg-gray-50 p-4 rounded-lg border space-y-4">
+                                        {Object.keys(currentStock.memoryOptions).map((size) => (
+                                            <div key={size} className="border-b pb-3 last:border-b-0 last:pb-0">
+                                                <h4 className="font-medium mb-2">{size} Configuration</h4>
+                                                <div className="grid grid-cols-2 gap-3">
+                                                    <div>
+                                                        <Label className="text-sm">{size} Price (₹):</Label>
+                                                        <Input
+                                                            type="number"
+                                                            value={currentStock.memoryOptions[size].price}
+                                                            onChange={(e) => handlePriceChange(size, e.target.value)}
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <Label className="text-sm">Hostycare Product ID:</Label>
+                                                        <Input
+                                                            type="text"
+                                                            placeholder="e.g., 1, 2, 3"
+                                                            value={currentStock.memoryOptions[size].hostycareProductId || ''}
+                                                            onChange={(e) => handleHostycareProductIdChange(size, e.target.value)}
+                                                        />
+                                                        <p className="text-xs text-gray-500 mt-1">
+                                                            Leave empty to disable auto-provisioning for this size
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ))}
                                     </div>
-                                ))}
+                                </div>
+
                                 <div>
                                     <Label className="text-base font-semibold">Tags:</Label>
                                     <div className="flex gap-2 mb-2">
@@ -337,6 +430,7 @@ const ManageIpStock = () => {
                                         </div>
                                     )}
                                 </div>
+
                                 {/* Promo Codes Management */}
                                 <div>
                                     <Label className="text-base font-semibold">Promo Codes:</Label>
@@ -372,7 +466,7 @@ const ManageIpStock = () => {
                                     {currentStock.promoCodes && currentStock.promoCodes.length > 0 && (
                                         <div className="border rounded p-2 max-h-32 overflow-y-auto">
                                             {currentStock.promoCodes.map((promo, index) => (
-                                                <div key={index} className="flex justify-between items-center mb-1 p-2 bg--50 rounded">
+                                                <div key={index} className="flex justify-between items-center mb-1 p-2 bg-gray-50 rounded">
                                                     <div className="flex items-center gap-2">
                                                         <span className={promo.isActive ? '' : 'line-through text-gray-500'}>
                                                             {promo.code} - {promo.discountType === 'fixed' ? `₹${promo.discount} off` : `${promo.discount}% off`}
