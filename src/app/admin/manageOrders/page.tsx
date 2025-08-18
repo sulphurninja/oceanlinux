@@ -212,8 +212,8 @@ const ManageOrders = () => {
                                 <TableCell>
                                     <Badge variant={
                                         order.status === 'active' ? 'default' :
-                                        order.status === 'paid' ? 'secondary' :
-                                        order.status === 'pending' ? 'outline' : 'destructive'
+                                            order.status === 'paid' ? 'secondary' :
+                                                order.status === 'pending' ? 'outline' : 'destructive'
                                     }>
                                         {order.status}
                                     </Badge>
@@ -232,22 +232,23 @@ const ManageOrders = () => {
                                             {order.autoProvisioned ? 'View' : 'Edit'}
                                         </Button>
 
-                                        {(order.status === 'paid' &&
-                                          (!order.autoProvisioned || order.provisioningStatus === 'failed')) && (
-                                            <Button
-                                                size="sm"
-                                                onClick={() => handleProvision(order)}
-                                                disabled={provisioning === order._id}
-                                                className="bg-blue-600 hover:bg-blue-700"
-                                            >
-                                                {provisioning === order._id ? (
-                                                    <Loader2 className="w-4 h-4 mr-1 animate-spin" />
-                                                ) : (
-                                                    <Play className="w-4 h-4 mr-1" />
-                                                )}
-                                                Auto-Provision
-                                            </Button>
-                                        )}
+                                      {/* // In the Actions column, show button for paid or confirmed: */}
+                                        {((order.status === 'paid' || order.status === 'confirmed') &&
+                                            (!order.autoProvisioned || order.provisioningStatus === 'failed')) && (
+                                                <Button
+                                                    size="sm"
+                                                    onClick={() => handleProvision(order)}
+                                                    disabled={provisioning === order._id}
+                                                    className="bg-blue-600 hover:bg-blue-700"
+                                                >
+                                                    {provisioning === order._id ? (
+                                                        <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                                                    ) : (
+                                                        <Play className="w-4 h-4 mr-1" />
+                                                    )}
+                                                    Auto-Provision
+                                                </Button>
+                                            )}
                                     </div>
                                 </TableCell>
                             </TableRow>

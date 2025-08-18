@@ -1,7 +1,7 @@
 const HostycareAPI = require('./hostycareApi');
-const connectDB = require('@/lib/db');
-const Order = require('@/models/orderModel');
-const IPStock = require('@/models/ipStockModel');
+const connectDB = require('@/lib/db').default;       // <- add .default
+const Order = require('@/models/orderModel').default; // <- add .default
+const IPStock = require('@/models/ipStockModel');     // CJS, no change
 
 class AutoProvisioningService {
   constructor() {
@@ -52,8 +52,15 @@ class AutoProvisioningService {
     console.log('[AUTO-PROVISION-SERVICE] ✅ Generated hostname:', hostname);
     return hostname;
   }
+  // Utility: convert Mongoose Map or plain object to a plain object
+  toPlainObject(mapOrObj) {
+    if (!mapOrObj) return {};
+    if (typeof mapOrObj.toObject === 'function') return mapOrObj.toObject();
+    if (mapOrObj instanceof Map) return Object.fromEntries(mapOrObj.entries());
+    if (typeof mapOrObj === 'object') return { ...mapOrObj };
+    return {};
+  }
 
-  // Main provisioning function
   async provisionServer(orderId) {
     const startTime = Date.now();
     console.log("\n" + "🚀".repeat(80));
@@ -145,14 +152,18 @@ class AutoProvisioningService {
       console.log(`[AUTO-PROVISION] 🔧 STEP 5: Generating server details...`);
       const credentials = this.generateCredentials();
       const hostname = this.generateHostname(order.productName, order.memory);
-
+      // Convert defaultConfigurations Map -> object
+      const defaultConfigs = this.toPlainObject(ipStock.defaultConfigurations);
       // STEP 6: Prepare order data for Hostycare
       const orderData = {
         cycle: 'monthly',
-        hostname: hostname,
+        hostname,
         username: credentials.username,
         password: credentials.password,
-        configurations: ipStock.defaultConfigurations || {}
+        // Optional extras if needed later:
+        // nsprefix: ['ns1.example.com', 'ns2.example.com'],
+        // fields: { ciuser: 'cloudinituser' },
+        configurations: defaultConfigs
       };
 
       console.log(`[AUTO-PROVISION] 📤 STEP 6: Preparing Hostycare API request...`);
@@ -160,7 +171,7 @@ class AutoProvisioningService {
       console.log(`   - Cycle: ${orderData.cycle}`);
       console.log(`   - Hostname: ${orderData.hostname}`);
       console.log(`   - Username: ${orderData.username}`);
-      console.log(`   - Password: ${orderData.password.substring(0, 4)}****`);
+
 
       // STEP 7: Create server via Hostycare API
       console.log(`[AUTO-PROVISION] 🌐 STEP 7: Creating server via Hostycare API...`);

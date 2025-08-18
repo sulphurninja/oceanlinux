@@ -9,40 +9,57 @@ class HostycareAPI {
     console.log('  API Key:', this.apiKey ? 'SET (length: ' + (this.apiKey?.length || 0) + ')' : 'MISSING');
   }
 
-generateToken() {
-  const crypto = require('crypto');
+  // Helper: form-url-encode nested objects (e.g., configurations[key]=value, fields[key]=value, nsprefix[]=a)
+  buildFormParams(obj, parentKey = '', params = new URLSearchParams()) {
+    const isPlainObject = (v) => Object.prototype.toString.call(v) === '[object Object]';
+    const isMap = (v) => v && typeof v === 'object' && typeof v.forEach === 'function' && typeof v.get === 'function';
 
-  // Use gmdate format as per Hostycare docs: gmdate("y-m-d H")
-  const now = new Date();
-  const year = now.getUTCFullYear().toString().slice(-2);
-  const month = (now.getUTCMonth() + 1).toString().padStart(2, '0');
-  const day = now.getUTCDate().toString().padStart(2, '0');
-  const hour = now.getUTCHours().toString().padStart(2, '0');
-  const currentTime = `${year}-${month}-${day} ${hour}`;
+    const entries = isMap(obj) ? Array.from(obj.entries()) : Object.entries(obj || {});
 
-  // The key is email:time
-  const key = `${this.username}:${currentTime}`;
+    for (const [key, value] of entries) {
+      const fullKey = parentKey ? `${parentKey}[${key}]` : key;
 
-  // The data is the API key
-  const data = this.apiKey;
+      if (value === undefined || value === null) continue;
 
-  // According to PHP docs: hash_hmac("sha256", api_key, email:time)
-  // In Node.js: createHmac(algorithm, key).update(data)
-  const hash = crypto.createHmac('sha256', key).update(data).digest('hex');
-  const token = Buffer.from(hash).toString('base64');
+      if (Array.isArray(value)) {
+        for (const v of value) {
+          if (isPlainObject(v) || isMap(v)) {
+            this.buildFormParams(v, `${fullKey}[]`, params);
+          } else {
+            params.append(`${fullKey}[]`, String(v));
+          }
+        }
+      } else if (isPlainObject(value) || isMap(value)) {
+        this.buildFormParams(value, fullKey, params);
+      } else {
+        params.append(fullKey, String(value));
+      }
+    }
+    return params;
+  }
 
-  // Debug logging
-  console.log('[HOSTYCARE] Token generation (CORRECTED):');
-  console.log('  Username:', this.username);
-  console.log('  API Key length:', this.apiKey?.length);
-  console.log('  Current Time (UTC):', currentTime);
-  console.log('  HMAC Key (email:time):', key);
-  console.log('  HMAC Data (api-key):', data);
-  console.log('  HMAC Hash (hex):', hash);
-  console.log('  Base64 Token:', token);
+  generateToken() {
+    const crypto = require('crypto');
 
-  return token;
-}
+    const now = new Date();
+    const year = now.getUTCFullYear().toString().slice(-2);
+    const month = (now.getUTCMonth() + 1).toString().padStart(2, '0');
+    const day = now.getUTCDate().toString().padStart(2, '0');
+    const hour = now.getUTCHours().toString().padStart(2, '0');
+    const currentTime = `${year}-${month}-${day} ${hour}`;
+
+    const key = `${this.username}:${currentTime}`;
+    const data = this.apiKey;
+
+    const hash = crypto.createHmac('sha256', key).update(data).digest('hex');
+    const token = Buffer.from(hash).toString('base64');
+
+    console.log('[HOSTYCARE] Token generation:');
+    console.log('  Current Time (UTC):', currentTime);
+    console.log('  Base64 Token (trimmed):', token.substring(0, 10) + '...' + token.substring(token.length - 10));
+
+    return token;
+  }
 
   async makeRequest(action, method = 'GET', params = {}) {
     try {
@@ -52,35 +69,29 @@ generateToken() {
       const headers = {
         'username': this.username,
         'token': token,
-        'Content-Type': 'application/x-www-form-urlencoded'
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Accept': 'application/json'
       };
-
-      console.log('[HOSTYCARE] Request headers (sanitized):', {
-        username: this.username,
-        token: token.substring(0, 10) + '...' + token.substring(token.length - 10),
-        'Content-Type': headers['Content-Type']
-      });
 
       const config = {
         method,
         headers
       };
 
-      if (method === 'POST' && Object.keys(params).length > 0) {
-        config.body = new URLSearchParams(params);
-        console.log('[HOSTYCARE] Request body params:', params);
+      if (method === 'POST') {
+        if (params instanceof URLSearchParams) {
+          config.body = params;
+        } else if (params && typeof params === 'object') {
+          // Properly encode nested structures (configurations, fields, nsprefix)
+          config.body = this.buildFormParams(params);
+        }
+        console.log('[HOSTYCARE] Encoded form body (for debugging):', config.body?.toString());
       }
 
-      console.log('[HOSTYCARE] Full request URL:', `${this.endpoint}${action}`);
       const response = await fetch(`${this.endpoint}${action}`, config);
-      console.log('[HOSTYCARE] Response status:', response.status, response.statusText);
-
-      // Log response headers for debugging
-      console.log('[HOSTYCARE] Response headers:', Object.fromEntries(response.headers.entries()));
 
       let data;
       const responseText = await response.text();
-      console.log('[HOSTYCARE] Raw response:', responseText);
 
       try {
         data = JSON.parse(responseText);
@@ -88,8 +99,6 @@ generateToken() {
         console.error('[HOSTYCARE] Failed to parse JSON response:', parseError);
         throw new Error(`Invalid JSON response: ${responseText}`);
       }
-
-      console.log('[HOSTYCARE] Parsed response data:', data);
 
       if (!response.ok) {
         throw new Error(data.message || `API request failed with status ${response.status}: ${responseText}`);
@@ -115,25 +124,41 @@ generateToken() {
 
   // Get available products
   async getProducts() {
+    // withpricing=1 as query parameter per docs
     return await this.makeRequest('/products?withpricing=1');
   }
 
   // Create a new service/server
   async createServer(productId, orderData) {
-    const params = {
+    // orderData may include: cycle, hostname, username, password, nsprefix (array), fields (object), configurations (object)
+    // Ensure only expected keys and proper nesting
+    const body = {
       cycle: orderData.cycle || 'monthly',
       hostname: orderData.hostname,
       username: orderData.username,
       password: orderData.password,
-      ...orderData.configurations
     };
 
-    return await this.makeRequest(`/order/products/${productId}`, 'POST', params);
+    if (Array.isArray(orderData.nsprefix)) {
+      body.nsprefix = orderData.nsprefix;
+    }
+    if (orderData.fields && typeof orderData.fields === 'object') {
+      body.fields = orderData.fields;
+    }
+    if (orderData.configurations && typeof orderData.configurations === 'object') {
+      body.configurations = orderData.configurations;
+    }
+
+    return await this.makeRequest(`/order/products/${productId}`, 'POST', body);
   }
 
   // Get service details
   async getServiceDetails(serviceId) {
     return await this.makeRequest(`/services/${serviceId}`);
+  }
+
+  async getServiceInfo(serviceId) {
+    return await this.makeRequest(`/services/${serviceId}/getInfo`);
   }
 
   // Start a service
@@ -183,11 +208,6 @@ generateToken() {
     return await this.makeRequest(`/services/${serviceId}/reinstall`, 'POST', {
       password
     });
-  }
-
-  // Test connection
-  async testConnection() {
-    return await this.makeRequest('/testConnection');
   }
 
   // Get account credit

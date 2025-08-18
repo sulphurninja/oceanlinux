@@ -7,7 +7,7 @@ export async function POST(request) {
 
     try {
         const reqBody = await request.json();
-        const { name, available, serverType, tags, memoryOptions, promoCodes } = reqBody;
+        const { name, available, serverType, tags, memoryOptions, promoCodes, defaultConfigurations } = reqBody;
 
         const newIPStock = new IPStock({
             name,
@@ -15,7 +15,8 @@ export async function POST(request) {
             serverType,
             tags: tags || [],
             memoryOptions,
-            promoCodes: promoCodes || []
+            promoCodes: promoCodes || [],
+            defaultConfigurations: defaultConfigurations || {},
         });
 
         await newIPStock.save();
