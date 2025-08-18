@@ -44,4 +44,10 @@ const orderSchema = new mongoose.Schema({
     autoProvisioned: { type: Boolean, default: false },
 }, { timestamps: true });
 
+// ✅ add indexes so sort & lookups are fast
+orderSchema.index({ createdAt: -1 });
+orderSchema.index({ user: 1 });
+
+
+
 export default mongoose.models.Order || mongoose.model('Order', orderSchema);

@@ -47,7 +47,7 @@ class AutoProvisioningService {
     const cleanName = productName.toLowerCase().replace(/[^a-z0-9]/g, '');
     const memoryCode = memory.toLowerCase().replace('gb', '');
     const randomSuffix = Math.random().toString(36).substring(2, 8);
-    const hostname = `${cleanName}-${memoryCode}gb-${randomSuffix}.example.com`;
+    const hostname = `${cleanName}-${memoryCode}gb-${randomSuffix}.com`;
 
     console.log('[AUTO-PROVISION-SERVICE] ✅ Generated hostname:', hostname);
     return hostname;

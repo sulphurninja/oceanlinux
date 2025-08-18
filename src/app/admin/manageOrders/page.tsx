@@ -52,15 +52,20 @@ const ManageOrders = () => {
         fetchOrders();
     }, []);
 
+    // ManageOrders.tsx
     const fetchOrders = async () => {
         try {
-            const response = await fetch('/api/admin/orders');
+            const response = await fetch(`/api/admin/orders?t=${Date.now()}`, {
+                cache: 'no-store',
+                headers: { 'cache-control': 'no-cache', pragma: 'no-cache' },
+            });
             const data = await response.json();
             setOrders(data);
-        } catch (error) {
+        } catch {
             toast.error('Failed to fetch orders');
         }
     };
+
 
     const handleEdit = (order: Order) => {
         setCurrentOrder({ ...order });
@@ -232,7 +237,7 @@ const ManageOrders = () => {
                                             {order.autoProvisioned ? 'View' : 'Edit'}
                                         </Button>
 
-                                      {/* // In the Actions column, show button for paid or confirmed: */}
+                                        {/* // In the Actions column, show button for paid or confirmed: */}
                                         {((order.status === 'paid' || order.status === 'confirmed') &&
                                             (!order.autoProvisioned || order.provisioningStatus === 'failed')) && (
                                                 <Button
