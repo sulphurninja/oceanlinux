@@ -9,7 +9,7 @@ class HostycareAPI {
     console.log('  API Key:', this.apiKey ? 'SET (length: ' + (this.apiKey?.length || 0) + ')' : 'MISSING');
   }
 
-  // Helper: form-url-encode nested objects (e.g., configurations[key]=value, fields[key]=value, nsprefix[]=a)
+ // Helper: serialize nested params like configurations[key]=value, fields[key]=value, nsprefix[]=ns1
   buildFormParams(obj, parentKey = '', params = new URLSearchParams()) {
     const isPlainObject = (v) => Object.prototype.toString.call(v) === '[object Object]';
     const isMap = (v) => v && typeof v === 'object' && typeof v.forEach === 'function' && typeof v.get === 'function';
@@ -18,7 +18,6 @@ class HostycareAPI {
 
     for (const [key, value] of entries) {
       const fullKey = parentKey ? `${parentKey}[${key}]` : key;
-
       if (value === undefined || value === null) continue;
 
       if (Array.isArray(value)) {
@@ -66,42 +65,34 @@ class HostycareAPI {
       console.log(`[HOSTYCARE] Making ${method} request to: ${this.endpoint}${action}`);
 
       const token = this.generateToken();
-      const headers = {
+     const headers = {
         'username': this.username,
         'token': token,
         'Content-Type': 'application/x-www-form-urlencoded',
         'Accept': 'application/json'
       };
 
-      const config = {
-        method,
-        headers
-      };
+      const config = { method, headers };
 
       if (method === 'POST') {
-        if (params instanceof URLSearchParams) {
-          config.body = params;
-        } else if (params && typeof params === 'object') {
-          // Properly encode nested structures (configurations, fields, nsprefix)
-          config.body = this.buildFormParams(params);
-        }
-        console.log('[HOSTYCARE] Encoded form body (for debugging):', config.body?.toString());
+        config.body = params instanceof URLSearchParams ? params : this.buildFormParams(params);
+        console.log('[HOSTYCARE] Encoded form body (debug):', config.body?.toString());
       }
 
       const response = await fetch(`${this.endpoint}${action}`, config);
-
-      let data;
       const responseText = await response.text();
 
+      let data;
       try {
         data = JSON.parse(responseText);
       } catch (parseError) {
-        console.error('[HOSTYCARE] Failed to parse JSON response:', parseError);
         throw new Error(`Invalid JSON response: ${responseText}`);
       }
 
-      if (!response.ok) {
-        throw new Error(data.message || `API request failed with status ${response.status}: ${responseText}`);
+      // Throw if Hostycare embeds error in JSON even with HTTP 200
+      if (!response.ok || data?.error || data?.success === false) {
+        const msg = data?.error || data?.message || `API request failed with status ${response.status}`;
+        throw new Error(msg);
       }
 
       return data;

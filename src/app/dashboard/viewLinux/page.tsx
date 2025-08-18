@@ -23,7 +23,12 @@ import {
     Activity,
     Check,
     Terminal,
-    TerminalIcon
+    TerminalIcon,
+    Play,
+    Square,
+    PowerCircle,
+    KeyRound,
+    LayoutTemplate
 } from 'lucide-react';
 import {
     Dialog,
@@ -53,6 +58,9 @@ interface Order {
     username?: string;
     password?: string;
     expiryDate?: Date;
+    // NEW: show VPS controls when Hostycare service exists
+    hostycareServiceId?: string;
+    provisioningStatus?: string;
 }
 
 // OS Icon Component
@@ -62,20 +70,20 @@ const OSIcon = ({ os, className = "h-8 w-8" }: { os: string; className?: string 
     if (osLower.includes('ubuntu')) {
         return (
             <div className={`${className} bg-orange-500 rounded-full flex items-center justify-center text-white font-bold text-sm`}>
-                <img src='/ubuntu.png' className='rounded-full object-contain'/> 
+                <img src='/ubuntu.png' className='rounded-full object-contain' />
             </div>
         );
     } else if (osLower.includes('centos')) {
         return (
             <div className={`${className} bg-purple-600 rounded-full flex items-center justify-center text-white font-bold text-sm`}>
-                                <img src='/centos.png' className='rounded-full object-contain'/> 
+                <img src='/centos.png' className='rounded-full object-contain' />
 
             </div>
         );
     } else if (osLower.includes('windows')) {
         return (
             <div className={`${className} bg-blue-600 rounded-full flex items-center justify-center text-white font-bold text-sm`}>
-                                         <img src='/windows.png' className='rounded-full object-contain'/> 
+                <img src='/windows.png' className='rounded-full object-contain' />
 
             </div>
         );
@@ -103,6 +111,12 @@ const ViewLinux = () => {
     const [showPassword, setShowPassword] = useState(false);
     const router = useRouter();
 
+    // ... inside component ...
+    const [serviceDetails, setServiceDetails] = useState<any | null>(null);
+    const [serviceLoading, setServiceLoading] = useState(false);
+    const [actionBusy, setActionBusy] = useState<string | null>(null);
+
+
     useEffect(() => {
         fetchOrders();
     }, []);
@@ -120,9 +134,45 @@ const ViewLinux = () => {
         }
     };
 
+    const loadServiceDetails = async (order: Order) => {
+        if (!order.hostycareServiceId) return;
+        setServiceLoading(true);
+        try {
+            const res = await fetch(`/api/orders/service-action?orderId=${order._id}`);
+            const data = await res.json();
+            if (data.success) setServiceDetails(data);
+        } finally {
+            setServiceLoading(false);
+        }
+    };
+
+    const runServiceAction = async (order: Order, action: string, payload?: any) => {
+        setActionBusy(action);
+        try {
+            const res = await fetch('/api/orders/service-action', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ orderId: order._id, action, payload })
+            });
+            const data = await res.json();
+            if (data.success) {
+                toast.success(`Action "${action}" executed`);
+                await loadServiceDetails(order);
+            } else {
+                toast.error(data.error || `Failed to run "${action}"`);
+            }
+        } catch (e: any) {
+            toast.error(e.message || `Failed to run "${action}"`);
+        } finally {
+            setActionBusy(null);
+        }
+    };
+
     const handleDialogOpen = (order: Order) => {
         setSelectedOrder(order);
         setShowPassword(false);
+        setServiceDetails(null);
+        if (order.hostycareServiceId) loadServiceDetails(order);
     };
 
     const copyToClipboard = (text: string, field: string) => {
@@ -449,6 +499,70 @@ const ViewLinux = () => {
                                         </div>
                                     </div>
                                 )}
+
+                                {selectedOrder.hostycareServiceId && (
+                                    <>
+                                        <Separator />
+                                        <div className="space-y-3">
+                                            <div className="flex items-center gap-2">
+                                                <Server className="h-5 w-5 text-primary" />
+                                                <h3 className="text-lg font-semibold">Manage VPS</h3>
+                                                <Badge variant="secondary" className="ml-auto">
+                                                    Service ID: {selectedOrder.hostycareServiceId}
+                                                </Badge>
+                                            </div>
+
+                                            <div className="flex flex-wrap gap-2">
+                                                <Button variant="outline" size="sm" onClick={() => loadServiceDetails(selectedOrder)} disabled={serviceLoading}>
+                                                    <RefreshCw className={`h-4 w-4 mr-1 ${serviceLoading ? 'animate-spin' : ''}`} />
+                                                    Refresh Status
+                                                </Button>
+                                                <Button size="sm" onClick={() => runServiceAction(selectedOrder, 'start')} disabled={actionBusy === 'start'}>
+                                                    <Play className="h-4 w-4 mr-1" /> Start
+                                                </Button>
+                                                <Button size="sm" variant="secondary" onClick={() => runServiceAction(selectedOrder, 'stop')} disabled={actionBusy === 'stop'}>
+                                                    <Square className="h-4 w-4 mr-1" /> Stop
+                                                </Button>
+                                                <Button size="sm" variant="outline" onClick={() => runServiceAction(selectedOrder, 'reboot')} disabled={actionBusy === 'reboot'}>
+                                                    <PowerCircle className="h-4 w-4 mr-1" /> Reboot
+                                                </Button>
+                                                <Button
+                                                    size="sm"
+                                                    variant="outline"
+                                                    onClick={async () => {
+                                                        const pwd = prompt('Enter new root/administrator password');
+                                                        if (pwd) await runServiceAction(selectedOrder, 'changepassword', { password: pwd });
+                                                    }}
+                                                    disabled={actionBusy === 'changepassword'}
+                                                >
+                                                    <KeyRound className="h-4 w-4 mr-1" /> Change Password
+                                                </Button>
+                                                <Button
+                                                    size="sm"
+                                                    variant="destructive"
+                                                    onClick={async () => {
+                                                        const pwd = prompt('Enter root/administrator password for reinstall');
+                                                        if (pwd) await runServiceAction(selectedOrder, 'reinstall', { password: pwd });
+                                                    }}
+                                                    disabled={actionBusy === 'reinstall'}
+                                                >
+                                                    <LayoutTemplate className="h-4 w-4 mr-1" /> Reinstall
+                                                </Button>
+                                            </div>
+
+                                            <div className="border rounded p-3 text-sm">
+                                                {serviceLoading ? (
+                                                    <div className="text-muted-foreground">Loading service details...</div>
+                                                ) : serviceDetails ? (
+                                                    <pre className="max-h-56 overflow-auto bg-muted p-2 rounded">{JSON.stringify(serviceDetails, null, 2)}</pre>
+                                                ) : (
+                                                    <div className="text-muted-foreground">No service details loaded.</div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </>
+                                )}
+
 
                                 {/* Expiry Information */}
                                 {selectedOrder.expiryDate && (

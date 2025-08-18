@@ -60,6 +60,14 @@ class AutoProvisioningService {
     if (typeof mapOrObj === 'object') return { ...mapOrObj };
     return {};
   }
+  // NEW: Decide login username from productName
+  // If productName includes 'vps', 'windows', or 'rdp' -> administrator, else root
+  getLoginUsernameFromProductName(productName = '') {
+    const s = String(productName).toLowerCase();
+    const isWindowsLike = s.includes('windows') || s.includes('rdp') || s.includes('vps');
+    return isWindowsLike ? 'administrator' : 'root';
+  }
+
 
   async provisionServer(orderId) {
     const startTime = Date.now();
@@ -152,18 +160,17 @@ class AutoProvisioningService {
       console.log(`[AUTO-PROVISION] 🔧 STEP 5: Generating server details...`);
       const credentials = this.generateCredentials();
       const hostname = this.generateHostname(order.productName, order.memory);
-      // Convert defaultConfigurations Map -> object
-      const defaultConfigs = this.toPlainObject(ipStock.defaultConfigurations);
+
+      // Decide login username by product name (Windows/RDP/VPS => administrator, else root)
+      const loginUsername = this.getLoginUsernameFromProductName(order.productName);
+
       // STEP 6: Prepare order data for Hostycare
       const orderData = {
         cycle: 'monthly',
-        hostname,
-        username: credentials.username,
+        hostname: hostname,
+        username: loginUsername, // use fixed username based on product name
         password: credentials.password,
-        // Optional extras if needed later:
-        // nsprefix: ['ns1.example.com', 'ns2.example.com'],
-        // fields: { ciuser: 'cloudinituser' },
-        configurations: defaultConfigs
+        configurations: ipStock.defaultConfigurations || {}
       };
 
       console.log(`[AUTO-PROVISION] 📤 STEP 6: Preparing Hostycare API request...`);
@@ -171,7 +178,7 @@ class AutoProvisioningService {
       console.log(`   - Cycle: ${orderData.cycle}`);
       console.log(`   - Hostname: ${orderData.hostname}`);
       console.log(`   - Username: ${orderData.username}`);
-
+      console.log(`   - Password: ${orderData.password.substring(0, 4)}****`);
 
       // STEP 7: Create server via Hostycare API
       console.log(`[AUTO-PROVISION] 🌐 STEP 7: Creating server via Hostycare API...`);
@@ -192,16 +199,17 @@ class AutoProvisioningService {
       let serviceId = null;
       let ipAddress = null;
 
-      // The response structure may vary, adjust according to Hostycare's actual response
-      if (hostycareResponse.service) {
+      // Prefer nested data.service when present
+      if (hostycareResponse?.service) {
         serviceId = hostycareResponse.service.id;
-        ipAddress = hostycareResponse.service.ipAddress;
+        ipAddress = hostycareResponse.service.dedicatedip || hostycareResponse.service.ipAddress;
         console.log(`[AUTO-PROVISION] ✅ Extracted from response.service:`);
-      } else if (hostycareResponse.data) {
+      } else if (hostycareResponse?.data) {
         serviceId = hostycareResponse.data.id || hostycareResponse.data.serviceId;
-        ipAddress = hostycareResponse.data.ipAddress;
+        const svc = hostycareResponse.data.service || {};
+        ipAddress = svc.dedicatedip || svc.ipAddress || hostycareResponse.data.ipAddress;
         console.log(`[AUTO-PROVISION] ✅ Extracted from response.data:`);
-      } else if (hostycareResponse.id) {
+      } else if (hostycareResponse?.id) {
         serviceId = hostycareResponse.id;
         console.log(`[AUTO-PROVISION] ✅ Extracted from response.id:`);
       } else {
@@ -212,24 +220,29 @@ class AutoProvisioningService {
       console.log(`   - Service ID: ${serviceId || 'NOT FOUND'}`);
       console.log(`   - IP Address: ${ipAddress || 'NOT FOUND'}`);
 
+      // If we still didn't get a serviceId, treat as failure
+      if (!serviceId) {
+        throw new Error('Hostycare did not return a service ID (provisioning failed)');
+      }
+
       // STEP 9: Update order with provisioning results
       console.log(`[AUTO-PROVISION] 💾 STEP 9: Updating order with provisioning results...`);
       const updateData = {
-        hostycareServiceId: serviceId,
+        hostycareServiceId: String(serviceId),
         hostycareProductId: memoryOption.hostycareProductId,
-        username: credentials.username,
+        username: loginUsername, // save standard username for customers
         password: credentials.password,
         ipAddress: ipAddress || 'Pending', // IP might be assigned later
         provisioningStatus: 'active',
         status: 'active',
         autoProvisioned: true,
-        os: 'Ubuntu 22' // Default OS, can be made configurable
+        os: order.os || 'Ubuntu 22'
       };
 
       console.log(`[AUTO-PROVISION] 📝 Update data:`);
       Object.entries(updateData).forEach(([key, value]) => {
         if (key === 'password') {
-          console.log(`   - ${key}: ${value.substring(0, 4)}****`);
+          console.log(`   - ${key}: ${String(value).substring(0, 4)}****`);
         } else {
           console.log(`   - ${key}: ${value}`);
         }
@@ -245,7 +258,7 @@ class AutoProvisioningService {
       console.log(`   - Order ID: ${orderId}`);
       console.log(`   - Service ID: ${serviceId}`);
       console.log(`   - IP Address: ${ipAddress || 'Pending'}`);
-      console.log(`   - Username: ${credentials.username}`);
+      console.log(`   - Username: ${loginUsername}`);
       console.log(`   - Status: active`);
       console.log("🎉".repeat(80));
 
@@ -260,7 +273,7 @@ class AutoProvisioningService {
       return {
         success: true,
         serviceId,
-        credentials,
+        credentials: { username: loginUsername, password: credentials.password },
         hostname,
         ipAddress,
         totalTime
@@ -275,11 +288,12 @@ class AutoProvisioningService {
       console.error(`   - Stack trace:`, error.stack);
       console.error("💥".repeat(80));
 
-      // Update order with error status
+      // Update order with error status (do not store credentials)
       try {
         await Order.findByIdAndUpdate(orderId, {
           provisioningStatus: 'failed',
-          provisioningError: error.message
+          provisioningError: error.message,
+          autoProvisioned: false
         });
         console.log(`[AUTO-PROVISION] ✅ Order ${orderId} marked as failed`);
       } catch (updateError) {
@@ -302,11 +316,19 @@ class AutoProvisioningService {
 
       console.log(`[AUTO-PROVISION] 📊 Service details:`, serviceDetails);
 
-      if (serviceDetails.ipAddress) {
+      // Prefer dedicatedip if present
+      const ip =
+        serviceDetails?.data?.service?.dedicatedip ||
+        serviceDetails?.service?.dedicatedip ||
+        serviceDetails?.dedicatedip ||
+        serviceDetails?.ipAddress ||
+        null;
+
+      if (ip) {
         await Order.findByIdAndUpdate(orderId, {
-          ipAddress: serviceDetails.ipAddress
+          ipAddress: ip
         });
-        console.log(`[AUTO-PROVISION] ✅ Updated IP address for order ${orderId}: ${serviceDetails.ipAddress}`);
+        console.log(`[AUTO-PROVISION] ✅ Updated IP address for order ${orderId}: ${ip}`);
       } else {
         console.log(`[AUTO-PROVISION] ⚠️ IP address still not available for service ${serviceId}`);
       }
