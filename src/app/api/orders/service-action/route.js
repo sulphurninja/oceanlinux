@@ -49,20 +49,35 @@ export async function POST(request) {
     let result;
 
     switch (action) {
-      case 'start': result = await api.startService(sid); break;
-      case 'stop': result = await api.stopService(sid); break;
-      case 'reboot': result = await api.rebootService(sid); break;
+      case 'start':
+        result = await api.startService(sid);
+        break;
+      case 'stop':
+        result = await api.stopService(sid);
+        break;
+      case 'reboot':
+        result = await api.rebootService(sid);
+        break;
       case 'changepassword':
         if (!payload?.password) return NextResponse.json({ message: 'password is required' }, { status: 400 });
         result = await api.changePassword(sid, payload.password);
+        // Sync the new password into our Order record
+        await Order.findByIdAndUpdate(orderId, { password: payload.password });
         break;
       case 'reinstall':
         if (!payload?.password) return NextResponse.json({ message: 'password is required' }, { status: 400 });
         result = await api.reinstallService(sid, payload.password);
+        // Also update local password to reflect the reinstall credential
+        await Order.findByIdAndUpdate(orderId, { password: payload.password });
         break;
-      case 'templates': result = await api.getReinstallTemplates(sid); break;
-      case 'details': result = await api.getServiceDetails(sid); break;
-      default: return NextResponse.json({ message: 'Unsupported action' }, { status: 400 });
+      case 'templates':
+        result = await api.getReinstallTemplates(sid);
+        break;
+      case 'details':
+        result = await api.getServiceDetails(sid);
+        break;
+      default:
+        return NextResponse.json({ message: 'Unsupported action' }, { status: 400 });
     }
 
     return NextResponse.json({ success: true, action, result });

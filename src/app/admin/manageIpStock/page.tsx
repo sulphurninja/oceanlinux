@@ -367,7 +367,7 @@ const ManageIpStock = () => {
                                 {/* Memory Options and Hostycare Mapping */}
                                 <div>
                                     <Label className="text-base font-semibold">Memory Configuration & Hostycare Mapping:</Label>
-                                    <div className="bg-gray-50 p-4 rounded-lg border space-y-4">
+                                    <div className="bg--50 p-4 rounded-lg border space-y-4">
                                         {Object.keys(currentStock.memoryOptions).map((size) => (
                                             <div key={size} className="border-b pb-3 last:border-b-0 last:pb-0">
                                                 <h4 className="font-medium mb-2">{size} Configuration</h4>
@@ -466,7 +466,7 @@ const ManageIpStock = () => {
                                     {currentStock.promoCodes && currentStock.promoCodes.length > 0 && (
                                         <div className="border rounded p-2 max-h-32 overflow-y-auto">
                                             {currentStock.promoCodes.map((promo, index) => (
-                                                <div key={index} className="flex justify-between items-center mb-1 p-2 bg-gray-50 rounded">
+                                                <div key={index} className="flex justify-between items-center mb-1 p-2 bg--50 rounded">
                                                     <div className="flex items-center gap-2">
                                                         <span className={promo.isActive ? '' : 'line-through text-gray-500'}>
                                                             {promo.code} - {promo.discountType === 'fixed' ? `₹${promo.discount} off` : `${promo.discount}% off`}

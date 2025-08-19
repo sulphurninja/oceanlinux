@@ -6,30 +6,48 @@ import React, { useEffect, useState } from 'react'
 type Props = { children: React.ReactNode }
 
 export default function Layout({ children }: Props) {
-    const [role, setRole] = useState("");
+  const [role, setRole] = useState<string | null>(null);
 
-    useEffect(() => {
-        const fetchIPStocks = async () => {
-            const response = await fetch('/api/users/me');
-            const data = await response.json();
-            setRole(data.role);
-        };
-        fetchIPStocks();
-    }, []);
+  useEffect(() => {
+    const fetchMe = async () => {
+      try {
+        const response = await fetch('/api/users/me');
+        const data = await response.json();
+        setRole(data?.role || '');
+      } catch {
+        setRole('');
+      }
+    };
+    fetchMe();
+  }, []);
 
-    console.log(role, 'role')
-
-
-
+  if (role === null) {
     return (
-        <div className='flex overflow-hidden  w-full'>
-            <AdminSidebar />
-            {role && role === "Admin" ? (
-                <div className='w-full '>
-                    {children}
-                </div>
-            ) : "Sorry, You're Not authorized to access the Admin Panel :)"}
-        </div>
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-pulse">Loading...</div>
+      </div>
+    );
+  }
 
-    )
+  return (
+    <div className="min-h-screen bg-background">
+      {role === 'Admin' ? (
+        <div className="flex h-screen overflow-hidden">
+          <AdminSidebar />
+          <main className="flex-1 overflow-auto">
+            <div className="h-full">
+              {children}
+            </div>
+          </main>
+        </div>
+      ) : (
+        <div className="min-h-screen flex items-center justify-center p-6">
+          <div className="text-center space-y-4">
+            <h1 className="text-2xl font-semibold">Access Denied</h1>
+            <p className="text-muted-foreground">You're not authorized to access the Admin Panel</p>
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }
