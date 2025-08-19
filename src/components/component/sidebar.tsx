@@ -1,181 +1,265 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { Sheet, SheetTrigger, SheetContent, SheetClose, SheetOverlay } from "@/components/ui/sheet";
-import { BadgeIndianRupee, ChevronDownIcon, LayoutDashboardIcon, LogOutIcon, LucideWaves, Menu, NotebookText, ReceiptIndianRupee, ReplyIcon, ServerIcon, UserIcon, XIcon } from 'lucide-react';
+import { Sheet, SheetTrigger, SheetContent, SheetClose } from "@/components/ui/sheet";
+import { Badge } from "@/components/ui/badge";
+import {
+  ChevronDownIcon,
+  LayoutDashboardIcon,
+  LogOutIcon,
+  LucideWaves,
+  Menu,
+  NotebookText,
+  ReceiptIndianRupee,
+  ServerIcon,
+  UserIcon,
+  XIcon,
+  ShoppingBag,
+  Settings,
+  Lock,
+  Bell,
+  CreditCard
+} from 'lucide-react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../ui/collapsible';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
+import { cn } from "@/lib/utils";
+import { Separator } from "@/components/ui/separator";
+
+interface NavItem {
+  href: string;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  badge?: string;
+  children?: NavItem[];
+}
 
 const ResponsiveSidebar = () => {
   const [open, setOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
   const router = useRouter();
+  const pathname = usePathname();
 
   const handleLogout = async () => {
     try {
       localStorage.removeItem('token');
       router.push('/login');
+      setOpen(false);
     } catch (error) {
       console.error('Logout failed:', error);
     }
   };
 
+  const navItems: NavItem[] = [
+    {
+      href: '/dashboard',
+      label: 'Dashboard',
+      icon: LayoutDashboardIcon,
+    },
+    {
+      href: '/dashboard/ipStock',
+      label: 'IP Stock',
+      icon: ServerIcon,
+      badge: 'Buy Now'
+    },
+    {
+      href: '/dashboard/viewLinux',
+      label: 'My Orders',
+      icon: ShoppingBag,
+    },
+    {
+      href: '/dashboard/orders',
+      label: 'Order History',
+      icon: ReceiptIndianRupee,
+    },
+    {
+      href: '/dashboard/scripts',
+      label: 'Scripts',
+      icon: NotebookText,
+    }
+  ];
 
-  return (
-    <div className="flex fixed">
-      {/* Mobile Sidebar */}
-      <Sheet open={open} onOpenChange={setOpen} >
-        <SheetTrigger asChild className='lg:hidden'>
-          <Button variant="ghost" size="icon" className="p-4">
-            {/* <XIcon className="h-5 w-5" /> */}
-            <Menu className='absolute left-0 ml-2 top-6' />
-            <span className="sr-only">Open sidebar</span>
-          </Button>
-        </SheetTrigger>
-        <SheetContent side="left" className="w-64 lg:hidden">
-          {/* <SheetOverlay /> */}
-          {/* Sidebar Content */}
-          <div className="flex flex-col h-full">
-            <div className="flex items-center justify-between p-4 shadow-md">
-              <Link href="/" prefetch={false}>
-                <h1 className="flex items-center gap-2 font-semibold">
-                  <LucideWaves className="h-6" />
-                  Ocean Linux
-                </h1>
-              </Link>
-              {/* <SheetClose asChild>
-                <Button variant="ghost" size="icon">
-                  <XIcon className="h-5 w-5" />
-                  <span className="sr-only">Close sidebar</span>
-                </Button>
-              </SheetClose> */}
-            </div>
-            <div className="flex-1 overflow-y-auto">
-              <nav className="flex flex-col space-y-1 p-4">
-                {/* Navigation Links */}
-                <Link href="/dashboard" prefetch={false}>
-                  <h1 className="flex items-center gap-2 rounded-md p-2 ">
-                    <LayoutDashboardIcon className="h-5 w-5" />
-                    Dashboard
-                  </h1>
-                </Link>
-                <Link href="/dashboard/viewLinux" prefetch={false}>
-                  <h1 className="flex items-center gap-2 rounded-md p-2 ">
-                    <ReplyIcon className="h-5 w-5" />
-                    View Orders
-                  </h1>
-                </Link>
-                <Link href="/dashboard/ipStock" prefetch={false}>
-                  <h1 className="flex items-center gap-2 rounded-md p-2 ">
-                    <ServerIcon className="h-5 w-5" />
-                    IP Stock (Buy Now)
-                  </h1>
-                </Link>
-                <Link href="/dashboard/orders" prefetch={false}>
-                  <h1 className="flex items-center gap-2 rounded-xl px-3 py-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-white -foreground">
-                    <ReceiptIndianRupee className="h-5 w-5" />
-                    Order History
-                  </h1>
-                </Link>
-                <Link href="/dashboard/scripts" prefetch={false}>
-                  <h1 className="flex items-center gap-2 rounded-xl px-3 py-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-white -foreground">
-                    <NotebookText className="h-5 w-5" />
-                    Scripts
-                  </h1>
-                </Link>
-              </nav>
-            </div>
-            <div className="p-4 border-t">
+  const accountItems: NavItem[] = [
+    {
+      href: '/dashboard/my-account',
+      label: 'Profile Settings',
+      icon: Settings,
+    },
+    {
+      href: '/dashboard/changePassword',
+      label: 'Security',
+      icon: Lock,
+    }
+  ];
 
-              <h1 onClick={handleLogout} className="flex cursor-pointer items-center gap-2 rounded-md p-2 ">
-                <LogOutIcon className="h-5 w-5" />
-                Logout
-              </h1>
+  const isActive = (href: string) => {
+    return pathname === href;
+  };
 
-            </div>
+  const SidebarContent = ({ isMobile = false }: { isMobile?: boolean }) => (
+    <div className="flex flex-col h-full bg-background">
+      {/* Header */}
+      <div className=" items-center justify-between p-4 lg:p-6 border-b bg-gradient-to-r from-primary/5 to-transparent">
+            <div className=''>
+            <h1 className="font-bold text-4xl">Ocean Linux</h1>
+
           </div>
-        </SheetContent>
-      </Sheet>
 
-      {/* Permanent Sidebar for Large Screens */}
-      <div className="hidden lg:flex  lg:flex-col lg:w-64 lg:h-screen lg:inset-y-0 lg:z-10 lg:bg-background lg:border-r lg:shadow-lg">
-        <div className="flex items-center justify-between p-4 shadow-md">
-          <Link href="/" prefetch={false}>
-            <h1 className="flex items-center gap-2 font-semibold">
-              <LucideWaves className="h-6" />
-              Ocean Linux
-            </h1>
-          </Link>
+        <div className='flex items-center justify-center scale-90 '>
+          <img src='/backtick.png' className='h-6' />
+          <p className="text-sm text-muted-foreground">A Product of Backtick Labs</p>
         </div>
-        <div className="flex-1 overflow-y-auto">
-          <nav className="flex flex-col space-y-2 p-4">
-            <Link href="/dashboard" prefetch={false}>
-              <h1 className="flex items-center gap-2 rounded-xl px-3 py-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-white -foreground">
-                <LayoutDashboardIcon className="h-5 w-5" />
-                Dashboard
-              </h1>
-            </Link>
-            <Link href="/dashboard/viewLinux" prefetch={false}>
-              <h1 className="flex items-center gap-2 rounded-xl px-3 py-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-white -foreground">
-                <ReplyIcon className="h-5 w-5" />
-                View Orders
-              </h1>
-            </Link>
-            <Link href="/dashboard/ipStock" prefetch={false}>
-              <h1 className="flex items-center gap-2 rounded-xl px-3 py-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-white -foreground">
-                <ServerIcon className="h-5 w-5" />
-                IP Stock (Buy Now)
-              </h1>
-            </Link>
-            <Link href="/dashboard/orders" prefetch={false}>
-              <h1 className="flex items-center gap-2 rounded-xl px-3 py-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-white -foreground">
-                <ReceiptIndianRupee className="h-5 w-5" />
-                Order History
-              </h1>
-            </Link>
-            <Link href="/dashboard/scripts" prefetch={false}>
-              <h1 className="flex items-center gap-2 rounded-xl px-3 py-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-white -foreground">
-                <NotebookText className="h-5 w-5" />
-                Scripts
-              </h1>
-            </Link>
-            <Collapsible className="grid gap-2">
-              <CollapsibleTrigger className="flex items-center justify-between rounded-xl px-3 py-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-white -foreground [&[data-state=open]>svg]:rotate-90">
-                <div className="flex items-center gap-2">
+
+        <Link href="/" className="flex items-center gap-3">
+          {/* <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary/10">
+            <LucideWaves className="h-5 w-5 text-primary" />
+          </div> */}
+
+        </Link>
+
+      </div>
+
+      {/* Navigation */}
+      <div className="flex-1 overflow-y-auto scrollbar-hide p-4 lg:p-6">
+        <nav className="space-y-2">
+          {/* Main Navigation */}
+          <div className="space-y-1">
+            {navItems.map((item) => (
+              <Link
+                key={item.href}
+                href={item.href}
+                onClick={() => isMobile && setOpen(false)}
+                className={cn(
+                  "flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-medium transition-all duration-200",
+                  "hover:bg-accent/50 hover:scale-[1.02] active:scale-[0.98]",
+                  isActive(item.href)
+                    ? "bg-primary text-white /10 text- border border-primary/20"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <item.icon className="h-5 w-5 flex-shrink-0" />
+                <span className="flex-1">{item.label}</span>
+                {item.badge && (
+                  <Badge variant="secondary" className="text-xs px-2 py-0.5">
+                    {item.badge}
+                  </Badge>
+                )}
+              </Link>
+            ))}
+          </div>
+
+          <Separator className="my-4" />
+
+          {/* Account Section */}
+          <div className="space-y-1">
+            <Collapsible open={accountOpen} onOpenChange={setAccountOpen}>
+              <CollapsibleTrigger className={cn(
+                "flex w-full items-center justify-between rounded-xl px-3 py-3 text-sm font-medium transition-all duration-200",
+                "hover:bg-accent/50 text-muted-foreground hover:text-foreground",
+                "[&[data-state=open]>svg]:rotate-180"
+              )}>
+                <div className="flex items-center gap-3">
                   <UserIcon className="h-5 w-5" />
                   Account
                 </div>
-                <ChevronDownIcon className="h-4 w-4 transition-transform" />
+                <ChevronDownIcon className="h-4 w-4 transition-transform duration-200" />
               </CollapsibleTrigger>
-              <CollapsibleContent className="grid gap-2 px-3">
-                <Link
-                  href="/dashboard/my-account"
-                  className="flex items-center gap-2 rounded-xl py-2 px-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-white -foreground"
-                  prefetch={false}
-                >
-                  My Account
-                </Link>
-                <Link
-                  href="/dashboard/changePassword"
-                  className="flex items-center gap-2 rounded-xl px-2 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-white -foreground"
-                  prefetch={false}
-                >
-                  Change Password
-                </Link>
+              <CollapsibleContent className="space-y-1 pt-2">
+                {accountItems.map((item) => (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    onClick={() => isMobile && setOpen(false)}
+                    className={cn(
+                      "flex items-center gap-3 rounded-lg px-6 py-2 text-sm font-medium transition-all duration-200",
+                      "hover:bg-accent/30 ml-3",
+                      isActive(item.href)
+                        ? "bg-primary/10 text-primary"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    <item.icon className="h-4 w-4" />
+                    {item.label}
+                  </Link>
+                ))}
               </CollapsibleContent>
             </Collapsible>
-          </nav>
-        </div>
-        <div className="p-4 border-t">
-          <h1 onClick={handleLogout} className="flex items-center cursor-pointer gap-2 rounded-xl px-3 py-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-white -foreground">
-            <LogOutIcon className="h-5 w-5" />
-            Logout
-          </h1>
+          </div>
+        </nav>
 
+        {/* Quick Actions */}
+        <div className="mt-8">
+          <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+            Quick Actions
+          </h3>
+          <div className="space-y-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full justify-start h-9"
+              onClick={() => {
+                router.push('/dashboard/ipStock');
+                isMobile && setOpen(false);
+              }}
+            >
+              <ServerIcon className="h-4 w-4 mr-2" />
+              New Order
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full justify-start h-9"
+              onClick={() => {
+                // Add billing functionality
+                isMobile && setOpen(false);
+              }}
+            >
+              <CreditCard className="h-4 w-4 mr-2" />
+              Billing
+            </Button>
+          </div>
         </div>
       </div>
+
+      {/* Footer */}
+      <div className="p-4 lg:p-6 border-t bg-muted/20">
+        <Button
+          onClick={handleLogout}
+          variant="ghost"
+          className="w-full justify-start text-destructive hover:text-destructive hover:bg-destructive/10"
+        >
+          <LogOutIcon className="h-5 w-5 mr-3" />
+          Logout
+        </Button>
+      </div>
     </div>
+  );
+
+  return (
+    <>
+      {/* Mobile Sidebar */}
+      <Sheet open={open} onOpenChange={setOpen}>
+        <SheetTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="fixed top-4 left-4 z-50 lg:hidden bg-background/80 backdrop-blur-sm border shadow-md"
+          >
+            <Menu className="h-5 w-5" />
+            <span className="sr-only">Open sidebar</span>
+          </Button>
+        </SheetTrigger>
+        <SheetContent side="left" className="w-80 p-0">
+          <SidebarContent isMobile />
+        </SheetContent>
+      </Sheet>
+
+      {/* Desktop Sidebar */}
+      <div className="hidden lg:flex lg:flex-col lg:w-72 lg:h-screen lg:fixed lg:inset-y-0 lg:z-10 lg:bg-background lg:border-r lg:shadow-sm">
+        <SidebarContent />
+      </div>
+    </>
   );
 };
 

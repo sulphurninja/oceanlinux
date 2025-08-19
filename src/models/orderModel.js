@@ -42,12 +42,22 @@ const orderSchema = new mongoose.Schema({
     },
     provisioningError: { type: String, default: '' },
     autoProvisioned: { type: Boolean, default: false },
+
+    // VPS Management tracking fields
+    lastAction: { type: String }, // 'start', 'stop', 'reboot', 'changepassword', 'reinstall'
+    lastActionTime: { type: Date },
+    lastSyncTime: { type: Date }, // When we last synced with Hostycare API
+    serverDetails: {
+        lastUpdated: { type: Date },
+        rawDetails: { type: mongoose.Schema.Types.Mixed },
+        rawInfo: { type: mongoose.Schema.Types.Mixed }
+    }
 }, { timestamps: true });
 
 // ✅ add indexes so sort & lookups are fast
 orderSchema.index({ createdAt: -1 });
 orderSchema.index({ user: 1 });
-
-
+orderSchema.index({ hostycareServiceId: 1 });
+orderSchema.index({ lastSyncTime: -1 });
 
 export default mongoose.models.Order || mongoose.model('Order', orderSchema);

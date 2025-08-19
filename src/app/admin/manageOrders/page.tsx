@@ -252,7 +252,8 @@ const ManageOrders = () => {
             order.user?.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
             order.productName.toLowerCase().includes(searchTerm.toLowerCase()) ||
             order.status.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            order.transactionId.toLowerCase().includes(searchTerm.toLowerCase());
+            order.transactionId.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            (order.ipAddress && order.ipAddress.toLowerCase().includes(searchTerm.toLowerCase()));
 
         // Status filter
         const matchesStatus = !filters.status || order.status === filters.status;
@@ -560,6 +561,7 @@ const ManageOrders = () => {
                                         <TableHead className="w-[100px]">Price</TableHead>
                                         <TableHead className="w-[120px]">Status</TableHead>
                                         <TableHead className="w-[160px]">Provisioning</TableHead>
+                                        <TableHead className="w-[140px]">Transaction ID</TableHead>
                                         <TableHead className="w-[120px]">Date</TableHead>
                                         <TableHead className="w-[200px]">Actions</TableHead>
                                     </TableRow>
@@ -567,7 +569,7 @@ const ManageOrders = () => {
                                 <TableBody>
                                     {filteredOrders.length === 0 ? (
                                         <TableRow>
-                                            <TableCell colSpan={8} className="h-32 text-center text-muted-foreground">
+                                            <TableCell colSpan={9} className="h-32 text-center text-muted-foreground">
                                                 {hasActiveFilters ? 'No orders match your search criteria.' : 'No orders found.'}
                                             </TableCell>
                                         </TableRow>
@@ -590,6 +592,11 @@ const ManageOrders = () => {
                                                 </TableCell>
                                                 <TableCell>
                                                     {getProvisioningStatusBadge(order)}
+                                                </TableCell>
+                                                <TableCell>
+                                                    <div className="text-sm font-mono text-muted-foreground truncate max-w-[120px]" title={order.transactionId}>
+                                                        {order.transactionId || 'N/A'}
+                                                    </div>
                                                 </TableCell>
                                                 <TableCell>
                                                     <div className="text-sm">
@@ -631,6 +638,7 @@ const ManageOrders = () => {
                                     )}
                                 </TableBody>
                             </Table>
+
                         </div>
                     </div>
                 </ScrollArea>
