@@ -9,48 +9,57 @@ class AutoProvisioningService {
     console.log('[AUTO-PROVISION-SERVICE] 🏗️ AutoProvisioningService instance created');
   }
 
-// REPLACE the generateCredentials method completely
-generateCredentials(productName = '') {
-  console.log('[AUTO-PROVISION-SERVICE] 🔐 Generating safe credentials...');
-
-  const upperCase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-  const lowerCase = 'abcdefghijklmnopqrstuvwxyz';
-  const numbers = '0123456789';
-  
-  // ONLY these 4 special characters - NOTHING ELSE!
-  const safeSpecialChars = '@#&$';
-
-  let password = '';
-
-  // Ensure at least one character from each category
-  password += upperCase[Math.floor(Math.random() * upperCase.length)];
-  password += lowerCase[Math.floor(Math.random() * lowerCase.length)];
-  password += numbers[Math.floor(Math.random() * numbers.length)];
-  password += safeSpecialChars[Math.floor(Math.random() * safeSpecialChars.length)];
-
-  // Fill the rest randomly (16 characters total)
-  const allChars = upperCase + lowerCase + numbers + safeSpecialChars;
-  for (let i = password.length; i < 16; i++) {
-    password += allChars[Math.floor(Math.random() * allChars.length)];
+  // NEW: Determine OS from product name
+  getOSFromProductName(productName = '') {
+    const s = String(productName).toLowerCase();
+    const isWindows = s.includes('vps') || s.includes('rdp') || s.includes('windows');
+    return isWindows ? 'Windows 2022 64' : 'Ubuntu 22';
   }
 
-  // Shuffle the password
-  password = password.split('').sort(() => 0.5 - Math.random()).join('');
 
-  // Use context-aware username
-  const username = this.getLoginUsernameFromProductName(productName);
 
-  const credentials = {
-    username: username,
-    password: password
-  };
+  // REPLACE the generateCredentials method completely
+  generateCredentials(productName = '') {
+    console.log('[AUTO-PROVISION-SERVICE] 🔐 Generating safe credentials...');
 
-  console.log('[AUTO-PROVISION-SERVICE] ✅ Safe credentials generated:');
-  console.log(`   - Username: ${credentials.username}`);
-  console.log(`   - Password: ${credentials.password.substring(0, 4)}**** (16 chars, ONLY @#&$ specials)`);
+    const upperCase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    const lowerCase = 'abcdefghijklmnopqrstuvwxyz';
+    const numbers = '0123456789';
 
-  return credentials;
-}
+    // ONLY these 4 special characters - NOTHING ELSE!
+    const safeSpecialChars = '@#&$';
+
+    let password = '';
+
+    // Ensure at least one character from each category
+    password += upperCase[Math.floor(Math.random() * upperCase.length)];
+    password += lowerCase[Math.floor(Math.random() * lowerCase.length)];
+    password += numbers[Math.floor(Math.random() * numbers.length)];
+    password += safeSpecialChars[Math.floor(Math.random() * safeSpecialChars.length)];
+
+    // Fill the rest randomly (16 characters total)
+    const allChars = upperCase + lowerCase + numbers + safeSpecialChars;
+    for (let i = password.length; i < 16; i++) {
+      password += allChars[Math.floor(Math.random() * allChars.length)];
+    }
+
+    // Shuffle the password
+    password = password.split('').sort(() => 0.5 - Math.random()).join('');
+
+    // Use context-aware username
+    const username = this.getLoginUsernameFromProductName(productName);
+
+    const credentials = {
+      username: username,
+      password: password
+    };
+
+    console.log('[AUTO-PROVISION-SERVICE] ✅ Safe credentials generated:');
+    console.log(`   - Username: ${credentials.username}`);
+    console.log(`   - Password: ${credentials.password.substring(0, 4)}**** (16 chars, ONLY @#&$ specials)`);
+
+    return credentials;
+  }
 
 
   // Generate hostname
@@ -328,6 +337,10 @@ generateCredentials(productName = '') {
         // STEP 8: Update order with success (even if IP is pending)
         console.log(`[AUTO-PROVISION] 💾 STEP 8: Updating order with provisioning success...`);
 
+        // Determine OS from product name
+        const detectedOS = this.getOSFromProductName(order.productName);
+        console.log(`[AUTO-PROVISION] 🖥️ Detected OS from product "${order.productName}": ${detectedOS}`);
+
         const updateData = {
           status: 'active',
           provisioningStatus: 'active',
@@ -335,7 +348,8 @@ generateCredentials(productName = '') {
           username: credentials.username,
           password: credentials.password,
           autoProvisioned: true,
-          provisioningError: ''
+          provisioningError: '',
+          os: detectedOS // Add OS detection
         };
 
         if (ipAddress) {
@@ -359,6 +373,7 @@ generateCredentials(productName = '') {
         console.log(`   - Service ID: ${serviceId}`);
         console.log(`   - IP Status: ${ipAddress || 'Will be assigned automatically'}`);
         console.log(`   - Username: ${credentials.username}`);
+        console.log(`   - OS: ${detectedOS}`); // Log detected OS
         console.log(`   - Product ID: ${productId}`);
         console.log(`   - Product Name: ${memoryConfig.hostycareProductName || 'N/A'}`);
         console.log(`   - Hostname: ${hostname}`);
