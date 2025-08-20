@@ -109,7 +109,7 @@ const ManageOrders = () => {
             const result = await response.json();
 
             if (result.success) {
-                toast.success('Server provisioning started successfully!');
+                toast.success('Server provisioned successfully!');
                 fetchOrders();
             } else {
                 toast.error(result.message || 'Provisioning failed');
@@ -121,6 +121,7 @@ const ManageOrders = () => {
             setIsProvisioningDialogOpen(false);
         }
     };
+
     const handleBatchAutoProvision = async () => {
         setBatchProvisioning(true);
         try {
@@ -615,8 +616,9 @@ const ManageOrders = () => {
                                                             {order.autoProvisioned ? 'View' : 'Edit'}
                                                         </Button>
 
-                                                        {((order.status === 'paid' || order.status === 'confirmed') &&
-                                                            (!order.autoProvisioned || order.provisioningStatus === 'failed')) && (
+                                                        {/* Show Auto-Provision button for paid/confirmed orders that aren't provisioned */}
+                                                        {(order.status === 'paid' || order.status === 'confirmed') &&
+                                                            !order.autoProvisioned && (
                                                                 <Button
                                                                     size="sm"
                                                                     onClick={() => handleProvision(order)}
