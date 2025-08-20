@@ -12,47 +12,51 @@ export async function POST(request) {
     // Helper function to determine OS from product name
     const determineOSFromProductName = (productName = '') => {
       const s = String(productName).toLowerCase();
-
       if (s.includes('windows') || s.includes('rdp') || s.includes('vps')) {
         return 'Windows 2022 64';
       } else if (s.includes('centos')) {
         return 'CentOS 7';
       } else {
-        return 'Ubuntu 22'; // default
+        return 'Ubuntu 22';
       }
     };
 
-    // Simplified query - back to working logic but with race condition protection
-    // Simplified query - back to working logic but with race condition protection
+    // Reset any orders stuck in provisioning for more than 10 minutes
+    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+    await Order.updateMany(
+      {
+        status: 'confirmed',
+        provisioningStatus: 'provisioning',
+        updatedAt: { $lt: tenMinutesAgo }
+      },
+      {
+        provisioningStatus: 'failed',
+        provisioningError: 'Provisioning timed out - API timeout or server error',
+        updatedAt: new Date()
+      }
+    );
+
+    // Find orders that need provisioning - SIMPLIFIED QUERY
     const ordersToProvision = await Order.find({
       status: 'confirmed',
-      // Exclude orders that are currently being processed or already completed
-      provisioningStatus: { $nin: ['provisioning', 'active'] },
-      // Only include orders that need provisioning
       $or: [
-        // New orders that haven't been auto-provisioned
+        // New orders
         { autoProvisioned: false },
         { autoProvisioned: { $exists: false } },
-        // Retry specific failed cases
+        // Failed orders that can be retried
         {
           provisioningStatus: 'failed',
           autoProvisioned: true,
           $or: [
             { provisioningError: { $regex: 'Password strength should not be less than 100', $options: 'i' } },
-            { provisioningError: { $regex: 'The following IP\\(s\\) are used by another VPS', $options: 'i' } }
+            { provisioningError: { $regex: 'The following IP\\(s\\) are used by another VPS', $options: 'i' } },
+            { provisioningError: { $regex: 'timed out', $options: 'i' } }, // Include timeout errors
+            { provisioningError: { $regex: 'API timeout', $options: 'i' } }
           ]
         }
       ],
-      // Additional safety check - exclude orders that already have complete server details
-      $nor: [
-        {
-          $and: [
-            { ipAddress: { $exists: true, $ne: '' } },
-            { username: { $exists: true, $ne: '' } },
-            { password: { $exists: true, $ne: '' } }
-          ]
-        }
-      ]
+      // Exclude currently processing or completed
+      provisioningStatus: { $nin: ['provisioning', 'active'] }
     }).populate('user', 'name email');
 
     console.log(`Found ${ordersToProvision.length} orders to provision`);
@@ -68,16 +72,15 @@ export async function POST(request) {
     const provisioningService = new AutoProvisioningService();
     const results = [];
 
-    // Process each order
+    // Process each order with timeout handling
     for (const order of ordersToProvision) {
       console.log(`Processing order ${order._id} for ${order.user?.email}`);
 
       try {
-        // CRITICAL: Double-check and set provisioning status to prevent race conditions
+        // Set provisioning status atomically
         const updateResult = await Order.findOneAndUpdate(
           {
             _id: order._id,
-            // Only update if not already being processed
             provisioningStatus: { $nin: ['provisioning', 'active'] }
           },
           {
@@ -87,9 +90,8 @@ export async function POST(request) {
           { new: true }
         );
 
-        // If update failed, another process is handling this order
         if (!updateResult) {
-          console.log(`Order ${order._id} already being processed by another instance, skipping`);
+          console.log(`Order ${order._id} already being processed, skipping`);
           results.push({
             orderId: order._id,
             customerEmail: order.user?.email,
@@ -101,34 +103,26 @@ export async function POST(request) {
           continue;
         }
 
-        // Determine and set the correct OS based on product name
+        // Set OS
         const correctOS = determineOSFromProductName(order.productName);
-        console.log(`Order ${order._id}: Determined OS from product "${order.productName}": ${correctOS}`);
-
-        // Update the order with correct OS before provisioning
         if (order.os !== correctOS) {
-          console.log(`Order ${order._id}: Updating OS from "${order.os}" to "${correctOS}"`);
           await Order.findByIdAndUpdate(order._id, { os: correctOS });
         }
 
-        // Check if this is a retry
-        const isRetry = order.provisioningStatus === 'failed' &&
-          order.provisioningError && (
-            order.provisioningError.includes('Password strength should not be less than 100') ||
-            order.provisioningError.includes('The following IP(s) are used by another VPS')
-          );
-
+        // Check if retry
+        const isRetry = order.provisioningStatus === 'failed' && order.provisioningError;
         if (isRetry) {
-          console.log(`Retrying order ${order._id} due to recoverable error: ${order.provisioningError}`);
-          // Reset error but keep status as 'provisioning' (already set above)
-          await Order.findByIdAndUpdate(order._id, {
-            provisioningError: '',
-            os: correctOS
-          });
+          console.log(`Retrying order ${order._id} due to: ${order.provisioningError}`);
+          await Order.findByIdAndUpdate(order._id, { provisioningError: '' });
         }
 
-        // Attempt provisioning
-        const result = await provisioningService.provisionServer(order._id);
+        // CRITICAL: Add timeout to prevent hanging
+        const provisioningPromise = provisioningService.provisionServer(order._id);
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Provisioning timeout after 5 minutes')), 5 * 60 * 1000)
+        );
+
+        const result = await Promise.race([provisioningPromise, timeoutPromise]);
 
         results.push({
           orderId: order._id,
@@ -141,18 +135,20 @@ export async function POST(request) {
           skipped: false
         });
 
-        console.log(`Order ${order._id} provisioning result:`, result.success ? 'SUCCESS' : 'FAILED');
+        console.log(`Order ${order._id} result:`, result.success ? 'SUCCESS' : 'FAILED');
 
-        // Add delay between orders
+        // Delay between orders
         await new Promise(resolve => setTimeout(resolve, 2000));
 
       } catch (error) {
         console.error(`Error provisioning order ${order._id}:`, error);
 
-        // Reset provisioning status on error
+        // Reset status on error
         await Order.findByIdAndUpdate(order._id, {
           provisioningStatus: 'failed',
-          provisioningError: error.message
+          provisioningError: error.message.includes('timeout') ?
+            'Provisioning timed out - API timeout or server error' :
+            error.message
         });
 
         results.push({
@@ -168,14 +164,14 @@ export async function POST(request) {
       }
     }
 
-    // Summary statistics
+    // Summary
     const processedResults = results.filter(r => !r.skipped);
     const successCount = processedResults.filter(r => r.success).length;
     const failedCount = processedResults.filter(r => !r.success).length;
     const retryCount = processedResults.filter(r => r.isRetry).length;
     const skippedCount = results.filter(r => r.skipped).length;
 
-    console.log(`Batch provisioning completed: ${successCount} successful, ${failedCount} failed, ${retryCount} retries, ${skippedCount} skipped`);
+    console.log(`Batch completed: ${successCount} successful, ${failedCount} failed, ${retryCount} retries, ${skippedCount} skipped`);
 
     return NextResponse.json({
       success: true,
@@ -203,6 +199,8 @@ export async function POST(request) {
     );
   }
 }
+
+// ... rest of the GET method remains the same ...
 
 // GET endpoint - simplified query to match POST logic
 export async function GET(request) {
