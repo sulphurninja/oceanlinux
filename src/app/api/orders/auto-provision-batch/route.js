@@ -9,7 +9,7 @@ export async function POST(request) {
   try {
     console.log('Starting batch auto-provisioning for confirmed orders...');
 
-    // Helper function to determine OS from product name (same logic as autoProvisioningService)
+    // Helper function to determine OS from product name
     const determineOSFromProductName = (productName = '') => {
       const s = String(productName).toLowerCase();
 
@@ -22,18 +22,17 @@ export async function POST(request) {
       }
     };
 
-    // Find all confirmed orders that haven't been auto-provisioned yet
+    // Simplified query - back to working logic but with race condition protection
     const ordersToProvision = await Order.find({
       status: 'confirmed',
+      // Exclude orders that are currently being processed or already completed
+      provisioningStatus: { $nin: ['provisioning', 'active'] },
+      // Only include orders that need provisioning
       $or: [
-        // New orders that have never been auto-provisioned
-        {
-          $and: [
-            { $or: [{ autoProvisioned: false }, { autoProvisioned: { $exists: false } }] },
-            { $or: [{ provisioningStatus: { $exists: false } }, { provisioningStatus: 'pending' }] }
-          ]
-        },
-        // Only retry specific failed cases
+        // New orders that haven't been auto-provisioned
+        { autoProvisioned: false },
+        { autoProvisioned: { $exists: false } },
+        // Retry specific failed cases
         {
           provisioningStatus: 'failed',
           autoProvisioned: true,
@@ -43,18 +42,14 @@ export async function POST(request) {
           ]
         }
       ],
-      // CRITICAL: Exclude orders that are already successfully provisioned or currently being processed
-      provisioningStatus: { $nin: ['active', 'provisioning'] },
-      // Also exclude orders that already have server details (manually set or auto-provisioned successfully)
-      $nor: [
-        {
-          $and: [
-            { ipAddress: { $exists: true, $ne: '' } },
-            { username: { $exists: true, $ne: '' } },
-            { provisioningStatus: 'active' }
-          ]
-        }
-      ]
+      // Additional safety check - exclude orders that already have complete server details
+      $not: {
+        $and: [
+          { ipAddress: { $exists: true, $ne: '' } },
+          { username: { $exists: true, $ne: '' } },
+          { password: { $exists: true, $ne: '' } }
+        ]
+      }
     }).populate('user', 'name email');
 
     console.log(`Found ${ordersToProvision.length} orders to provision`);
@@ -75,55 +70,57 @@ export async function POST(request) {
       console.log(`Processing order ${order._id} for ${order.user?.email}`);
 
       try {
-        // Double-check the order status before processing (race condition protection)
-        const currentOrder = await Order.findById(order._id);
-        if (!currentOrder) {
-          console.log(`Order ${order._id} no longer exists, skipping`);
-          continue;
-        }
+        // CRITICAL: Double-check and set provisioning status to prevent race conditions
+        const updateResult = await Order.findOneAndUpdate(
+          {
+            _id: order._id,
+            // Only update if not already being processed
+            provisioningStatus: { $nin: ['provisioning', 'active'] }
+          },
+          {
+            provisioningStatus: 'provisioning',
+            updatedAt: new Date()
+          },
+          { new: true }
+        );
 
-        // Skip if already being processed or completed
-        if (currentOrder.provisioningStatus === 'provisioning' ||
-          currentOrder.provisioningStatus === 'active' ||
-          (currentOrder.ipAddress && currentOrder.username && currentOrder.provisioningStatus !== 'failed')) {
-          console.log(`Order ${order._id} already processed or in progress, skipping`);
+        // If update failed, another process is handling this order
+        if (!updateResult) {
+          console.log(`Order ${order._id} already being processed by another instance, skipping`);
           results.push({
             orderId: order._id,
             customerEmail: order.user?.email,
             productName: order.productName,
             success: true,
-            message: 'Already provisioned or in progress',
-            isRetry: false,
+            message: 'Already being processed',
             skipped: true
           });
           continue;
         }
 
-        // 🚨 NEW: Determine and set the correct OS based on product name
-        const correctOS = determineOSFromProductName(currentOrder.productName);
-        console.log(`Order ${order._id}: Determined OS from product "${currentOrder.productName}": ${correctOS}`);
+        // Determine and set the correct OS based on product name
+        const correctOS = determineOSFromProductName(order.productName);
+        console.log(`Order ${order._id}: Determined OS from product "${order.productName}": ${correctOS}`);
 
         // Update the order with correct OS before provisioning
-        if (currentOrder.os !== correctOS) {
-          console.log(`Order ${order._id}: Updating OS from "${currentOrder.os}" to "${correctOS}"`);
+        if (order.os !== correctOS) {
+          console.log(`Order ${order._id}: Updating OS from "${order.os}" to "${correctOS}"`);
           await Order.findByIdAndUpdate(order._id, { os: correctOS });
         }
 
-        // Check if this is a retry for specific errors
-        const isRetry = currentOrder.provisioningStatus === 'failed' &&
-          currentOrder.provisioningError && (
-            currentOrder.provisioningError.includes('Password strength should not be less than 100') ||
-            currentOrder.provisioningError.includes('The following IP(s) are used by another VPS')
+        // Check if this is a retry
+        const isRetry = order.provisioningStatus === 'failed' &&
+          order.provisioningError && (
+            order.provisioningError.includes('Password strength should not be less than 100') ||
+            order.provisioningError.includes('The following IP(s) are used by another VPS')
           );
 
         if (isRetry) {
-          console.log(`Retrying order ${order._id} due to recoverable error: ${currentOrder.provisioningError}`);
-
-          // Reset provisioning status for retry
+          console.log(`Retrying order ${order._id} due to recoverable error: ${order.provisioningError}`);
+          // Reset error but keep status as 'provisioning' (already set above)
           await Order.findByIdAndUpdate(order._id, {
-            provisioningStatus: 'pending',
             provisioningError: '',
-            os: correctOS // Ensure OS is also updated on retry
+            os: correctOS
           });
         }
 
@@ -134,7 +131,7 @@ export async function POST(request) {
           orderId: order._id,
           customerEmail: order.user?.email,
           productName: order.productName,
-          detectedOS: correctOS, // Include the detected OS in results
+          detectedOS: correctOS,
           success: result.success,
           message: result.message || (result.success ? 'Provisioned successfully' : 'Provisioning failed'),
           isRetry: isRetry,
@@ -142,13 +139,18 @@ export async function POST(request) {
         });
 
         console.log(`Order ${order._id} provisioning result:`, result.success ? 'SUCCESS' : 'FAILED');
-        console.log(`Order ${order._id} OS set to: ${correctOS}`);
 
-        // Add a small delay between orders to avoid overwhelming the API
+        // Add delay between orders
         await new Promise(resolve => setTimeout(resolve, 2000));
 
       } catch (error) {
         console.error(`Error provisioning order ${order._id}:`, error);
+
+        // Reset provisioning status on error
+        await Order.findByIdAndUpdate(order._id, {
+          provisioningStatus: 'failed',
+          provisioningError: error.message
+        });
 
         results.push({
           orderId: order._id,
@@ -199,7 +201,7 @@ export async function POST(request) {
   }
 }
 
-// GET endpoint remains the same...
+// GET endpoint - simplified query to match POST logic
 export async function GET(request) {
   await connectDB();
 
@@ -220,18 +222,13 @@ export async function GET(request) {
       }
     ]);
 
-    // Get orders that need provisioning
+    // Get orders that need provisioning - same logic as POST
     const ordersNeedingProvisioning = await Order.countDocuments({
       status: 'confirmed',
+      provisioningStatus: { $nin: ['provisioning', 'active'] },
       $or: [
-        // New orders that have never been auto-provisioned
-        {
-          $and: [
-            { $or: [{ autoProvisioned: false }, { autoProvisioned: { $exists: false } }] },
-            { $or: [{ provisioningStatus: { $exists: false } }, { provisioningStatus: 'pending' }] }
-          ]
-        },
-        // Only retry specific failed cases
+        { autoProvisioned: false },
+        { autoProvisioned: { $exists: false } },
         {
           provisioningStatus: 'failed',
           autoProvisioned: true,
@@ -241,21 +238,16 @@ export async function GET(request) {
           ]
         }
       ],
-      // Exclude orders that are already successfully provisioned or currently being processed
-      provisioningStatus: { $nin: ['active', 'provisioning'] },
-      // Also exclude orders that already have server details
-      $nor: [
-        {
-          $and: [
-            { ipAddress: { $exists: true, $ne: '' } },
-            { username: { $exists: true, $ne: '' } },
-            { provisioningStatus: 'active' }
-          ]
-        }
-      ]
+      $not: {
+        $and: [
+          { ipAddress: { $exists: true, $ne: '' } },
+          { username: { $exists: true, $ne: '' } },
+          { password: { $exists: true, $ne: '' } }
+        ]
+      }
     });
 
-    // Get failed orders that can be retried (same fix)
+    // Get failed orders that can be retried
     const retryableOrders = await Order.countDocuments({
       status: 'confirmed',
       provisioningStatus: 'failed',
@@ -268,11 +260,10 @@ export async function GET(request) {
 
     let detailsData = {};
     if (includeDetails) {
-      // Get recent provisioning activity
       detailsData.recentActivity = await Order.find({
         status: 'confirmed',
         autoProvisioned: true,
-        updatedAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) } // Last 24 hours
+        updatedAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }
       })
         .select('user productName provisioningStatus provisioningError updatedAt os')
         .populate('user', 'email')
