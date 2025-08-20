@@ -260,6 +260,8 @@ const ViewLinux = () => {
         setTimeout(() => setCopied(null), 2000);
     };
 
+    // ... existing code ...
+
     const getStatusBadge = (status: string, provisioningStatus?: string, lastAction?: string) => {
         const currentStatus = provisioningStatus || status;
 
@@ -306,22 +308,34 @@ const ViewLinux = () => {
             }
         }
 
-        // Default status badges
+        // Default status badges - FIXED: Handle completed status properly
         switch (currentStatus.toLowerCase()) {
             case 'active':
-            case 'completed':
                 return (
                     <Badge className="bg-green-50 text-green-700 border-green-200">
                         <div className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></div>
                         Active
                     </Badge>
                 );
+            case 'completed':
+                return (
+                    <Badge className="bg-green-50 text-green-700 border-green-200">
+                        <CheckCircle className="w-3 h-3 mr-1" />
+                        Completed
+                    </Badge>
+                );
             case 'pending':
-            case 'provisioning':
                 return (
                     <Badge className="bg-amber-50 text-amber-700 border-amber-200">
                         <Clock className="w-3 h-3 mr-1" />
-                        {currentStatus === 'provisioning' ? 'Provisioning' : 'Pending'}
+                        Pending
+                    </Badge>
+                );
+            case 'provisioning':
+                return (
+                    <Badge className="bg-amber-50 text-amber-700 border-amber-200">
+                        <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                        Provisioning
                     </Badge>
                 );
             case 'suspended':
@@ -332,11 +346,17 @@ const ViewLinux = () => {
                     </Badge>
                 );
             case 'failed':
+                return (
+                    <Badge className="bg-red-50 text-red-700 border-red-200">
+                        <XCircle className="w-3 h-3 mr-1" />
+                        Failed
+                    </Badge>
+                );
             case 'terminated':
                 return (
                     <Badge className="bg-red-50 text-red-700 border-red-200">
                         <XCircle className="w-3 h-3 mr-1" />
-                        {currentStatus === 'terminated' ? 'Terminated' : 'Failed'}
+                        Terminated
                     </Badge>
                 );
             default:
@@ -348,6 +368,7 @@ const ViewLinux = () => {
                 );
         }
     };
+
 
 
     const formatDate = (date: Date | string) => {
@@ -473,7 +494,7 @@ const ViewLinux = () => {
                     </div>
                 ) : (
                     <div className="space-y-4">
-                       {filteredOrders.map((order) => (
+                        {filteredOrders.map((order) => (
                             <Card key={order._id} className="hover:shadow-md transition-shadow">
                                 <CardContent className="p-6">
                                     <div className="flex items-center justify-between">
@@ -609,7 +630,7 @@ const ViewLinux = () => {
                                                 </div>
                                             </CardContent>
                                         </Card>
-{/* Recent Activity Card */}
+                                        {/* Recent Activity Card */}
                                         {(selectedOrder.lastAction || selectedOrder.lastActionTime) && (
                                             <Card>
                                                 <CardHeader>
