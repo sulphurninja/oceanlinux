@@ -23,6 +23,7 @@ export async function POST(request) {
     };
 
     // Simplified query - back to working logic but with race condition protection
+    // Simplified query - back to working logic but with race condition protection
     const ordersToProvision = await Order.find({
       status: 'confirmed',
       // Exclude orders that are currently being processed or already completed
@@ -43,13 +44,15 @@ export async function POST(request) {
         }
       ],
       // Additional safety check - exclude orders that already have complete server details
-      $not: {
-        $and: [
-          { ipAddress: { $exists: true, $ne: '' } },
-          { username: { $exists: true, $ne: '' } },
-          { password: { $exists: true, $ne: '' } }
-        ]
-      }
+      $nor: [
+        {
+          $and: [
+            { ipAddress: { $exists: true, $ne: '' } },
+            { username: { $exists: true, $ne: '' } },
+            { password: { $exists: true, $ne: '' } }
+          ]
+        }
+      ]
     }).populate('user', 'name email');
 
     console.log(`Found ${ordersToProvision.length} orders to provision`);
@@ -223,6 +226,7 @@ export async function GET(request) {
     ]);
 
     // Get orders that need provisioning - same logic as POST
+    // Get orders that need provisioning - same logic as POST
     const ordersNeedingProvisioning = await Order.countDocuments({
       status: 'confirmed',
       provisioningStatus: { $nin: ['provisioning', 'active'] },
@@ -238,13 +242,15 @@ export async function GET(request) {
           ]
         }
       ],
-      $not: {
-        $and: [
-          { ipAddress: { $exists: true, $ne: '' } },
-          { username: { $exists: true, $ne: '' } },
-          { password: { $exists: true, $ne: '' } }
-        ]
-      }
+      $nor: [
+        {
+          $and: [
+            { ipAddress: { $exists: true, $ne: '' } },
+            { username: { $exists: true, $ne: '' } },
+            { password: { $exists: true, $ne: '' } }
+          ]
+        }
+      ]
     });
 
     // Get failed orders that can be retried
