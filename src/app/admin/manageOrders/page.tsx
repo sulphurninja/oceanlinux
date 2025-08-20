@@ -617,22 +617,23 @@ const ManageOrders = () => {
                                                         </Button>
 
                                                         {/* Show Auto-Provision button for paid/confirmed orders that aren't provisioned */}
-                                                        {(order.status === 'paid' || order.status === 'confirmed') &&
-                                                            !order.autoProvisioned && (
-                                                                <Button
-                                                                    size="sm"
-                                                                    onClick={() => handleProvision(order)}
-                                                                    disabled={provisioning === order._id}
-                                                                    className="gap-1"
-                                                                >
-                                                                    {provisioning === order._id ? (
-                                                                        <Loader2 className="w-4 h-4 animate-spin" />
-                                                                    ) : (
-                                                                        <Play className="w-4 h-4" />
-                                                                    )}
-                                                                    Auto-Provision
-                                                                </Button>
-                                                            )}
+                                                        {(order.status === 'paid' || order.status === 'confirmed') && (
+                                                            <Button
+                                                                size="sm"
+                                                                onClick={() => handleProvision(order)}
+                                                                disabled={provisioning === order._id}
+                                                                className="gap-1"
+                                                                variant={order.provisioningStatus === 'failed' ? 'destructive' : 'default'}
+                                                            >
+                                                                {provisioning === order._id ? (
+                                                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                                                ) : (
+                                                                    <Play className="w-4 h-4" />
+                                                                )}
+                                                                {order.provisioningStatus === 'failed' ? 'Retry Auto-Provision' : 'Auto-Provision'}
+                                                            </Button>
+                                                        )}
+
                                                     </div>
                                                 </TableCell>
                                             </TableRow>
