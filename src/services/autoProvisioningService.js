@@ -10,32 +10,43 @@ class AutoProvisioningService {
   }
 
   // Generate random credentials
-  generateCredentials() {
-    console.log('[AUTO-PROVISION-SERVICE] 🔐 Generating credentials...');
+  generateCredentials(productName = '') {
+    console.log('[AUTO-PROVISION-SERVICE] 🔐 Generating enhanced credentials...');
 
-    const generatePassword = (length = 12) => {
-      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
-      let password = '';
-      for (let i = 0; i < length; i++) {
-        password += chars.charAt(Math.floor(Math.random() * chars.length));
-      }
-      return password;
-    };
+    // Generate a stronger password that meets requirements
+    const upperCase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    const lowerCase = 'abcdefghijklmnopqrstuvwxyz';
+    const numbers = '0123456789';
+    const specialChars = '!@#$%^&*()_+-=[]{}|;:,.<>?';
 
-    const generateUsername = () => {
-      const prefixes = ['user', 'admin', 'root', 'client'];
-      const randomNum = Math.floor(Math.random() * 10000);
-      return `${prefixes[Math.floor(Math.random() * prefixes.length)]}${randomNum}`;
-    };
+    let password = '';
+
+    // Ensure at least one character from each category
+    password += upperCase[Math.floor(Math.random() * upperCase.length)];
+    password += lowerCase[Math.floor(Math.random() * lowerCase.length)];
+    password += numbers[Math.floor(Math.random() * numbers.length)];
+    password += specialChars[Math.floor(Math.random() * specialChars.length)];
+
+    // Fill the rest randomly (minimum 16 characters total for better strength)
+    const allChars = upperCase + lowerCase + numbers + specialChars;
+    for (let i = password.length; i < 16; i++) {
+      password += allChars[Math.floor(Math.random() * allChars.length)];
+    }
+
+    // Shuffle the password
+    password = password.split('').sort(() => 0.5 - Math.random()).join('');
+
+    // Use context-aware username based on product type
+    const username = this.getLoginUsernameFromProductName(productName);
 
     const credentials = {
-      username: generateUsername(),
-      password: generatePassword()
+      username: username,
+      password: password
     };
 
-    console.log('[AUTO-PROVISION-SERVICE] ✅ Credentials generated:');
-    console.log(`   - Username: ${credentials.username}`);
-    console.log(`   - Password: ${credentials.password.substring(0, 4)}****`);
+    console.log('[AUTO-PROVISION-SERVICE] ✅ Enhanced credentials generated:');
+    console.log(`   - Username: ${credentials.username} (${productName.includes('Windows') || productName.includes('RDP') ? 'Windows' : 'Linux'} detected)`);
+    console.log(`   - Password: ${credentials.password.substring(0, 4)}**** (${credentials.password.length} chars)`);
 
     return credentials;
   }
@@ -124,8 +135,28 @@ class AutoProvisioningService {
 
       console.log(`[AUTO-PROVISION] ✅ Found IP Stock: ${ipStock.name}`);
 
-      // STEP 4: Get memory configuration
-      const memoryOptions = this.toPlainObject(ipStock.memoryOptions);
+      // STEP 4: Get memory configuration - FIXED VERSION
+      console.log(`[AUTO-PROVISION] 📦 STEP 4: Getting memory configuration...`);
+      console.log(`[AUTO-PROVISION] 🔍 Raw memoryOptions:`, ipStock.memoryOptions);
+      console.log(`[AUTO-PROVISION] 🔍 memoryOptions type:`, typeof ipStock.memoryOptions);
+
+      // Better conversion for Mongoose documents
+      let memoryOptions;
+      if (ipStock.memoryOptions) {
+        if (typeof ipStock.memoryOptions.toObject === 'function') {
+          memoryOptions = ipStock.memoryOptions.toObject();
+        } else if (ipStock.memoryOptions instanceof Map) {
+          memoryOptions = Object.fromEntries(ipStock.memoryOptions.entries());
+        } else if (typeof ipStock.memoryOptions === 'object') {
+          memoryOptions = JSON.parse(JSON.stringify(ipStock.memoryOptions));
+        } else {
+          memoryOptions = {};
+        }
+      } else {
+        memoryOptions = {};
+      }
+
+      console.log(`[AUTO-PROVISION] 🧠 Converted memoryOptions:`, memoryOptions);
       console.log(`[AUTO-PROVISION] 🧠 Available memory options:`, Object.keys(memoryOptions));
       console.log(`[AUTO-PROVISION] 🔍 Looking for memory: "${order.memory}"`);
 
@@ -133,12 +164,16 @@ class AutoProvisioningService {
 
       if (!memoryConfig) {
         // Try variations if exact match fails
+        console.log(`[AUTO-PROVISION] ⚠️ Exact match failed, trying variations...`);
+
         const memoryVariations = [
           order.memory.toLowerCase(),
           order.memory.toUpperCase(),
           order.memory.replace('GB', 'gb'),
           order.memory.replace('gb', 'GB'),
         ];
+
+        console.log(`[AUTO-PROVISION] 🔄 Trying variations:`, memoryVariations);
 
         for (const variation of memoryVariations) {
           if (memoryOptions[variation]) {
@@ -151,6 +186,12 @@ class AutoProvisioningService {
 
       if (!memoryConfig) {
         const availableKeys = Object.keys(memoryOptions);
+        console.error(`[AUTO-PROVISION] ❌ Memory config not found!`);
+        console.error(`   Requested: "${order.memory}"`);
+        console.error(`   Available: [${availableKeys.join(', ')}]`);
+        console.error(`   IP Stock: ${ipStock.name}`);
+        console.error(`   Raw memoryOptions:`, ipStock.memoryOptions);
+
         throw new Error(
           `Memory configuration not found!\n` +
           `Requested: "${order.memory}"\n` +
