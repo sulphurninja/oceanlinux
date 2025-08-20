@@ -249,23 +249,83 @@ console.log(`[AUTO-PROVISION] ✅ Product Name: ${memoryConfig.hostycareProductN
 
         console.log(`[AUTO-PROVISION] 🆔 Service ID: ${serviceId}`);
 
-        // STEP 7: Get service details to extract IP
-        console.log(`[AUTO-PROVISION] 🔍 STEP 7: Getting service details...`);
+        // STEP 7: Get IP address (with patient retry strategy)
+        console.log(`[AUTO-PROVISION] 🔍 STEP 7: Getting IP address...`);
         let ipAddress = null;
 
-        try {
-          const serviceDetails = await this.hostycareApi.getServiceDetails(serviceId);
-          ipAddress = serviceDetails?.data?.service?.dedicatedip ||
-            serviceDetails?.service?.dedicatedip ||
-            serviceDetails?.dedicatedip ||
-            null;
+        // First, try to get IP from the creation response
+        ipAddress = apiResponse?.data?.service?.dedicatedip ||
+          apiResponse?.data?.service?.dedicatedIp ||
+          apiResponse?.service?.dedicatedip ||
+          apiResponse?.service?.dedicatedIp ||
+          apiResponse?.dedicatedip ||
+          apiResponse?.dedicatedIp ||
+          null;
 
-          console.log(`[AUTO-PROVISION] 🌐 IP Address: ${ipAddress || 'Not available yet'}`);
-        } catch (error) {
-          console.log(`[AUTO-PROVISION] ⚠️ Could not get service details immediately:`, error.message);
+        if (ipAddress) {
+          console.log(`[AUTO-PROVISION] ✅ IP found in creation response: ${ipAddress}`);
+        } else {
+          console.log(`[AUTO-PROVISION] 📋 IP not in creation response - this is normal for new servers`);
+          console.log(`[AUTO-PROVISION] ⏳ Server is being provisioned, will attempt to get IP with patience...`);
+
+          // Patient retry strategy - servers can take 5-15 minutes to be ready
+          const maxRetries = 5;
+          const retryDelays = [10000, 20000, 30000, 60000, 120000]; // 10s, 20s, 30s, 1m, 2m
+
+          for (let attempt = 1; attempt <= maxRetries && !ipAddress; attempt++) {
+            const delay = retryDelays[attempt - 1];
+
+            console.log(`[AUTO-PROVISION] ⏳ Waiting ${delay / 1000} seconds before attempt ${attempt}/${maxRetries}...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+
+            try {
+              console.log(`[AUTO-PROVISION] 🔄 Checking server status (attempt ${attempt}/${maxRetries})...`);
+
+              const serviceDetails = await this.hostycareApi.getServiceDetails(serviceId);
+              console.log(`[AUTO-PROVISION] 📊 Service details received:`, JSON.stringify(serviceDetails, null, 2));
+
+              ipAddress = serviceDetails?.data?.service?.dedicatedip ||
+                serviceDetails?.data?.service?.dedicatedIp ||
+                serviceDetails?.service?.dedicatedip ||
+                serviceDetails?.service?.dedicatedIp ||
+                serviceDetails?.dedicatedip ||
+                serviceDetails?.dedicatedIp ||
+                null;
+
+              if (ipAddress) {
+                console.log(`[AUTO-PROVISION] 🎉 IP address obtained: ${ipAddress} (after ${attempt} attempts)`);
+                break;
+              } else {
+                console.log(`[AUTO-PROVISION] ⌛ Server still provisioning... (attempt ${attempt}/${maxRetries})`);
+
+                // Log what we got to help debug
+                if (serviceDetails) {
+                  console.log(`[AUTO-PROVISION] 🔍 Available fields in response:`, Object.keys(serviceDetails));
+                  if (serviceDetails.data) {
+                    console.log(`[AUTO-PROVISION] 🔍 Available fields in data:`, Object.keys(serviceDetails.data));
+                  }
+                  if (serviceDetails.service) {
+                    console.log(`[AUTO-PROVISION] 🔍 Available fields in service:`, Object.keys(serviceDetails.service));
+                  }
+                }
+              }
+            } catch (error) {
+              if (error.message.includes('Details unavailable')) {
+                console.log(`[AUTO-PROVISION] ⌛ Server still being set up (attempt ${attempt}/${maxRetries}) - this is expected`);
+              } else {
+                console.log(`[AUTO-PROVISION] ⚠️ Unexpected error on attempt ${attempt}: ${error.message}`);
+              }
+            }
+          }
         }
 
-        // STEP 8: Update order with success
+        // Don't fail the entire provisioning if IP isn't available yet
+        const ipStatus = ipAddress ? `IP: ${ipAddress}` : 'IP will be assigned when server is ready';
+        console.log(`[AUTO-PROVISION] 🌐 Final status: ${ipStatus}`);
+
+        // STEP 8: Update order with success (even if IP is pending)
+        console.log(`[AUTO-PROVISION] 💾 STEP 8: Updating order with provisioning success...`);
+
         const updateData = {
           status: 'active',
           provisioningStatus: 'active',
@@ -278,6 +338,9 @@ console.log(`[AUTO-PROVISION] ✅ Product Name: ${memoryConfig.hostycareProductN
 
         if (ipAddress) {
           updateData.ipAddress = ipAddress;
+        } else {
+          // Set a placeholder to indicate IP is pending
+          updateData.ipAddress = 'Pending - Server being provisioned';
         }
 
         // Set expiry date (30 days from now)
@@ -292,14 +355,29 @@ console.log(`[AUTO-PROVISION] ✅ Product Name: ${memoryConfig.hostycareProductN
         console.log(`[AUTO-PROVISION] ✅ PROVISIONING COMPLETED SUCCESSFULLY!`);
         console.log(`   - Order ID: ${orderId}`);
         console.log(`   - Service ID: ${serviceId}`);
-        console.log(`   - IP Address: ${ipAddress || 'Will be available soon'}`);
+        console.log(`   - IP Status: ${ipAddress || 'Will be assigned automatically'}`);
         console.log(`   - Username: ${credentials.username}`);
         console.log(`   - Product ID: ${productId}`);
         console.log(`   - Product Name: ${memoryConfig.hostycareProductName || 'N/A'}`);
         console.log(`   - Hostname: ${hostname}`);
         console.log(`   - Total Time: ${totalTime}ms`);
+        console.log(`   - Note: ${ipAddress ? 'Server ready!' : 'Server is being set up, IP will be available soon'}`);
         console.log("✅".repeat(80));
 
+        // Schedule background IP monitoring if IP is not available yet
+        if (!ipAddress) {
+          console.log(`[AUTO-PROVISION] 🔄 Starting background IP monitoring for service ${serviceId}...`);
+
+          // Schedule multiple background checks
+          const backgroundChecks = [300000, 600000, 900000]; // 5min, 10min, 15min
+
+          backgroundChecks.forEach((delay, index) => {
+            setTimeout(async () => {
+              console.log(`[AUTO-PROVISION] 🔍 Background check ${index + 1} for service ${serviceId}...`);
+              await this.checkAndUpdateIP(orderId, serviceId);
+            }, delay);
+          });
+        }
         return {
           success: true,
           serviceId,
@@ -340,7 +418,35 @@ console.log(`[AUTO-PROVISION] ✅ Product Name: ${memoryConfig.hostycareProductN
       };
     }
   }
+  // New method for background IP checking
+  async checkAndUpdateIP(orderId, serviceId) {
+    try {
+      console.log(`[BACKGROUND-IP] 🔍 Checking IP for order ${orderId}, service ${serviceId}`);
 
+      const serviceDetails = await this.hostycareApi.getServiceDetails(serviceId);
+
+      const ip = serviceDetails?.data?.service?.dedicatedip ||
+        serviceDetails?.data?.service?.dedicatedIp ||
+        serviceDetails?.service?.dedicatedip ||
+        serviceDetails?.service?.dedicatedIp ||
+        serviceDetails?.dedicatedip ||
+        serviceDetails?.dedicatedIp ||
+        null;
+
+      if (ip && ip !== 'Pending - Server being provisioned') {
+        await Order.findByIdAndUpdate(orderId, { ipAddress: ip });
+        console.log(`[BACKGROUND-IP] ✅ IP updated for order ${orderId}: ${ip}`);
+      } else {
+        console.log(`[BACKGROUND-IP] ⌛ IP still not ready for service ${serviceId}`);
+      }
+    } catch (error) {
+      if (error.message.includes('Details unavailable')) {
+        console.log(`[BACKGROUND-IP] ⌛ Server still being provisioned for service ${serviceId}`);
+      } else {
+        console.error(`[BACKGROUND-IP] ❌ Error checking IP for service ${serviceId}:`, error.message);
+      }
+    }
+  }
   // Enhanced password generation for better success rate
   generateEnhancedCredentials() {
     console.log('[AUTO-PROVISION-SERVICE] 🔐 Generating enhanced credentials...');
