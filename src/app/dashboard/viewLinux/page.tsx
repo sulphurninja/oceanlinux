@@ -555,9 +555,7 @@ const ViewLinux = () => {
                                         </div>
                                     </div>
                                 </DialogHeader>
-
-                                <Tabs defaultValue="overview" className="w-full">
-
+                                <Tabs defaultValue="connection" className="w-full">
                                     <TabsList className="grid w-full grid-cols-3">
                                         <TabsTrigger value="overview">Overview</TabsTrigger>
                                         <TabsTrigger value="connection">Connection Details</TabsTrigger>
