@@ -9,17 +9,16 @@ class AutoProvisioningService {
     console.log('[AUTO-PROVISION-SERVICE] 🏗️ AutoProvisioningService instance created');
   }
 
-  // Generate random credentials
+  // Update the generateCredentials method with ONLY the safe special chars
   generateCredentials(productName = '') {
-    console.log('[AUTO-PROVISION-SERVICE] 🔐 Generating enhanced credentials...');
+    console.log('[AUTO-PROVISION-SERVICE] 🔐 Generating safe credentials...');
 
-    // Generate a stronger password that meets Hostycare requirements
     const upperCase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
     const lowerCase = 'abcdefghijklmnopqrstuvwxyz';
     const numbers = '0123456789';
 
-    // Use ONLY the allowed special characters for Windows VPS
-    const allowedSpecialChars = '!@#$%^&*_-+=?';
+    // ONLY these 4 special characters - nothing else!
+    const safeSpecialChars = '@#&$';
 
     let password = '';
 
@@ -27,10 +26,10 @@ class AutoProvisioningService {
     password += upperCase[Math.floor(Math.random() * upperCase.length)];
     password += lowerCase[Math.floor(Math.random() * lowerCase.length)];
     password += numbers[Math.floor(Math.random() * numbers.length)];
-    password += allowedSpecialChars[Math.floor(Math.random() * allowedSpecialChars.length)];
+    password += safeSpecialChars[Math.floor(Math.random() * safeSpecialChars.length)];
 
-    // Fill the rest randomly (minimum 16 characters total for better strength)
-    const allChars = upperCase + lowerCase + numbers + allowedSpecialChars;
+    // Fill the rest randomly (16 characters total)
+    const allChars = upperCase + lowerCase + numbers + safeSpecialChars;
     for (let i = password.length; i < 16; i++) {
       password += allChars[Math.floor(Math.random() * allChars.length)];
     }
@@ -38,7 +37,7 @@ class AutoProvisioningService {
     // Shuffle the password
     password = password.split('').sort(() => 0.5 - Math.random()).join('');
 
-    // Use context-aware username based on product type
+    // Use context-aware username
     const username = this.getLoginUsernameFromProductName(productName);
 
     const credentials = {
@@ -46,10 +45,9 @@ class AutoProvisioningService {
       password: password
     };
 
-    console.log('[AUTO-PROVISION-SERVICE] ✅ Hostycare-compatible credentials generated:');
-    console.log(`   - Username: ${credentials.username} (${productName.includes('Windows') || productName.includes('RDP') ? 'Windows' : 'Linux'} detected)`);
-    console.log(`   - Password: ${credentials.password.substring(0, 4)}**** (${credentials.password.length} chars, safe characters only)`);
-    console.log(`   - Special chars used: Only ! @ # $ % ^ & * _ - + = ?`);
+    console.log('[AUTO-PROVISION-SERVICE] ✅ Safe credentials generated:');
+    console.log(`   - Username: ${credentials.username}`);
+    console.log(`   - Password: ${credentials.password.substring(0, 4)}**** (16 chars, only @#&$ specials)`);
 
     return credentials;
   }
