@@ -13,11 +13,13 @@ class AutoProvisioningService {
   generateCredentials(productName = '') {
     console.log('[AUTO-PROVISION-SERVICE] 🔐 Generating enhanced credentials...');
 
-    // Generate a stronger password that meets requirements
+    // Generate a stronger password that meets Hostycare requirements
     const upperCase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
     const lowerCase = 'abcdefghijklmnopqrstuvwxyz';
     const numbers = '0123456789';
-    const specialChars = '!@#$%^&*()_+-=[]{}|;:,.<>?';
+
+    // Use ONLY the allowed special characters for Windows VPS
+    const allowedSpecialChars = '!@#$%^&*_-+=?';
 
     let password = '';
 
@@ -25,10 +27,10 @@ class AutoProvisioningService {
     password += upperCase[Math.floor(Math.random() * upperCase.length)];
     password += lowerCase[Math.floor(Math.random() * lowerCase.length)];
     password += numbers[Math.floor(Math.random() * numbers.length)];
-    password += specialChars[Math.floor(Math.random() * specialChars.length)];
+    password += allowedSpecialChars[Math.floor(Math.random() * allowedSpecialChars.length)];
 
     // Fill the rest randomly (minimum 16 characters total for better strength)
-    const allChars = upperCase + lowerCase + numbers + specialChars;
+    const allChars = upperCase + lowerCase + numbers + allowedSpecialChars;
     for (let i = password.length; i < 16; i++) {
       password += allChars[Math.floor(Math.random() * allChars.length)];
     }
@@ -44,9 +46,10 @@ class AutoProvisioningService {
       password: password
     };
 
-    console.log('[AUTO-PROVISION-SERVICE] ✅ Enhanced credentials generated:');
+    console.log('[AUTO-PROVISION-SERVICE] ✅ Hostycare-compatible credentials generated:');
     console.log(`   - Username: ${credentials.username} (${productName.includes('Windows') || productName.includes('RDP') ? 'Windows' : 'Linux'} detected)`);
-    console.log(`   - Password: ${credentials.password.substring(0, 4)}**** (${credentials.password.length} chars)`);
+    console.log(`   - Password: ${credentials.password.substring(0, 4)}**** (${credentials.password.length} chars, safe characters only)`);
+    console.log(`   - Special chars used: Only ! @ # $ % ^ & * _ - + = ?`);
 
     return credentials;
   }
@@ -135,86 +138,86 @@ class AutoProvisioningService {
 
       console.log(`[AUTO-PROVISION] ✅ Found IP Stock: ${ipStock.name}`);
 
-   // STEP 4: Get memory configuration - FIXED FOR MAP OBJECTS
-console.log(`[AUTO-PROVISION] 📦 STEP 4: Getting memory configuration...`);
-console.log(`[AUTO-PROVISION] 🔍 Raw memoryOptions:`, ipStock.memoryOptions);
-console.log(`[AUTO-PROVISION] 🔍 memoryOptions type:`, typeof ipStock.memoryOptions);
+      // STEP 4: Get memory configuration - FIXED FOR MAP OBJECTS
+      console.log(`[AUTO-PROVISION] 📦 STEP 4: Getting memory configuration...`);
+      console.log(`[AUTO-PROVISION] 🔍 Raw memoryOptions:`, ipStock.memoryOptions);
+      console.log(`[AUTO-PROVISION] 🔍 memoryOptions type:`, typeof ipStock.memoryOptions);
 
-// Handle Map objects properly
-let memoryOptions;
-if (ipStock.memoryOptions instanceof Map) {
-  // Convert Map to plain object
-  memoryOptions = Object.fromEntries(ipStock.memoryOptions.entries());
-  console.log(`[AUTO-PROVISION] ✅ Converted Map to object`);
-} else if (typeof ipStock.memoryOptions.toObject === 'function') {
-  memoryOptions = ipStock.memoryOptions.toObject();
-  console.log(`[AUTO-PROVISION] ✅ Used toObject() method`);
-} else if (typeof ipStock.memoryOptions === 'object') {
-  memoryOptions = JSON.parse(JSON.stringify(ipStock.memoryOptions));
-  console.log(`[AUTO-PROVISION] ✅ Used JSON stringify/parse`);
-} else {
-  memoryOptions = {};
-  console.log(`[AUTO-PROVISION] ⚠️ Used empty fallback`);
-}
+      // Handle Map objects properly
+      let memoryOptions;
+      if (ipStock.memoryOptions instanceof Map) {
+        // Convert Map to plain object
+        memoryOptions = Object.fromEntries(ipStock.memoryOptions.entries());
+        console.log(`[AUTO-PROVISION] ✅ Converted Map to object`);
+      } else if (typeof ipStock.memoryOptions.toObject === 'function') {
+        memoryOptions = ipStock.memoryOptions.toObject();
+        console.log(`[AUTO-PROVISION] ✅ Used toObject() method`);
+      } else if (typeof ipStock.memoryOptions === 'object') {
+        memoryOptions = JSON.parse(JSON.stringify(ipStock.memoryOptions));
+        console.log(`[AUTO-PROVISION] ✅ Used JSON stringify/parse`);
+      } else {
+        memoryOptions = {};
+        console.log(`[AUTO-PROVISION] ⚠️ Used empty fallback`);
+      }
 
-console.log(`[AUTO-PROVISION] 🧠 Converted memoryOptions:`, memoryOptions);
-console.log(`[AUTO-PROVISION] 🧠 Available memory options:`, Object.keys(memoryOptions));
-console.log(`[AUTO-PROVISION] 🔍 Looking for memory: "${order.memory}"`);
+      console.log(`[AUTO-PROVISION] 🧠 Converted memoryOptions:`, memoryOptions);
+      console.log(`[AUTO-PROVISION] 🧠 Available memory options:`, Object.keys(memoryOptions));
+      console.log(`[AUTO-PROVISION] 🔍 Looking for memory: "${order.memory}"`);
 
-let memoryConfig = memoryOptions[order.memory];
+      let memoryConfig = memoryOptions[order.memory];
 
-if (!memoryConfig) {
-  // Try variations if exact match fails
-  console.log(`[AUTO-PROVISION] ⚠️ Exact match failed, trying variations...`);
-  
-  const memoryVariations = [
-    order.memory.toLowerCase(),
-    order.memory.toUpperCase(),
-    order.memory.replace('GB', 'gb'),
-    order.memory.replace('gb', 'GB'),
-  ];
-  
-  console.log(`[AUTO-PROVISION] 🔄 Trying variations:`, memoryVariations);
+      if (!memoryConfig) {
+        // Try variations if exact match fails
+        console.log(`[AUTO-PROVISION] ⚠️ Exact match failed, trying variations...`);
 
-  for (const variation of memoryVariations) {
-    if (memoryOptions[variation]) {
-      console.log(`[AUTO-PROVISION] ✅ Found memory config with variation: "${variation}"`);
-      memoryConfig = memoryOptions[variation];
-      break;
-    }
-  }
-}
+        const memoryVariations = [
+          order.memory.toLowerCase(),
+          order.memory.toUpperCase(),
+          order.memory.replace('GB', 'gb'),
+          order.memory.replace('gb', 'GB'),
+        ];
 
-if (!memoryConfig) {
-  const availableKeys = Object.keys(memoryOptions);
-  console.error(`[AUTO-PROVISION] ❌ Memory config not found!`);
-  console.error(`   Requested: "${order.memory}"`);
-  console.error(`   Available: [${availableKeys.join(', ')}]`);
-  console.error(`   IP Stock: ${ipStock.name}`);
-  
-  throw new Error(
-    `Memory configuration not found!\n` +
-    `Requested: "${order.memory}"\n` +
-    `Available options: [${availableKeys.join(', ')}]\n` +
-    `IP Stock: ${ipStock.name}`
-  );
-}
+        console.log(`[AUTO-PROVISION] 🔄 Trying variations:`, memoryVariations);
 
-console.log(`[AUTO-PROVISION] ✅ Found memory config:`, memoryConfig);
+        for (const variation of memoryVariations) {
+          if (memoryOptions[variation]) {
+            console.log(`[AUTO-PROVISION] ✅ Found memory config with variation: "${variation}"`);
+            memoryConfig = memoryOptions[variation];
+            break;
+          }
+        }
+      }
 
-// Check for hostycareProductId (your field name) or productId (fallback)
-const productId = memoryConfig.hostycareProductId || memoryConfig.productId;
+      if (!memoryConfig) {
+        const availableKeys = Object.keys(memoryOptions);
+        console.error(`[AUTO-PROVISION] ❌ Memory config not found!`);
+        console.error(`   Requested: "${order.memory}"`);
+        console.error(`   Available: [${availableKeys.join(', ')}]`);
+        console.error(`   IP Stock: ${ipStock.name}`);
 
-if (!productId) {
-  throw new Error(
-    `Memory configuration for "${order.memory}" is missing hostycareProductId!\n` +
-    `Current config: ${JSON.stringify(memoryConfig, null, 2)}\n` +
-    `IP Stock: ${ipStock.name}`
-  );
-}
+        throw new Error(
+          `Memory configuration not found!\n` +
+          `Requested: "${order.memory}"\n` +
+          `Available options: [${availableKeys.join(', ')}]\n` +
+          `IP Stock: ${ipStock.name}`
+        );
+      }
 
-console.log(`[AUTO-PROVISION] ✅ Using Hostycare Product ID: ${productId}`);
-console.log(`[AUTO-PROVISION] ✅ Product Name: ${memoryConfig.hostycareProductName || 'N/A'}`);
+      console.log(`[AUTO-PROVISION] ✅ Found memory config:`, memoryConfig);
+
+      // Check for hostycareProductId (your field name) or productId (fallback)
+      const productId = memoryConfig.hostycareProductId || memoryConfig.productId;
+
+      if (!productId) {
+        throw new Error(
+          `Memory configuration for "${order.memory}" is missing hostycareProductId!\n` +
+          `Current config: ${JSON.stringify(memoryConfig, null, 2)}\n` +
+          `IP Stock: ${ipStock.name}`
+        );
+      }
+
+      console.log(`[AUTO-PROVISION] ✅ Using Hostycare Product ID: ${productId}`);
+      console.log(`[AUTO-PROVISION] ✅ Product Name: ${memoryConfig.hostycareProductName || 'N/A'}`);
 
       // STEP 5: Generate credentials and hostname
       const credentials = this.generateCredentials(order.productName);
