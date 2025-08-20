@@ -69,187 +69,236 @@ class AutoProvisioningService {
   }
 
 
-async provisionServer(orderId) {
-  const startTime = Date.now();
-  console.log("\n" + "🚀".repeat(80));
-  console.log(`[AUTO-PROVISION] 🚀 STARTING AUTO-PROVISIONING for order: ${orderId}`);
-  console.log(`[AUTO-PROVISION] ⏰ Start time: ${new Date().toISOString()}`);
-  console.log("🚀".repeat(80));
+  async provisionServer(orderId) {
+    const startTime = Date.now();
+    console.log("\n" + "🚀".repeat(80));
+    console.log(`[AUTO-PROVISION] 🚀 STARTING AUTO-PROVISIONING for order: ${orderId}`);
+    console.log(`[AUTO-PROVISION] ⏰ Start time: ${new Date().toISOString()}`);
+    console.log("🚀".repeat(80));
 
-  await connectDB();
-  console.log("[AUTO-PROVISION] ✅ Database connected");
+    await connectDB();
+    console.log("[AUTO-PROVISION] ✅ Database connected");
 
-  try {
-    // STEP 1: Find the order
-    console.log(`[AUTO-PROVISION] 📋 STEP 1: Finding order ${orderId}...`);
-    const order = await Order.findById(orderId);
-
-    if (!order) {
-      throw new Error(`Order ${orderId} not found in database`);
-    }
-
-    console.log(`[AUTO-PROVISION] ✅ Order found:`);
-    console.log(`   - Product: ${order.productName}`);
-    console.log(`   - Memory: ${order.memory}`);
-    console.log(`   - Price: ₹${order.price}`);
-    console.log(`   - IP Stock ID: ${order.ipStockId || 'NOT SET'}`);
-
-    // STEP 2: Update status to provisioning
-    console.log(`[AUTO-PROVISION] 📝 STEP 2: Updating order status to 'provisioning'...`);
-    await Order.findByIdAndUpdate(orderId, {
-      provisioningStatus: 'provisioning',
-      provisioningError: '',
-      autoProvisioned: true
-    });
-
-    // STEP 3: Find IP Stock configuration
-    console.log(`[AUTO-PROVISION] 📦 STEP 3: Finding IP Stock configuration...`);
-    let ipStock;
-
-    if (order.ipStockId) {
-      console.log(`[AUTO-PROVISION] 🔍 Looking for IP Stock by ID: ${order.ipStockId}`);
-      ipStock = await IPStock.findById(order.ipStockId);
-    }
-
-    if (!ipStock) {
-      console.log(`[AUTO-PROVISION] 🔍 Searching IP Stock by product name: "${order.productName}"`);
-      ipStock = await IPStock.findOne({
-        name: { $regex: new RegExp(order.productName, 'i') }
-      });
-    }
-
-    if (!ipStock) {
-      throw new Error(`IPStock configuration not found for product: ${order.productName}`);
-    }
-
-    console.log(`[AUTO-PROVISION] ✅ Found IP Stock: ${ipStock.name}`);
-
-    // STEP 4: Get memory configuration
-    const memoryOptions = this.toPlainObject(ipStock.memoryOptions);
-    const memoryConfig = memoryOptions[order.memory];
-
-    if (!memoryConfig) {
-      throw new Error(`Memory configuration not found for: ${order.memory}`);
-    }
-
-    console.log(`[AUTO-PROVISION] 🧠 Memory config found:`, memoryConfig);
-
-    // STEP 5: Generate credentials and hostname
-    const credentials = this.generateCredentials();
-    const hostname = this.generateHostname(order.productName, order.memory);
-
-    console.log(`[AUTO-PROVISION] 🔐 Generated credentials: ${credentials.username} / ${credentials.password.substring(0, 4)}****`);
-    console.log(`[AUTO-PROVISION] 🌐 Generated hostname: ${hostname}`);
-
-    // STEP 6: Create server via Hostycare API
-    console.log(`[AUTO-PROVISION] 🚀 STEP 6: Creating server via Hostycare API...`);
-    
-    const orderData = {
-      cycle: 'monthly',
-      hostname: hostname,
-      username: credentials.username,
-      password: credentials.password,
-      fields: this.toPlainObject(memoryConfig.fields || {}),
-      configurations: this.toPlainObject(memoryConfig.configurations || {})
-    };
-
-    console.log(`[AUTO-PROVISION] 📦 Order data:`, orderData);
-
-    const apiResponse = await this.hostycareApi.createServer(memoryConfig.productId, orderData);
-    console.log(`[AUTO-PROVISION] ✅ Server created successfully:`, apiResponse);
-
-    const serviceId = apiResponse?.data?.service?.id || apiResponse?.service?.id || apiResponse?.id;
-    
-    if (!serviceId) {
-      throw new Error('Service ID not found in API response');
-    }
-
-    console.log(`[AUTO-PROVISION] 🆔 Service ID: ${serviceId}`);
-
-    // STEP 7: Get service details to extract IP
-    console.log(`[AUTO-PROVISION] 🔍 STEP 7: Getting service details...`);
-    let ipAddress = null;
-    
     try {
-      const serviceDetails = await this.hostycareApi.getServiceDetails(serviceId);
-      ipAddress = serviceDetails?.data?.service?.dedicatedip || 
-                 serviceDetails?.service?.dedicatedip || 
-                 serviceDetails?.dedicatedip ||
-                 null;
-      
-      console.log(`[AUTO-PROVISION] 🌐 IP Address: ${ipAddress || 'Not available yet'}`);
-    } catch (error) {
-      console.log(`[AUTO-PROVISION] ⚠️ Could not get service details immediately:`, error.message);
-    }
+      // STEP 1: Find the order
+      console.log(`[AUTO-PROVISION] 📋 STEP 1: Finding order ${orderId}...`);
+      const order = await Order.findById(orderId);
 
-    // STEP 8: Update order with success
-    const updateData = {
-      status: 'active',
-      provisioningStatus: 'active',
-      hostycareServiceId: serviceId,
-      username: credentials.username,
-      password: credentials.password,
-      autoProvisioned: true,
-      provisioningError: ''
-    };
+      if (!order) {
+        throw new Error(`Order ${orderId} not found in database`);
+      }
 
-    if (ipAddress) {
-      updateData.ipAddress = ipAddress;
-    }
+      console.log(`[AUTO-PROVISION] ✅ Order found:`);
+      console.log(`   - Product: ${order.productName}`);
+      console.log(`   - Memory: ${order.memory}`);
+      console.log(`   - Price: ₹${order.price}`);
+      console.log(`   - IP Stock ID: ${order.ipStockId || 'NOT SET'}`);
 
-    // Set expiry date (30 days from now)
-    const expiryDate = new Date();
-    expiryDate.setDate(expiryDate.getDate() + 30);
-    updateData.expiryDate = expiryDate;
-
-    await Order.findByIdAndUpdate(orderId, updateData);
-
-    const totalTime = Date.now() - startTime;
-    console.log("\n" + "✅".repeat(80));
-    console.log(`[AUTO-PROVISION] ✅ PROVISIONING COMPLETED SUCCESSFULLY!`);
-    console.log(`   - Order ID: ${orderId}`);
-    console.log(`   - Service ID: ${serviceId}`);
-    console.log(`   - IP Address: ${ipAddress || 'Will be available soon'}`);
-    console.log(`   - Username: ${credentials.username}`);
-    console.log(`   - Hostname: ${hostname}`);
-    console.log(`   - Total Time: ${totalTime}ms`);
-    console.log("✅".repeat(80));
-
-    return {
-      success: true,
-      serviceId,
-      ipAddress,
-      credentials,
-      hostname,
-      totalTime
-    };
-
-  } catch (error) {
-    const totalTime = Date.now() - startTime;
-    console.error("\n" + "💥".repeat(80));
-    console.error(`[AUTO-PROVISION] 💥 PROVISIONING FAILED for order ${orderId}:`);
-    console.error(`   - Error: ${error.message}`);
-    console.error(`   - Time elapsed: ${totalTime}ms`);
-    console.error("💥".repeat(80));
-
-    // Update order with error status
-    try {
+      // STEP 2: Update status to provisioning
+      console.log(`[AUTO-PROVISION] 📝 STEP 2: Updating order status to 'provisioning'...`);
       await Order.findByIdAndUpdate(orderId, {
-        provisioningStatus: 'failed',
-        provisioningError: error.message,
+        provisioningStatus: 'provisioning',
+        provisioningError: '',
         autoProvisioned: true
       });
-    } catch (updateError) {
-      console.error(`[AUTO-PROVISION] ❌ Failed to update order status:`, updateError);
-    }
 
-    return {
-      success: false,
-      error: error.message,
-      totalTime
-    };
+      // STEP 3: Find IP Stock configuration
+      console.log(`[AUTO-PROVISION] 📦 STEP 3: Finding IP Stock configuration...`);
+      let ipStock;
+
+      if (order.ipStockId) {
+        console.log(`[AUTO-PROVISION] 🔍 Looking for IP Stock by ID: ${order.ipStockId}`);
+        ipStock = await IPStock.findById(order.ipStockId);
+      }
+
+      if (!ipStock) {
+        console.log(`[AUTO-PROVISION] 🔍 Searching IP Stock by product name: "${order.productName}"`);
+        ipStock = await IPStock.findOne({
+          name: { $regex: new RegExp(order.productName, 'i') }
+        });
+      }
+
+      if (!ipStock) {
+        throw new Error(`IPStock configuration not found for product: ${order.productName}`);
+      }
+
+      console.log(`[AUTO-PROVISION] ✅ Found IP Stock: ${ipStock.name}`);
+
+      // STEP 4: Get memory configuration
+      const memoryOptions = this.toPlainObject(ipStock.memoryOptions);
+      console.log(`[AUTO-PROVISION] 🧠 Available memory options:`, Object.keys(memoryOptions));
+      console.log(`[AUTO-PROVISION] 🔍 Looking for memory: "${order.memory}"`);
+
+      let memoryConfig = memoryOptions[order.memory];
+
+      if (!memoryConfig) {
+        // Try variations if exact match fails
+        const memoryVariations = [
+          order.memory.toLowerCase(),
+          order.memory.toUpperCase(),
+          order.memory.replace('GB', 'gb'),
+          order.memory.replace('gb', 'GB'),
+        ];
+
+        for (const variation of memoryVariations) {
+          if (memoryOptions[variation]) {
+            console.log(`[AUTO-PROVISION] ✅ Found memory config with variation: "${variation}"`);
+            memoryConfig = memoryOptions[variation];
+            break;
+          }
+        }
+      }
+
+      if (!memoryConfig) {
+        const availableKeys = Object.keys(memoryOptions);
+        throw new Error(
+          `Memory configuration not found!\n` +
+          `Requested: "${order.memory}"\n` +
+          `Available options: [${availableKeys.join(', ')}]\n` +
+          `IP Stock: ${ipStock.name}`
+        );
+      }
+
+      console.log(`[AUTO-PROVISION] ✅ Found memory config:`, memoryConfig);
+
+      // Check for hostycareProductId (your field name) or productId (fallback)
+      const productId = memoryConfig.hostycareProductId || memoryConfig.productId;
+
+      if (!productId) {
+        throw new Error(
+          `Memory configuration for "${order.memory}" is missing hostycareProductId!\n` +
+          `Current config: ${JSON.stringify(memoryConfig, null, 2)}\n` +
+          `IP Stock: ${ipStock.name}`
+        );
+      }
+
+      console.log(`[AUTO-PROVISION] ✅ Using Hostycare Product ID: ${productId}`);
+      console.log(`[AUTO-PROVISION] ✅ Product Name: ${memoryConfig.hostycareProductName || 'N/A'}`);
+
+      // STEP 5: Generate credentials and hostname
+      const credentials = this.generateCredentials(order.productName);
+      const hostname = this.generateHostname(order.productName, order.memory);
+
+      console.log(`[AUTO-PROVISION] 🔐 Generated credentials: ${credentials.username} / ${credentials.password.substring(0, 4)}****`);
+      console.log(`[AUTO-PROVISION] 🌐 Generated hostname: ${hostname}`);
+
+      // STEP 6: Create server via Hostycare API
+      console.log(`[AUTO-PROVISION] 🚀 STEP 6: Creating server via Hostycare API...`);
+
+      const orderData = {
+        cycle: 'monthly',
+        hostname: hostname,
+        username: credentials.username,
+        password: credentials.password,
+        fields: this.toPlainObject(memoryConfig.fields || ipStock.defaultConfigurations || {}),
+        configurations: this.toPlainObject(memoryConfig.configurations || ipStock.defaultConfigurations || {})
+      };
+
+      console.log(`[AUTO-PROVISION] 📦 Order data:`, orderData);
+
+      try {
+        const apiResponse = await this.hostycareApi.createServer(productId, orderData);
+        console.log(`[AUTO-PROVISION] ✅ Server created successfully:`, apiResponse);
+
+        const serviceId = apiResponse?.data?.service?.id || apiResponse?.service?.id || apiResponse?.id;
+
+        if (!serviceId) {
+          throw new Error(`Service ID not found in API response. Response: ${JSON.stringify(apiResponse)}`);
+        }
+
+        console.log(`[AUTO-PROVISION] 🆔 Service ID: ${serviceId}`);
+
+        // STEP 7: Get service details to extract IP
+        console.log(`[AUTO-PROVISION] 🔍 STEP 7: Getting service details...`);
+        let ipAddress = null;
+
+        try {
+          const serviceDetails = await this.hostycareApi.getServiceDetails(serviceId);
+          ipAddress = serviceDetails?.data?.service?.dedicatedip ||
+            serviceDetails?.service?.dedicatedip ||
+            serviceDetails?.dedicatedip ||
+            null;
+
+          console.log(`[AUTO-PROVISION] 🌐 IP Address: ${ipAddress || 'Not available yet'}`);
+        } catch (error) {
+          console.log(`[AUTO-PROVISION] ⚠️ Could not get service details immediately:`, error.message);
+        }
+
+        // STEP 8: Update order with success
+        const updateData = {
+          status: 'active',
+          provisioningStatus: 'active',
+          hostycareServiceId: serviceId,
+          username: credentials.username,
+          password: credentials.password,
+          autoProvisioned: true,
+          provisioningError: ''
+        };
+
+        if (ipAddress) {
+          updateData.ipAddress = ipAddress;
+        }
+
+        // Set expiry date (30 days from now)
+        const expiryDate = new Date();
+        expiryDate.setDate(expiryDate.getDate() + 30);
+        updateData.expiryDate = expiryDate;
+
+        await Order.findByIdAndUpdate(orderId, updateData);
+
+        const totalTime = Date.now() - startTime;
+        console.log("\n" + "✅".repeat(80));
+        console.log(`[AUTO-PROVISION] ✅ PROVISIONING COMPLETED SUCCESSFULLY!`);
+        console.log(`   - Order ID: ${orderId}`);
+        console.log(`   - Service ID: ${serviceId}`);
+        console.log(`   - IP Address: ${ipAddress || 'Will be available soon'}`);
+        console.log(`   - Username: ${credentials.username}`);
+        console.log(`   - Product ID: ${productId}`);
+        console.log(`   - Product Name: ${memoryConfig.hostycareProductName || 'N/A'}`);
+        console.log(`   - Hostname: ${hostname}`);
+        console.log(`   - Total Time: ${totalTime}ms`);
+        console.log("✅".repeat(80));
+
+        return {
+          success: true,
+          serviceId,
+          ipAddress,
+          credentials,
+          hostname,
+          productId,
+          totalTime
+        };
+
+      } catch (apiError) {
+        console.error(`[AUTO-PROVISION] 💥 Hostycare API Error:`, apiError.message);
+        throw new Error(`Hostycare API Error: ${apiError.message}`);
+      }
+    } catch (error) {
+      const totalTime = Date.now() - startTime;
+      console.error("\n" + "💥".repeat(80));
+      console.error(`[AUTO-PROVISION] 💥 PROVISIONING FAILED for order ${orderId}:`);
+      console.error(`   - Error: ${error.message}`);
+      console.error(`   - Time elapsed: ${totalTime}ms`);
+      console.error("💥".repeat(80));
+
+      // Update order with error status
+      try {
+        await Order.findByIdAndUpdate(orderId, {
+          provisioningStatus: 'failed',
+          provisioningError: error.message,
+          autoProvisioned: true
+        });
+      } catch (updateError) {
+        console.error(`[AUTO-PROVISION] ❌ Failed to update order status:`, updateError);
+      }
+
+      return {
+        success: false,
+        error: error.message,
+        totalTime
+      };
+    }
   }
-}
 
   // Enhanced password generation for better success rate
   generateEnhancedCredentials() {
