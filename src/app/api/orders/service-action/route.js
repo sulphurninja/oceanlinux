@@ -93,27 +93,38 @@ export async function POST(request) {
 
       case 'reinstall':
         if (!payload?.password) return NextResponse.json({ message: 'password is required' }, { status: 400 });
+        if (!payload?.templateId) return NextResponse.json({ message: 'templateId is required for reinstall' }, { status: 400 });
 
-        // Optional: If templateId is provided, use it for reinstall
-        if (payload.templateId) {
+        console.log('[REINSTALL] Starting reinstall for service:', sid);
+        console.log('[REINSTALL] Template ID:', payload.templateId);
+
+        try {
           result = await api.reinstallService(sid, payload.password, payload.templateId);
-        } else {
-          // Reinstall with current OS (if API supports it)
-          result = await api.reinstallService(sid, payload.password);
-        }
+          console.log('[REINSTALL] API Success:', result);
 
-        // Update local password and status to reflect the reinstall
-        await Order.findByIdAndUpdate(orderId, {
-          password: payload.password,
-          provisioningStatus: 'provisioning', // Will be updated to active once complete
-          lastAction: 'reinstall',
-          lastActionTime: new Date()
-        });
+          // Update local password and status
+          await Order.findByIdAndUpdate(orderId, {
+            password: payload.password,
+            provisioningStatus: 'provisioning',
+            lastAction: 'reinstall',
+            lastActionTime: new Date()
+          });
+        } catch (error) {
+          console.error('[REINSTALL] API Error:', error.message);
+          throw error;
+        }
         break;
 
       case 'templates':
-        // Get available OS templates for reinstall
-        result = await api.getServiceTemplates(sid);
+        console.log('[TEMPLATES] Fetching templates for service:', sid);
+        try {
+          // Get available OS templates first
+          result = await api.getReinstallTemplates(sid);
+          console.log('[TEMPLATES] Available templates:', result);
+        } catch (error) {
+          console.error('[TEMPLATES] Error:', error.message);
+          throw error;
+        }
         break;
 
 

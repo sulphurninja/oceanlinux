@@ -9,7 +9,7 @@ class HostycareAPI {
     console.log('  API Key:', this.apiKey ? 'SET (length: ' + (this.apiKey?.length || 0) + ')' : 'MISSING');
   }
 
- // Helper: serialize nested params like configurations[key]=value, fields[key]=value, nsprefix[]=ns1
+  // Helper: serialize nested params like configurations[key]=value, fields[key]=value, nsprefix[]=ns1
   buildFormParams(obj, parentKey = '', params = new URLSearchParams()) {
     const isPlainObject = (v) => Object.prototype.toString.call(v) === '[object Object]';
     const isMap = (v) => v && typeof v === 'object' && typeof v.forEach === 'function' && typeof v.get === 'function';
@@ -65,7 +65,7 @@ class HostycareAPI {
       console.log(`[HOSTYCARE] Making ${method} request to: ${this.endpoint}${action}`);
 
       const token = this.generateToken();
-     const headers = {
+      const headers = {
         'username': this.username,
         'token': token,
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -189,28 +189,29 @@ class HostycareAPI {
     });
   }
 
-  // Get templates for reinstall - This should return available OS templates
+  // Get templates for reinstall - maps to ostemplate() without parameters
   async getReinstallTemplates(serviceId) {
-    // First get available templates without performing reinstall
+    // This should map to: index.php?svs=serviceId&act=ostemplate
+    // But since we're using REST API, let's try the direct endpoint
     return await this.makeRequest(`/services/${serviceId}/ostemplate`);
   }
 
-  // Reinstall service with template selection
+  // Reinstall service - maps to ostemplate($vid, $newosid, $newpass)
   async reinstallService(serviceId, password, templateId = null) {
     const body = {
-      password,
-      conf: password, // Confirmation password as shown in SDK
+      newpass: password,
+      conf: password,
       reinsos: 'Reinstall'
     };
-    
-    // If templateId is provided, include it (this should be the OS template ID)
+
+    // Template ID is required for reinstall
     if (templateId) {
       body.newos = templateId;
     }
-    
+
     return await this.makeRequest(`/services/${serviceId}/ostemplate`, 'POST', body);
   }
-
+  
   // New method to get service OS templates (similar to SDK's ostemplate function)
   async getServiceTemplates(serviceId) {
     return await this.makeRequest(`/services/${serviceId}/ostemplate`);

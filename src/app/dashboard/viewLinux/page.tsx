@@ -260,34 +260,11 @@ const ViewLinux = () => {
         setTimeout(() => setCopied(null), 2000);
     };
 
-    // ... existing code ...
 
     const getStatusBadge = (status: string, provisioningStatus?: string, lastAction?: string) => {
-        const currentStatus = provisioningStatus || status;
-
-        // Show transitional states based on last action
-        if (lastAction && actionBusy === null) {
-            switch (lastAction) {
-                case 'start':
-                    if (currentStatus === 'active') {
-                        return (
-                            <Badge className="bg-green-50 text-green-700 border-green-200">
-                                <div className="w-2 h-2 bg-green-500 rounded-full mr-2"></div>
-                                Running
-                            </Badge>
-                        );
-                    }
-                    break;
-                case 'stop':
-                    if (currentStatus === 'suspended') {
-                        return (
-                            <Badge className="bg-gray-50 text-gray-700 border-gray-200">
-                                <Square className="w-3 h-3 mr-1" />
-                                Stopped
-                            </Badge>
-                        );
-                    }
-                    break;
+        // Show transitional states ONLY during active operations (when actionBusy is set)
+        if (actionBusy) {
+            switch (actionBusy) {
                 case 'reboot':
                     return (
                         <Badge className="bg-blue-50 text-blue-700 border-blue-200">
@@ -295,33 +272,56 @@ const ViewLinux = () => {
                             Rebooting
                         </Badge>
                     );
+                case 'start':
+                    return (
+                        <Badge className="bg-green-50 text-green-700 border-green-200">
+                            <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                            Starting
+                        </Badge>
+                    );
+                case 'stop':
+                    return (
+                        <Badge className="bg-gray-50 text-gray-700 border-gray-200">
+                            <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                            Stopping
+                        </Badge>
+                    );
                 case 'reinstall':
-                    if (currentStatus === 'provisioning') {
-                        return (
-                            <Badge className="bg-amber-50 text-amber-700 border-amber-200">
-                                <Loader2 className="w-3 h-3 mr-1 animate-spin" />
-                                Reinstalling
-                            </Badge>
-                        );
-                    }
-                    break;
+                    return (
+                        <Badge className="bg-amber-50 text-amber-700 border-amber-200">
+                            <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                            Reinstalling
+                        </Badge>
+                    );
+                case 'changepassword':
+                    return (
+                        <Badge className="bg-blue-50 text-blue-700 border-blue-200">
+                            <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                            Changing Password
+                        </Badge>
+                    );
             }
         }
 
-        // Default status badges - FIXED: Handle completed status properly
+        // EXPLICIT CHECK: If order.status is 'completed', always show 'Active'
+        if (status.toLowerCase() === 'completed') {
+            return (
+                <Badge className="bg-green-50 text-green-700 border-green-200">
+                    <div className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></div>
+                    Active
+                </Badge>
+            );
+        }
+
+        // For all other cases, use the current status or provisioning status
+        const currentStatus = provisioningStatus || status;
+
         switch (currentStatus.toLowerCase()) {
             case 'active':
                 return (
                     <Badge className="bg-green-50 text-green-700 border-green-200">
                         <div className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></div>
                         Active
-                    </Badge>
-                );
-            case 'completed':
-                return (
-                    <Badge className="bg-green-50 text-green-700 border-green-200">
-                        <CheckCircle className="w-3 h-3 mr-1" />
-                        Completed
                     </Badge>
                 );
             case 'pending':
@@ -368,8 +368,6 @@ const ViewLinux = () => {
                 );
         }
     };
-
-
 
     const formatDate = (date: Date | string) => {
         return new Date(date).toLocaleDateString('en-US', {
@@ -906,79 +904,57 @@ const ViewLinux = () => {
                                                     <div className="space-y-4">
                                                         <h4 className="font-semibold">Advanced Actions</h4>
                                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                            {/* <Button
-                                                                variant="outline"
-                                                                size="lg"
-                                                                onClick={async () => {
-                                                                    const pwd = prompt('Enter new root/administrator password:');
-                                                                    if (pwd && pwd.length >= 6) {
-                                                                        await runServiceAction(selectedOrder, 'changepassword', { password: pwd });
-                                                                    } else if (pwd) {
-                                                                        toast.error('Password must be at least 6 characters long');
-                                                                    }
-                                                                }}
-                                                                disabled={actionBusy === 'changepassword'}
-                                                                className="h-12 gap-2"
-                                                            >
-                                                                {actionBusy === 'changepassword' ? (
-                                                                    <Loader2 className="h-4 w-4 animate-spin" />
-                                                                ) : (
-                                                                    <KeyRound className="h-4 w-4" />
-                                                                )}
-                                                                Change Password
-                                                            </Button> */}
-                                  
                                                             <Button
                                                                 variant="destructive"
                                                                 size="lg"
                                                                 onClick={async () => {
                                                                     const confirmed = confirm('Are you sure you want to reinstall? This will erase all data!');
                                                                     if (confirmed) {
-                                                                        // First, optionally get templates
-                                                                        const shouldSelectTemplate = confirm('Do you want to select a different OS template? (Cancel to keep current OS)');
+                                                                        try {
+                                                                            // First, get available templates
+                                                                            const templatesRes = await fetch('/api/orders/service-action', {
+                                                                                method: 'POST',
+                                                                                headers: { 'Content-Type': 'application/json' },
+                                                                                body: JSON.stringify({ orderId: selectedOrder._id, action: 'templates' })
+                                                                            });
+                                                                            const templatesData = await templatesRes.json();
 
-                                                                        if (shouldSelectTemplate) {
-                                                                            // Get available templates
-                                                                            try {
-                                                                                const templatesRes = await fetch('/api/orders/service-action', {
-                                                                                    method: 'POST',
-                                                                                    headers: { 'Content-Type': 'application/json' },
-                                                                                    body: JSON.stringify({ orderId: selectedOrder._id, action: 'templates' })
-                                                                                });
-                                                                                const templatesData = await templatesRes.json();
+                                                                            if (templatesData.success && templatesData.result) {
+                                                                                // Show available templates to user
+                                                                                const templates = templatesData.result;
+                                                                                let templateOptions = '';
 
-                                                                                if (templatesData.success && templatesData.result) {
-                                                                                    // Show template selection (you might want to create a proper dialog for this)
-                                                                                    const templateOptions = Object.entries(templatesData.result).map(([id, template]: [string, any]) =>
-                                                                                        `${id}: ${template.name || template.distro || id}`
-                                                                                    ).join('\n');
+                                                                                // Format templates for display (assuming templates is an object with ID keys)
+                                                                                for (const [id, template] of Object.entries(templates)) {
+                                                                                    const name = template.name || template.distro || template.os || id;
+                                                                                    templateOptions += `${id}: ${name}\n`;
+                                                                                }
 
-                                                                                    const selectedTemplate = prompt(`Available templates:\n${templateOptions}\n\nEnter template ID (or cancel to keep current):`);
+                                                                                if (templateOptions) {
+                                                                                    const selectedTemplateId = prompt(`Select OS Template:\n\n${templateOptions}\nEnter template ID:`);
 
-                                                                                    if (selectedTemplate) {
-                                                                                        const pwd = prompt('Enter new root/administrator password:');
+                                                                                    if (selectedTemplateId && templates[selectedTemplateId]) {
+                                                                                        const pwd = prompt('Enter new root/administrator password (minimum 6 characters):');
                                                                                         if (pwd && pwd.length >= 6) {
                                                                                             await runServiceAction(selectedOrder, 'reinstall', {
                                                                                                 password: pwd,
-                                                                                                templateId: selectedTemplate
+                                                                                                templateId: selectedTemplateId
                                                                                             });
-                                                                                        } else if (pwd) {
+                                                                                        } else if (pwd !== null) {
                                                                                             toast.error('Password must be at least 6 characters long');
                                                                                         }
+                                                                                    } else if (selectedTemplateId !== null) {
+                                                                                        toast.error('Invalid template ID selected');
                                                                                     }
+                                                                                } else {
+                                                                                    toast.error('No templates available for reinstall');
                                                                                 }
-                                                                            } catch (error) {
-                                                                                console.error('Failed to get templates:', error);
-                                                                                toast.error('Failed to load templates');
+                                                                            } else {
+                                                                                toast.error('Failed to load available templates');
                                                                             }
-                                                                        } else {
-                                                                            // Just reinstall with current OS
-                                                                            const pwd = prompt('Enter new root/administrator password:');
-                                                                            if (pwd && pwd.length >= 6) {
-                                                                                await runServiceAction(selectedOrder, 'reinstall', { password: pwd });
-                                                                            } else if (pwd) {
-                                                                                toast.error('Password must be at least 6 characters long');
-                                                                            }
+                                                                        } catch (error) {
+                                                                            console.error('Error getting templates:', error);
+                                                                            toast.error('Failed to load templates');
                                                                         }
                                                                     }
                                                                 }}
@@ -994,7 +970,6 @@ const ViewLinux = () => {
                                                             </Button>
                                                         </div>
                                                     </div>
-
                                                     <Separator />
 
                                                     {/* Service Status */}
