@@ -918,7 +918,7 @@ const ViewLinux = () => {
                                                                                 body: JSON.stringify({ orderId: selectedOrder._id, action: 'templates' })
                                                                             });
                                                                             const templatesData = await templatesRes.json();
-
+                                                                            console.log(templatesData, 'kya aa rha he bc?')
                                                                             if (templatesData.success && templatesData.result) {
                                                                                 // Show available templates to user
                                                                                 const templates = templatesData.result;
