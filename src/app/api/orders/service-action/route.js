@@ -9,7 +9,6 @@ export async function GET(request) {
     await connectDB();
     const userId = await getDataFromToken(request);
     if (!userId) return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
-
     const { searchParams } = new URL(request.url);
     const orderId = searchParams.get('orderId');
     if (!orderId) return NextResponse.json({ message: 'orderId is required' }, { status: 400 });
@@ -94,7 +93,15 @@ export async function POST(request) {
 
       case 'reinstall':
         if (!payload?.password) return NextResponse.json({ message: 'password is required' }, { status: 400 });
-        result = await api.reinstallService(sid, payload.password);
+
+        // Optional: If templateId is provided, use it for reinstall
+        if (payload.templateId) {
+          result = await api.reinstallService(sid, payload.password, payload.templateId);
+        } else {
+          // Reinstall with current OS (if API supports it)
+          result = await api.reinstallService(sid, payload.password);
+        }
+
         // Update local password and status to reflect the reinstall
         await Order.findByIdAndUpdate(orderId, {
           password: payload.password,
@@ -105,8 +112,10 @@ export async function POST(request) {
         break;
 
       case 'templates':
-        result = await api.getReinstallTemplates(sid);
+        // Get available OS templates for reinstall
+        result = await api.getServiceTemplates(sid);
         break;
+
 
       case 'details':
         result = await api.getServiceDetails(sid);
@@ -151,28 +160,61 @@ async function syncServerState(orderId, details, info) {
     if (details) {
       // Map server status from Hostycare API to our provisioningStatus
       if (details.status) {
-        const hostycareStatus = details.status.toLowerCase();
+        // Safely convert status to string and handle different data types
+        let hostycareStatus;
+        if (typeof details.status === 'string') {
+          hostycareStatus = details.status.toLowerCase();
+        } else if (typeof details.status === 'number') {
+          // Handle numeric status codes (common in APIs)
+          hostycareStatus = details.status.toString();
+        } else if (typeof details.status === 'boolean') {
+          // Handle boolean status (true = active, false = inactive)
+          hostycareStatus = details.status ? 'active' : 'suspended';
+        } else if (details.status && typeof details.status === 'object') {
+          // Handle object status (extract relevant field)
+          hostycareStatus = details.status.state || details.status.name || details.status.value || 'unknown';
+          if (typeof hostycareStatus === 'string') {
+            hostycareStatus = hostycareStatus.toLowerCase();
+          }
+        } else {
+          console.warn('[SYNC] Unknown status type:', typeof details.status, details.status);
+          hostycareStatus = String(details.status).toLowerCase();
+        }
+
+        // Map the normalized status to our schema
         switch (hostycareStatus) {
           case 'online':
           case 'running':
+          case 'active':
+          case '1':
+          case 'true':
             updateData.provisioningStatus = 'active';
             break;
           case 'offline':
           case 'stopped':
+          case 'suspended':
+          case '0':
+          case 'false':
             updateData.provisioningStatus = 'suspended';
             break;
           case 'installing':
           case 'provisioning':
+          case 'building':
+          case 'creating':
             updateData.provisioningStatus = 'provisioning';
             break;
           case 'failed':
+          case 'error':
             updateData.provisioningStatus = 'failed';
             break;
           case 'terminated':
+          case 'deleted':
+          case 'destroyed':
             updateData.provisioningStatus = 'terminated';
             break;
           default:
-            // Keep existing status if we don't recognize the new one
+            // Log unknown status for debugging but don't update
+            console.warn('[SYNC] Unknown server status:', hostycareStatus, 'from original:', details.status);
             break;
         }
       }
@@ -198,11 +240,18 @@ async function syncServerState(orderId, details, info) {
     // Only update if we have meaningful data to sync
     if (Object.keys(updateData).length > 1) { // More than just lastSyncTime
       await Order.findByIdAndUpdate(orderId, updateData);
-      console.log(`[SYNC] Updated order ${orderId} with server state:`, updateData);
+      console.log(`[SYNC] Updated order ${orderId} with server state:`, {
+        ...updateData,
+        serverDetails: updateData.serverDetails ? '[Raw data stored]' : undefined
+      });
+    } else {
+      console.log(`[SYNC] No meaningful updates for order ${orderId}`);
     }
 
   } catch (error) {
-    console.error('[SYNC] Error syncing server state:', error);
+    console.error('[SYNC] Error syncing server state for order', orderId, ':', error);
+    console.error('[SYNC] Details object:', details);
+    console.error('[SYNC] Info object:', info);
     throw error;
   }
 }

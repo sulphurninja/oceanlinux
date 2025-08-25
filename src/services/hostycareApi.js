@@ -189,16 +189,31 @@ class HostycareAPI {
     });
   }
 
-  // Get templates for reinstall
+  // Get templates for reinstall - This should return available OS templates
   async getReinstallTemplates(serviceId) {
-    return await this.makeRequest(`/services/${serviceId}/reinstall`);
+    // First get available templates without performing reinstall
+    return await this.makeRequest(`/services/${serviceId}/ostemplate`);
   }
 
-  // Reinstall service
-  async reinstallService(serviceId, password) {
-    return await this.makeRequest(`/services/${serviceId}/reinstall`, 'POST', {
-      password
-    });
+  // Reinstall service with template selection
+  async reinstallService(serviceId, password, templateId = null) {
+    const body = {
+      password,
+      conf: password, // Confirmation password as shown in SDK
+      reinsos: 'Reinstall'
+    };
+    
+    // If templateId is provided, include it (this should be the OS template ID)
+    if (templateId) {
+      body.newos = templateId;
+    }
+    
+    return await this.makeRequest(`/services/${serviceId}/ostemplate`, 'POST', body);
+  }
+
+  // New method to get service OS templates (similar to SDK's ostemplate function)
+  async getServiceTemplates(serviceId) {
+    return await this.makeRequest(`/services/${serviceId}/ostemplate`);
   }
 
   // Get account credit

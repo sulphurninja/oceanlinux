@@ -9,58 +9,36 @@ class AutoProvisioningService {
     console.log('[AUTO-PROVISION-SERVICE] 🏗️ AutoProvisioningService instance created');
   }
 
-  // NEW: Determine OS from product name
-  getOSFromProductName(productName = '') {
-    const s = String(productName).toLowerCase();
-    const isWindows = s.includes('vps') || s.includes('rdp') || s.includes('windows');
-    return isWindows ? 'Windows 2022 64' : 'Ubuntu 22';
-  }
+  // Generate random credentials
+  generateCredentials() {
+    console.log('[AUTO-PROVISION-SERVICE] 🔐 Generating credentials...');
 
-
-
-  // REPLACE the generateCredentials method completely
-  generateCredentials(productName = '') {
-    console.log('[AUTO-PROVISION-SERVICE] 🔐 Generating safe credentials...');
-
-    const upperCase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-    const lowerCase = 'abcdefghijklmnopqrstuvwxyz';
-    const numbers = '0123456789';
-
-    // ONLY these 4 special characters - NOTHING ELSE!
-    const safeSpecialChars = '@#&$';
-
-    let password = '';
-
-    // Ensure at least one character from each category
-    password += upperCase[Math.floor(Math.random() * upperCase.length)];
-    password += lowerCase[Math.floor(Math.random() * lowerCase.length)];
-    password += numbers[Math.floor(Math.random() * numbers.length)];
-    password += safeSpecialChars[Math.floor(Math.random() * safeSpecialChars.length)];
-
-    // Fill the rest randomly (16 characters total)
-    const allChars = upperCase + lowerCase + numbers + safeSpecialChars;
-    for (let i = password.length; i < 16; i++) {
-      password += allChars[Math.floor(Math.random() * allChars.length)];
-    }
-
-    // Shuffle the password
-    password = password.split('').sort(() => 0.5 - Math.random()).join('');
-
-    // Use context-aware username
-    const username = this.getLoginUsernameFromProductName(productName);
-
-    const credentials = {
-      username: username,
-      password: password
+    const generatePassword = (length = 12) => {
+      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
+      let password = '';
+      for (let i = 0; i < length; i++) {
+        password += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      return password;
     };
 
-    console.log('[AUTO-PROVISION-SERVICE] ✅ Safe credentials generated:');
+    const generateUsername = () => {
+      const prefixes = ['user', 'admin', 'root', 'client'];
+      const randomNum = Math.floor(Math.random() * 10000);
+      return `${prefixes[Math.floor(Math.random() * prefixes.length)]}${randomNum}`;
+    };
+
+    const credentials = {
+      username: generateUsername(),
+      password: generatePassword()
+    };
+
+    console.log('[AUTO-PROVISION-SERVICE] ✅ Credentials generated:');
     console.log(`   - Username: ${credentials.username}`);
-    console.log(`   - Password: ${credentials.password.substring(0, 4)}**** (16 chars, ONLY @#&$ specials)`);
+    console.log(`   - Password: ${credentials.password.substring(0, 4)}****`);
 
     return credentials;
   }
-
 
   // Generate hostname
   generateHostname(productName, memory) {
@@ -146,29 +124,8 @@ class AutoProvisioningService {
 
       console.log(`[AUTO-PROVISION] ✅ Found IP Stock: ${ipStock.name}`);
 
-      // STEP 4: Get memory configuration - FIXED FOR MAP OBJECTS
-      console.log(`[AUTO-PROVISION] 📦 STEP 4: Getting memory configuration...`);
-      console.log(`[AUTO-PROVISION] 🔍 Raw memoryOptions:`, ipStock.memoryOptions);
-      console.log(`[AUTO-PROVISION] 🔍 memoryOptions type:`, typeof ipStock.memoryOptions);
-
-      // Handle Map objects properly
-      let memoryOptions;
-      if (ipStock.memoryOptions instanceof Map) {
-        // Convert Map to plain object
-        memoryOptions = Object.fromEntries(ipStock.memoryOptions.entries());
-        console.log(`[AUTO-PROVISION] ✅ Converted Map to object`);
-      } else if (typeof ipStock.memoryOptions.toObject === 'function') {
-        memoryOptions = ipStock.memoryOptions.toObject();
-        console.log(`[AUTO-PROVISION] ✅ Used toObject() method`);
-      } else if (typeof ipStock.memoryOptions === 'object') {
-        memoryOptions = JSON.parse(JSON.stringify(ipStock.memoryOptions));
-        console.log(`[AUTO-PROVISION] ✅ Used JSON stringify/parse`);
-      } else {
-        memoryOptions = {};
-        console.log(`[AUTO-PROVISION] ⚠️ Used empty fallback`);
-      }
-
-      console.log(`[AUTO-PROVISION] 🧠 Converted memoryOptions:`, memoryOptions);
+      // STEP 4: Get memory configuration
+      const memoryOptions = this.toPlainObject(ipStock.memoryOptions);
       console.log(`[AUTO-PROVISION] 🧠 Available memory options:`, Object.keys(memoryOptions));
       console.log(`[AUTO-PROVISION] 🔍 Looking for memory: "${order.memory}"`);
 
@@ -176,16 +133,12 @@ class AutoProvisioningService {
 
       if (!memoryConfig) {
         // Try variations if exact match fails
-        console.log(`[AUTO-PROVISION] ⚠️ Exact match failed, trying variations...`);
-
         const memoryVariations = [
           order.memory.toLowerCase(),
           order.memory.toUpperCase(),
           order.memory.replace('GB', 'gb'),
           order.memory.replace('gb', 'GB'),
         ];
-
-        console.log(`[AUTO-PROVISION] 🔄 Trying variations:`, memoryVariations);
 
         for (const variation of memoryVariations) {
           if (memoryOptions[variation]) {
@@ -198,11 +151,6 @@ class AutoProvisioningService {
 
       if (!memoryConfig) {
         const availableKeys = Object.keys(memoryOptions);
-        console.error(`[AUTO-PROVISION] ❌ Memory config not found!`);
-        console.error(`   Requested: "${order.memory}"`);
-        console.error(`   Available: [${availableKeys.join(', ')}]`);
-        console.error(`   IP Stock: ${ipStock.name}`);
-
         throw new Error(
           `Memory configuration not found!\n` +
           `Requested: "${order.memory}"\n` +
@@ -337,10 +285,6 @@ class AutoProvisioningService {
         // STEP 8: Update order with success (even if IP is pending)
         console.log(`[AUTO-PROVISION] 💾 STEP 8: Updating order with provisioning success...`);
 
-        // Determine OS from product name
-        const detectedOS = this.getOSFromProductName(order.productName);
-        console.log(`[AUTO-PROVISION] 🖥️ Detected OS from product "${order.productName}": ${detectedOS}`);
-
         const updateData = {
           status: 'active',
           provisioningStatus: 'active',
@@ -348,8 +292,7 @@ class AutoProvisioningService {
           username: credentials.username,
           password: credentials.password,
           autoProvisioned: true,
-          provisioningError: '',
-          os: detectedOS // Add OS detection
+          provisioningError: ''
         };
 
         if (ipAddress) {
@@ -373,7 +316,6 @@ class AutoProvisioningService {
         console.log(`   - Service ID: ${serviceId}`);
         console.log(`   - IP Status: ${ipAddress || 'Will be assigned automatically'}`);
         console.log(`   - Username: ${credentials.username}`);
-        console.log(`   - OS: ${detectedOS}`); // Log detected OS
         console.log(`   - Product ID: ${productId}`);
         console.log(`   - Product Name: ${memoryConfig.hostycareProductName || 'N/A'}`);
         console.log(`   - Hostname: ${hostname}`);
@@ -464,8 +406,49 @@ class AutoProvisioningService {
       }
     }
   }
+  // Enhanced password generation for better success rate
+  generateEnhancedCredentials() {
+    console.log('[AUTO-PROVISION-SERVICE] 🔐 Generating enhanced credentials...');
 
+    // Generate a stronger password that meets requirements
+    const upperCase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    const lowerCase = 'abcdefghijklmnopqrstuvwxyz';
+    const numbers = '0123456789';
+    const specialChars = '!@#$%^&*()_+-=[]{}|;:,.<>?';
 
+    let password = '';
+
+    // Ensure at least one character from each category
+    password += upperCase[Math.floor(Math.random() * upperCase.length)];
+    password += lowerCase[Math.floor(Math.random() * lowerCase.length)];
+    password += numbers[Math.floor(Math.random() * numbers.length)];
+    password += specialChars[Math.floor(Math.random() * specialChars.length)];
+
+    // Fill the rest randomly (minimum 16 characters total for better strength)
+    const allChars = upperCase + lowerCase + numbers + specialChars;
+    for (let i = password.length; i < 16; i++) {
+      password += allChars[Math.floor(Math.random() * allChars.length)];
+    }
+
+    // Shuffle the password
+    password = password.split('').sort(() => 0.5 - Math.random()).join('');
+
+    const credentials = {
+      username: 'root',
+      password: password
+    };
+
+    console.log('[AUTO-PROVISION-SERVICE] ✅ Enhanced credentials generated:');
+    console.log(`   - Username: ${credentials.username}`);
+    console.log(`   - Password: ${credentials.password.substring(0, 4)}**** (${credentials.password.length} chars)`);
+
+    return credentials;
+  }
+
+  // Update the existing generateCredentials method to use enhanced version
+  generateCredentials() {
+    return this.generateEnhancedCredentials();
+  }
 
   // Check if an error is retryable
   isRetryableError(errorMessage) {

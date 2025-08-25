@@ -906,7 +906,7 @@ const ViewLinux = () => {
                                                     <div className="space-y-4">
                                                         <h4 className="font-semibold">Advanced Actions</h4>
                                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                            <Button
+                                                            {/* <Button
                                                                 variant="outline"
                                                                 size="lg"
                                                                 onClick={async () => {
@@ -926,18 +926,59 @@ const ViewLinux = () => {
                                                                     <KeyRound className="h-4 w-4" />
                                                                 )}
                                                                 Change Password
-                                                            </Button>
+                                                            </Button> */}
+                                  
                                                             <Button
                                                                 variant="destructive"
                                                                 size="lg"
                                                                 onClick={async () => {
                                                                     const confirmed = confirm('Are you sure you want to reinstall? This will erase all data!');
                                                                     if (confirmed) {
-                                                                        const pwd = prompt('Enter new root/administrator password:');
-                                                                        if (pwd && pwd.length >= 6) {
-                                                                            await runServiceAction(selectedOrder, 'reinstall', { password: pwd });
-                                                                        } else if (pwd) {
-                                                                            toast.error('Password must be at least 6 characters long');
+                                                                        // First, optionally get templates
+                                                                        const shouldSelectTemplate = confirm('Do you want to select a different OS template? (Cancel to keep current OS)');
+
+                                                                        if (shouldSelectTemplate) {
+                                                                            // Get available templates
+                                                                            try {
+                                                                                const templatesRes = await fetch('/api/orders/service-action', {
+                                                                                    method: 'POST',
+                                                                                    headers: { 'Content-Type': 'application/json' },
+                                                                                    body: JSON.stringify({ orderId: selectedOrder._id, action: 'templates' })
+                                                                                });
+                                                                                const templatesData = await templatesRes.json();
+
+                                                                                if (templatesData.success && templatesData.result) {
+                                                                                    // Show template selection (you might want to create a proper dialog for this)
+                                                                                    const templateOptions = Object.entries(templatesData.result).map(([id, template]: [string, any]) =>
+                                                                                        `${id}: ${template.name || template.distro || id}`
+                                                                                    ).join('\n');
+
+                                                                                    const selectedTemplate = prompt(`Available templates:\n${templateOptions}\n\nEnter template ID (or cancel to keep current):`);
+
+                                                                                    if (selectedTemplate) {
+                                                                                        const pwd = prompt('Enter new root/administrator password:');
+                                                                                        if (pwd && pwd.length >= 6) {
+                                                                                            await runServiceAction(selectedOrder, 'reinstall', {
+                                                                                                password: pwd,
+                                                                                                templateId: selectedTemplate
+                                                                                            });
+                                                                                        } else if (pwd) {
+                                                                                            toast.error('Password must be at least 6 characters long');
+                                                                                        }
+                                                                                    }
+                                                                                }
+                                                                            } catch (error) {
+                                                                                console.error('Failed to get templates:', error);
+                                                                                toast.error('Failed to load templates');
+                                                                            }
+                                                                        } else {
+                                                                            // Just reinstall with current OS
+                                                                            const pwd = prompt('Enter new root/administrator password:');
+                                                                            if (pwd && pwd.length >= 6) {
+                                                                                await runServiceAction(selectedOrder, 'reinstall', { password: pwd });
+                                                                            } else if (pwd) {
+                                                                                toast.error('Password must be at least 6 characters long');
+                                                                            }
                                                                         }
                                                                     }
                                                                 }}
