@@ -242,7 +242,7 @@ const ResponsiveSidebar = () => {
               <ServerIcon className="h-3.5 w-3.5 lg:h-4 lg:w-4 mr-2" />
               <span className="text-xs lg:text-sm">New Order</span>
             </Button>
-            <Button
+            {/* <Button
               variant="outline"
               size="sm"
               className="w-full justify-start h-8 lg:h-9"
@@ -251,9 +251,9 @@ const ResponsiveSidebar = () => {
                 isMobile && setOpen(false);
               }}
             >
-              <CreditCard className="h-3.5 w-3.5 lg:h-4 lg:w-4 mr-2" />
+              <Downloa className="h-3.5 w-3.5 lg:h-4 lg:w-4 mr-2" />
               <span className="text-xs lg:text-sm">Billing</span>
-            </Button>
+            </Button> */}
           </div>
         </div>
       </div>
