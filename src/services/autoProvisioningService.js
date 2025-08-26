@@ -106,15 +106,32 @@ class AutoProvisioningService {
       console.log(`   - Product: ${order.productName}`);
       console.log(`   - Memory: ${order.memory}`);
       console.log(`   - Price: ₹${order.price}`);
+      console.log(`   - Current OS: ${order.os || 'Default'}`);
       console.log(`   - IP Stock ID: ${order.ipStockId || 'NOT SET'}`);
 
-      // STEP 2: Update status to provisioning
-      console.log(`[AUTO-PROVISION] 📝 STEP 2: Updating order status to 'provisioning'...`);
+      // STEP 2: Determine OS based on productName and update order status
+      console.log(`[AUTO-PROVISION] 📝 STEP 2: Determining OS and updating order status...`);
+
+      const productNameLower = String(order.productName).toLowerCase();
+      const isWindowsProduct = productNameLower.includes('windows') ||
+        productNameLower.includes('rdp') ||
+        productNameLower.includes('vps');
+
+      const targetOS = isWindowsProduct ? 'Windows 2022 64' : 'Ubuntu 22';
+
+      console.log(`[AUTO-PROVISION] 🖥️ Product analysis:`);
+      console.log(`   - Product Name: "${order.productName}"`);
+      console.log(`   - Is Windows Product: ${isWindowsProduct}`);
+      console.log(`   - Target OS: ${targetOS}`);
+
       await Order.findByIdAndUpdate(orderId, {
         provisioningStatus: 'provisioning',
         provisioningError: '',
-        autoProvisioned: true
+        autoProvisioned: true,
+        os: targetOS // Update OS based on product name
       });
+
+      console.log(`[AUTO-PROVISION] ✅ Order updated with OS: ${targetOS}`);
 
       // STEP 3: Find IP Stock configuration
       console.log(`[AUTO-PROVISION] 📦 STEP 3: Finding IP Stock configuration...`);
