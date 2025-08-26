@@ -44,14 +44,24 @@ const orderSchema = new mongoose.Schema({
     autoProvisioned: { type: Boolean, default: false },
 
     // VPS Management tracking fields
-    lastAction: { type: String }, // 'start', 'stop', 'reboot', 'changepassword', 'reinstall'
+    lastAction: { type: String }, // 'start', 'stop', 'reboot', 'changepassword', 'reinstall', 'renew'
     lastActionTime: { type: Date },
     lastSyncTime: { type: Date }, // When we last synced with Hostycare API
     serverDetails: {
         lastUpdated: { type: Date },
         rawDetails: { type: mongoose.Schema.Types.Mixed },
         rawInfo: { type: mongoose.Schema.Types.Mixed }
-    }
+    },
+
+    // Renewal tracking
+    renewalPayments: [{
+        paymentId: { type: String, required: true },
+        amount: { type: Number, required: true },
+        paidAt: { type: Date, required: true },
+        previousExpiry: { type: Date, required: true },
+        newExpiry: { type: Date, required: true },
+        renewalTxnId: { type: String, required: true }
+    }]
 }, { timestamps: true });
 
 // ✅ add indexes so sort & lookups are fast
@@ -59,5 +69,6 @@ orderSchema.index({ createdAt: -1 });
 orderSchema.index({ user: 1 });
 orderSchema.index({ hostycareServiceId: 1 });
 orderSchema.index({ lastSyncTime: -1 });
+orderSchema.index({ expiryDate: 1 }); // Add index for expiry queries
 
 export default mongoose.models.Order || mongoose.model('Order', orderSchema);

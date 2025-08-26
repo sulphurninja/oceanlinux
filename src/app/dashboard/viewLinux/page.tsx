@@ -1,4 +1,4 @@
-'use client'
+"use client";
 
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -32,7 +32,8 @@ import {
     Database,
     MemoryStick,
     Search,
-    X
+    X,
+    CreditCard
 } from 'lucide-react';
 import {
     Dialog,
@@ -58,12 +59,19 @@ import { Progress } from '@/components/ui/progress';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
+declare global {
+    interface Window {
+        Razorpay: any;
+    }
+}
+
 interface Order {
     _id: string;
     productName: string;
     os: string;
     memory: string;
     status: string;
+    price: number;
     ipAddress?: string;
     username?: string;
     password?: string;
@@ -71,7 +79,17 @@ interface Order {
     createdAt?: Date;
     hostycareServiceId?: string;
     provisioningStatus?: string;
-    price?: number;
+    lastAction?: string;
+    lastActionTime?: Date;
+    lastSyncTime?: Date;
+    renewalPayments?: Array<{
+        paymentId: string;
+        amount: number;
+        paidAt: Date;
+        previousExpiry: Date;
+        newExpiry: Date;
+        renewalTxnId: string;
+    }>;
 }
 
 // OS Icon Component
@@ -167,6 +185,7 @@ const ViewLinux = () => {
             setFilteredOrders(filtered);
         }
     }, [orders, searchQuery]);
+
     const clearSearch = () => {
         setSearchQuery('');
     };
@@ -245,12 +264,20 @@ const ViewLinux = () => {
     };
 
     const handleDialogOpen = (order: Order) => {
+        if (!order) return;
         setSelectedOrder(order);
         setShowPassword(false);
         setServiceDetails(null);
         if (order.hostycareServiceId) {
             loadServiceDetails(order);
         }
+    };
+
+    const handleDialogClose = () => {
+        setSelectedOrder(null);
+        setShowPassword(false);
+        setServiceDetails(null);
+        setActionBusy(null);
     };
 
     const copyToClipboard = (text: string, field: string) => {
@@ -260,6 +287,152 @@ const ViewLinux = () => {
         setTimeout(() => setCopied(null), 2000);
     };
 
+    const getDaysUntilExpiry = (expiryDate: Date | string | null | undefined) => {
+        if (!expiryDate) return 0;
+        const now = new Date();
+        const expiry = new Date(expiryDate);
+        const diffTime = expiry.getTime() - now.getTime();
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        return diffDays;
+    };
+
+    const isRenewalEligible = (order: Order | null) => {
+        if (!order || !order.expiryDate) return false;
+        const daysLeft = getDaysUntilExpiry(order.expiryDate);
+        // Allow renewal if expiring within 30 days or already expired (but not more than 7 days ago)
+        return daysLeft <= 30 && daysLeft >= -7;
+    };
+
+    const isExpired = (order: Order | null) => {
+        if (!order || !order.expiryDate) return false;
+        return getDaysUntilExpiry(order.expiryDate) < 0;
+    };
+
+    const handleRenewService = async (order: Order) => {
+        if (!order || !order.expiryDate) {
+            toast.error('Order has no expiry date');
+            return;
+        }
+
+        const daysLeft = getDaysUntilExpiry(order.expiryDate);
+        const isExpiredService = daysLeft < 0;
+
+        const confirmed = confirm(
+            `Renew service for ₹${order.price}?\n\n` +
+            `Service: ${order.productName}\n` +
+            `Configuration: ${order.memory}\n` +
+            `Current Expiry: ${formatDate(order.expiryDate)}\n` +
+            `${isExpiredService ? 'Service is expired' : `${daysLeft} days remaining`}\n\n` +
+            `After payment, service will be extended for 30 days.\n` +
+            `Proceed to payment?`
+        );
+
+        if (!confirmed) return;
+
+        setActionBusy('renew');
+
+        try {
+            // Initiate renewal payment
+            const res = await fetch("/api/payment/renew", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    orderId: order._id
+                })
+            });
+
+            const data = await res.json();
+
+            if (!res.ok) {
+                toast.error(data.message || "Failed to initiate renewal payment");
+                setActionBusy(null);
+                return;
+            }
+
+            // Store renewal transaction ID
+            if (data.renewalTxnId) {
+                localStorage.setItem('lastRenewalTxnId', data.renewalTxnId);
+                localStorage.setItem('renewalOrderId', order._id);
+                console.log("Stored renewal info in localStorage");
+            }
+
+            // Sanitize description for Razorpay
+            const sanitizedDescription = `Renewal: ${order.productName} - ${order.memory}`.replace(/[^\w\s\-\.]/g, '').trim();
+            const sanitizedCustomerName = data.customer.name.replace(/[^\w\s\-\.]/g, '').trim();
+
+            // Initialize Razorpay for renewal
+            const options = {
+                key: data.razorpay.key,
+                amount: data.razorpay.amount,
+                currency: data.razorpay.currency,
+                name: 'OceanLinux',
+                description: sanitizedDescription,
+                order_id: data.razorpay.order_id,
+                prefill: {
+                    name: sanitizedCustomerName,
+                    email: data.customer.email,
+                },
+                theme: {
+                    color: '#3b82f6'
+                },
+                handler: async function (response: any) {
+                    console.log('Renewal payment successful:', response);
+                    toast.success("Payment successful! Processing renewal...");
+
+                    try {
+                        // Call API to confirm renewal payment and trigger service renewal
+                        const confirmRes = await fetch("/api/payment/renew-confirm", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                                renewalTxnId: data.renewalTxnId,
+                                orderId: order._id,
+                                razorpay_payment_id: response.razorpay_payment_id,
+                                razorpay_order_id: response.razorpay_order_id,
+                                razorpay_signature: response.razorpay_signature
+                            })
+                        });
+
+                        const confirmData = await confirmRes.json();
+
+                        if (confirmRes.ok && confirmData.success) {
+                            toast.success("Service renewed successfully! New expiry date updated.");
+
+                            // Refresh order data to show new expiry date
+                            await Promise.all([
+                                fetchOrders(), // Refresh the orders list
+                                refreshOrderData(order._id) // Refresh selected order
+                            ]);
+                        } else {
+                            toast.error("Payment successful but renewal processing failed. Please contact support.");
+                            console.error('Renewal confirmation failed:', confirmData);
+                        }
+                    } catch (error) {
+                        console.error('Error confirming renewal payment:', error);
+                        toast.error("Payment successful but renewal confirmation failed. Please contact support.");
+                    } finally {
+                        setActionBusy(null);
+                    }
+                },
+                modal: {
+                    ondismiss: function () {
+                        console.log('Renewal payment modal dismissed');
+                        setActionBusy(null);
+                    }
+                }
+            };
+
+            setSelectedOrder(null); // Close the server details dialog
+
+            const razorpay = new window.Razorpay(options);
+            razorpay.open();
+
+        } catch (error) {
+            console.error("Error initiating renewal payment:", error);
+            toast.error("Something went wrong. Please try again");
+            setActionBusy(null);
+        }
+    };
 
     const getStatusBadge = (status: string, provisioningStatus?: string, lastAction?: string) => {
         // Show transitional states ONLY during active operations (when actionBusy is set)
@@ -284,6 +457,13 @@ const ViewLinux = () => {
                         <Badge className="bg-gray-50 text-gray-700 border-gray-200">
                             <Loader2 className="w-3 h-3 mr-1 animate-spin" />
                             Stopping
+                        </Badge>
+                    );
+                case 'renew':
+                    return (
+                        <Badge className="bg-green-50 text-green-700 border-green-200">
+                            <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                            Renewing
                         </Badge>
                     );
                 case 'reinstall':
@@ -377,14 +557,6 @@ const ViewLinux = () => {
             hour: '2-digit',
             minute: '2-digit'
         });
-    };
-
-    const getDaysUntilExpiry = (expiryDate: Date | string) => {
-        const now = new Date();
-        const expiry = new Date(expiryDate);
-        const diffTime = expiry.getTime() - now.getTime();
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-        return diffDays;
     };
 
     return (
@@ -524,10 +696,46 @@ const ViewLinux = () => {
                                                         </span>
                                                     )}
                                                 </div>
+                                                {/* Add expiry indicator on order cards */}
+                                                {order.expiryDate && (
+                                                    <div className="mt-2">
+                                                        {isExpired(order) ? (
+                                                            <Badge variant="destructive" className="text-xs">
+                                                                <AlertTriangle className="h-3 w-3 mr-1" />
+                                                                Expired {Math.abs(getDaysUntilExpiry(order.expiryDate))} days ago
+                                                            </Badge>
+                                                        ) : getDaysUntilExpiry(order.expiryDate) <= 7 ? (
+                                                            <Badge variant="outline" className="text-xs border-amber-200 text-amber-700">
+                                                                <Clock className="h-3 w-3 mr-1" />
+                                                                Expires in {getDaysUntilExpiry(order.expiryDate)} days
+                                                            </Badge>
+                                                        ) : null}
+                                                    </div>
+                                                )}
                                             </div>
                                         </div>
 
-                                        <div className="flex items-center gap-4">
+                                        <div className="flex items-center gap-2">
+                                            {/* Add quick renewal button on card if eligible */}
+                                            {isRenewalEligible(order) && order.hostycareServiceId && (
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        handleRenewService(order);
+                                                    }}
+                                                    disabled={actionBusy === 'renew'}
+                                                    className="gap-1 text-xs"
+                                                >
+                                                    {actionBusy === 'renew' ? (
+                                                        <Loader2 className="h-3 w-3 animate-spin" />
+                                                    ) : (
+                                                        <CreditCard className="h-3 w-3" />
+                                                    )}
+                                                    Renew
+                                                </Button>
+                                            )}
                                             {getStatusBadge(order.status, order.provisioningStatus, order.lastAction)}
                                             <Button
                                                 variant="outline"
@@ -546,10 +754,14 @@ const ViewLinux = () => {
                     </div>
                 )}
 
-                {/* Updated Server Details Dialog */}
-                <Dialog open={Boolean(selectedOrder)} onOpenChange={() => setSelectedOrder(null)}>
+                {/* Server Details Dialog */}
+                <Dialog open={Boolean(selectedOrder)} onOpenChange={(open) => {
+                    if (!open) {
+                        handleDialogClose();
+                    }
+                }}>
                     <DialogContent className='sm:max-w-4xl max-h-[90vh] overflow-y-auto'>
-                        {selectedOrder && (
+                        {selectedOrder ? (
                             <>
                                 <DialogHeader className="space-y-4">
                                     <div className="flex items-start justify-between">
@@ -574,7 +786,8 @@ const ViewLinux = () => {
                                         </div>
                                     </div>
                                 </DialogHeader>
-                                <Tabs defaultValue="connection" className="w-full">
+
+                                <Tabs defaultValue="overview" className="w-full">
                                     <TabsList className="grid w-full grid-cols-3">
                                         <TabsTrigger value="overview">Overview</TabsTrigger>
                                         <TabsTrigger value="connection">Connection Details</TabsTrigger>
@@ -594,7 +807,7 @@ const ViewLinux = () => {
                                             </CardHeader>
                                             <CardContent>
                                                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                                                    <div className="p-4 bg-blue-300 rounded-lg border border-blue-200">
+                                                    <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
                                                         <div className="flex items-center gap-3">
                                                             <Terminal className="h-8 w-8 text-blue-600" />
                                                             <div>
@@ -604,7 +817,7 @@ const ViewLinux = () => {
                                                         </div>
                                                     </div>
 
-                                                    <div className="p-4 bg-purple-300 rounded-lg border border-purple-200">
+                                                    <div className="p-4 bg-purple-50 rounded-lg border border-purple-200">
                                                         <div className="flex items-center gap-3">
                                                             <MemoryStick className="h-8 w-8 text-purple-600" />
                                                             <div>
@@ -614,7 +827,7 @@ const ViewLinux = () => {
                                                         </div>
                                                     </div>
 
-                                                    <div className="p-4 bg-green-300 rounded-lg border border-green-200">
+                                                    <div className="p-4 bg-green-50 rounded-lg border border-green-200">
                                                         <div className="flex items-center gap-3">
                                                             <Activity className="h-8 w-8 text-green-600" />
                                                             <div>
@@ -628,6 +841,7 @@ const ViewLinux = () => {
                                                 </div>
                                             </CardContent>
                                         </Card>
+
                                         {/* Recent Activity Card */}
                                         {(selectedOrder.lastAction || selectedOrder.lastActionTime) && (
                                             <Card>
@@ -643,6 +857,7 @@ const ViewLinux = () => {
                                                             {selectedOrder.lastAction === 'start' && <Play className="h-4 w-4 text-blue-600" />}
                                                             {selectedOrder.lastAction === 'stop' && <Square className="h-4 w-4 text-blue-600" />}
                                                             {selectedOrder.lastAction === 'reboot' && <RefreshCw className="h-4 w-4 text-blue-600" />}
+                                                            {selectedOrder.lastAction === 'renew' && <CreditCard className="h-4 w-4 text-blue-600" />}
                                                             {selectedOrder.lastAction === 'changepassword' && <KeyRound className="h-4 w-4 text-blue-600" />}
                                                             {selectedOrder.lastAction === 'reinstall' && <LayoutTemplate className="h-4 w-4 text-blue-600" />}
                                                             {!selectedOrder.lastAction && <Activity className="h-4 w-4 text-blue-600" />}
@@ -664,28 +879,69 @@ const ViewLinux = () => {
                                                 </CardContent>
                                             </Card>
                                         )}
-                                        {selectedOrder.expiryDate && (
+
+                                        {/* Service Timeline with Renewal */}
+                                        {selectedOrder?.expiryDate && (
                                             <Card>
                                                 <CardHeader>
                                                     <CardTitle className="flex items-center gap-2">
                                                         <Calendar className="h-5 w-5" />
-                                                        Service Timeline
+                                                        Service Timeline & Renewal
                                                     </CardTitle>
                                                 </CardHeader>
                                                 <CardContent>
-                                                    <div className="p-4 bg-blue-900 rounded-lg border border-blue-200">
+                                                    <div className={cn(
+                                                        "p-4 rounded-lg border",
+                                                        isExpired(selectedOrder)
+                                                            ? "bg-red-50 border-red-200"
+                                                            : getDaysUntilExpiry(selectedOrder.expiryDate) <= 7
+                                                                ? "bg-amber-50 border-amber-200"
+                                                                : "bg-blue-50 border-blue-200"
+                                                    )}>
                                                         <div className="flex items-center justify-between">
                                                             <div>
-                                                                <p className="font-semibold text-blue-200">Service Expires</p>
-                                                                <p className="text-sm text-white -600">
+                                                                <p className={cn(
+                                                                    "font-semibold",
+                                                                    isExpired(selectedOrder)
+                                                                        ? "text-red-700"
+                                                                        : getDaysUntilExpiry(selectedOrder.expiryDate) <= 7
+                                                                            ? "text-amber-700"
+                                                                            : "text-blue-700"
+                                                                )}>
+                                                                    {isExpired(selectedOrder) ? 'Service Expired' : 'Service Expires'}
+                                                                </p>
+                                                                <p className={cn(
+                                                                    "text-sm",
+                                                                    isExpired(selectedOrder)
+                                                                        ? "text-red-600"
+                                                                        : getDaysUntilExpiry(selectedOrder.expiryDate) <= 7
+                                                                            ? "text-amber-600"
+                                                                            : "text-blue-600"
+                                                                )}>
                                                                     {formatDate(selectedOrder.expiryDate)}
                                                                 </p>
                                                             </div>
                                                             <div className="text-right">
-                                                                <p className="text-2xl font-bold text-white -900">
-                                                                    {getDaysUntilExpiry(selectedOrder.expiryDate)}
+                                                                <p className={cn(
+                                                                    "text-2xl font-bold",
+                                                                    isExpired(selectedOrder)
+                                                                        ? "text-red-700"
+                                                                        : getDaysUntilExpiry(selectedOrder.expiryDate) <= 7
+                                                                            ? "text-amber-700"
+                                                                            : "text-blue-700"
+                                                                )}>
+                                                                    {Math.abs(getDaysUntilExpiry(selectedOrder.expiryDate))}
                                                                 </p>
-                                                                <p className="text-sm text-blue-200">days left</p>
+                                                                <p className={cn(
+                                                                    "text-sm",
+                                                                    isExpired(selectedOrder)
+                                                                        ? "text-red-600"
+                                                                        : getDaysUntilExpiry(selectedOrder.expiryDate) <= 7
+                                                                            ? "text-amber-600"
+                                                                            : "text-blue-600"
+                                                                )}>
+                                                                    {isExpired(selectedOrder) ? 'days ago' : 'days left'}
+                                                                </p>
                                                             </div>
                                                         </div>
 
@@ -697,7 +953,80 @@ const ViewLinux = () => {
                                                                 />
                                                             </div>
                                                         )}
+
+                                                        {/* Renewal Button */}
+                                                        {isRenewalEligible(selectedOrder) && selectedOrder.hostycareServiceId && (
+                                                            <div className="mt-4 pt-3 border-t">
+                                                                <Button
+                                                                    onClick={() => handleRenewService(selectedOrder)}
+                                                                    disabled={actionBusy === 'renew'}
+                                                                    className={cn(
+                                                                        "w-full gap-2",
+                                                                        isExpired(selectedOrder)
+                                                                            ? "bg-red-600 hover:bg-red-700"
+                                                                            : "bg-green-600 hover:bg-green-700"
+                                                                    )}
+                                                                >
+                                                                    {actionBusy === 'renew' ? (
+                                                                        <>
+                                                                            <Loader2 className="h-4 w-4 animate-spin" />
+                                                                            Processing Payment...
+                                                                        </>
+                                                                    ) : (
+                                                                        <>
+                                                                            <CreditCard className="h-4 w-4" />
+                                                                            {isExpired(selectedOrder)
+                                                                                ? `Renew Service - Pay ₹${selectedOrder.price}`
+                                                                                : `Renew for 30 Days - Pay ₹${selectedOrder.price}`
+                                                                            }
+                                                                        </>
+                                                                    )}
+                                                                </Button>
+
+                                                                {isExpired(selectedOrder) && (
+                                                                    <p className="text-xs text-red-600 mt-2 text-center">
+                                                                        ⚠️ Service renewal available for up to 7 days after expiry
+                                                                    </p>
+                                                                )}
+                                                            </div>
+                                                        )}
+
+                                                        {/* Show renewal eligibility message */}
+                                                        {!isRenewalEligible(selectedOrder) && selectedOrder?.hostycareServiceId && (
+                                                            <div className="mt-4 pt-3 border-t">
+                                                                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                                                    <Clock className="h-4 w-4" />
+                                                                    {selectedOrder.expiryDate && getDaysUntilExpiry(selectedOrder.expiryDate) > 30
+                                                                        ? `Renewal available ${getDaysUntilExpiry(selectedOrder.expiryDate) - 30} days before expiry`
+                                                                        : selectedOrder.expiryDate && getDaysUntilExpiry(selectedOrder.expiryDate) < -7
+                                                                            ? 'Renewal period has expired'
+                                                                            : 'Renewal not available'
+                                                                    }
+                                                                </div>
+                                                            </div>
+                                                        )}
                                                     </div>
+
+                                                    {/* Renewal History */}
+                                                    {selectedOrder.renewalPayments && selectedOrder.renewalPayments.length > 0 && (
+                                                        <div className="mt-4 pt-4 border-t">
+                                                            <h4 className="font-medium text-sm mb-3">Renewal History</h4>
+                                                            <div className="space-y-2 max-h-32 overflow-y-auto">
+                                                                {selectedOrder.renewalPayments.map((renewal, index) => (
+                                                                    <div key={index} className="flex items-center justify-between text-xs p-2 bg-muted/30 rounded">
+                                                                        <div>
+                                                                            <p className="font-medium">₹{renewal.amount} paid</p>
+                                                                            <p className="text-muted-foreground">{formatDate(renewal.paidAt)}</p>
+                                                                        </div>
+                                                                        <div className="text-right">
+                                                                            <p>Extended to</p>
+                                                                            <p className="text-muted-foreground">{formatDate(renewal.newExpiry)}</p>
+                                                                        </div>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    )}
                                                 </CardContent>
                                             </Card>
                                         )}
@@ -911,6 +1240,8 @@ const ViewLinux = () => {
                                                                     const confirmed = confirm('Are you sure you want to reinstall? This will erase all data!');
                                                                     if (confirmed) {
                                                                         try {
+                                                                            setActionBusy('reinstall');
+
                                                                             // First, get available templates
                                                                             const templatesRes = await fetch('/api/orders/service-action', {
                                                                                 method: 'POST',
@@ -918,43 +1249,103 @@ const ViewLinux = () => {
                                                                                 body: JSON.stringify({ orderId: selectedOrder._id, action: 'templates' })
                                                                             });
                                                                             const templatesData = await templatesRes.json();
-                                                                            console.log(templatesData, 'kya aa rha he bc?')
-                                                                            if (templatesData.success && templatesData.result) {
-                                                                                // Show available templates to user
-                                                                                const templates = templatesData.result;
-                                                                                let templateOptions = '';
 
-                                                                                // Format templates for display (assuming templates is an object with ID keys)
-                                                                                for (const [id, template] of Object.entries(templates)) {
-                                                                                    const name = template.name || template.distro || template.os || id;
-                                                                                    templateOptions += `${id}: ${name}\n`;
+                                                                            console.log('Templates response:', templatesData);
+
+                                                                            if (templatesData.success && templatesData.result) {
+                                                                                const templates = templatesData.result;
+
+                                                                                // Handle different response formats
+                                                                                let templateOptions = '';
+                                                                                let templateList = {};
+
+                                                                                if (Array.isArray(templates)) {
+                                                                                    // If templates is an array
+                                                                                    templates.forEach((template, index) => {
+                                                                                        const name = template.name || template.os || template.distro || `Template ${index + 1}`;
+                                                                                        const id = template.id || template.templateId || index.toString();
+                                                                                        templateList[id] = template;
+                                                                                        templateOptions += `${id}: ${name}\n`;
+                                                                                    });
+                                                                                } else if (typeof templates === 'object' && templates !== null) {
+                                                                                    // If templates is an object
+                                                                                    Object.entries(templates).forEach(([id, template]) => {
+                                                                                        const name = typeof template === 'string' ? template :
+                                                                                            (template?.name || template?.os || template?.distro || `Template ${id}`);
+                                                                                        templateList[id] = template;
+                                                                                        templateOptions += `${id}: ${name}\n`;
+                                                                                    });
+                                                                                } else {
+                                                                                    console.warn('Unexpected templates format:', templates);
+                                                                                    templateOptions = 'No templates found in expected format';
                                                                                 }
 
-                                                                                if (templateOptions) {
-                                                                                    const selectedTemplateId = prompt(`Select OS Template:\n\n${templateOptions}\nEnter template ID:`);
+                                                                                if (templateOptions && Object.keys(templateList).length > 0) {
+                                                                                    const selectedTemplateId = prompt(
+                                                                                        `Select OS Template:\n\n${templateOptions}\nEnter template ID (or leave blank for default):`
+                                                                                    );
 
-                                                                                    if (selectedTemplateId && templates[selectedTemplateId]) {
-                                                                                        const pwd = prompt('Enter new root/administrator password (minimum 6 characters):');
-                                                                                        if (pwd && pwd.length >= 6) {
-                                                                                            await runServiceAction(selectedOrder, 'reinstall', {
-                                                                                                password: pwd,
-                                                                                                templateId: selectedTemplateId
-                                                                                            });
-                                                                                        } else if (pwd !== null) {
-                                                                                            toast.error('Password must be at least 6 characters long');
-                                                                                        }
-                                                                                    } else if (selectedTemplateId !== null) {
+                                                                                    // Allow empty selection for default reinstall
+                                                                                    if (selectedTemplateId === null) {
+                                                                                        // User cancelled
+                                                                                        setActionBusy(null);
+                                                                                        return;
+                                                                                    }
+
+                                                                                    // Validate template selection if provided
+                                                                                    if (selectedTemplateId && !templateList[selectedTemplateId]) {
                                                                                         toast.error('Invalid template ID selected');
+                                                                                        setActionBusy(null);
+                                                                                        return;
+                                                                                    }
+
+                                                                                    const pwd = prompt('Enter new root/administrator password (minimum 6 characters):');
+                                                                                    if (pwd && pwd.length >= 6) {
+                                                                                        await runServiceAction(selectedOrder, 'reinstall', {
+                                                                                            password: pwd,
+                                                                                            templateId: selectedTemplateId || undefined // undefined if empty
+                                                                                        });
+                                                                                    } else if (pwd !== null) {
+                                                                                        toast.error('Password must be at least 6 characters long');
+                                                                                        setActionBusy(null);
+                                                                                    } else {
+                                                                                        // User cancelled password prompt
+                                                                                        setActionBusy(null);
                                                                                     }
                                                                                 } else {
-                                                                                    toast.error('No templates available for reinstall');
+                                                                                    // No templates available, proceed with default reinstall
+                                                                                    console.log('No templates available, proceeding with default reinstall');
+                                                                                    const pwd = prompt('No templates available. Proceed with default OS reinstall?\n\nEnter new root/administrator password (minimum 6 characters):');
+                                                                                    if (pwd && pwd.length >= 6) {
+                                                                                        await runServiceAction(selectedOrder, 'reinstall', {
+                                                                                            password: pwd
+                                                                                        });
+                                                                                    } else if (pwd !== null) {
+                                                                                        toast.error('Password must be at least 6 characters long');
+                                                                                        setActionBusy(null);
+                                                                                    } else {
+                                                                                        setActionBusy(null);
+                                                                                    }
                                                                                 }
                                                                             } else {
-                                                                                toast.error('Failed to load available templates');
+                                                                                // Failed to get templates, proceed with default reinstall
+                                                                                console.log('Failed to load templates, proceeding with default reinstall');
+                                                                                const pwd = prompt('Failed to load templates. Proceed with default OS reinstall?\n\nEnter new root/administrator password (minimum 6 characters):');
+                                                                                if (pwd && pwd.length >= 6) {
+                                                                                    await runServiceAction(selectedOrder, 'reinstall', {
+                                                                                        password: pwd
+                                                                                    });
+                                                                                } else if (pwd !== null) {
+                                                                                    toast.error('Password must be at least 6 characters long');
+                                                                                    setActionBusy(null);
+                                                                                } else {
+                                                                                    setActionBusy(null);
+                                                                                }
                                                                             }
                                                                         } catch (error) {
-                                                                            console.error('Error getting templates:', error);
-                                                                            toast.error('Failed to load templates');
+                                                                            console.error('Error in reinstall process:', error);
+                                                                            toast.error('Failed to initiate reinstall');
+                                                                            setActionBusy(null);
                                                                         }
                                                                     }
                                                                 }}
@@ -968,8 +1359,34 @@ const ViewLinux = () => {
                                                                 )}
                                                                 Reinstall OS
                                                             </Button>
+
+                                                            {/* Change Password Button */}
+                                                            <Button
+                                                                variant="outline"
+                                                                size="lg"
+                                                                onClick={async () => {
+                                                                    const newPassword = prompt('Enter new password (minimum 6 characters):');
+                                                                    if (newPassword && newPassword.length >= 6) {
+                                                                        await runServiceAction(selectedOrder, 'changepassword', {
+                                                                            password: newPassword
+                                                                        });
+                                                                    } else if (newPassword !== null) {
+                                                                        toast.error('Password must be at least 6 characters long');
+                                                                    }
+                                                                }}
+                                                                disabled={actionBusy === 'changepassword'}
+                                                                className="h-12 gap-2"
+                                                            >
+                                                                {actionBusy === 'changepassword' ? (
+                                                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                                                ) : (
+                                                                    <KeyRound className="h-4 w-4" />
+                                                                )}
+                                                                Change Password
+                                                            </Button>
                                                         </div>
                                                     </div>
+
                                                     <Separator />
 
                                                     {/* Service Status */}
@@ -1023,12 +1440,12 @@ const ViewLinux = () => {
                                 <DialogFooter className="border-t pt-6">
                                     <Button
                                         variant="outline"
-                                        onClick={() => setSelectedOrder(null)}
+                                        onClick={handleDialogClose}
                                         className="w-full sm:w-auto"
                                     >
                                         Close
                                     </Button>
-                                    {selectedOrder.ipAddress && (
+                                    {/* {selectedOrder.ipAddress && (
                                         <Button
                                             onClick={() => {
                                                 const sshCommand = `ssh ${selectedOrder.username}@${selectedOrder.ipAddress}`;
@@ -1039,9 +1456,33 @@ const ViewLinux = () => {
                                             <Terminal className="h-4 w-4" />
                                             Copy SSH Command
                                         </Button>
+                                    )} */}
+                                    {/* Add renewal button in footer if eligible */}
+                                    {isRenewalEligible(selectedOrder) && selectedOrder.hostycareServiceId && (
+                                        <Button
+                                            onClick={() => handleRenewService(selectedOrder)}
+                                            disabled={actionBusy === 'renew'}
+                                            className="w-full sm:w-auto gap-2 bg-green-600 hover:bg-green-700"
+                                        >
+                                            {actionBusy === 'renew' ? (
+                                                <>
+                                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                                    Processing...
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <CreditCard className="h-4 w-4" />
+                                                    Renew Service
+                                                </>
+                                            )}
+                                        </Button>
                                     )}
                                 </DialogFooter>
                             </>
+                        ) : (
+                            <div className="flex justify-center items-center py-8">
+                                <Loader2 className="h-8 w-8 animate-spin" />
+                            </div>
                         )}
                     </DialogContent>
                 </Dialog>

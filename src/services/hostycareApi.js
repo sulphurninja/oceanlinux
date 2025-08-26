@@ -182,36 +182,39 @@ class HostycareAPI {
     return await this.makeRequest(`/services/${serviceId}/terminate`, 'POST');
   }
 
+  // Renew a service
+  async renewService(serviceId) {
+    return await this.makeRequest(`/services/${serviceId}/renew`, 'POST');
+  }
+
   // Change password
   async changePassword(serviceId, newPassword) {
     return await this.makeRequest(`/services/${serviceId}/changepassword`, 'POST', {
       password: newPassword
     });
   }
-  // Get templates for reinstall - matches PHP SDK exactly
+
+  // Get templates for reinstall - Using proper API endpoint
   async getReinstallTemplates(serviceId) {
-    // PHP: $this->call('index.php?svs='.$vid.'&act=ostemplate');
-    return await this.makeRequest(`?svs=${serviceId}&act=ostemplate`);
+    console.log(`[HOSTYCARE] Getting reinstall templates for service: ${serviceId}`);
+    return await this.makeRequest(`/services/${serviceId}/reinstall`, 'GET');
   }
 
-  // Reinstall service - matches PHP SDK exactly
-  async reinstallService(serviceId, password, templateId) {
-    // PHP: $post = array('newos' => $newosid, 'newpass' => $newpass, 'conf' => $newpass, 'reinsos' => 'Reinstall');
-    // PHP: $this->call('index.php?svs='.$vid.'&act=ostemplate', $post);
-
+  // Reinstall service - Using proper API endpoint
+  async reinstallService(serviceId, password, templateId = null) {
+    console.log(`[HOSTYCARE] Reinstalling service: ${serviceId} with template: ${templateId}`);
+    
     const body = {
-      newos: templateId,
-      newpass: password,
-      conf: password,
-      reinsos: 'Reinstall'
+      password: password
     };
 
-    return await this.makeRequest(`?svs=${serviceId}&act=ostemplate`, 'POST', body);
-  }
+    // If templateId is provided, include it
+    if (templateId) {
+      body.template = templateId; // or templateId, depending on API expectation
+      // You might need to adjust this field name based on actual API requirements
+    }
 
-  // New method to get service OS templates (similar to SDK's ostemplate function)
-  async getServiceTemplates(serviceId) {
-    return await this.makeRequest(`/services/${serviceId}/ostemplate`);
+    return await this.makeRequest(`/services/${serviceId}/reinstall`, 'POST', body);
   }
 
   // Get account credit

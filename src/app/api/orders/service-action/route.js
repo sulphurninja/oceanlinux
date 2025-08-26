@@ -93,13 +93,13 @@ export async function POST(request) {
 
       case 'reinstall':
         if (!payload?.password) return NextResponse.json({ message: 'password is required' }, { status: 400 });
-        if (!payload?.templateId) return NextResponse.json({ message: 'templateId is required for reinstall' }, { status: 400 });
 
         console.log('[REINSTALL] Starting reinstall for service:', sid);
-        console.log('[REINSTALL] Template ID:', payload.templateId);
+        console.log('[REINSTALL] Payload:', payload);
 
         try {
-          result = await api.reinstallService(sid, payload.password, payload.templateId);
+          // Call reinstall with or without template
+          result = await api.reinstallService(sid, payload.password, payload.templateId || null);
           console.log('[REINSTALL] API Success:', result);
 
           // Update local password and status
@@ -118,7 +118,7 @@ export async function POST(request) {
       case 'templates':
         console.log('[TEMPLATES] Fetching templates for service:', sid);
         try {
-          // Get available OS templates first
+          // Get available OS templates
           result = await api.getReinstallTemplates(sid);
           console.log('[TEMPLATES] Available templates:', result);
         } catch (error) {
@@ -126,7 +126,6 @@ export async function POST(request) {
           throw error;
         }
         break;
-
 
       case 'details':
         result = await api.getServiceDetails(sid);
