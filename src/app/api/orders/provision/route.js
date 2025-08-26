@@ -5,7 +5,6 @@ const AutoProvisioningService = require('@/services/autoProvisioningService');
 
 export async function POST(request) {
   await connectDB();
-
   try {
     const { orderId, orderIds } = await request.json();
     const provisioningService = new AutoProvisioningService();
@@ -60,11 +59,9 @@ export async function GET(request) {
         { status: 400 }
       );
     }
-
     const order = await Order.findById(orderId).select(
       'provisioningStatus provisioningError hostycareServiceId autoProvisioned'
     );
-
     if (!order) {
       return NextResponse.json(
         { message: 'Order not found' },

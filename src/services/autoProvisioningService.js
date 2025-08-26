@@ -124,8 +124,57 @@ class AutoProvisioningService {
 
       console.log(`[AUTO-PROVISION] ✅ Found IP Stock: ${ipStock.name}`);
 
-      // STEP 4: Get memory configuration
-      const memoryOptions = this.toPlainObject(ipStock.memoryOptions);
+      // STEP 4: Get memory configuration - FIXED FOR MONGOOSE MAP
+      console.log(`[AUTO-PROVISION] 📦 STEP 4: Getting memory configuration...`);
+      console.log(`[AUTO-PROVISION] 🔍 Raw memoryOptions:`, ipStock.memoryOptions);
+      console.log(`[AUTO-PROVISION] 🔍 memoryOptions type:`, typeof ipStock.memoryOptions);
+      console.log(`[AUTO-PROVISION] 🔍 memoryOptions constructor:`, ipStock.memoryOptions?.constructor?.name);
+
+      // Handle Mongoose Map objects properly
+      let memoryOptions = {};
+
+      if (ipStock.memoryOptions) {
+        if (ipStock.memoryOptions instanceof Map) {
+          // It's a native JavaScript Map
+          memoryOptions = Object.fromEntries(ipStock.memoryOptions.entries());
+          console.log(`[AUTO-PROVISION] ✅ Converted native Map to object`);
+        } else if (typeof ipStock.memoryOptions.toObject === 'function') {
+          // It's a Mongoose Map with toObject method
+          memoryOptions = ipStock.memoryOptions.toObject();
+          console.log(`[AUTO-PROVISION] ✅ Used Mongoose toObject() method`);
+        } else if (ipStock.memoryOptions.constructor?.name === 'Map') {
+          // Handle Mongoose Map that might not be detected as instanceof Map
+          try {
+            memoryOptions = {};
+            for (const [key, value] of ipStock.memoryOptions) {
+              memoryOptions[key] = value;
+            }
+            console.log(`[AUTO-PROVISION] ✅ Manually converted Mongoose Map`);
+          } catch (e) {
+            console.log(`[AUTO-PROVISION] ⚠️ Failed to iterate Map:`, e.message);
+          }
+        } else if (typeof ipStock.memoryOptions === 'object' && ipStock.memoryOptions !== null) {
+          // It's already a plain object or can be treated as one
+          memoryOptions = JSON.parse(JSON.stringify(ipStock.memoryOptions));
+          console.log(`[AUTO-PROVISION] ✅ Used JSON stringify/parse`);
+        }
+
+        // Additional fallback - try direct property access
+        if (Object.keys(memoryOptions).length === 0) {
+          console.log(`[AUTO-PROVISION] 🔄 Trying direct property access...`);
+
+          // Try common memory sizes directly
+          const commonSizes = ['2GB', '4GB', '8GB', '16GB', '32GB'];
+          for (const size of commonSizes) {
+            if (ipStock.memoryOptions[size] || ipStock.memoryOptions.get?.(size)) {
+              memoryOptions[size] = ipStock.memoryOptions[size] || ipStock.memoryOptions.get(size);
+              console.log(`[AUTO-PROVISION] ✅ Found ${size} via direct access`);
+            }
+          }
+        }
+      }
+
+      console.log(`[AUTO-PROVISION] 🧠 Converted memoryOptions:`, memoryOptions);
       console.log(`[AUTO-PROVISION] 🧠 Available memory options:`, Object.keys(memoryOptions));
       console.log(`[AUTO-PROVISION] 🔍 Looking for memory: "${order.memory}"`);
 
@@ -133,12 +182,16 @@ class AutoProvisioningService {
 
       if (!memoryConfig) {
         // Try variations if exact match fails
+        console.log(`[AUTO-PROVISION] ⚠️ Exact match failed, trying variations...`);
+
         const memoryVariations = [
           order.memory.toLowerCase(),
           order.memory.toUpperCase(),
           order.memory.replace('GB', 'gb'),
           order.memory.replace('gb', 'GB'),
         ];
+
+        console.log(`[AUTO-PROVISION] 🔄 Trying variations:`, memoryVariations);
 
         for (const variation of memoryVariations) {
           if (memoryOptions[variation]) {
@@ -147,10 +200,32 @@ class AutoProvisioningService {
             break;
           }
         }
+
+        // Try direct access from original ipStock if variations fail
+        if (!memoryConfig) {
+          console.log(`[AUTO-PROVISION] 🔄 Trying direct access from ipStock...`);
+          for (const variation of [order.memory, ...memoryVariations]) {
+            if (ipStock.memoryOptions?.[variation] || ipStock.memoryOptions?.get?.(variation)) {
+              memoryConfig = ipStock.memoryOptions[variation] || ipStock.memoryOptions.get(variation);
+              console.log(`[AUTO-PROVISION] ✅ Found via direct ipStock access: "${variation}"`);
+              break;
+            }
+          }
+        }
       }
 
       if (!memoryConfig) {
         const availableKeys = Object.keys(memoryOptions);
+        console.error(`[AUTO-PROVISION] ❌ Memory config not found!`);
+        console.error(`   Requested: "${order.memory}"`);
+        console.error(`   Available: [${availableKeys.join(', ')}]`);
+        console.error(`   IP Stock: ${ipStock.name}`);
+        console.error(`   IP Stock memoryOptions raw:`, ipStock.memoryOptions);
+
+        // Try one more time with raw access
+        console.error(`   Trying raw 8GB access:`, ipStock.memoryOptions?.['8GB']);
+        console.error(`   Trying get method:`, ipStock.memoryOptions?.get?.('8GB'));
+
         throw new Error(
           `Memory configuration not found!\n` +
           `Requested: "${order.memory}"\n` +
@@ -161,7 +236,7 @@ class AutoProvisioningService {
 
       console.log(`[AUTO-PROVISION] ✅ Found memory config:`, memoryConfig);
 
-      // Check for hostycareProductId (your field name) or productId (fallback)
+      // Check for hostycareProductId
       const productId = memoryConfig.hostycareProductId || memoryConfig.productId;
 
       if (!productId) {
