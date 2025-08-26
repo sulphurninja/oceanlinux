@@ -43,12 +43,13 @@ export async function POST(request) {
         await connectDB();
         console.log("[AUTO-PROVISION-CRON] ✅ Database connected");
 
-        // STEP 1: Find orders that need provisioning
-        console.log(`[AUTO-PROVISION-CRON] 📋 STEP 1: Finding orders that need auto-provisioning...`);
+        // STEP 1: Find orders that need provisioning - UPDATED QUERY
+        console.log(`[AUTO-PROVISION-CRON] 📋 STEP 1: Finding confirmed orders with valid product configs...`);
 
-        const ordersToProvision = await Order.find({
+        // First, get all confirmed orders that haven't been auto-provisioned
+        const candidateOrders = await Order.find({
             $and: [
-                { $or: [{ status: 'paid' }, { status: 'confirmed' }] },
+                { status: 'confirmed' }, // ONLY confirmed orders
                 {
                     $or: [
                         { autoProvisioned: { $ne: true } },
@@ -70,26 +71,86 @@ export async function POST(request) {
             ]
         })
             .sort({ createdAt: 1 }) // Oldest first
-            .limit(CONFIG.batchSize);
+            .limit(CONFIG.batchSize * 2); // Get more candidates to filter
 
-        console.log(`[AUTO-PROVISION-CRON] 📊 Found ${ordersToProvision.length} orders to process`);
+        console.log(`[AUTO-PROVISION-CRON] 📊 Found ${candidateOrders.length} candidate orders`);
 
-        if (ordersToProvision.length === 0) {
-            console.log(`[AUTO-PROVISION-CRON] ✅ No orders need provisioning`);
-            return NextResponse.json({
-                success: true,
-                message: 'No orders need provisioning',
-                processed: 0,
-                summary: { successful: 0, failed: 0, skipped: 0, retries: 0 }
-            });
+        // STEP 2: Filter orders that have valid product configurations
+        const validOrders = [];
+
+        for (const order of candidateOrders) {
+            console.log(`[AUTO-PROVISION-CRON] 🔍 Checking product config for order ${order._id}: ${order.productName}`);
+
+            try {
+                // Find IPStock for this order's product
+                let ipStock;
+
+                if (order.ipStockId) {
+                    ipStock = await IPStock.findById(order.ipStockId);
+                } else {
+                    ipStock = await IPStock.findOne({
+                        name: { $regex: new RegExp(order.productName, 'i') }
+                    });
+                }
+
+                if (!ipStock) {
+                    console.log(`[AUTO-PROVISION-CRON] ❌ No IPStock found for order ${order._id}: ${order.productName}`);
+                    continue;
+                }
+
+                // Check if memory config exists and has hostycareProductId
+                let memoryOptions = {};
+
+                if (ipStock.memoryOptions) {
+                    if (ipStock.memoryOptions instanceof Map) {
+                        memoryOptions = Object.fromEntries(ipStock.memoryOptions.entries());
+                    } else if (typeof ipStock.memoryOptions.toObject === 'function') {
+                        memoryOptions = ipStock.memoryOptions.toObject();
+                    } else if (typeof ipStock.memoryOptions === 'object') {
+                        memoryOptions = JSON.parse(JSON.stringify(ipStock.memoryOptions));
+                    }
+                }
+
+                const memoryConfig = memoryOptions[order.memory];
+                const productId = memoryConfig?.hostycareProductId || memoryConfig?.productId;
+
+                if (!productId) {
+                    console.log(`[AUTO-PROVISION-CRON] ❌ No hostycareProductId for order ${order._id}: ${order.memory} in ${ipStock.name}`);
+                    continue;
+                }
+
+                console.log(`[AUTO-PROVISION-CRON] ✅ Valid config found for order ${order._id}: Product ID ${productId}`);
+                validOrders.push(order);
+
+                // Stop when we have enough valid orders
+                if (validOrders.length >= CONFIG.batchSize) {
+                    break;
+                }
+
+            } catch (configError) {
+                console.error(`[AUTO-PROVISION-CRON] ❌ Error checking config for order ${order._id}:`, configError.message);
+                continue;
+            }
         }
 
-        // STEP 2: Process orders with retry logic
+        console.log(`[AUTO-PROVISION-CRON] 📊 Found ${validOrders.length} orders with valid configurations to process`);
+
+        if (validOrders.length === 0) {
+            console.log(`[AUTO-PROVISION-CRON] ✅ No valid orders need provisioning`);
+            return NextResponse.json({
+                success: true,
+                message: 'No valid orders need provisioning',
+                processed: 0,
+                checked: candidateOrders.length,
+                summary: { successful: 0, failed: 0, skipped: candidateOrders.length, retries: 0 }
+            });
+        }
+        // STEP 3: Process valid orders with retry logic
         const provisioningService = new AutoProvisioningService();
         const results = [];
         let totalRetries = 0;
 
-        for (const order of ordersToProvision) {
+        for (const order of validOrders) {
             const orderStartTime = Date.now();
             console.log(`\n[AUTO-PROVISION-CRON] 🔄 Processing order: ${order._id}`);
             console.log(`[AUTO-PROVISION-CRON] 📦 Product: ${order.productName}`);
@@ -160,35 +221,40 @@ export async function POST(request) {
             }
 
             // Add delay between orders to avoid rate limiting
-            if (ordersToProvision.indexOf(order) < ordersToProvision.length - 1) {
+            if (validOrders.indexOf(order) < validOrders.length - 1) {
                 console.log(`[AUTO-PROVISION-CRON] ⏱️ Waiting 2 seconds before next order...`);
                 await sleep(2000);
             }
         }
-        
-        // STEP 3: Generate summary
+
+        // STEP 4: Generate summary
         const successful = results.filter(r => r.success).length;
         const failed = results.filter(r => !r.success).length;
+        const skipped = candidateOrders.length - validOrders.length;
         const totalTime = Date.now() - startTime;
 
         const summary = {
             successful,
             failed,
+            skipped,
             retries: totalRetries,
             totalTime,
-            processed: results.length
+            processed: results.length,
+            checked: candidateOrders.length
         };
 
         console.log("\n" + "🎯".repeat(80));
         console.log(`[AUTO-PROVISION-CRON] 🎯 BATCH PROCESSING COMPLETED`);
-        console.log(`   - Total processed: ${summary.processed}`);
+        console.log(`   - Orders checked: ${summary.checked}`);
+        console.log(`   - Orders processed: ${summary.processed}`);
+        console.log(`   - Orders skipped (no config): ${summary.skipped}`);
         console.log(`   - Successful: ${summary.successful}`);
         console.log(`   - Failed: ${summary.failed}`);
         console.log(`   - Total retries: ${summary.retries}`);
         console.log(`   - Total time: ${summary.totalTime}ms`);
         console.log("🎯".repeat(80));
 
-        // STEP 4: Handle failed orders (mark for human review if non-retryable)
+        // STEP 5: Handle failed orders (mark for human review if non-retryable)
         const nonRetryableFailures = results.filter(r => !r.success && !r.retryable);
         if (nonRetryableFailures.length > 0) {
             console.log(`[AUTO-PROVISION-CRON] 🔴 Marking ${nonRetryableFailures.length} orders for manual review...`);
@@ -204,7 +270,7 @@ export async function POST(request) {
 
         return NextResponse.json({
             success: true,
-            message: `Processed ${summary.processed} orders: ${summary.successful} successful, ${summary.failed} failed`,
+            message: `Checked ${summary.checked} orders, processed ${summary.processed}: ${summary.successful} successful, ${summary.failed} failed, ${summary.skipped} skipped`,
             summary,
             results,
             timestamp: new Date().toISOString()
@@ -227,16 +293,18 @@ export async function POST(request) {
     }
 }
 
-// GET endpoint for status/health check
+// GET endpoint for status/health check - UPDATED
 export async function GET(request) {
     try {
         await connectDB();
 
         // Get statistics
         const totalOrders = await Order.countDocuments();
+        const confirmedOrders = await Order.countDocuments({ status: 'confirmed' });
+
         const pendingProvisioning = await Order.countDocuments({
             $and: [
-                { $or: [{ status: 'paid' }, { status: 'confirmed' }] },
+                { status: 'confirmed' }, // Only confirmed orders
                 {
                     $or: [
                         { autoProvisioned: { $ne: true } },
@@ -267,6 +335,7 @@ export async function GET(request) {
             status: 'healthy',
             statistics: {
                 totalOrders,
+                confirmedOrders,
                 pendingProvisioning,
                 activeProvisioned,
                 failedProvisioning
@@ -274,7 +343,8 @@ export async function GET(request) {
             config: {
                 maxRetries: CONFIG.maxRetries,
                 batchSize: CONFIG.batchSize,
-                retryDelayMs: CONFIG.retryDelayMs
+                retryDelayMs: CONFIG.retryDelayMs,
+                note: "Only processes 'confirmed' orders with valid product configurations"
             },
             timestamp: new Date().toISOString()
         });
@@ -288,3 +358,4 @@ export async function GET(request) {
         }, { status: 500 });
     }
 }
+

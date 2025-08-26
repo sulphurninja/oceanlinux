@@ -495,49 +495,7 @@ class AutoProvisioningService {
       }
     }
   }
-  // Enhanced password generation for better success rate
-  generateEnhancedCredentials() {
-    console.log('[AUTO-PROVISION-SERVICE] 🔐 Generating enhanced credentials...');
 
-    // Generate a stronger password that meets requirements
-    const upperCase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-    const lowerCase = 'abcdefghijklmnopqrstuvwxyz';
-    const numbers = '0123456789';
-    const specialChars = '!@#$%^&*()_+-=[]{}|;:,.<>?';
-
-    let password = '';
-
-    // Ensure at least one character from each category
-    password += upperCase[Math.floor(Math.random() * upperCase.length)];
-    password += lowerCase[Math.floor(Math.random() * lowerCase.length)];
-    password += numbers[Math.floor(Math.random() * numbers.length)];
-    password += specialChars[Math.floor(Math.random() * specialChars.length)];
-
-    // Fill the rest randomly (minimum 16 characters total for better strength)
-    const allChars = upperCase + lowerCase + numbers + specialChars;
-    for (let i = password.length; i < 16; i++) {
-      password += allChars[Math.floor(Math.random() * allChars.length)];
-    }
-
-    // Shuffle the password
-    password = password.split('').sort(() => 0.5 - Math.random()).join('');
-
-    const credentials = {
-      username: 'root',
-      password: password
-    };
-
-    console.log('[AUTO-PROVISION-SERVICE] ✅ Enhanced credentials generated:');
-    console.log(`   - Username: ${credentials.username}`);
-    console.log(`   - Password: ${credentials.password.substring(0, 4)}**** (${credentials.password.length} chars)`);
-
-    return credentials;
-  }
-
-  // Update the existing generateCredentials method to use enhanced version
-  generateCredentials() {
-    return this.generateEnhancedCredentials();
-  }
 
   // Check if an error is retryable
   isRetryableError(errorMessage) {
