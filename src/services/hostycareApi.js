@@ -188,30 +188,27 @@ class HostycareAPI {
       password: newPassword
     });
   }
-
-  // Get templates for reinstall - maps to ostemplate() without parameters
+  // Get templates for reinstall - matches PHP SDK exactly
   async getReinstallTemplates(serviceId) {
-    // This should map to: index.php?svs=serviceId&act=ostemplate
-    // But since we're using REST API, let's try the direct endpoint
-    return await this.makeRequest(`/services/${serviceId}/ostemplate`);
+    // PHP: $this->call('index.php?svs='.$vid.'&act=ostemplate');
+    return await this.makeRequest(`?svs=${serviceId}&act=ostemplate`);
   }
 
-  // Reinstall service - maps to ostemplate($vid, $newosid, $newpass)
-  async reinstallService(serviceId, password, templateId = null) {
+  // Reinstall service - matches PHP SDK exactly
+  async reinstallService(serviceId, password, templateId) {
+    // PHP: $post = array('newos' => $newosid, 'newpass' => $newpass, 'conf' => $newpass, 'reinsos' => 'Reinstall');
+    // PHP: $this->call('index.php?svs='.$vid.'&act=ostemplate', $post);
+
     const body = {
+      newos: templateId,
       newpass: password,
       conf: password,
       reinsos: 'Reinstall'
     };
 
-    // Template ID is required for reinstall
-    if (templateId) {
-      body.newos = templateId;
-    }
-
-    return await this.makeRequest(`/services/${serviceId}/ostemplate`, 'POST', body);
+    return await this.makeRequest(`?svs=${serviceId}&act=ostemplate`, 'POST', body);
   }
-  
+
   // New method to get service OS templates (similar to SDK's ostemplate function)
   async getServiceTemplates(serviceId) {
     return await this.makeRequest(`/services/${serviceId}/ostemplate`);

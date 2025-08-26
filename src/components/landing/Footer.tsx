@@ -1,35 +1,35 @@
 import Link from "next/link"
 import { LucideWaves, Mail, Phone, MapPin, Globe } from "lucide-react"
 import Image from "next/image"
+import EmailSupportDialog from "@/components/EmailSupportDialog"
 
 const footerSections = {
   hosting: {
     title: "Linux Hosting",
     links: [
-      { name: "🔄 Gold Series Rotating", href: "/hosting/gold-series" },
-      { name: "🚀 Nova Linux VPS", href: "/hosting/nova-linux" },
-      { name: "🔋 Power Linux VPS", href: "/hosting/power-linux" },
-      { name: "🔰 Titan Series", href: "/hosting/titan-series" },
-      { name: "💰 Most Affordable Plans", href: "/pricing" },
-      { name: "🛠️ Managed Linux Hosting", href: "/managed-hosting" }
+      { name: "🔄 Gold Series Rotating", href: "/hosting#gold-series" },
+      { name: "🚀 Nova Linux VPS", href: "/hosting#nova-linux" },
+      { name: "🔋 Power Linux VPS", href: "/hosting#power-linux" },
+      { name: "🔰 Titan Series", href: "/hosting#titan-series" },
+      { name: "💰 Most Affordable Plans", href: "/hosting" },
+      { name: "🛠️ Managed Linux Hosting", href: "/vps" }
     ]
   },
   servers: {
     title: "VPS & Servers",
     links: [
-      { name: "Linux VPS Hosting", href: "/vps/linux" },
-      { name: "Dedicated Servers", href: "/servers/dedicated" },
-      { name: "Cloud Servers", href: "/servers/cloud" },
-      { name: "Managed Servers", href: "/servers/managed" },
-      { name: "Affordable VPS", href: "/vps/affordable" }
+      { name: "Linux VPS Hosting", href: "/vps" },
+      { name: "Server Series", href: "/series" },
+      { name: "Affordable Hosting", href: "/hosting" },
+      { name: "Premium Gold Series", href: "/hosting#gold-series" },
+      { name: "Enterprise Titan Series", href: "/hosting#titan-series" }
     ]
   },
   support: {
     title: "Support & Help",
     links: [
       { name: "📚 Knowledge Base", href: "/knowledge-base" },
-      { name: "💬 Live Chat Support", href: "/support/chat" },
-      { name: "📧 Email Support", href: "/support/email" },
+      { name: "💬 Live Chat Support", href: "/live-chat" },
       { name: "🎟️ Support Tickets", href: "/support/tickets" },
       { name: "📋 Server Status", href: "/status" }
     ]
@@ -37,11 +37,8 @@ const footerSections = {
   company: {
     title: "Company",
     links: [
-      { name: "About OceanLinux", href: "/about" },
-      { name: "Why Choose Us", href: "/why-choose-us" },
-      { name: "Our Data Centers", href: "/data-centers" },
-      { name: "Careers", href: "/careers" },
-      { name: "Contact Us", href: "/contact" }
+      { name: "About OceanLinux", href: "/about-us" },
+      { name: "Contact Us", href: "/contact-us" }
     ]
   }
 }
@@ -57,8 +54,7 @@ export default function Footer() {
             <div className="lg:col-span-2">
               <Link href="/" className="flex items-center space-x-3 mb-6">
                 <div className="relative">
-                  <LucideWaves className="w-8 h-8 text-primary" />
-                  <div className="absolute -top-1 -right-1 w-3 h-3 bg-secondary rounded-full animate-pulse"></div>
+                  <img src='/oceanlinux.png' className="h-20" />
                 </div>
                 <div>
                   <span className="text-2xl font-bold bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">
@@ -67,22 +63,23 @@ export default function Footer() {
                   <div className="text-xs text-muted-foreground -mt-1">The Ocean of Linux</div>
                 </div>
               </Link>
-              
+
               <p className="text-muted-foreground leading-relaxed mb-6">
-                The most affordable premium Linux VPS hosting provider. We make professional hosting 
+                The most affordable premium Linux VPS hosting provider. We make professional hosting
                 accessible to everyone with transparent pricing, reliable performance, and expert support.
               </p>
 
               {/* Backtick Labs Branding */}
               <div className="flex items-center space-x-3 mb-6 p-4 bg-muted/50 rounded-lg">
                 <div className="flex items-center space-x-2">
-                  {/* Replace with actual Backtick Labs logo */}
-                  <div className="w-8 h-8 bg-gradient-to-r from-blue-500 to-purple-500 rounded flex items-center justify-center">
-                    <span className="text-white font-bold text-sm">`</span>
+                  <div className="w-8 h-8 rounded flex items-center justify-center">
+                    <img src='/backtick.png' />
                   </div>
                   <div>
                     <div className="text-sm font-medium">A Product of</div>
-                    <div className="text-lg font-bold text-primary">Backtick Labs</div>
+                    <Link href='https://backtick.app'>
+                      <div className="text-lg font-bold text-primary">Backtick Labs</div>
+                    </Link>
                   </div>
                 </div>
               </div>
@@ -95,12 +92,6 @@ export default function Footer() {
                     hello@oceanlinux.com
                   </a>
                 </div>
-                {/* <div className="flex items-center space-x-3">
-                  <Phone className="w-4 h-4 text-primary" />
-                  <a href="tel:+1-800-OCEAN-LX" className="hover:text-primary transition-colors">
-                    +1-800-OCEAN-LX (24/7)
-                  </a>
-                </div> */}
                 <div className="flex items-center space-x-3">
                   <Globe className="w-4 h-4 text-primary" />
                   <span>Global Data Centers • 99.9% Uptime SLA</span>
@@ -128,16 +119,27 @@ export default function Footer() {
                   <div key={key}>
                     <h4 className="font-semibold text-foreground mb-4">{section.title}</h4>
                     <ul className="space-y-2">
-                      {section.links.map((link, index) => (
-                        <li key={index}>
-                          <Link 
-                            href={link.href}
-                            className="text-sm text-muted-foreground hover:text-primary transition-colors"
-                          >
-                            {link.name}
-                          </Link>
-                        </li>
-                      ))}
+                      {section.links.map((link, index) => {
+                        // Special handling for Email Support
+                        if (link.name === "📧 Email Support") {
+                          return (
+                            <li key={index}>
+                              <EmailSupportDialog />
+                            </li>
+                          );
+                        }
+                        
+                        return (
+                          <li key={index}>
+                            <Link
+                              href={link.href}
+                              className="text-sm text-muted-foreground hover:text-primary transition-colors"
+                            >
+                              {link.name}
+                            </Link>
+                          </li>
+                        );
+                      })}
                     </ul>
                   </div>
                 ))}
@@ -155,16 +157,16 @@ export default function Footer() {
               © 2024 OceanLinux. All rights reserved. • A Product of Backtick Labs
             </div>
             <div className="flex items-center space-x-6">
-              <Link href="/privacy" className="text-sm text-muted-foreground hover:text-primary transition-colors">
+              <Link href="/privacy-policy" className="text-sm text-muted-foreground hover:text-primary transition-colors">
                 Privacy Policy
               </Link>
-              <Link href="/terms" className="text-sm text-muted-foreground hover:text-primary transition-colors">
+              <Link href="/terms-and-conditions" className="text-sm text-muted-foreground hover:text-primary transition-colors">
                 Terms of Service
               </Link>
-              <Link href="/refund" className="text-sm text-muted-foreground hover:text-primary transition-colors">
+              <Link href="/refund-policy" className="text-sm text-muted-foreground hover:text-primary transition-colors">
                 Refund Policy
               </Link>
-              <Link href="/contact" className="text-sm text-muted-foreground hover:text-primary transition-colors">
+              <Link href="/contact-us" className="text-sm text-muted-foreground hover:text-primary transition-colors">
                 Contact Support
               </Link>
             </div>

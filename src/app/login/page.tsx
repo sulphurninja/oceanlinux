@@ -1,4 +1,4 @@
-import Login from '@/components/component/login'
+import LoginPage from '@/components/component/LoginPage'
 import React from 'react'
 
 type Props = {}
@@ -6,7 +6,7 @@ type Props = {}
 export default function page({ }: Props) {
   return (
     <div>
-      <Login />
+      <LoginPage />
     </div>
   )
 }
