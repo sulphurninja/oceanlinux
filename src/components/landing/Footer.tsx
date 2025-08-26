@@ -37,7 +37,7 @@ const footerSections = {
   company: {
     title: "Company",
     links: [
-      { name: "About OceanLinux", href: "/about-us" },
+      { name: "About OceanLinux", href: "/about" },
       { name: "Contact Us", href: "/contact-us" }
     ]
   }
