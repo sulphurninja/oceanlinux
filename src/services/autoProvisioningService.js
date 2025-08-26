@@ -9,36 +9,50 @@ class AutoProvisioningService {
     console.log('[AUTO-PROVISION-SERVICE] 🏗️ AutoProvisioningService instance created');
   }
 
-  // Generate random credentials
-  generateCredentials() {
-    console.log('[AUTO-PROVISION-SERVICE] 🔐 Generating credentials...');
+  // REPLACE the generateCredentials method completely with this ULTRA-SIMPLE version
+  generateCredentials(productName = '') {
+    console.log('[AUTO-PROVISION-SERVICE] 🔐 Generating ultra-simple credentials...');
 
-    const generatePassword = (length = 12) => {
-      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
-      let password = '';
-      for (let i = 0; i < length; i++) {
-        password += chars.charAt(Math.floor(Math.random() * chars.length));
-      }
-      return password;
-    };
+    const upperCase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    const lowerCase = 'abcdefghijklmnopqrstuvwxyz';
+    const numbers = '0123456789';
 
-    const generateUsername = () => {
-      const prefixes = ['user', 'admin', 'root', 'client'];
-      const randomNum = Math.floor(Math.random() * 10000);
-      return `${prefixes[Math.floor(Math.random() * prefixes.length)]}${randomNum}`;
-    };
+    // ONLY these 4 special characters - NOTHING ELSE!
+    const safeSpecialChars = '@#&$';
+
+    let password = '';
+
+    // Build a 12-character password
+    password += upperCase[Math.floor(Math.random() * upperCase.length)]; // 1 uppercase
+    password += lowerCase[Math.floor(Math.random() * lowerCase.length)]; // 1 lowercase  
+    password += numbers[Math.floor(Math.random() * numbers.length)];     // 1 number
+    password += safeSpecialChars[Math.floor(Math.random() * safeSpecialChars.length)]; // 1 special
+
+    // Fill remaining 8 characters with safe mix
+    const allSafeChars = upperCase + lowerCase + numbers + safeSpecialChars;
+    for (let i = 4; i < 12; i++) {
+      password += allSafeChars[Math.floor(Math.random() * allSafeChars.length)];
+    }
+
+    // Shuffle the password
+    password = password.split('').sort(() => 0.5 - Math.random()).join('');
+
+    // Use context-aware username
+    const username = this.getLoginUsernameFromProductName(productName);
 
     const credentials = {
-      username: generateUsername(),
-      password: generatePassword()
+      username: username,
+      password: password
     };
 
-    console.log('[AUTO-PROVISION-SERVICE] ✅ Credentials generated:');
+    console.log('[AUTO-PROVISION-SERVICE] ✅ Ultra-simple credentials generated:');
     console.log(`   - Username: ${credentials.username}`);
-    console.log(`   - Password: ${credentials.password.substring(0, 4)}****`);
+    console.log(`   - Password: ${credentials.password.substring(0, 4)}**** (12 chars, ONLY @#&$ specials)`);
 
     return credentials;
   }
+
+
 
   // Generate hostname
   generateHostname(productName, memory) {
