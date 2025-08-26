@@ -8,6 +8,7 @@ const inter = Inter({ subsets: ["latin"] });
 export const metadata: Metadata = {
   title: "OceanLinux - The Ocean of Linux",
   description: "The Ocean of Linux, Discover the ocean of Linux distributions with OceanLinux. Access premium Linux hosting, VPS servers, dedicated servers, and cloud hosting solutions. Professional Linux infrastructure for developers and enterprises.",
+  viewport: "width=device-width, initial-scale=1, maximum-scale=1",
   keywords: "OceanLinux, The Ocean of Linux, Ocean Linux, Linux Ocean, Linux distribution, Linux hosting, Linux VPS, Linux cloud hosting, Linux dedicated server, Linux distros, open source, enterprise Linux, developer tools",
   authors: [{ name: "OceanLinux Team" }],
   creator: "OceanLinux",
@@ -90,11 +91,13 @@ export default function RootLayout({
             __html: JSON.stringify(structuredData)
           }}
         />
+        {/* Add Razorpay script */}
+        <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
       </head>
       <body className={inter.className}>
-        <Toaster 
+        <Toaster
           position="bottom-right"
           toastOptions={{
             duration: 4000,

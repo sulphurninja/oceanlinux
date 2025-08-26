@@ -333,8 +333,8 @@ export default function Dashboard() {
 
       <div className="p-4 lg:p-6 space-y-6 max-w-7xl mx-auto">
         {/* Welcome Banner - Mobile Optimized */}
-        <Card className="relative overflow-hidden">
-          <div className="absolute inset-0 bg-gradient-to-r from-primary/10 via-primary/5 to-transparent" />
+        <Card className="relative bg-gradient-to-br from-purple-500/10 to-purple-600/5 overflow-hidden">
+          {/* <div className="absolute inset-0 bg-gradient-to-r from-primary/10 via-primary/5 to-transparent" /> */}
           <CardContent className="relative p-4 lg:p-6">
             <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
               <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">

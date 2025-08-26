@@ -3,10 +3,13 @@ import connectDB from '@/lib/db';
 import { getDataFromToken } from '@/helper/getDataFromToken';
 import Order from '@/models/orderModel';
 import User from '@/models/userModel';
+import Razorpay from 'razorpay';
 
-// Configure with your actual API key
-const UPI_GATEWAY_API_KEY = process.env.UPI_GATEWAY_API_KEY || "9502f310-cc59-4217-ad6c-e24924c01478";
-const UPI_GATEWAY_URL = "https://api.ekqr.in/api/create_order";
+// Initialize Razorpay with your credentials
+const razorpay = new Razorpay({
+  key_id: process.env.RAZORPAY_KEY_ID,
+  key_secret: process.env.RAZORPAY_KEY_SECRET,
+});
 
 export async function POST(request) {
   await connectDB();
@@ -45,59 +48,35 @@ export async function POST(request) {
       );
     }
 
-    // 5. Generate a unique transaction ID in the exact format from their example
-    const clientTxnId = `${Date.now()}`.substring(0, 10);
+    // 5. Generate a unique order ID
+    const clientTxnId = `ORDER_${Date.now()}_${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
 
-    // 6. Simplify product name to avoid special characters
-    const simplifiedProductName = "Server Plan " + memory;
-
-    // 7. Create payment request using real values but in the working format
-    const paymentData = {
-      key: UPI_GATEWAY_API_KEY,
-      client_txn_id: clientTxnId,
-      amount: String(Math.round(price)), // Ensure it's rounded to avoid decimal issues
-      p_info: simplifiedProductName,
-      customer_name: user.name,
-      customer_email: user.email,
-      customer_mobile: "9876543210", // Using dummy mobile since we don't have it
-      redirect_url: `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/payment/callback`,
-      udf1: "order-reference",
-      udf2: memory,
-      udf3: "server-plan"
-    };
-
-    // Log the payment data for debugging
-    console.log("Real-values payment request:", paymentData);
-
-    // Make the API request
-    const response = await fetch(UPI_GATEWAY_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(paymentData),
-    });
-
-    console.log(`Payment gateway response status: ${response.status}`);
-    const paymentResponse = await response.json();
-    console.log("Payment gateway response:", paymentResponse);
-
-    if (!paymentResponse.status) {
-      return NextResponse.json(
-        {
-          message: paymentResponse.msg || 'Payment initiation failed',
-          gatewayResponse: paymentResponse,
-          sentData: paymentData
-        },
-        { status: 400 }
-      );
-    }
-
-    // 8. Create a pending order in our database with promo code info
-    // Calculate expiry date (30 days from now)
+    // 6. Calculate expiry date (30 days from now)
     const expiryDate = new Date();
     expiryDate.setDate(expiryDate.getDate() + 30);
 
+    // 7. Create Razorpay order
+    const razorpayOrderOptions = {
+      amount: Math.round(price * 100), // Razorpay expects amount in paise
+      currency: 'INR',
+      receipt: clientTxnId,
+      notes: {
+        product_name: productName,
+        memory: memory,
+        customer_email: user.email,
+        customer_name: user.name,
+        promo_code: promoCode || '',
+        original_price: originalPrice || price,
+        discount: promoDiscount || 0
+      }
+    };
+
+    console.log("Creating Razorpay order:", razorpayOrderOptions);
+
+    const razorpayOrder = await razorpay.orders.create(razorpayOrderOptions);
+    console.log("Razorpay order created:", razorpayOrder);
+
+    // 8. Create a pending order in our database with promo code info
     const newOrder = await Order.create({
       user: userId,
       productName,
@@ -108,20 +87,30 @@ export async function POST(request) {
       promoDiscount: promoDiscount || 0,
       ipStockId: ipStockId || null,
       clientTxnId,
-      gatewayOrderId: paymentResponse.data.order_id.toString(),
+      gatewayOrderId: razorpayOrder.id,
       status: 'pending',
       customerName: user.name,
       customerEmail: user.email,
       expiryDate: expiryDate,
     });
 
-    // 9. Return success with payment URL for the frontend
+    console.log("Order created in database:", newOrder._id);
+
+    // 9. Return Razorpay order details for frontend
     return NextResponse.json({
       message: 'Payment initiated',
       orderId: newOrder._id,
-      paymentUrl: paymentResponse.data.payment_url,
-      upiIntents: paymentResponse.data.upi_intent || null,
-      clientTxnId: clientTxnId
+      clientTxnId: clientTxnId,
+      razorpay: {
+        order_id: razorpayOrder.id,
+        amount: razorpayOrder.amount,
+        currency: razorpayOrder.currency,
+        key: process.env.RAZORPAY_KEY_ID
+      },
+      customer: {
+        name: user.name,
+        email: user.email
+      }
     });
 
   } catch (error) {

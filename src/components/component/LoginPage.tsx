@@ -8,12 +8,12 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { 
-  CheckCircle, 
-  Star, 
-  Shield, 
-  Zap, 
-  Globe, 
+import {
+  CheckCircle,
+  Star,
+  Shield,
+  Zap,
+  Globe,
   Clock,
   Server,
   DollarSign,
@@ -112,17 +112,17 @@ function LoginPage({ className, ...props }: React.ComponentPropsWithoutRef<"div"
     <div className="relative min-h-screen overflow-hidden">
       {/* Background */}
       <div className="absolute inset-0 z-0">
-        <img 
-          src='/bg.gif' 
-          className='absolute inset-0 w-full h-full object-cover opacity-20' 
+        <img
+          src='/bg.gif'
+          className='absolute inset-0 w-full h-full object-cover opacity-20'
           alt="Background"
         />
         <div className="absolute inset-0 bg-gradient-to-br from-background/95 via-background/90 to-background/95"></div>
       </div>
 
-      <div className={cn("relative z-10 min-h-screen flex", className)} {...props}>
+      <div className={cn("relative z-10 min-h-screen grid md:grid-cols-2", className)} {...props}>
         {/* Left Content */}
-        <div className="hidden lg:flex lg:w-1/2 flex-col justify-center p-12 xl:p-16">
+        <div className="hidden lg:flex flex-col justify-center p-12 ">
           <div className="max-w-2xl">
             {/* Brand */}
             <div className="flex items-center space-x-3 mb-8">
@@ -144,14 +144,14 @@ function LoginPage({ className, ...props }: React.ComponentPropsWithoutRef<"div"
                   <Activity className="w-4 h-4" />
                   Welcome Back to Your Dashboard
                 </Badge>
-                
+
                 <h2 className="text-4xl xl:text-5xl font-bold leading-tight">
                   Manage Your
                   <span className="text-gradient block">Linux Empire</span>
                 </h2>
-                
+
                 <p className="text-xl text-muted-foreground leading-relaxed">
-                  Access your powerful dashboard to monitor, manage, and optimize your 
+                  Access your powerful dashboard to monitor, manage, and optimize your
                   Linux VPS servers with enterprise-grade tools and insights.
                 </p>
               </div>
@@ -227,22 +227,21 @@ function LoginPage({ className, ...props }: React.ComponentPropsWithoutRef<"div"
         </div>
 
         {/* Right Login Form */}
-        <div className="w-full lg:w-1/2 flex items-center justify-center p-6 lg:p-12">
+        <div className="w-full  flex items-center md:-mt-[80%] justify-center p-6 ">
           <div className="w-full max-w-md">
             <Card className="shadow-2xl border-2">
               {/* Logo for mobile */}
               <div className='flex justify-center items-center pt-6 lg:hidden'>
                 <div className='text-center'>
-                  <DotLottieReact
-                    src="/linux.lottie"
-                    loop
-                    autoplay
-                    className='h-16'
+                  <img
+                    src="/oceanlinux.png"
+
+                    className='h-20 ml-6'
                   />
-                  <h1 className='text-2xl font-bold bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent'>
+                  {/* <h1 className='text-2xl font-bold bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent'>
                     OceanLinux
-                  </h1>
-                  <p className="text-xs text-muted-foreground">The Ocean of Linux</p>
+                  </h1> */}
+                  <p className="text-xs ml-4 text-muted-foreground">The Ocean of Linux</p>
                 </div>
               </div>
 
@@ -329,9 +328,9 @@ function LoginPage({ className, ...props }: React.ComponentPropsWithoutRef<"div"
                       </div>
                     </div>
 
-                    <Button 
-                      type="submit" 
-                      className="w-full h-12 text-base font-semibold" 
+                    <Button
+                      type="submit"
+                      className="w-full h-12 text-base font-semibold"
                       disabled={isLoading}
                     >
                       {isLoading ? (

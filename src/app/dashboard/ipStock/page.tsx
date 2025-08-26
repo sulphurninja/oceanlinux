@@ -54,6 +54,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 // ... keep all existing interfaces and schema unchanged ...
 
+declare global {
+  interface Window {
+    Razorpay: any;
+  }
+}
+
 interface MemoryOptionDetails {
   price: number | null;
 }
@@ -226,7 +232,18 @@ export default function IPStockPage() {
     return Math.max(0, selectedProduct.price - promoDiscount); // Ensure price doesn't go below 0
   };
 
-  // Handle proceed to payment with promo code data
+
+  const sanitizeForRazorpay = (str: string) => {
+    // Remove or replace characters that Razorpay doesn't allow
+    return str
+      .replace(/[^\w\s\-\.]/g, '') // Keep only alphanumeric, spaces, hyphens, and dots
+      .replace(/\s+/g, ' ') // Replace multiple spaces with single space
+      .trim() // Remove leading/trailing spaces
+      .substring(0, 255); // Limit length to 255 characters (Razorpay limit)
+  };
+
+  // Update the handleProceedToPayment function
+  // Update the handleProceedToPayment function
   const handleProceedToPayment = async () => {
     if (!selectedProduct) return;
 
@@ -256,14 +273,76 @@ export default function IPStockPage() {
         return;
       }
 
+      // Store client transaction ID
       if (data.clientTxnId) {
         localStorage.setItem('lastClientTxnId', data.clientTxnId);
         console.log("Stored clientTxnId in localStorage:", data.clientTxnId);
       }
 
-      toast.success("Redirecting to payment gateway...");
+      // Sanitize all text fields for Razorpay
+      const sanitizedDescription = sanitizeForRazorpay(`${selectedProduct.name} - ${selectedProduct.memory}`);
+      const sanitizedCustomerName = sanitizeForRazorpay(data.customer.name);
+
+      console.log("Original description:", `${selectedProduct.name} - ${selectedProduct.memory}`);
+      console.log("Sanitized description:", sanitizedDescription);
+
+      // Initialize Razorpay
+      const options = {
+        key: data.razorpay.key,
+        amount: data.razorpay.amount,
+        currency: data.razorpay.currency,
+        name: 'OceanLinux',
+        description: sanitizedDescription, // Use sanitized description
+        order_id: data.razorpay.order_id,
+        prefill: {
+          name: sanitizedCustomerName, // Use sanitized customer name
+          email: data.customer.email, // Email is usually safe but we can sanitize if needed
+        },
+        theme: {
+          color: '#3b82f6'
+        },
+        handler: async function (response: any) {
+          console.log('Payment successful:', response);
+          toast.success("Payment successful! Processing order...");
+
+          try {
+            // Call your API to confirm payment and trigger provisioning
+            const confirmRes = await fetch("/api/payment/confirm", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                clientTxnId: data.clientTxnId,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_signature: response.razorpay_signature
+              })
+            });
+
+            if (confirmRes.ok) {
+              toast.success("Order confirmed! Redirecting...");
+              router.push(`/payment/callback?client_txn_id=${data.clientTxnId}&payment_id=${response.razorpay_payment_id}`);
+            } else {
+              toast.error("Payment confirmed but order processing failed. Please contact support.");
+              router.push(`/payment/callback?client_txn_id=${data.clientTxnId}&status=processing_failed`);
+            }
+          } catch (error) {
+            console.error('Error confirming payment:', error);
+            toast.error("Payment successful but order confirmation failed. Please contact support.");
+            router.push(`/payment/callback?client_txn_id=${data.clientTxnId}&status=confirmation_failed`);
+          }
+        },
+        modal: {
+          ondismiss: function () {
+            console.log('Payment modal dismissed');
+            setPaymentInitiating(false);
+          }
+        }
+      };
+
       setShowDialog(false);
-      window.location.href = data.paymentUrl;
+
+      const razorpay = new window.Razorpay(options);
+      razorpay.open();
 
     } catch (error) {
       console.error("Error initiating payment:", error);

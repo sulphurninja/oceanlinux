@@ -4,12 +4,12 @@ import { useState, useRef, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { 
-    Send, 
-    Bot, 
-    User, 
-    MessageCircle, 
-    Loader2, 
+import {
+    Send,
+    Bot,
+    User,
+    MessageCircle,
+    Loader2,
     ArrowLeft,
     Zap,
     Shield,
@@ -125,31 +125,31 @@ export default function LiveChat() {
     return (
         <>
             <Header />
-            
+
             {/* Hero Section */}
             <section className="section-padding gradient- relative overflow-hidden">
                 <div className="absolute inset-0 opacity-10">
                     <div className="absolute inset-0 bg-[url('/grid-pattern.svg')] bg-center"></div>
                 </div>
-                
+
                 <div className="container mx-auto container-padding relative z-10">
                     <div className="max-w-4xl mx-auto text-center animate-slide-up">
                         <div className="inline-flex items-center px-4 py-2 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 mb-6">
                             <MessageCircle className="w-4 h-4 mr-2 text-green-400" />
                             <span className="text-sm font-medium text-white">Live AI Assistant • Instant Responses</span>
                         </div>
-                        
+
                         <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold mb-6 leading-tight text-white">
-                            Get Instant Help with 
+                            Get Instant Help with
                             <span className="text-gradient block">Our AI Assistant</span>
                         </h1>
-                        
+
                         <p className="text-xl text-white/90 mb-8 max-w-3xl mx-auto">
-                            Ask anything about our Linux hosting services, pricing, or technical questions. 
+                            Ask anything about our Linux hosting services, pricing, or technical questions.
                             Our AI assistant is trained on all OceanLinux services and ready to help 24/7.
                         </p>
 
-                     <div className="grid grid-cols-3 gap-6 mb-8">
+                        <div className="grid grid-cols-3 gap-6 mb-8">
                             <div className="text-center">
                                 <div className="text-2xl font-bold text-green-400">24/7</div>
                                 <div className="text-sm text-white/70">Always Available</div>
@@ -172,11 +172,11 @@ export default function LiveChat() {
                             </div>
                         </div>
 
-                    
+
 
                         <Link href="/contact-us">
-                            <Button 
-                                variant="outline" 
+                            <Button
+                                variant="outline"
                                 className="border-white/30 text-white hover:bg-white/10 backdrop-blur-sm"
                             >
                                 <ArrowLeft className="w-4 h-4 mr-2" />
@@ -188,11 +188,11 @@ export default function LiveChat() {
             </section>
 
             {/* Chat Interface */}
-            <section className="py-12 bg-background">
+            <section className="p-12 bg-background">
                 <div className="container mx-auto px-6">
                     <div className="max-w-4xl mx-auto">
-                        <Card className="h-[600px] flex flex-col shadow-2xl">
-                            <CardHeader className="bg-primary/5 rounded-t-lg">
+                        <Card className="h-[700px] flex flex-col shadow-2xl">
+                            <CardHeader className="bg-primary/5 rounded-t-lg flex-shrink-0">
                                 <div className="flex items-center justify-between">
                                     <div className="flex items-center gap-3">
                                         <div className="w-10 h-10 bg-primary/10 rounded-full flex items-center justify-center">
@@ -213,41 +213,38 @@ export default function LiveChat() {
                                 </div>
                             </CardHeader>
 
-                            <CardContent className="flex-1 flex flex-col p-0">
-                                {/* Messages */}
-                                <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                            <CardContent className="flex-1 flex flex-col p-0 min-h-0">
+                                {/* Messages Container - Fixed height and scrolling */}
+                                <div className="flex-1 overflow-y-auto p-6 space-y-4 min-h-0">
                                     {messages.map((message) => (
                                         <div
                                             key={message.id}
                                             className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
                                         >
-                                            <div className={`flex gap-3 max-w-[80%] ${message.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
-                                                <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
-                                                    message.role === 'user' 
-                                                        ? 'bg-primary text-primary-foreground' 
+                                            <div className={`flex gap-3 max-w-[85%] ${message.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
+                                                <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${message.role === 'user'
+                                                        ? 'bg-primary text-primary-foreground'
                                                         : 'bg-secondary text-secondary-foreground'
-                                                }`}>
+                                                    }`}>
                                                     {message.role === 'user' ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
                                                 </div>
-                                                <div className={`rounded-2xl px-4 py-3 ${
-                                                    message.role === 'user'
+                                                <div className={`rounded-2xl px-4 py-3 break-words ${message.role === 'user'
                                                         ? 'bg-primary text-primary-foreground'
                                                         : 'bg-muted'
-                                                }`}>
-                                                    <p className="text-sm whitespace-pre-wrap">{message.content}</p>
-                                                    <p className={`text-xs mt-2 opacity-70 ${
-                                                        message.role === 'user' ? 'text-primary-foreground/70' : 'text-muted-foreground'
                                                     }`}>
+                                                    <p className="text-sm whitespace-pre-wrap break-words">{message.content}</p>
+                                                    <p className={`text-xs mt-2 opacity-70 ${message.role === 'user' ? 'text-primary-foreground/70' : 'text-muted-foreground'
+                                                        }`}>
                                                         {formatTime(message.timestamp)}
                                                     </p>
                                                 </div>
                                             </div>
                                         </div>
                                     ))}
-                                    
+
                                     {isLoading && (
                                         <div className="flex justify-start">
-                                            <div className="flex gap-3 max-w-[80%]">
+                                            <div className="flex gap-3 max-w-[85%]">
                                                 <div className="w-8 h-8 rounded-full bg-secondary text-secondary-foreground flex items-center justify-center">
                                                     <Bot className="w-4 h-4" />
                                                 </div>
@@ -260,32 +257,34 @@ export default function LiveChat() {
                                             </div>
                                         </div>
                                     )}
-                                    
+
                                     <div ref={messagesEndRef} />
                                 </div>
 
-                                {/* Quick Questions */}
+                                {/* Quick Questions - Only show when minimal messages */}
                                 {messages.length === 1 && (
-                                    <div className="px-6 pb-4">
-                                        <p className="text-sm text-muted-foreground mb-3">Quick questions to get started:</p>
-                                        <div className="flex flex-wrap gap-2">
-                                            {quickQuestions.map((question, index) => (
-                                                <Button
-                                                    key={index}
-                                                    variant="outline"
-                                                    size="sm"
-                                                    className="text-xs h-8"
-                                                    onClick={() => setInput(question)}
-                                                >
-                                                    {question}
-                                                </Button>
-                                            ))}
+                                    <div className="px-6 pb-4 flex-shrink-0 border-t border-border/50">
+                                        <div className="pt-4">
+                                            <p className="text-sm text-muted-foreground mb-3">Quick questions to get started:</p>
+                                            <div className="flex flex-wrap gap-2">
+                                                {quickQuestions.map((question, index) => (
+                                                    <Button
+                                                        key={index}
+                                                        variant="outline"
+                                                        size="sm"
+                                                        className="text-xs h-8"
+                                                        onClick={() => setInput(question)}
+                                                    >
+                                                        {question}
+                                                    </Button>
+                                                ))}
+                                            </div>
                                         </div>
                                     </div>
                                 )}
 
-                           {/* Input */}
-                                <div className="border-t p-4">
+                                {/* Input Section - Fixed at bottom */}
+                                <div className="border-t p-4 flex-shrink-0 bg-background">
                                     <div className="flex gap-3">
                                         <Input
                                             value={input}
@@ -295,8 +294,8 @@ export default function LiveChat() {
                                             disabled={isLoading}
                                             className="flex-1"
                                         />
-                                        <Button 
-                                            onClick={sendMessage} 
+                                        <Button
+                                            onClick={sendMessage}
                                             disabled={!input.trim() || isLoading}
                                             size="icon"
                                             className="px-4"
@@ -322,7 +321,6 @@ export default function LiveChat() {
                     </div>
                 </div>
             </section>
-
             {/* Features */}
             <section className="py-16 bg-muted/30">
                 <div className="container mx-auto px-6">

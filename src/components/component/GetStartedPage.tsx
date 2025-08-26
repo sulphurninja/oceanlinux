@@ -8,12 +8,12 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { 
-  CheckCircle, 
-  Star, 
-  Shield, 
-  Zap, 
-  Globe, 
+import {
+  CheckCircle,
+  Star,
+  Shield,
+  Zap,
+  Globe,
   Clock,
   Server,
   DollarSign,
@@ -114,9 +114,9 @@ function GetStartedPage({ className, ...props }: React.ComponentPropsWithoutRef<
     <div className="relative min-h-screen overflow-hidden">
       {/* Background */}
       <div className="absolute inset-0 z-0">
-        <img 
-          src='/bg.gif' 
-          className='absolute inset-0 w-full h-full object-cover opacity-20' 
+        <img
+          src='/bg.gif'
+          className='absolute inset-0 w-full h-full object-cover opacity-20'
           alt="Background"
         />
         <div className="absolute inset-0 bg-gradient-to-br from-background/95 via-background/90 to-background/95"></div>
@@ -146,14 +146,14 @@ function GetStartedPage({ className, ...props }: React.ComponentPropsWithoutRef<
                   <Star className="w-4 h-4" />
                   Most Affordable Premium Linux VPS
                 </Badge>
-                
+
                 <h2 className="text-4xl xl:text-5xl font-bold leading-tight">
                   Start Your
                   <span className="text-gradient block">Linux Journey Today</span>
                 </h2>
-                
+
                 <p className="text-xl text-muted-foreground leading-relaxed">
-                  Join thousands of developers and businesses who chose OceanLinux for 
+                  Join thousands of developers and businesses who chose OceanLinux for
                   reliable, affordable, and high-performance Linux VPS hosting.
                 </p>
               </div>
@@ -183,7 +183,7 @@ function GetStartedPage({ className, ...props }: React.ComponentPropsWithoutRef<
                 <h3 className="text-lg font-semibold">🔥 Popular Linux VPS Plans</h3>
                 <div className="grid grid-cols-2 gap-3">
                   {plans.map((plan, index) => (
-                    <div 
+                    <div
                       key={index}
                       className={`p-3 rounded-lg border ${plan.popular ? 'border-primary bg-primary/5' : 'border-border bg-muted/30'}`}
                     >
@@ -234,22 +234,21 @@ function GetStartedPage({ className, ...props }: React.ComponentPropsWithoutRef<
         </div>
 
         {/* Right Signup Form */}
-        <div className="w-full lg:w-1/2 flex items-center justify-center p-6 lg:p-12">
+        <div className="w-full lg:w-1/2 flex items-center justify-center p-6 md:-mt-24 lg:p-12">
           <div className="w-full max-w-md">
             <Card className="shadow-2xl border-2">
               {/* Logo for mobile */}
               <div className='flex justify-center items-center pt-6 lg:hidden'>
                 <div className='text-center'>
-                  <DotLottieReact
-                    src="/linux.lottie"
-                    loop
-                    autoplay
-                    className='h-16'
+                  <img
+                    src="/oceanlinux.png"
+
+                    className='h-20 ml-6'
                   />
-                  <h1 className='text-2xl font-bold bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent'>
+                  {/* <h1 className='text-2xl font-bold bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent'>
                     OceanLinux
-                  </h1>
-                  <p className="text-xs text-muted-foreground">The Ocean of Linux</p>
+                  </h1> */}
+                  <p className="text-xs ml-4 text-muted-foreground">The Ocean of Linux</p>
                 </div>
               </div>
 
