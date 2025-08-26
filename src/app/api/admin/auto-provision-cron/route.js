@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
-import Order from '@/models/orderModel';
+import Order from '../../../../models/orderModel'
+import IPStock from '../../../../models/ipStockModel'
 const AutoProvisioningService = require('@/services/autoProvisioningService');
 
 // Configuration
