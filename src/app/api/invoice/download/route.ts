@@ -7,378 +7,361 @@ import { jsPDF } from 'jspdf';
 import fs from 'fs';
 import path from 'path';
 
-// Function to remove emojis from text
-const removeEmojis = (text: string) => {
-  return text.replace(/[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/gu, '').trim();
+// -------- ORG CONSTANTS (edit as needed) ----------
+const ORG = {
+  brand: 'Ocean Linux',
+  legal: 'Backtick Labs',
+  tagline: 'Most Affordable Premium Linux VPS Hosting',
+  address: 'Office No.311, Kohinoor Majestic, Pune - 411019',
+  email: 'hello@oceanlinux.com',
+  phone: '', // optional
+  gstin: '', // e.g. '27ABCDE1234F1Z5' or leave empty
+  showGST: false, // flip to true if you want GST lines calculated/shown
+  gstRatePct: 18, // if showGST=true, apply CGST/SGST/IGST as per your state rules
 };
+// --------------------------------------------------
 
-// Function to clean text for PDF rendering
-const cleanTextForPDF = (text: string) => {
-  if (!text) return '';
-  return removeEmojis(text)
-    .replace(/[^\x00-\x7F]/g, '')
-    .trim();
-};
+// Remove emojis (keep full text otherwise)
+const removeEmojis = (text: string) =>
+  (text || '').replace(
+    /[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/gu,
+    ''
+  );
 
-// Function to load and convert image to base64
+const clean = (t?: string) => removeEmojis(t || '').trim();
+
+// Load logo from /public/oceanlinux.png (optional)
 const getLogoBase64 = () => {
   try {
-    const logoPath = path.join(process.cwd(), 'public', 'oceanlinux.png');
-    const logoBuffer = fs.readFileSync(logoPath);
-    return `data:image/png;base64,${logoBuffer.toString('base64')}`;
-  } catch (error) {
-    console.log('Logo not found, proceeding without logo');
+    const p = path.join(process.cwd(), 'public', 'oceanlinux.png');
+    const b = fs.readFileSync(p);
+    return `data:image/png;base64,${b.toString('base64')}`;
+  } catch {
     return null;
   }
 };
 
-// Function to add final footer (only for the last page)
+// Add final footer on last page
 const addFinalFooter = (doc: jsPDF) => {
+  const darkBg = [2, 7, 19];
   const primaryBlue = [59, 130, 246];
-  const darkGray = [71, 85, 105];
-  const darkBg = [2, 7, 19]; // #020713
 
-  // Modern footer with dark background
-  doc.setFillColor(darkBg[0], darkBg[1], darkBg[2]);
+  doc.setFillColor(...darkBg);
   doc.rect(0, 270, 210, 27, 'F');
 
-  doc.setTextColor(primaryBlue[0], primaryBlue[1], primaryBlue[2]);
-  doc.setFontSize(10);
+  doc.setTextColor(...primaryBlue);
   doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10);
   doc.text('Thank you for choosing Ocean Linux!', 20, 280);
 
   doc.setTextColor(255, 255, 255);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
-  doc.text('Most Affordable Premium Linux VPS Hosting | Enterprise Quality at Budget Prices', 20, 286);
-  doc.text('This is a computer-generated invoice. For support: hello@oceanlinux.com', 20, 291);
+  doc.text(ORG.tagline, 20, 286);
+  const support = `This is a computer-generated invoice. Support: ${ORG.email}`;
+  doc.text(support, 20, 291);
 };
 
-// Function to check if content fits on current page, if not create new page
-const checkPageSpace = (doc: jsPDF, currentY: number, requiredSpace: number) => {
-  const pageHeight = 297; // A4 height
-  const footerSpace = 30; // Space reserved for footer
-  
-  if (currentY + requiredSpace > pageHeight - footerSpace) {
-    // Add new page without footer
+// Paging helper
+const checkPageSpace = (doc: jsPDF, y: number, need: number) => {
+  const pageH = 297, footer = 30;
+  if (y + need > pageH - footer) {
     doc.addPage();
-    
-    // Add light background to new page
-    const lightGray = [248, 250, 252];
-    doc.setFillColor(lightGray[0], lightGray[1], lightGray[2]);
+    // light background
+    doc.setFillColor(248, 250, 252);
     doc.rect(0, 0, 210, 297, 'F');
-    
-    return 30; // Return new Y position for new page
+    return 30;
   }
-  return currentY;
+  return y;
+};
+
+// Multi-line draw
+const drawLabelValue = (
+  doc: jsPDF,
+  label: string,
+  value: string,
+  x: number,
+  y: number,
+  maxWidth: number,
+  labelColor = [71, 85, 105]
+) => {
+  doc.setTextColor(labelColor[0], labelColor[1], labelColor[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.text(label, x, y);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(0, 0, 0);
+  const lines = doc.splitTextToSize(value, maxWidth);
+  doc.text(lines, x, y + 5);
+  const height = 5 + lines.length * 5;
+  return y + height;
+};
+
+// Mask secrets safely
+const maskSecret = (s?: string) => {
+  if (!s) return '';
+  if (s.length <= 4) return '*'.repeat(s.length);
+  return s.slice(0, 2) + '*'.repeat(Math.max(1, s.length - 4)) + s.slice(-2);
 };
 
 export async function GET(request: NextRequest) {
   try {
     await connectDB();
 
-    // Check authentication
     const token = request.cookies.get('token')?.value;
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    let userId;
+    let userId: string;
     try {
       userId = getDataFromToken(request);
-    } catch (error) {
+    } catch {
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
     }
 
     const { searchParams } = new URL(request.url);
     const orderId = searchParams.get('orderId');
+    if (!orderId) return NextResponse.json({ error: 'Order ID is required' }, { status: 400 });
 
-    if (!orderId) {
-      return NextResponse.json({ error: 'Order ID is required' }, { status: 400 });
-    }
-
-    // Find the order and verify ownership
     const order = await Order.findOne({ _id: orderId, user: userId }).lean();
     const user = await User.findById(userId).lean();
+    if (!order) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
+    if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
-    if (!order) {
-      return NextResponse.json({ error: 'Order not found' }, { status: 404 });
-    }
+    // Gather fields (full text kept, no truncation)
+    const productName = clean(order.productName || 'N/A');
+    const memory = clean(order.memory || 'N/A');
+    const customerName = clean(order.customerName || user.name || 'N/A');
+    const customerEmail = clean(order.customerEmail || user.email || 'N/A');
+    const ip = clean(order.ipAddress || '');
+    const uname = clean(order.username || '');
+    const passwd = clean(order.password || '');
+    const os = clean(order.os || '');
+    const txId = clean(order.transactionId || '');
+    const gwOrderId = clean(order.gatewayOrderId || '');
+    const clientTxnId = clean(order.clientTxnId || '');
+    const createdAt = new Date(order.createdAt || new Date());
+    const expiry = order.expiryDate ? new Date(order.expiryDate as any) : null;
 
-    if (!user) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
-    }
+    // Amounts
+    const gross = Number(order.originalPrice ?? order.price ?? 0);
+    const discount = Number(order.promoDiscount ?? 0);
+    const netBeforeTax = Number(order.price ?? gross) - (ORG.showGST ? 0 : 0); // when GST shown, compute below
+    const taxable = ORG.showGST ? (Number(order.price ?? gross)) * (100 / (100 + ORG.gstRatePct)) : Number(order.price ?? gross);
+    const gstAmt = ORG.showGST ? Math.round((taxable * ORG.gstRatePct) / 100) : 0;
+    const total = ORG.showGST ? Math.round(taxable + gstAmt) : Number(order.price ?? gross);
 
-    // Clean text fields
-    const cleanProductName = cleanTextForPDF(order.productName || 'N/A');
-    const cleanMemory = cleanTextForPDF(order.memory || 'N/A');
-    const cleanUserName = cleanTextForPDF(user.name || 'N/A');
-    const cleanUserEmail = cleanTextForPDF(user.email || 'N/A');
-    const cleanPromoCode = order.promoCode ? cleanTextForPDF(order.promoCode) : '';
-
-    // Generate modern PDF invoice
+    // Start PDF
     const doc = new jsPDF();
-    
-    // Color scheme with updated dark background
-    const primaryBlue = [59, 130, 246]; // Blue-500
-    const darkBlue = [30, 58, 138]; // Blue-800
-    const lightGray = [248, 250, 252]; // Slate-50
-    const darkGray = [71, 85, 105]; // Slate-600
-    const green = [34, 197, 94]; // Green-500
-    const darkBg = [2, 7, 19]; // #020713
+    const darkBg = [2, 7, 19];
+    const lightGray = [248, 250, 252];
+    const darkGray = [71, 85, 105];
+    const green = [34, 197, 94];
 
-    // Modern gradient background effect
-    doc.setFillColor(lightGray[0], lightGray[1], lightGray[2]);
-    doc.rect(0, 0, 210, 297, 'F'); // A4 background
+    // Background
+    doc.setFillColor(...lightGray);
+    doc.rect(0, 0, 210, 297, 'F');
 
-    // Header section with dark background (#020713)
-    doc.setFillColor(darkBg[0], darkBg[1], darkBg[2]);
-    doc.rect(0, 0, 210, 60, 'F');
+    // Header
+    doc.setFillColor(...darkBg);
+    doc.rect(0, 0, 210, 62, 'F');
 
-    // Add logo if available
-    const logoBase64 = getLogoBase64();
-    if (logoBase64) {
-      try {
-        doc.addImage(logoBase64, 'PNG', 20, 15, 30, 30);
-      } catch (error) {
-        console.log('Error adding logo to PDF');
-      }
+    const logo = getLogoBase64();
+    if (logo) {
+      try { doc.addImage(logo, 'PNG', 20, 15, 28, 28); } catch {}
     }
 
-    // Company branding
     doc.setTextColor(255, 255, 255);
-    doc.setFontSize(24);
-    doc.setFont('helvetica', 'bold');
-    doc.text('Ocean Linux', logoBase64 ? 60 : 20, 30);
-    
-    doc.setFontSize(12);
-    doc.setFont('helvetica', 'normal');
-    doc.text('Most Affordable Premium Linux VPS Hosting', logoBase64 ? 60 : 20, 38);
-    doc.text('A Product of Backtick Labs Private Limited', logoBase64 ? 60 : 20, 45);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(22);
+    doc.text(ORG.brand, logo ? 55 : 20, 28);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(11);
+    doc.text(ORG.tagline, logo ? 55 : 20, 36);
+    doc.text(`A Product of ${ORG.legal}`, logo ? 55 : 20, 43);
 
-    // Modern invoice badge
-    // doc.setFillColor(255, 255, 255);
-    // doc.roundedRect(140, 15, 50, 30, 5, 5, 'F');
-    // doc.setTextColor(primaryBlue[0], primaryBlue[1], primaryBlue[2]);
-    // doc.setFontSize(20);
-    // doc.setFont('helvetica', 'bold');
-    // doc.text('INVOICE', 145, 32);
-
-    // Invoice details in modern card style
+    // Invoice meta card
     doc.setFillColor(255, 255, 255);
-    doc.roundedRect(20, 75, 170, 35, 5, 5, 'F');
-    
-    // Invoice meta information
-    doc.setTextColor(darkGray[0], darkGray[1], darkGray[2]);
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'bold');
-    doc.text('INVOICE DETAILS', 25, 85);
+    doc.roundedRect(20, 74, 170, 36, 5, 5, 'F');
 
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9);
-    const invoiceId = order._id.toString().substring(order._id.toString().length - 8).toUpperCase();
-    doc.text(`Invoice #: OL-${invoiceId}`, 25, 92);
-    doc.text(`Date: ${new Date(order.createdAt).toLocaleDateString('en-IN')}`, 25, 98);
-    doc.text(`Due Date: ${new Date(order.createdAt).toLocaleDateString('en-IN')}`, 25, 104);
+    doc.setTextColor(...darkGray);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
+    doc.text('INVOICE DETAILS', 25, 84);
+
+    // Invoice number = suffix of _id
+    const invoiceSuffix = order._id.toString().slice(-8).toUpperCase();
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(0, 0, 0);
+    doc.text(`Invoice #: OL-${invoiceSuffix}`, 25, 92);
+    doc.text(`Invoice Date: ${createdAt.toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}`, 25, 98);
+    doc.text(`Service Period: ${createdAt.toLocaleDateString('en-IN')} ${expiry ? `→ ${expiry.toLocaleDateString('en-IN')}` : ''}`, 25, 104);
 
     // Status badge
     const statusX = 140;
-    if (order.status === 'completed') {
-      doc.setFillColor(green[0], green[1], green[2]);
-    } else if (order.status === 'pending') {
-      doc.setFillColor(255, 193, 7); // Yellow
+    const status = (order.status || 'pending').toString();
+    if (status === 'completed') doc.setFillColor(...green);
+    else if (status === 'pending') doc.setFillColor(255, 193, 7);
+    else doc.setFillColor(220, 53, 69);
+    doc.roundedRect(statusX, 88, 30, 9, 2, 2, 'F');
+    doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold'); doc.setFontSize(8);
+    doc.text(status.toUpperCase(), statusX + 3, 94);
+
+    // BILL TO / FROM cards
+    doc.setFillColor(255, 255, 255);
+    doc.roundedRect(20, 118, 80, 46, 5, 5, 'F');
+    doc.setTextColor(...darkGray); doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
+    doc.text('BILL TO', 25, 128);
+    doc.setFont('helvetica', 'normal'); doc.setTextColor(0, 0, 0); doc.setFontSize(9);
+    const billY1 = drawLabelValue(doc, '', `${customerName}`, 25, 135, 70);
+    drawLabelValue(doc, '', `${customerEmail}`, 25, billY1 + 2, 70);
+
+    doc.setFillColor(255, 255, 255);
+    doc.roundedRect(110, 118, 80, 46, 5, 5, 'F');
+    doc.setTextColor(...darkGray); doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
+    doc.text('FROM', 115, 128);
+    doc.setFont('helvetica', 'normal'); doc.setTextColor(0, 0, 0); doc.setFontSize(9);
+    let fromY = 135;
+    fromY = drawLabelValue(doc, '', ORG.brand, 115, fromY, 70);
+    fromY = drawLabelValue(doc, '', ORG.legal, 115, fromY + 1, 70);
+    fromY = drawLabelValue(doc, '', ORG.address, 115, fromY + 1, 70);
+    fromY = drawLabelValue(doc, '', `${ORG.email}${ORG.phone ? ` • ${ORG.phone}` : ''}`, 115, fromY + 1, 70);
+    if (ORG.showGST && ORG.gstin) drawLabelValue(doc, '', `GSTIN: ${ORG.gstin}`, 115, fromY + 1, 70);
+
+    // Services table header
+    let y = 172;
+    y = checkPageSpace(doc, y, 18);
+    doc.setFillColor(...darkBg);
+    doc.roundedRect(20, y, 170, 12, 2, 2, 'F');
+    doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
+    doc.text('SERVICE DESCRIPTION', 25, y + 8);
+    doc.text('CONFIGURATION', 125, y + 8);
+    y += 12;
+
+    // Services row (full wrap; no truncation)
+    doc.setFillColor(255, 255, 255);
+    doc.rect(20, y, 170, 18, 'F');
+    doc.setTextColor(0, 0, 0); doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+
+    const desc = `${productName}`;
+    const descLines = doc.splitTextToSize(desc, 95);
+    const cfg = `RAM: ${memory}${os ? ` • OS: ${os}` : ''}`;
+    const cfgLines = doc.splitTextToSize(cfg, 60);
+
+    // Draw description and config
+    const baseY = y + 6;
+    doc.text(descLines, 25, baseY);
+    doc.text(cfgLines, 125, baseY);
+
+    // Amount at far right (top aligned)
+    doc.setFont('helvetica', 'bold');
+    doc.text(`₹ ${Number(order.price ?? 0).toLocaleString('en-IN')}`, 175, baseY, { align: 'right' });
+
+    // Increase y to max of lines
+    const rowHeight = Math.max(descLines.length, cfgLines.length) * 5 + 10;
+    y += rowHeight;
+
+    // Promo / totals box
+    y = checkPageSpace(doc, y + 6, 50);
+    if (order.promoCode && (order.promoDiscount ?? 0) > 0) {
+      doc.setFont('helvetica', 'normal'); doc.setTextColor(34, 197, 94); doc.setFontSize(9);
+      const promo = `Promo Applied: ${clean(order.promoCode)} (−₹ ${Number(order.promoDiscount).toLocaleString('en-IN')})`;
+      doc.text(promo, 20, y + 4);
+    }
+
+    // Totals card
+    doc.setFillColor(245, 247, 250);
+    doc.roundedRect(120, y, 70, ORG.showGST ? 30 : 22, 3, 3, 'F');
+    doc.setTextColor(2, 7, 19);
+    doc.setFont('helvetica', 'bold');
+
+    // When GST shown
+    if (ORG.showGST) {
+      doc.setFontSize(9); doc.text('Subtotal', 125, y + 8);
+      doc.setFont('helvetica', 'normal'); doc.text(`₹ ${Math.round(taxable).toLocaleString('en-IN')}`, 185, y + 8, { align: 'right' });
+      doc.setFont('helvetica', 'bold'); doc.text(`GST (${ORG.gstRatePct}%)`, 125, y + 16);
+      doc.setFont('helvetica', 'normal'); doc.text(`₹ ${gstAmt.toLocaleString('en-IN')}`, 185, y + 16, { align: 'right' });
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.text('TOTAL', 125, y + 26);
+      doc.text(`₹ ${total.toLocaleString('en-IN')}`, 185, y + 26, { align: 'right' });
+      y += 36;
     } else {
-      doc.setFillColor(220, 53, 69); // Red
+      doc.setFontSize(11); doc.text('TOTAL', 125, y + 12);
+      doc.text(`₹ ${total.toLocaleString('en-IN')}`, 185, y + 12, { align: 'right' });
+      y += 28;
     }
-    doc.roundedRect(statusX, 87, 25, 8, 2, 2, 'F');
-    doc.setTextColor(255, 255, 255);
-    doc.setFontSize(8);
-    doc.setFont('helvetica', 'bold');
-    doc.text(order.status.toUpperCase(), statusX + 2, 92);
 
-    // Customer details section
+    // Service details / delivery proof (password masked)
+    y = checkPageSpace(doc, y, 60);
     doc.setFillColor(255, 255, 255);
-    doc.roundedRect(20, 125, 80, 40, 5, 5, 'F');
-    
-    doc.setTextColor(darkGray[0], darkGray[1], darkGray[2]);
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'bold');
-    doc.text('BILL TO', 25, 135);
+    doc.roundedRect(20, y, 170, 42, 5, 5, 'F');
+    doc.setTextColor(...darkGray); doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
+    doc.text('SERVICE & DELIVERY DETAILS', 25, y + 10);
+    doc.setFont('helvetica', 'normal'); doc.setTextColor(0, 0, 0); doc.setFontSize(9);
 
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(11);
-    doc.setTextColor(0, 0, 0);
-    doc.text(cleanUserName, 25, 145);
-    doc.setFontSize(9);
-    doc.setTextColor(darkGray[0], darkGray[1], darkGray[2]);
-    doc.text(cleanUserEmail, 25, 152);
+    let dY = y + 16;
+    const deliveryLines = [
+      ip ? `Server / IP: ${ip}` : '',
+      uname ? `Username: ${uname}` : '',
+      passwd ? `Password: ${maskSecret(passwd)} (masked)` : '',
+      os ? `OS: ${os}` : '',
+      `Provisioning: ${order.autoProvisioned ? 'Auto-Provisioned' : 'Manual'} • Status: ${order.provisioningStatus || order.status || 'N/A'}`,
+      `Delivery Note: Service activated on ${createdAt.toLocaleString('en-IN')} and details shared via dashboard/email.`,
+      expiry ? `Valid Until: ${expiry.toLocaleDateString('en-IN')}` : '',
+    ].filter(Boolean);
 
-    // Company details section
+    deliveryLines.forEach(line => {
+      const lines = doc.splitTextToSize(line, 160);
+      doc.text(lines, 25, dY);
+      dY += lines.length * 5;
+    });
+
+    y = dY + 6;
+
+    // Payment information
+    y = checkPageSpace(doc, y, 36);
     doc.setFillColor(255, 255, 255);
-    doc.roundedRect(110, 125, 80, 40, 5, 5, 'F');
-    
-    doc.setTextColor(darkGray[0], darkGray[1], darkGray[2]);
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'bold');
-    doc.text('FROM', 115, 135);
+    doc.roundedRect(20, y, 170, 30, 5, 5, 'F');
+    doc.setTextColor(...darkGray); doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
+    doc.text('PAYMENT INFORMATION', 25, y + 10);
+    doc.setFont('helvetica', 'normal'); doc.setTextColor(0, 0, 0); doc.setFontSize(8);
 
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9);
-    doc.setTextColor(0, 0, 0);
-    doc.text('Ocean Linux', 115, 145);
-    doc.text('hello@oceanlinux.com', 115, 152);
-    // doc.text('+91 XXX XXX XXXX', 115, 159);
+    let pY = y + 16;
+    const payLines = [
+      txId ? `Razorpay Payment ID: ${txId}` : '',
+      gwOrderId ? `Razorpay Order ID: ${gwOrderId}` : '',
+      clientTxnId ? `Client Txn ID: ${clientTxnId}` : '',
+      `Payment Status: ${status}`,
+      `Payment Date: ${createdAt.toLocaleString('en-IN')}`,
+    ].filter(Boolean);
 
-    // Services table with modern design
-    let currentY = 180;
-    
-    // Check if table fits on current page
-    currentY = checkPageSpace(doc, currentY, 50);
-    
-    // Table header with dark background
-    doc.setFillColor(darkBg[0], darkBg[1], darkBg[2]);
-    doc.roundedRect(20, currentY, 170, 12, 2, 2, 'F');
-    
-    doc.setTextColor(255, 255, 255);
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'bold');
-    doc.text('SERVICE DESCRIPTION', 25, currentY + 8);
-    doc.text('CONFIGURATION', 90, currentY + 8);
-    doc.text('AMOUNT', 155, currentY + 8);
+    payLines.forEach(line => {
+      const lines = doc.splitTextToSize(line, 160);
+      doc.text(lines, 25, pY);
+      pY += lines.length * 4.6;
+    });
 
-    // Table content
-    currentY += 12;
+    // Terms (optional)
+    y = checkPageSpace(doc, pY + 6, 30);
     doc.setFillColor(255, 255, 255);
-    doc.rect(20, currentY, 170, 15, 'F');
+    doc.roundedRect(20, y, 170, 24, 5, 5, 'F');
+    doc.setTextColor(...darkGray); doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
+    doc.text('NOTES / TERMS', 25, y + 8);
+    doc.setFont('helvetica', 'normal'); doc.setTextColor(0, 0, 0); doc.setFontSize(8);
+    const terms = doc.splitTextToSize(
+      'This invoice is issued by Ocean Linux (Backtick Labs). Digital services once provisioned are non-returnable. Disputes: Pune jurisdiction. For support or clarifications, write to hello@oceanlinux.com.',
+      162
+    );
+    doc.text(terms, 25, y + 14);
 
-    doc.setTextColor(0, 0, 0);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9);
-
-    // Truncate long product names
-    const maxProductNameLength = 20;
-    const displayProductName = cleanProductName.length > maxProductNameLength
-      ? cleanProductName.substring(0, maxProductNameLength) + '...'
-      : cleanProductName;
-
-    doc.text(displayProductName, 25, currentY + 8);
-    doc.text(cleanMemory, 90, currentY + 8);
-    doc.text(`Rs ${order.price.toLocaleString('en-IN')}`, 155, currentY + 8);
-
-    // Move to next section
-    currentY += 25;
-
-    // Check space for promo/total section
-    currentY = checkPageSpace(doc, currentY, 40);
-    
-    // Promo discount section (if applicable)
-    if (order.promoCode && order.promoDiscount > 0) {
-      doc.setTextColor(green[0], green[1], green[2]);
-      doc.setFontSize(9);
-      doc.text(`Promo Applied: ${cleanPromoCode}`, 120, currentY);
-      doc.text(`- Rs ${order.promoDiscount.toLocaleString('en-IN')}`, 155, currentY);
-      currentY += 10;
-    }
-
-    // Total section with modern styling
-    doc.setFillColor(lightGray[0], lightGray[1], lightGray[2]);
-    doc.roundedRect(120, currentY, 70, 20, 3, 3, 'F');
-    
-    doc.setTextColor(darkBg[0], darkBg[1], darkBg[2]);
-    doc.setFontSize(12);
-    doc.setFont('helvetica', 'bold');
-    doc.text('TOTAL AMOUNT', 125, currentY + 8);
-    doc.text(`Rs ${order.price.toLocaleString('en-IN')}`, 155, currentY + 15);
-
-    currentY += 35;
-
-    // Service details section
-    if (order.ipAddress || order.username || order.os) {
-      // Calculate required space for service details
-      let serviceDetailsCount = 0;
-      if (order.ipAddress) serviceDetailsCount++;
-      if (order.username) serviceDetailsCount++;
-      if (order.os) serviceDetailsCount++;
-      
-      const requiredSpace = 50 + (serviceDetailsCount * 7);
-      currentY = checkPageSpace(doc, currentY, requiredSpace);
-      
-      doc.setFillColor(255, 255, 255);
-      doc.roundedRect(20, currentY, 170, 40, 5, 5, 'F');
-      
-      doc.setTextColor(darkGray[0], darkGray[1], darkGray[2]);
-      doc.setFontSize(10);
-      doc.setFont('helvetica', 'bold');
-      doc.text('SERVICE DETAILS', 25, currentY + 12);
-
-      let detailY = currentY + 20;
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(9);
-
-      if (order.ipAddress) {
-        doc.text(`Server IP: ${cleanTextForPDF(order.ipAddress)}`, 25, detailY);
-        detailY += 7;
-      }
-
-      if (order.username) {
-        doc.text(`Username: ${cleanTextForPDF(order.username)}`, 25, detailY);
-        detailY += 7;
-      }
-
-      if (order.os) {
-        doc.text(`OS: ${cleanTextForPDF(order.os)}`, 25, detailY);
-        detailY += 7;
-      }
-
-      currentY += 50;
-    }
-
-    // Payment details
-    if (order.transactionId || order.gatewayOrderId) {
-      currentY = checkPageSpace(doc, currentY, 35);
-      
-      doc.setFillColor(255, 255, 255);
-      doc.roundedRect(20, currentY, 170, 30, 5, 5, 'F');
-      
-      doc.setTextColor(darkGray[0], darkGray[1], darkGray[2]);
-      doc.setFontSize(10);
-      doc.setFont('helvetica', 'bold');
-      doc.text('PAYMENT INFORMATION', 25, currentY + 12);
-
-      let payDetailY = currentY + 18;
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(8);
-
-      if (order.transactionId) {
-        doc.text(`Transaction ID: ${cleanTextForPDF(order.transactionId)}`, 25, payDetailY);
-        payDetailY += 6;
-      }
-
-      if (order.gatewayOrderId) {
-        doc.text(`Gateway Order ID: ${cleanTextForPDF(order.gatewayOrderId)}`, 25, payDetailY);
-      }
-
-      currentY += 40;
-    }
-
-    // Check space before adding final footer
-    currentY = checkPageSpace(doc, currentY, 30);
-
-    // Add final footer ONLY to the last page
+    // Footer on last page
     addFinalFooter(doc);
 
-    // Convert PDF to buffer
+    // Send buffer
     const pdfBuffer = Buffer.from(doc.output('arraybuffer'));
-
+    const invoiceFile = `oceanlinux-invoice-OL-${invoiceSuffix}.pdf`;
     return new NextResponse(pdfBuffer, {
       status: 200,
       headers: {
         'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename="oceanlinux-invoice-${invoiceId}.pdf"`,
+        'Content-Disposition': `attachment; filename="${invoiceFile}"`,
         'Content-Length': pdfBuffer.length.toString(),
       },
     });
-
   } catch (error) {
     console.error('Invoice generation error:', error);
     return NextResponse.json({ error: 'Failed to generate invoice' }, { status: 500 });

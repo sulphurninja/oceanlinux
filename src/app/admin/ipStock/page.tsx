@@ -36,6 +36,10 @@ type PromoCode = {
     discountType: 'percentage' | 'fixed';
     isActive: boolean;
 };
+type SmartVpsRow = { ip: string; vps: string | number; qty: number; pid: string | number }
+type SmartVpsIPs = { '4GB': string; '8GB': string; '16GB': string }
+type SmartVpsDefaultOS = { '4GB': string; '8GB': string; '16GB': string }
+type SmartVpsPIDs = { '4GB': string; '8GB': string; '16GB': string }
 
 const IPStockFormWithParams = () => {
     const searchParams = useSearchParams();
@@ -67,6 +71,36 @@ const IPStockFormWithParams = () => {
 
     const router = useRouter();
 
+    const [svRows, setSvRows] = useState<SmartVpsRow[]>([])
+    const [svLoading, setSvLoading] = useState(false)
+    const [smartvpsIPs, setSmartvpsIPs] = useState<SmartVpsIPs>({ '4GB': '', '8GB': '', '16GB': '' })
+    const [smartvpsDefaultOS, setSmartvpsDefaultOS] = useState<SmartVpsDefaultOS>({
+        '4GB': 'ubuntu',     // SmartVPS changeos values: ubuntu, centos, or 2012/2016/2019/2022/11
+        '8GB': 'ubuntu',
+        '16GB': 'ubuntu'
+    })
+    const [smartvpsPIDs, setSmartvpsPIDs] = useState<SmartVpsPIDs>({ '4GB': '', '8GB': '', '16GB': '' })
+
+
+    const loadSmartVps = async () => {
+        try {
+            setSvLoading(true)
+            const r = await fetch('/api/smartvps/ipstock')
+            const j = await r.json()
+            if (!j.success) throw new Error(j.error || 'Failed to fetch SmartVPS stock')
+            setSvRows(j.rows)
+            toast.success('Loaded SmartVPS IP stock')
+        } catch (e: any) {
+            toast.error(e.message || 'SmartVPS fetch failed')
+        } finally {
+            setSvLoading(false)
+        }
+    }
+    const setSmartVpsIP = (mem: keyof SmartVpsIPs, val: string) =>
+        setSmartvpsIPs(prev => ({ ...prev, [mem]: val }))
+    const setSmartVpsOS = (mem: keyof SmartVpsDefaultOS, val: string) =>
+        setSmartvpsDefaultOS(prev => ({ ...prev, [mem]: val }))
+
     useEffect(() => {
         if (prefilledProductId) {
             // Pre-fill all memory options with the same product ID
@@ -92,6 +126,12 @@ const IPStockFormWithParams = () => {
             ...prev,
             [size]: value
         }));
+    };
+    // helper to encode/decode pid+ip in Select valuef
+    const joinPidIp = (pid: string | number, ip: string) => `${pid}||${ip}`;
+    const splitPidIp = (value: string) => {
+        const [pid, ip] = value.split('||');
+        return { pid, ip };
     };
 
     const addPromoCode = () => {
@@ -135,7 +175,7 @@ const IPStockFormWithParams = () => {
     const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
         event.preventDefault();
 
-        // Build memory options with Hostycare product mapping
+        // 1) Keep existing pricing + Hostycare mapping untouched
         const memoryOptions = {
             '4GB': {
                 price: parseFloat(prices['4GB']),
@@ -154,6 +194,32 @@ const IPStockFormWithParams = () => {
             },
         };
 
+        // 2) Build SmartVPS byMemory only if values exist (so other providers remain unaffected)
+        const makeSmartVpsEntry = (mem: '4GB' | '8GB' | '16GB') => {
+            const ip = smartvpsIPs[mem];
+            const pid = (smartvpsPIDs as any)?.[mem];      // <-- you added smartvpsPIDs earlier
+            const defaultOS = smartvpsDefaultOS[mem];
+            if (!ip && !pid) return undefined;             // don’t include empty entries
+            return { ip, pid, defaultOS };
+        };
+
+        const smartvpsByMemory: Record<'4GB' | '8GB' | '16GB', any> = {
+            '4GB': makeSmartVpsEntry('4GB'),
+            '8GB': makeSmartVpsEntry('8GB'),
+            '16GB': makeSmartVpsEntry('16GB'),
+        };
+
+        // Remove undefined keys so your payload stays clean
+        const cleanedSmartvpsByMemory = Object.fromEntries(
+            Object.entries(smartvpsByMemory).filter(([, v]) => v !== undefined)
+        );
+
+        // If nothing selected for SmartVPS, omit the provider block entirely
+        const defaultConfigurations: any = {};
+        if (Object.keys(cleanedSmartvpsByMemory).length > 0) {
+            defaultConfigurations.smartvps = { byMemory: cleanedSmartvpsByMemory };
+        }
+
         try {
             const response = await axios.post('/api/ipstock', {
                 name,
@@ -163,26 +229,31 @@ const IPStockFormWithParams = () => {
                 tags,
                 memoryOptions,
                 promoCodes,
-                defaultConfigurations: {} // Empty for now, can be expanded later
+                defaultConfigurations, // includes smartvps only when you chose values
             });
 
             console.log('Submission Successful:', response.data);
 
             // Reset form
-            setName("");
-            setDescription("");
+            setName('');
+            setDescription('');
             setServerType('Linux');
             setTags([]);
             setPrices({ '4GB': '', '8GB': '', '16GB': '' });
             setHostycareProductIds({ '4GB': '', '8GB': '', '16GB': '' });
             setPromoCodes([]);
+            // also reset SmartVPS picks if you want
+            setSmartvpsIPs({ '4GB': '', '8GB': '', '16GB': '' });
+            setSmartvpsPIDs?.({ '4GB': '', '8GB': '', '16GB': '' }); // if you exposed this setter
+            setSmartVpsOS?.({ '4GB': 'ubuntu', '8GB': 'ubuntu', '16GB': 'ubuntu' });
 
-            toast.success("IP Stock created successfully!")
+            toast.success('IP Stock created successfully!');
         } catch (error: any) {
             console.error('Failed to submit:', error.response?.data || error.message);
             toast.error('Failed to create IP Stock');
         }
     };
+
 
     return (
         <div>
@@ -367,6 +438,64 @@ const IPStockFormWithParams = () => {
                                 )}
                             </div>
                         </CardContent>
+                        {/* SmartVPS Mapping (optional) */}
+                        <div className="mb-6">
+                            <Label className="block text-sm font-medium mb-3 text-base">
+                                SmartVPS Mapping (optional)
+                            </Label>
+
+                            <div className="flex items-center gap-2 mb-3">
+                                <Button type="button" onClick={loadSmartVps} disabled={svLoading}>
+                                    {svLoading ? 'Loading…' : 'Fetch SmartVPS Stock'}
+                                </Button>
+                                <span className="text-xs text-muted-foreground">
+                                    Pick one SmartVPS IP for each memory size
+                                </span>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 border rounded-lg p-4">
+                                {(['4GB', '8GB', '16GB'] as const).map(mem => (
+                                    <div key={mem} className="space-y-2">
+                                        <Label className="text-sm font-medium">{mem} SmartVPS IP</Label>
+                                        <Select
+                                            value={smartvpsPIDs[mem] && smartvpsIPs[mem] ? joinPidIp(smartvpsPIDs[mem], smartvpsIPs[mem]) : ''}
+                                            onValueChange={(val) => {
+                                                const { pid, ip } = splitPidIp(val);
+                                                setSmartVpsIP(mem, ip);
+                                                setSmartvpsPIDs(prev => ({ ...prev, [mem]: pid }));
+                                            }}
+                                        >
+                                            <SelectTrigger>
+                                                <SelectValue placeholder={svRows.length ? 'Select IP' : 'Load SmartVPS stock first'} />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {svRows.map(r => (
+                                                    <SelectItem key={`${r.pid}-${r.ip}`} value={joinPidIp(r.pid, r.ip)}>
+                                                        {r.ip} · pid:{String(r.pid)} · qty:{r.qty}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+
+                                        <Label className="text-xs">Default OS for {mem}</Label>
+                                        <Select value={smartvpsDefaultOS[mem]} onValueChange={(v) => setSmartVpsOS(mem, v)}>
+                                            <SelectTrigger><SelectValue /></SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="ubuntu">Ubuntu</SelectItem>
+                                                <SelectItem value="centos">CentOS</SelectItem>
+                                                <SelectItem value="2012">Windows 2012</SelectItem>
+                                                <SelectItem value="2016">Windows 2016</SelectItem>
+                                                <SelectItem value="2019">Windows 2019</SelectItem>
+                                                <SelectItem value="2022">Windows 2022</SelectItem>
+                                                <SelectItem value="11">Windows 11</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                ))}
+
+                            </div>
+                        </div>
+
                         <CardFooter>
                             <Button type="submit" className="btn btn-primary">Submit</Button>
                         </CardFooter>
