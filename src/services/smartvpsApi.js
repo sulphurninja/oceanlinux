@@ -1,11 +1,17 @@
 // /src/services/smartvpsApi.js
 // Uses BASIC AUTH built from SMARTVPS_USERNAME + SMARTVPS_PASSWORD
-// Sends JSON for POST endpoints (per SmartVPS docs) and GET for ipstock.
+// Sends JSON for POST endpoints (per SmartVPS docs) and POST for ipstock (per your working tests).
 
 const BASE_URL =
   (process.env.SMARTVPS_BASE_URL || 'https://smartvps.online/')
-    .replace(/\/+$/, '/')  // ensure single trailing slash
-  ;
+    .replace(/\/+$/, '/');
+
+function mask(s, keepStart = 3) {
+  if (!s) return '(missing)';
+  const str = String(s);
+  if (str.length <= keepStart) return str[0] + '***';
+  return str.slice(0, keepStart) + '***';
+}
 
 function buildAuthHeader() {
   const u = process.env.SMARTVPS_USERNAME;
@@ -20,14 +26,27 @@ function buildAuthHeader() {
 async function httpFetch(path, { method = 'POST', jsonBody, query } = {}) {
   const ac = new AbortController();
   const t = setTimeout(() => ac.abort(), 25_000);
-  try {
-    const url = new URL(path, BASE_URL);
-    if (query) {
-      for (const [k, v] of Object.entries(query)) {
-        url.searchParams.set(k, String(v));
-      }
-    }
 
+  const url = new URL(path, BASE_URL);
+  if (query) {
+    for (const [k, v] of Object.entries(query)) {
+      url.searchParams.set(k, String(v));
+    }
+  }
+
+  // LOG request
+  console.log('[SMARTVPS/HTTP] →', {
+    method,
+    url: url.toString(),
+    headers: {
+      Authorization: `Basic ${mask((process.env.SMARTVPS_USERNAME || '') + ':' + (process.env.SMARTVPS_PASSWORD || ''))}`,
+      Accept: 'application/json',
+      ...(jsonBody ? { 'Content-Type': 'application/json' } : {}),
+    },
+    body: jsonBody ? JSON.stringify(jsonBody) : undefined
+  });
+
+  try {
     const res = await fetch(url, {
       method,
       headers: {
@@ -43,7 +62,13 @@ async function httpFetch(path, { method = 'POST', jsonBody, query } = {}) {
 
     const text = await res.text();
 
-    // SmartVPS sometimes returns plain strings; try to parse JSON, fallback to raw string.
+    // LOG response
+    console.log('[SMARTVPS/HTTP] ←', {
+      status: res.status,
+      ok: res.ok,
+      bodyPreview: text?.slice(0, 800) // cap to avoid noise
+    });
+
     let data;
     try { data = text ? JSON.parse(text) : {}; } catch { data = text; }
 
@@ -62,18 +87,27 @@ async function httpFetch(path, { method = 'POST', jsonBody, query } = {}) {
 }
 
 class SmartVpsAPI {
-  // GET: IP stock
+  constructor() {
+    console.log('[SMARTVPS] Client init', {
+      BASE_URL,
+      userMasked: mask(process.env.SMARTVPS_USERNAME),
+      passMasked: mask(process.env.SMARTVPS_PASSWORD),
+    });
+  }
+
+  // Per your working tests, ipstock is POST under /api/oceansmart/ipstock
   ipstock() { return httpFetch('api/oceansmart/ipstock', { method: 'POST' }); }
+
   // Power
-  start(ip) { return httpFetch('api/oceansmart/start', { jsonBody: { ip } }); }
-  stop(ip) { return httpFetch('api/oceansmart/stop', { jsonBody: { ip } }); }
+  start(ip)  { return httpFetch('api/oceansmart/start',  { jsonBody: { ip } }); }
+  stop(ip)   { return httpFetch('api/oceansmart/stop',   { jsonBody: { ip } }); }
   format(ip) { return httpFetch('api/oceansmart/format', { jsonBody: { ip } }); }
   status(ip) { return httpFetch('api/oceansmart/status', { jsonBody: { ip } }); }
 
   // OS change — os ∈ {2012,2016,2019,2022,11,centos,ubuntu}
   changeOS(ip, os) { return httpFetch('api/oceansmart/changeos', { jsonBody: { ip, os } }); }
 
-  // Buy (requires you to call ipstock first and pick a usable IP; ram must be string/number)
+  // Buy (call ipstock first and pick a usable IP; ram string/number)
   buyVps(ip, ram) { return httpFetch('api/oceansmart/buyvps', { jsonBody: { ip, ram: String(ram) } }); }
 }
 
