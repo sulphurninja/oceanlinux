@@ -1,10 +1,20 @@
+// --- Force Node runtime & disable static caching (critical on Vercel) ---
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+// Optional: let this run longer if needed (Vercel)
+export const maxDuration = 60; // seconds
+
 import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 import IPStock from '@/models/ipStockModel';
-const SmartVpsAPI = require('@/services/smartvpsApi'); // your existing client with Basic Auth
 
-// --- small logging helper
+// If your SmartVpsAPI is CommonJS (module.exports = class ...),
+// require() is fine under Node runtime:
+const SmartVpsAPI = require('@/services/smartvpsApi');
+
+// --- tiny logger
 const L = {
   head: (label) => {
     console.log("\n" + "🛰️".repeat(80));
@@ -12,10 +22,10 @@ const L = {
     console.log("🛰️".repeat(80));
   },
   kv: (k, v) => console.log(`[SVPS-SYNC] ${k}:`, v),
-  line: (msg='') => console.log(`[SVPS-SYNC] ${msg}`),
+  line: (msg = '') => console.log(`[SVPS-SYNC] ${msg}`),
 };
 
-// --- normalize weird SmartVPS JSON (sometimes stringified twice, with \" etc.)
+// --- normalize SmartVPS' occasionally double-encoded JSON
 function normalizeSmartVpsResponse(payload) {
   if (payload == null) return payload;
   try {
@@ -30,31 +40,23 @@ function normalizeSmartVpsResponse(payload) {
   }
 }
 
-// --- sleep utility so we don't hammer their API
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-// --- is this IPStock a SmartVPS product?
 function isSmartVpsStock(ipStock) {
   const tags = Array.isArray(ipStock?.tags) ? ipStock.tags.map(t => String(t).toLowerCase()) : [];
   const provider = String(ipStock?.provider || '').toLowerCase();
   const name = String(ipStock?.name || '').toLowerCase();
-  return (
-    tags.includes('smartvps') ||
-    provider === 'smartvps' ||
-    name.includes('smartvps')
-  );
+  return tags.includes('smartvps') || provider === 'smartvps' || name.includes('smartvps');
 }
 
-// --- extract first IPv4 from any string/object
 function extractIp(from) {
   const text = typeof from === 'string' ? from : JSON.stringify(from || '');
   const m = text.match(/\b(?:\d{1,3}\.){3}\d{1,3}\b/);
   return m ? m[0] : null;
 }
 
-// --- core updater per order
+// --- update one order from SmartVPS status()
 async function refreshOneOrder(order, smartvpsApi) {
-  // Only attempt if we at least have an IP
   const ip = order?.ipAddress && extractIp(order.ipAddress);
   if (!ip) {
     return { orderId: order._id.toString(), skipped: true, reason: 'No valid IP on order' };
@@ -62,8 +64,9 @@ async function refreshOneOrder(order, smartvpsApi) {
 
   L.kv('Checking status for IP', ip);
 
-  const raw = await smartvpsApi.status(ip);          // POST { ip } per your client
-  const normalized = normalizeSmartVpsResponse(raw); // could still be string
+  const raw = await smartvpsApi.status(ip);  // your client does POST { ip }
+  const normalized = normalizeSmartVpsResponse(raw);
+
   L.kv('status(raw)', typeof raw === 'string' ? raw.slice(0, 500) : raw);
   L.kv('status(normalized)', normalized);
 
@@ -73,13 +76,11 @@ async function refreshOneOrder(order, smartvpsApi) {
       try {
         const unquoted = obj.replace(/^"+|"+$/g, '').replace(/\\"/g, '"');
         obj = JSON.parse(unquoted);
-      } catch {
-        obj = {};
-      }
+      } catch { obj = {}; }
     }
   }
 
-  // Known keys (note: SmartVPS typo "Usernane")
+  // Known SmartVPS keys (sometimes "Usernane" typo)
   const username = obj.Usernane || obj.Username || order.username || null;
   const password = obj.Password || order.password || null;
   const os = obj.OS || order.os || undefined;
@@ -88,7 +89,6 @@ async function refreshOneOrder(order, smartvpsApi) {
   const powerStatus = obj.PowerStatus;
   const actionStatus = obj.ActionStatus;
 
-  // Decide if we have anything new to save
   const hasCreds = Boolean(username && password);
   const update = {
     ...(hasCreds ? { username, password } : {}),
@@ -127,23 +127,27 @@ async function refreshOneOrder(order, smartvpsApi) {
  *
  * Body (optional):
  * {
- *   "limit": 10,              // max orders to process this call (default 10)
- *   "sleepMs": 800,           // delay between status calls (default 800ms)
- *   "onlyMissingCreds": true, // if true, restrict to orders without password/username (default true)
- *   "includeStatuses": ["active","confirmed"] // which order.status values to include
+ *   "limit": 10,
+ *   "sleepMs": 800,
+ *   "onlyMissingCreds": true,
+ *   "includeStatuses": ["active","confirmed"]
  * }
- *
- * This endpoint:
- *  1) Finds SmartVPS orders that look eligible
- *  2) Calls status(ip) for each
- *  3) Updates order with credentials when available
  */
 export async function POST(req) {
   const started = Date.now();
   L.head('SMARTVPS STATUS SYNC — START');
 
   try {
+    // Ensure we are on Node runtime and can open a real DB socket
     await connectDB();
+
+    // Allow optional protection when called from Lambda:
+    // if (process.env.SVPS_SYNC_TOKEN) {
+    //   const token = req.headers.get('x-sync-token');
+    //   if (token !== process.env.SVPS_SYNC_TOKEN) {
+    //     return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+    //   }
+    // }
 
     const smartvpsApi = new SmartVpsAPI();
 
@@ -160,11 +164,7 @@ export async function POST(req) {
     L.kv('onlyMissingCreds', onlyMissingCreds);
     L.kv('includeStatuses', includeStatuses);
 
-    // 1) Find candidate orders (simple pre-filter)
-    //    - Have an ipStockId
-    //    - Have some IP-like string in ipAddress (or at least a non-empty ipAddress)
-    //    - Status in allowed set
-    //    - If onlyMissingCreds: username or password missing/empty
+    // Base query
     const baseQuery = {
       ipStockId: { $exists: true, $ne: null },
       ipAddress: { $exists: true, $ne: null },
@@ -182,8 +182,8 @@ export async function POST(req) {
     }
 
     const candidates = await Order.find(baseQuery)
-      .sort({ updatedAt: 1 }) // oldest updated first
-      .limit(limit * 3);       // fetch a bit extra; we’ll filter by SmartVPS next
+      .sort({ updatedAt: 1 })
+      .limit(limit * 3);
 
     L.kv('candidateOrders(found)', candidates.length);
 
@@ -196,7 +196,7 @@ export async function POST(req) {
       });
     }
 
-    // 2) Build ipStock cache and filter to SmartVPS only
+    // Only SmartVPS stocks
     const ipStockIds = [...new Set(candidates.map(o => o.ipStockId).filter(Boolean))];
     const ipStocks = await IPStock.find({ _id: { $in: ipStockIds } });
     const ipStockMap = new Map(ipStocks.map(s => [String(s._id), s]));
@@ -218,7 +218,7 @@ export async function POST(req) {
       });
     }
 
-    // 3) Process each order (with small delay between calls)
+    // Process each with small delay
     const results = [];
     for (let i = 0; i < smartvpsOrders.length; i++) {
       const order = smartvpsOrders[i];
@@ -226,13 +226,8 @@ export async function POST(req) {
         const res = await refreshOneOrder(order, smartvpsApi);
         results.push({ ok: true, ...res });
       } catch (err) {
-        results.push({
-          ok: false,
-          orderId: order._id.toString(),
-          error: err.message,
-        });
+        results.push({ ok: false, orderId: order._id.toString(), error: err.message });
       }
-
       if (i < smartvpsOrders.length - 1 && sleepMs > 0) {
         await sleep(sleepMs);
       }
@@ -254,7 +249,7 @@ export async function POST(req) {
   }
 }
 
-// Optional: quick health check
+// Simple health check (helpful to verify on prod quickly)
 export async function GET() {
   return NextResponse.json({ ok: true, name: 'smartvps/status-sync' });
 }
