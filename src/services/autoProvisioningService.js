@@ -42,7 +42,7 @@ class AutoProvisioningService {
     password = password.split('').sort(() => 0.5 - Math.random()).join('');
 
     const username = this.getLoginUsernameFromProductName(productName);
-    L.line(`✅ Credentials generated — username=${username}, password=${password.substring(0,4)}****`);
+    L.line(`✅ Credentials generated — username=${username}, password=${password.substring(0, 4)}****`);
     return { username, password };
   }
 
@@ -104,11 +104,11 @@ class AutoProvisioningService {
       if (typeof payload === 'string') {
         try {
           return JSON.parse(payload);
-        } catch {}
+        } catch { }
         const unquoted = payload.replace(/^"+|"+$/g, '').replace(/\\"/g, '"');
         try {
           return JSON.parse(unquoted);
-        } catch {}
+        } catch { }
       }
       return payload;
     } catch {
@@ -150,6 +150,42 @@ class AutoProvisioningService {
       throw new Error(`SmartVPS ipstock failed: ${e.message}`);
     }
   }
+
+  // BEFORE: pickSmartVpsIp() tries to regex IPv4 from ipstock
+  // AFTER: pick a package by name/id, return a descriptor
+
+  async pickSmartVpsPackage(ipStock, order) {
+    try {
+      L.line('[SMARTVPS] Calling ipstock() …');
+      const res = await this.smartvpsApi.ipstock();
+      const data = this.normalizeSmartVpsResponse(res);
+
+      const obj = typeof data === 'string' ? JSON.parse(data) : data;
+      L.kv('[SMARTVPS] ipstock() normalized', JSON.stringify(obj).slice(0, 600));
+
+      const packages = Array.isArray(obj?.packages) ? obj.packages : [];
+      if (!packages.length) throw new Error('No packages in ipstock');
+
+      // Try to select package matching the IPStock/product name
+      const want = (ipStock?.name || order?.productName || '').toString();
+      const wantDigits = want.replace(/[^\d.]/g, ''); // "🏅 103.195" -> "103.195"
+
+      // Prefer exact/contains match on name, otherwise first active
+      let selected =
+        packages.find(p => String(p.name).includes(wantDigits)) ||
+        packages.find(p => String(p.name).toLowerCase().includes('103.195')) || // optional extra hint
+        packages.find(p => String(p.status).toLowerCase() === 'active') ||
+        packages[0];
+
+      if (!selected) throw new Error('Could not choose a package from ipstock');
+
+      L.kv('[SMARTVPS] Selected package', selected); // {id,name,ipv4,status}
+      return { id: selected.id, name: selected.name };
+    } catch (e) {
+      throw new Error(`SmartVPS ipstock failed: ${e.message}`);
+    }
+  }
+
 
   // --- MAIN PROVISION METHOD ----------------------------------------------
 
@@ -252,18 +288,21 @@ class AutoProvisioningService {
     L.kv('[SMARTVPS] parsed RAM (GB)', ram);
     if (!ram) throw new Error(`Unable to parse RAM from memory "${order.memory}" for SmartVPS`);
 
-    // 1) pick an IP
-    const candidateIp = await this.pickSmartVpsIp();
+    // NEW:
+    const pkg = await this.pickSmartVpsPackage(ipStock, order);
+    L.kv('[SMARTVPS] Using package for buy', pkg);
 
-    // 2) buyVps(ip, ram)
-    L.line('[SMARTVPS] Calling buyVps(ip, ram) …');
-    const buyRes = await this.smartvpsApi.buyVps(candidateIp, ram);
+    // Per SmartVPS docs, the field is named "ip", but it’s actually the package key.
+    // We’ll pass the package *name* (e.g., "103.195"). Server returns a string that includes the assigned IP.
+    L.line('[SMARTVPS] Calling buyVps(packageName, ram) …');
+    const buyRes = await this.smartvpsApi.buyVps(pkg.name, ram);
     const buyText = typeof buyRes === 'string' ? buyRes : JSON.stringify(buyRes);
     L.kv('[SMARTVPS] buyVps raw response', buyText);
 
-    const boughtIp = this.extractIp(buyText) || candidateIp;
-    L.kv('[SMARTVPS] boughtIp', boughtIp);
-    if (!boughtIp) throw new Error('SmartVPS buyVps did not return an IP');
+    // Extract the *assigned* IP from the buy response
+    const boughtIp = this.extractIp(buyText);
+    L.kv('[SMARTVPS] assigned/bought IP', boughtIp);
+    if (!boughtIp) throw new Error('SmartVPS buyVps did not return an assigned IP');
 
     // 3) status(ip) → credentials
     L.line('[SMARTVPS] Calling status(ip) …');
@@ -286,11 +325,11 @@ class AutoProvisioningService {
     const username = statusObj.Usernane || statusObj.Username || this.getLoginUsernameFromProductName(order.productName);
     const password = statusObj.Password || '';
     const os = statusObj.OS || targetOS;
-    const expiryDate = statusObj.ExpiryDate ? new Date(statusObj.ExpiryDate) : new Date(Date.now() + 30*24*60*60*1000);
+    const expiryDate = statusObj.ExpiryDate ? new Date(statusObj.ExpiryDate) : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
 
     L.kv('[SMARTVPS] extracted.ip', ipAddress);
     L.kv('[SMARTVPS] extracted.username', username);
-    L.kv('[SMARTVPS] extracted.password(masked)', password ? password.substring(0,4) + '****' : '(blank)');
+    L.kv('[SMARTVPS] extracted.password(masked)', password ? password.substring(0, 4) + '****' : '(blank)');
     L.kv('[SMARTVPS] extracted.os', os);
     L.kv('[SMARTVPS] extracted.expiryDate', expiryDate.toISOString());
 
@@ -361,7 +400,7 @@ class AutoProvisioningService {
       } else if (ipStock.memoryOptions?.constructor?.name === 'Map') {
         try {
           for (const [k, v] of ipStock.memoryOptions) memoryOptions[k] = v;
-        } catch {}
+        } catch { }
       } else if (typeof ipStock.memoryOptions === 'object' && ipStock.memoryOptions !== null) {
         memoryOptions = JSON.parse(JSON.stringify(ipStock.memoryOptions));
       }
@@ -421,7 +460,7 @@ class AutoProvisioningService {
     const hostname = this.generateHostname(order.productName, order.memory);
 
     L.kv('[HOSTYCARE] username', credentials.username);
-    L.kv('[HOSTYCARE] password(masked)', credentials.password.substring(0,4) + '****');
+    L.kv('[HOSTYCARE] password(masked)', credentials.password.substring(0, 4) + '****');
     L.kv('[HOSTYCARE] hostname', hostname);
 
     const orderData = {
