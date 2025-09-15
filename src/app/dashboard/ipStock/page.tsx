@@ -357,7 +357,7 @@ export default function IPStockPage() {
       <div className="lg:hidden h-16" />
 
       {/* Header - More Compact */}
-      <div className="border dark:border-none-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-40">
+      <div className="morder dark:morder-none-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-40">
         <div className="container mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex flex-col gap-4 py-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -594,7 +594,7 @@ export default function IPStockPage() {
             </Card>
 
             {/* Payment Info */}
-            <Card className="border dark:border-none-primary/20 bg-primary/5">
+            <Card className="morder dark:morder-none-primary/20 bg-primary/5">
               <CardContent className="pt-6">
                 <div className="flex gap-3">
                   <Info className="h-5 w-5 text-primary flex-shrink-0 mt-0.5" />
@@ -743,7 +743,7 @@ function CollapsibleServerPlan({
                   {memoryOptions.map(([memory, details]) => (
                     <div
                       key={memory}
-                      className="flex items-center justify-between p-3 rounded-lg border dark:border-none bg-card hover:bg-muted/50 transition-colors"
+                      className="flex items-center justify-between p-3 rounded-lg morder dark:morder-none bg-card hover:bg-muted/50 transition-colors"
                     >
                       <div className="flex-1">
                         <p className="font-medium text-sm">{memory}</p>
@@ -771,7 +771,7 @@ function CollapsibleServerPlan({
                 </div>
 
                 {hasPromoCodes && (
-                  <div className="mt-3 p-2 rounded-lg text-white bg-green-500 dark:bg-green-500/10 border dark:border-none border dark:border-none-green-200 dark:border dark:border-none-green-800">
+                  <div className="mt-3 p-2 rounded-lg text-white bg-green-500 dark:bg-green-500/10 morder dark:morder-none morder dark:morder-none-green-200 dark:morder dark:morder-none-green-800">
                     <p className="text-xs text-white dark:text-green-400 flex items-center gap-1">
                       <Tag className="h-3 w-3" />
                       Promo codes available for additional discounts!

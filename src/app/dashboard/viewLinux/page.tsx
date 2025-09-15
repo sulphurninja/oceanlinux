@@ -184,7 +184,7 @@ const ViewLinux = () => {
     const getStatusBadge = (status: string, provisioningStatus?: string, lastAction?: string) => {
         if (status.toLowerCase() === 'completed') {
             return (
-                <Badge className="bg-green-50 text-green-700 border dark:border-none-green-200">
+                <Badge className="bg-green-50 text-green-700 morder dark:morder-none-green-200">
                     <div className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></div>
                     Active
                 </Badge>
@@ -196,42 +196,42 @@ const ViewLinux = () => {
         switch (currentStatus.toLowerCase()) {
             case 'active':
                 return (
-                    <Badge className="bg-green-50 text-green-700 border dark:border-none-green-200">
+                    <Badge className="bg-green-50 text-green-700 morder dark:morder-none-green-200">
                         <div className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></div>
                         Active
                     </Badge>
                 );
             case 'pending':
                 return (
-                    <Badge className="bg-amber-50 text-amber-700 border dark:border-none-amber-200">
+                    <Badge className="bg-amber-50 text-amber-700 morder dark:morder-none-amber-200">
                         <Clock className="w-3 h-3 mr-1" />
                         Pending
                     </Badge>
                 );
             case 'provisioning':
                 return (
-                    <Badge className="bg-amber-50 text-amber-700 border dark:border-none-amber-200">
+                    <Badge className="bg-amber-50 text-amber-700 morder dark:morder-none-amber-200">
                         <Loader2 className="w-3 h-3 mr-1 animate-spin" />
                         Provisioning
                     </Badge>
                 );
             case 'suspended':
                 return (
-                    <Badge className="bg-orange-50 text-orange-700 border dark:border-none-orange-200">
+                    <Badge className="bg-orange-50 text-orange-700 morder dark:morder-none-orange-200">
                         <AlertTriangle className="w-3 h-3 mr-1" />
                         Suspended
                     </Badge>
                 );
             case 'failed':
                 return (
-                    <Badge className="bg-red-50 text-red-700 border dark:border-none-red-200">
+                    <Badge className="bg-red-50 text-red-700 morder dark:morder-none-red-200">
                         <XCircle className="w-3 h-3 mr-1" />
                         Failed
                     </Badge>
                 );
             case 'terminated':
                 return (
-                    <Badge className="bg-red-50 text-red-700 border dark:border-none-red-200">
+                    <Badge className="bg-red-50 text-red-700 morder dark:morder-none-red-200">
                         <XCircle className="w-3 h-3 mr-1" />
                         Terminated
                     </Badge>
@@ -259,7 +259,7 @@ const ViewLinux = () => {
     return (
         <div className='min-h-screen bg-background'>
             {/* Header */}
-            <div className='sticky top-0 z-40 border dark:border-none-b bg-background/95 backdrop-blur'>
+            <div className='sticky top-0 z-40 morder dark:morder-none-b bg-background/95 backdrop-blur'>
                 <div className='flex h-16 items-center justify-between px-4 lg:px-6'>
                     <div className='flex items-center gap-4'>
                         <Button
@@ -410,7 +410,7 @@ const ViewLinux = () => {
                                                                 Expired {Math.abs(getDaysUntilExpiry(order.expiryDate))} days ago
                                                             </Badge>
                                                         ) : getDaysUntilExpiry(order.expiryDate) <= 7 ? (
-                                                            <Badge variant="outline" className="text-xs border dark:border-none-amber-200 text-amber-700">
+                                                            <Badge variant="outline" className="text-xs morder dark:morder-none-amber-200 text-amber-700">
                                                                 <Clock className="h-3 w-3 mr-1" />
                                                                 Expires in {getDaysUntilExpiry(order.expiryDate)} days
                                                             </Badge>

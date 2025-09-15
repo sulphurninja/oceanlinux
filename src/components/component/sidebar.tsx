@@ -19,7 +19,8 @@ import {
   Lock,
   Sparkles,
   ChevronRightIcon,
-  Plus
+  Plus,
+  HelpCircle
 } from 'lucide-react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../ui/collapsible';
 import { useRouter, usePathname } from 'next/navigation';
@@ -231,7 +232,7 @@ const ResponsiveSidebar = () => {
         </nav>
 
         {/* Quick Actions Card */}
-        <Card className="mt-6 bg-gradient-to-br from-primary/20 to-primary/10 border-primary/30 dark:from-primary/5 dark:to-primary/10 dark:border-primary/20">
+        <Card className="mt-6 bg-gradient-to-br  to-primary/90 border-primary/30 from-primary/60  dark:border-primary/20">
           <CardContent className="p-4">
             <div className="flex items-center gap-2 mb-3">
               <Plus className="h-4 w-4 text-primary" />
@@ -259,7 +260,20 @@ const ResponsiveSidebar = () => {
       </div>
 
       {/* Footer */}
-      <div className="p-4 lg:p-6 border-t border-background/20 dark:border-border/40 bg-foreground/95 dark:bg-card/50">
+      <div className="p-2 lg:p-6 border-t border-background/20 dark:border-border/40 bg-foreground/95 dark:bg-card/50">
+        <div className="mb-4">
+            <Button
+              onClick={() => {
+                router.push('/support/tickets')
+              }}
+              variant="ghost"
+              className="w-full justify-start text-background/90 dark:text-foreground/80 hover:text-background dark:hover:text-foreground hover:bg-background/10 dark:hover:bg-accent/50 h-10 transition-all duration-200"
+              size="sm"
+            >
+              <HelpCircle className="h-4 w-4 mr-3" />
+              <span className="text-sm">Help & Support</span>
+            </Button>
+          </div>
         {/* Theme Toggle */}
         <div className="flex items-center justify-between mb-4">
           <span className="text-sm font-medium text-background/70 dark:text-muted-foreground">Theme</span>
@@ -316,6 +330,20 @@ const ResponsiveSidebar = () => {
           <div className="flex items-center space-x-2">
             <img src='/oceanlinux.png' className='h-8 w-auto' alt="OceanLinux" />
             <span className="text-lg font-semibold">OceanLinux</span>
+          </div>
+          {/* Help/Support Button */}
+          <div className="mb-4">
+            <Button
+              onClick={() => {
+                router.push('/support/tickets')
+              }}
+              variant="ghost"
+              className="w-full justify-start text-background/90 dark:text-foreground/80 hover:text-background dark:hover:text-foreground hover:bg-background/10 dark:hover:bg-accent/50 h-10 transition-all duration-200"
+              size="sm"
+            >
+              <HelpCircle className="h-4 w-4 mr-3" />
+              <span className="text-sm">Help & Support</span>
+            </Button>
           </div>
 
           <ThemeToggle />

@@ -321,7 +321,7 @@ const AdminSidebar = () => {
         </nav>
 
         {/* Quick Actions Card */}
-        <Card className="mt-6 bg-gradient-to-br from-primary/20 to-primary/10 border-primary/30 dark:from-primary/5 dark:to-primary/10 dark:border-primary/20">
+        <Card className="mt-6 bg-gradient-to-br  to-primary/90 border-primary/30 from-primary/60  dark:border-primary/20">
           <CardContent className="p-4">
             <div className="flex items-center gap-2 mb-3">
               <Plus className="h-4 w-4 text-primary" />
