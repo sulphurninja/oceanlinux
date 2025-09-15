@@ -2,6 +2,7 @@ import Footer from "@/components/landing/Footer";
 import Header from "@/components/landing/Header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { InstagramLogoIcon } from "@radix-ui/react-icons";
 import {
     Mail,
     MessageSquare,
@@ -26,7 +27,7 @@ export default function ContactUs() {
             <Header />
 
             {/* Hero Section */}
-            <section className="section-padding gradient- relative overflow-hidden">
+            <section className="section-padding bg-background - relative overflow-hidden">
                 {/* Background Pattern */}
                 <div className="absolute inset-0 opacity-10">
                     <div className="absolute inset-0 bg-[url('/grid-pattern.svg')] bg-center"></div>
@@ -34,7 +35,7 @@ export default function ContactUs() {
 
                 <div className="container mx-auto container-padding relative z-10 text-center">
                     <div className="max-w-4xl mx-auto animate-slide-up">
-                        <div className="inline-flex items-center px-4 py-2 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 mb-6">
+                        <div className="inline-flex items-center px-4 py-2 rounded-full bg-white/10 backdrop-blur-sm border dark:border-none border dark:border-none-white/20 mb-6">
                             <HeartHandshake className="w-4 h-4 mr-2 text-green-400" />
                             <span className="text-sm font-medium text-white">24/7 Support • Always Here for You</span>
                         </div>
@@ -80,7 +81,7 @@ export default function ContactUs() {
                                 <Button
                                     size="lg"
                                     variant="outline"
-                                    className="border-white/30 text-white hover:bg-white/10 backdrop-blur-sm px-8 py-4 text-lg font-semibold w-full sm:w-auto"
+                                    className="border dark:border-none-white/30 text-white hover:bg-white/10 backdrop-blur-sm px-8 py-4 text-lg font-semibold w-full sm:w-auto"
                                 >
                                     📧 Send Email
                                 </Button>
@@ -260,34 +261,38 @@ export default function ContactUs() {
 
                     <div className="flex flex-col sm:flex-row gap-6 justify-center items-center">
                         <Card className="p-6 hover:shadow-lg transition-all duration-300 w-full sm:w-auto">
+                            <Link href='https://instagram.com/oceanlinux' target="_blank" rel="noopener noreferrer" className="w-full">
                             <div className="flex items-center gap-4">
                                 <div className="w-12 h-12 bg-blue-500/10 rounded-lg flex items-center justify-center">
-                                    <Twitter className="w-6 h-6 text-blue-500" />
+                                    <InstagramLogoIcon className="w-6 h-6 text-blue-500" />
                                 </div>
                                 <div>
-                                    <h3 className="font-semibold">Follow us on Twitter</h3>
+                                    <h3 className="font-semibold">Follow us on Instagram</h3>
                                     <p className="text-sm text-muted-foreground">@OceanLinux</p>
                                 </div>
                             </div>
+                            </Link>
                         </Card>
 
                         <Card className="p-6 hover:shadow-lg transition-all duration-300 w-full sm:w-auto">
-                            <div className="flex items-center gap-4">
-                                <div className="w-12 h-12 bg-blue-600/10 rounded-lg flex items-center justify-center">
-                                    <Linkedin className="w-6 h-6 text-blue-600" />
+                            <Link href="https://www.linkedin.com/company/oceanlinux" target="_blank" rel="noopener noreferrer" className="w-full">
+                                <div className="flex items-center gap-4">
+                                    <div className="w-12 h-12 bg-blue-600/10 rounded-lg flex items-center justify-center">
+                                        <Linkedin className="w-6 h-6 text-blue-600" />
+                                    </div>
+                                    <div>
+                                        <h3 className="font-semibold">Connect on LinkedIn</h3>
+                                        <p className="text-sm text-muted-foreground">Ocean Linux</p>
+                                    </div>
                                 </div>
-                                <div>
-                                    <h3 className="font-semibold">Connect on LinkedIn</h3>
-                                    <p className="text-sm text-muted-foreground">Ocean Linux</p>
-                                </div>
-                            </div>
+                            </Link>
                         </Card>
                     </div>
                 </div>
             </section>
 
             {/* FAQ Teaser */}
-            <section className="py-16 bg-primary/5">
+            <section className="py-16 bg-background /5">
                 <div className="container mx-auto px-6 text-center">
                     <div className="max-w-3xl mx-auto">
                         <h2 className="text-3xl font-bold mb-4">Still Have Questions?</h2>
@@ -295,11 +300,11 @@ export default function ContactUs() {
                             Check out our comprehensive FAQ section or reach out directly for personalized assistance
                         </p>
                         <div className="flex flex-col sm:flex-row gap-4 justify-center">
-                            <Link href="/faq">
+                            {/* <Link href="/faq">
                                 <Button size="lg" variant="outline" className="px-8 w-full sm:w-auto">
                                     View FAQ
                                 </Button>
-                            </Link>
+                            </Link> */}
                             <Link href="/live-chat">
                                 <Button size="lg" className="px-8 w-full sm:w-auto">
                                     <Zap className="w-4 h-4 mr-2" />

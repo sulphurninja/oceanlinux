@@ -1,12 +1,12 @@
 import Footer from "@/components/landing/Footer";
 import Header from "@/components/landing/Header";
 import { Card, CardContent } from "@/components/ui/card";
-import { 
-    RefreshCw, 
-    Clock, 
-    Shield, 
-    CheckCircle, 
-    XCircle, 
+import {
+    RefreshCw,
+    Clock,
+    Shield,
+    CheckCircle,
+    XCircle,
     AlertTriangle,
     CreditCard,
     Mail,
@@ -23,27 +23,27 @@ export default function RefundPolicy() {
     return (
         <>
             <Header />
-            
+
             {/* Hero Section */}
             <section className="section-padding gradient- relative overflow-hidden">
                 <div className="absolute inset-0 opacity-10">
                     <div className="absolute inset-0 bg-[url('/grid-pattern.svg')] bg-center"></div>
                 </div>
-                
+
                 <div className="container mx-auto container-padding relative z-10 text-center">
                     <div className="max-w-4xl mx-auto animate-slide-up">
-                        <div className="inline-flex items-center px-4 py-2 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 mb-6">
+                        <div className="inline-flex items-center px-4 py-2 rounded-full bg-white/10 backdrop-blur-sm border dark:border-none border dark:border-none-white/20 mb-6">
                             <RefreshCw className="w-4 h-4 mr-2 text-green-400" />
                             <span className="text-sm font-medium text-white">7-Day Guarantee • Fair Refunds</span>
                         </div>
-                        
+
                         <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold mb-6 leading-tight text-white">
                             Refund Policy
                             <span className="text-gradient block">Your Satisfaction, Our Priority</span>
                         </h1>
-                        
+
                         <p className="text-xl text-white/90 mb-8 max-w-3xl mx-auto">
-                            We offer a 7-day money-back guarantee on all our affordable Linux hosting services. 
+                            We offer a 7-day money-back guarantee on all our affordable Linux hosting services.
                             Clear terms, fair process, and hassle-free refunds when you qualify.
                         </p>
 
@@ -69,7 +69,7 @@ export default function RefundPolicy() {
             <section className="py-16 bg-background">
                 <div className="container mx-auto px-6">
                     <div className="max-w-4xl mx-auto space-y-12">
-                        
+
                         {/* 7-Day Money Back Guarantee */}
                         <Card>
                             <CardContent className="p-8">
@@ -80,7 +80,7 @@ export default function RefundPolicy() {
                                     <div>
                                         <h2 className="text-2xl font-bold mb-4">1. 7-Day Money-Back Guarantee</h2>
                                         <p className="text-muted-foreground mb-4">
-                                            We're confident in our affordable Linux hosting services. That's why we offer a 
+                                            We're confident in our affordable Linux hosting services. That's why we offer a
                                             comprehensive 7-day money-back guarantee for new customers.
                                         </p>
                                     </div>
@@ -88,30 +88,30 @@ export default function RefundPolicy() {
 
                                 <div className="space-y-6">
                                     <div className="grid md:grid-cols-3 gap-6">
-                                        <div className="text-center p-4 bg-green-500/10 rounded-lg border border-green-500/20">
+                                        <div className="text-center p-4 bg-green-500/10 rounded-lg border dark:border-none border dark:border-none-green-500/20">
                                             <Calendar className="w-8 h-8 text-green-500 mx-auto mb-2" />
                                             <h3 className="font-semibold mb-2">7-Day Window</h3>
                                             <p className="text-sm text-muted-foreground">Full refund available within 7 days of purchase</p>
                                         </div>
-                                        <div className="text-center p-4 bg-blue-500/10 rounded-lg border border-blue-500/20">
+                                        <div className="text-center p-4 bg-blue-500/10 rounded-lg border dark:border-none border dark:border-none-blue-500/20">
                                             <Zap className="w-8 h-8 text-blue-500 mx-auto mb-2" />
                                             <h3 className="font-semibold mb-2">Quick Process</h3>
                                             <p className="text-sm text-muted-foreground">Refunds processed within 5-7 business days</p>
                                         </div>
-                                        <div className="text-center p-4 bg-purple-500/10 rounded-lg border border-purple-500/20">
+                                        <div className="text-center p-4 bg-purple-500/10 rounded-lg border dark:border-none border dark:border-none-purple-500/20">
                                             <CreditCard className="w-8 h-8 text-purple-500 mx-auto mb-2" />
                                             <h3 className="font-semibold mb-2">Original Method</h3>
                                             <p className="text-sm text-muted-foreground">Refunded to your original payment method</p>
                                         </div>
                                     </div>
 
-                                    <div className="p-4 bg-green-500/10 border border-green-500/20 rounded-lg">
+                                    <div className="p-4 bg-green-500/10 border dark:border-none border dark:border-none-green-500/20 rounded-lg">
                                         <div className="flex items-start gap-3">
                                             <Shield className="w-5 h-5 text-green-500 mt-0.5" />
                                             <div>
                                                 <p className="font-semibold text-green-800 dark:text-green-300">Our Commitment</p>
                                                 <p className="text-sm text-green-700 dark:text-green-400">
-                                                    We believe in our service quality. If you're not satisfied within the first 7 days, 
+                                                    We believe in our service quality. If you're not satisfied within the first 7 days,
                                                     we'll process your refund with no questions asked for valid reasons.
                                                 </p>
                                             </div>
@@ -138,7 +138,7 @@ export default function RefundPolicy() {
 
                                 <div className="grid md:grid-cols-2 gap-6">
                                     <div className="space-y-4">
-                                        <div className="p-4 bg-green-500/10 border border-green-500/20 rounded-lg">
+                                        <div className="p-4 bg-green-500/10 border dark:border-none border dark:border-none-green-500/20 rounded-lg">
                                             <h3 className="font-semibold text-green-800 dark:text-green-300 mb-3">✅ Valid Refund Reasons</h3>
                                             <ul className="space-y-2 text-sm text-green-700 dark:text-green-400">
                                                 <li>• Service not delivered within promised timeframe</li>
@@ -152,7 +152,7 @@ export default function RefundPolicy() {
                                         </div>
                                     </div>
                                     <div className="space-y-4">
-                                        <div className="p-4 bg-orange-500/10 border border-orange-500/20 rounded-lg">
+                                        <div className="p-4 bg-orange-500/10 border dark:border-none border dark:border-none-orange-500/20 rounded-lg">
                                             <h3 className="font-semibold text-orange-800 dark:text-orange-300 mb-3">📋 Eligibility Requirements</h3>
                                             <ul className="space-y-2 text-sm text-orange-700 dark:text-orange-400">
                                                 <li>• Request must be within 7 days of purchase</li>
@@ -186,7 +186,7 @@ export default function RefundPolicy() {
 
                                 <div className="space-y-6">
                                     <div className="grid md:grid-cols-2 gap-6">
-                                        <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-lg">
+                                        <div className="p-4 bg-red-500/10 border dark:border-none border dark:border-none-red-500/20 rounded-lg">
                                             <h3 className="font-semibold text-red-800 dark:text-red-300 mb-3">❌ Non-Refundable Situations</h3>
                                             <ul className="space-y-2 text-sm text-red-700 dark:text-red-400">
                                                 <li>• Change of mind or buyer's remorse</li>
@@ -199,7 +199,7 @@ export default function RefundPolicy() {
                                                 <li>• Dissatisfaction with Linux OS choice</li>
                                             </ul>
                                         </div>
-                                        <div className="p-4 bg-orange-500/10 border border-orange-500/20 rounded-lg">
+                                        <div className="p-4 bg-orange-500/10 border dark:border-none border dark:border-none-orange-500/20 rounded-lg">
                                             <h3 className="font-semibold text-orange-800 dark:text-orange-300 mb-3">⚠️ Partial Refund Cases</h3>
                                             <ul className="space-y-2 text-sm text-orange-700 dark:text-orange-400">
                                                 <li>• Annual plans with justified early cancellation</li>
@@ -213,13 +213,13 @@ export default function RefundPolicy() {
                                         </div>
                                     </div>
 
-                                    <div className="p-4 bg-amber-500/10 border border-amber-500/20 rounded-lg">
+                                    <div className="p-4 bg-amber-500/10 border dark:border-none border dark:border-none-amber-500/20 rounded-lg">
                                         <div className="flex items-start gap-3">
                                             <AlertTriangle className="w-5 h-5 text-amber-500 mt-0.5" />
                                             <div>
                                                 <p className="font-semibold text-amber-800 dark:text-amber-300">Fair Usage Policy</p>
                                                 <p className="text-sm text-amber-700 dark:text-amber-400">
-                                                    Our refund policy is designed to protect genuine customers. Abuse of this policy, 
+                                                    Our refund policy is designed to protect genuine customers. Abuse of this policy,
                                                     such as repeated refund requests or fraudulent claims, may result in account restrictions.
                                                 </p>
                                             </div>
@@ -269,7 +269,7 @@ export default function RefundPolicy() {
                                     </div>
 
                                     <div className="grid md:grid-cols-2 gap-6">
-                                        <div className="p-4 border rounded-lg">
+                                        <div className="p-4 border dark:border-none rounded-lg">
                                             <h3 className="font-semibold mb-3">Required Information</h3>
                                             <ul className="space-y-2 text-sm text-muted-foreground">
                                                 <li>• Order number or transaction ID</li>
@@ -279,7 +279,7 @@ export default function RefundPolicy() {
                                                 <li>• Any support ticket numbers (if applicable)</li>
                                             </ul>
                                         </div>
-                                        <div className="p-4 border rounded-lg">
+                                        <div className="p-4 border dark:border-none rounded-lg">
                                             <h3 className="font-semibold mb-3">Processing Timeline</h3>
                                             <ul className="space-y-2 text-sm text-muted-foreground">
                                                 <li>• <strong>Review:</strong> 24-48 hours for eligibility check</li>
@@ -310,7 +310,7 @@ export default function RefundPolicy() {
 
                                 <div className="space-y-6">
                                     <div className="grid md:grid-cols-2 gap-6">
-                                        <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+                                        <div className="p-4 bg-blue-500/10 border dark:border-none border dark:border-none-blue-500/20 rounded-lg">
                                             <h3 className="font-semibold text-blue-800 dark:text-blue-300 mb-3">Cancellation Rules</h3>
                                             <ul className="space-y-2 text-sm text-blue-700 dark:text-blue-400">
                                                 <li>• Cancel anytime through your dashboard</li>
@@ -320,7 +320,7 @@ export default function RefundPolicy() {
                                                 <li>• Final invoice sent for any outstanding amounts</li>
                                             </ul>
                                         </div>
-                                        <div className="p-4 bg-amber-500/10 border border-amber-500/20 rounded-lg">
+                                        <div className="p-4 bg-amber-500/10 border dark:border-none border dark:border-none-amber-500/20 rounded-lg">
                                             <h3 className="font-semibold text-amber-800 dark:text-amber-300 mb-3">Data Handling</h3>
                                             <ul className="space-y-2 text-sm text-amber-700 dark:text-amber-400">
                                                 <li>• 7-day grace period for data backup</li>
@@ -332,13 +332,13 @@ export default function RefundPolicy() {
                                         </div>
                                     </div>
 
-                                    <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-lg">
+                                    <div className="p-4 bg-red-500/10 border dark:border-none border dark:border-none-red-500/20 rounded-lg">
                                         <div className="flex items-start gap-3">
                                             <AlertTriangle className="w-5 h-5 text-red-500 mt-0.5" />
                                             <div>
                                                 <p className="font-semibold text-red-800 dark:text-red-300">Important Notice</p>
                                                 <p className="text-sm text-red-700 dark:text-red-400">
-                                                    Always backup your data before cancelling. Once the grace period expires, 
+                                                    Always backup your data before cancelling. Once the grace period expires,
                                                     all data is permanently deleted and cannot be recovered.
                                                 </p>
                                             </div>
@@ -364,24 +364,24 @@ export default function RefundPolicy() {
                                 </div>
 
                                 <div className="space-y-4">
-                                    <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+                                    <div className="p-4 bg-blue-500/10 border dark:border-none border dark:border-none-blue-500/20 rounded-lg">
                                         <h3 className="font-semibold text-blue-800 dark:text-blue-300 mb-2">Before Filing a Chargeback</h3>
                                         <p className="text-sm text-blue-700 dark:text-blue-400">
-                                            Contact our support team first. Most issues can be resolved quickly through direct communication, 
+                                            Contact our support team first. Most issues can be resolved quickly through direct communication,
                                             often resulting in faster resolution than the chargeback process.
                                         </p>
                                     </div>
-                                    <div className="p-4 bg-orange-500/10 border border-orange-500/20 rounded-lg">
+                                    <div className="p-4 bg-orange-500/10 border dark:border-none border dark:border-none-orange-500/20 rounded-lg">
                                         <h3 className="font-semibold text-orange-800 dark:text-orange-300 mb-2">Chargeback Consequences</h3>
                                         <p className="text-sm text-orange-700 dark:text-orange-400">
-                                            Unauthorized chargebacks without prior communication may lead to immediate account suspension. 
+                                            Unauthorized chargebacks without prior communication may lead to immediate account suspension.
                                             We reserve the right to dispute invalid chargeback claims and may restrict future services.
                                         </p>
                                     </div>
-                                    <div className="p-4 bg-green-500/10 border border-green-500/20 rounded-lg">
+                                    <div className="p-4 bg-green-500/10 border dark:border-none border dark:border-none-green-500/20 rounded-lg">
                                         <h3 className="font-semibold text-green-800 dark:text-green-300 mb-2">Legitimate Disputes</h3>
                                         <p className="text-sm text-green-700 dark:text-green-400">
-                                            We understand genuine billing disputes occur. Contact us immediately with any billing concerns, 
+                                            We understand genuine billing disputes occur. Contact us immediately with any billing concerns,
                                             and we'll work together to find a fair resolution.
                                         </p>
                                     </div>
@@ -390,14 +390,14 @@ export default function RefundPolicy() {
                         </Card>
 
                         {/* Contact Information */}
-                        <Card className="bg-primary/5 border-primary/20">
+                        <Card className="bg-primary/5 border dark:border-none-primary/20">
                             <CardContent className="p-8 text-center">
                                 <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-6">
                                     <Mail className="w-8 h-8 text-primary" />
                                 </div>
                                 <h2 className="text-2xl font-bold mb-4">Need to Request a Refund?</h2>
                                 <p className="text-muted-foreground mb-6 max-w-2xl mx-auto">
-                                    Our support team is here to help. Whether you need a refund, have questions about our policy, 
+                                    Our support team is here to help. Whether you need a refund, have questions about our policy,
                                     or want to discuss your specific situation, don't hesitate to reach out.
                                 </p>
                                 <div className="flex flex-col sm:flex-row gap-4 justify-center">
@@ -413,10 +413,10 @@ export default function RefundPolicy() {
                                         </Button>
                                     </Link>
                                 </div>
-                                
+
                                 <div className="mt-8 p-4 bg-muted/30 rounded-lg">
                                     <p className="text-sm text-muted-foreground">
-                                        <strong>Support Hours:</strong> We typically respond within 24 hours. 
+                                        <strong>Support Hours:</strong> We typically respond within 24 hours.
                                         For urgent refund requests, please mention "URGENT REFUND" in your subject line.
                                     </p>
                                 </div>
@@ -424,12 +424,12 @@ export default function RefundPolicy() {
                         </Card>
 
                         {/* Last Updated */}
-                        <div className="text-center pt-8 border-t">
+                        <div className="text-center pt-8 border dark:border-none-t">
                             <p className="text-sm text-muted-foreground">
-                                <strong>Last Updated:</strong> {new Date().toLocaleDateString('en-US', { 
-                                    year: 'numeric', 
-                                    month: 'long', 
-                                    day: 'numeric' 
+                                <strong>Last Updated:</strong> {new Date().toLocaleDateString('en-US', {
+                                    year: 'numeric',
+                                    month: 'long',
+                                    day: 'numeric'
                                 })}
                             </p>
                             <p className="text-sm text-muted-foreground mt-2">

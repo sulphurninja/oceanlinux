@@ -1,12 +1,12 @@
 import Footer from "@/components/landing/Footer";
 import Header from "@/components/landing/Header";
 import { Card, CardContent } from "@/components/ui/card";
-import { 
-    FileText, 
-    Users, 
-    Shield, 
-    CreditCard, 
-    Server, 
+import {
+    FileText,
+    Users,
+    Shield,
+    CreditCard,
+    Server,
     AlertTriangle,
     CheckCircle,
     Mail,
@@ -22,27 +22,27 @@ export default function TermsConditions() {
     return (
         <>
             <Header />
-            
+
             {/* Hero Section */}
             <section className="section-padding gradient- relative overflow-hidden">
                 <div className="absolute inset-0 opacity-10">
                     <div className="absolute inset-0 bg-[url('/grid-pattern.svg')] bg-center"></div>
                 </div>
-                
+
                 <div className="container mx-auto container-padding relative z-10 text-center">
                     <div className="max-w-4xl mx-auto animate-slide-up">
-                        <div className="inline-flex items-center px-4 py-2 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 mb-6">
+                        <div className="inline-flex items-center px-4 py-2 rounded-full bg-white/10 backdrop-blur-sm border dark:border-none border dark:border-none-white/20 mb-6">
                             <Scale className="w-4 h-4 mr-2 text-green-400" />
                             <span className="text-sm font-medium text-white">Legal Framework • Fair Usage</span>
                         </div>
-                        
+
                         <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold mb-6 leading-tight text-white">
                             Terms & Conditions
                             <span className="text-gradient block">Clear Rules, Fair Service</span>
                         </h1>
-                        
+
                         <p className="text-xl text-white/90 mb-8 max-w-3xl mx-auto">
-                            By using OceanLinux's affordable Linux hosting services, you agree to these terms. 
+                            By using OceanLinux's affordable Linux hosting services, you agree to these terms.
                             We've made them clear and straightforward - because transparency matters.
                         </p>
 
@@ -68,7 +68,7 @@ export default function TermsConditions() {
             <section className="py-16 bg-background">
                 <div className="container mx-auto px-6">
                     <div className="max-w-4xl mx-auto space-y-12">
-                        
+
                         {/* Account Registration */}
                         <Card>
                             <CardContent className="p-8">
@@ -130,13 +130,13 @@ export default function TermsConditions() {
                                         </div>
                                     </div>
 
-                                    <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-lg">
+                                    <div className="p-4 bg-red-500/10 border dark:border-none border dark:border-none-red-500/20 rounded-lg">
                                         <div className="flex items-start gap-3">
                                             <Ban className="w-5 h-5 text-red-500 mt-0.5" />
                                             <div>
                                                 <p className="font-semibold text-red-800 dark:text-red-300">Account Termination</p>
                                                 <p className="text-sm text-red-700 dark:text-red-400">
-                                                    Accounts with fraudulent information or involved in illegal activities 
+                                                    Accounts with fraudulent information or involved in illegal activities
                                                     will be terminated immediately without prior notice.
                                                 </p>
                                             </div>
@@ -156,7 +156,7 @@ export default function TermsConditions() {
                                     <div>
                                         <h2 className="text-2xl font-bold mb-4">2. Acceptable Service Usage</h2>
                                         <p className="text-muted-foreground mb-4">
-                                            Our Linux hosting services are designed for legitimate business and personal use. 
+                                            Our Linux hosting services are designed for legitimate business and personal use.
                                             Here's what's allowed and what's not:
                                         </p>
                                     </div>
@@ -164,7 +164,7 @@ export default function TermsConditions() {
 
                                 <div className="grid md:grid-cols-2 gap-6">
                                     <div className="space-y-4">
-                                        <div className="p-4 bg-green-500/10 border border-green-500/20 rounded-lg">
+                                        <div className="p-4 bg-green-500/10 border dark:border-none border dark:border-none-green-500/20 rounded-lg">
                                             <h3 className="font-semibold text-green-800 dark:text-green-300 mb-3">✅ Allowed Uses</h3>
                                             <ul className="space-y-2 text-sm text-green-700 dark:text-green-400">
                                                 <li>• Web hosting and applications</li>
@@ -178,7 +178,7 @@ export default function TermsConditions() {
                                         </div>
                                     </div>
                                     <div className="space-y-4">
-                                        <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-lg">
+                                        <div className="p-4 bg-red-500/10 border dark:border-none border dark:border-none-red-500/20 rounded-lg">
                                             <h3 className="font-semibold text-red-800 dark:text-red-300 mb-3">❌ Prohibited Uses</h3>
                                             <ul className="space-y-2 text-sm text-red-700 dark:text-red-400">
                                                 <li>• Illegal activities or content</li>
@@ -193,13 +193,13 @@ export default function TermsConditions() {
                                     </div>
                                 </div>
 
-                                <div className="mt-6 p-4 bg-orange-500/10 border border-orange-500/20 rounded-lg">
+                                <div className="mt-6 p-4 bg-orange-500/10 border dark:border-none border dark:border-none-orange-500/20 rounded-lg">
                                     <div className="flex items-start gap-3">
                                         <Shield className="w-5 h-5 text-orange-500 mt-0.5" />
                                         <div>
                                             <p className="font-semibold text-orange-800 dark:text-orange-300">Fair Usage Policy</p>
                                             <p className="text-sm text-orange-700 dark:text-orange-400">
-                                                While we offer generous resources, excessive usage that affects other users may result in 
+                                                While we offer generous resources, excessive usage that affects other users may result in
                                                 account review and potential limitations.
                                             </p>
                                         </div>
@@ -243,7 +243,7 @@ export default function TermsConditions() {
                                     </div>
 
                                     <div className="grid md:grid-cols-2 gap-6">
-                                        <div className="p-4 border rounded-lg">
+                                        <div className="p-4 border dark:border-none rounded-lg">
                                             <h3 className="font-semibold mb-3">Payment Methods</h3>
                                             <ul className="space-y-2 text-sm text-muted-foreground">
                                                 <li>• <strong>Razorpay:</strong> Credit/Debit cards, Net Banking, UPI</li>
@@ -252,7 +252,7 @@ export default function TermsConditions() {
                                                 <li>• All transactions are secure and encrypted</li>
                                             </ul>
                                         </div>
-                                        <div className="p-4 border rounded-lg">
+                                        <div className="p-4 border dark:border-none rounded-lg">
                                             <h3 className="font-semibold mb-3">Billing & Renewals</h3>
                                             <ul className="space-y-2 text-sm text-muted-foreground">
                                                 <li>• Monthly/Annual billing cycles available</li>
@@ -263,13 +263,13 @@ export default function TermsConditions() {
                                         </div>
                                     </div>
 
-                                    <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+                                    <div className="p-4 bg-blue-500/10 border dark:border-none border dark:border-none-blue-500/20 rounded-lg">
                                         <div className="flex items-start gap-3">
                                             <CreditCard className="w-5 h-5 text-blue-500 mt-0.5" />
                                             <div>
                                                 <p className="font-semibold text-blue-800 dark:text-blue-300">Refund Policy</p>
                                                 <p className="text-sm text-blue-700 dark:text-blue-400">
-                                                    7-day money-back guarantee for new customers. Refunds processed through original payment method. 
+                                                    7-day money-back guarantee for new customers. Refunds processed through original payment method.
                                                     Pro-rated refunds available for annual plans upon justified cancellation.
                                                 </p>
                                             </div>
@@ -358,7 +358,7 @@ export default function TermsConditions() {
 
                                 <div className="space-y-6">
                                     <div className="grid md:grid-cols-2 gap-6">
-                                        <div className="p-4 bg-orange-500/10 border border-orange-500/20 rounded-lg">
+                                        <div className="p-4 bg-orange-500/10 border dark:border-none border dark:border-none-orange-500/20 rounded-lg">
                                             <h3 className="font-semibold text-orange-800 dark:text-orange-300 mb-3">Suspension Reasons</h3>
                                             <ul className="space-y-2 text-sm text-orange-700 dark:text-orange-400">
                                                 <li>• Non-payment of invoices</li>
@@ -368,7 +368,7 @@ export default function TermsConditions() {
                                                 <li>• Legal compliance requirements</li>
                                             </ul>
                                         </div>
-                                        <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-lg">
+                                        <div className="p-4 bg-red-500/10 border dark:border-none border dark:border-none-red-500/20 rounded-lg">
                                             <h3 className="font-semibold text-red-800 dark:text-red-300 mb-3">Termination Reasons</h3>
                                             <ul className="space-y-2 text-sm text-red-700 dark:text-red-400">
                                                 <li>• Repeated violations of terms</li>
@@ -380,13 +380,13 @@ export default function TermsConditions() {
                                         </div>
                                     </div>
 
-                                    <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+                                    <div className="p-4 bg-blue-500/10 border dark:border-none border dark:border-none-blue-500/20 rounded-lg">
                                         <div className="flex items-start gap-3">
                                             <Shield className="w-5 h-5 text-blue-500 mt-0.5" />
                                             <div>
                                                 <p className="font-semibold text-blue-800 dark:text-blue-300">Fair Process</p>
                                                 <p className="text-sm text-blue-700 dark:text-blue-400">
-                                                    We'll attempt to notify you before suspension when possible. You can contact us to resolve issues. 
+                                                    We'll attempt to notify you before suspension when possible. You can contact us to resolve issues.
                                                     Data backup grace period of 7 days after termination for most cases.
                                                 </p>
                                             </div>
@@ -415,21 +415,21 @@ export default function TermsConditions() {
                                     <div className="p-4 bg-muted/30 rounded-lg">
                                         <h3 className="font-semibold mb-2">Service Disclaimer</h3>
                                         <p className="text-sm text-muted-foreground">
-                                            While we strive for 99.9% uptime and reliable service, we cannot guarantee uninterrupted service. 
+                                            While we strive for 99.9% uptime and reliable service, we cannot guarantee uninterrupted service.
                                             We are not liable for indirect damages, data loss, or business interruption beyond our service credits.
                                         </p>
                                     </div>
                                     <div className="p-4 bg-muted/30 rounded-lg">
                                         <h3 className="font-semibold mb-2">Data Responsibility</h3>
                                         <p className="text-sm text-muted-foreground">
-                                            You are responsible for maintaining backups of your data. While we provide backup services, 
+                                            You are responsible for maintaining backups of your data. While we provide backup services,
                                             you should maintain independent backups of critical data.
                                         </p>
                                     </div>
                                     <div className="p-4 bg-muted/30 rounded-lg">
                                         <h3 className="font-semibold mb-2">Maximum Liability</h3>
                                         <p className="text-sm text-muted-foreground">
-                                            Our maximum liability is limited to the amount paid for services in the affected billing period, 
+                                            Our maximum liability is limited to the amount paid for services in the affected billing period,
                                             typically provided as service credits or refunds.
                                         </p>
                                     </div>
@@ -438,14 +438,14 @@ export default function TermsConditions() {
                         </Card>
 
                         {/* Contact & Updates */}
-                        <Card className="bg-primary/5 border-primary/20">
+                        <Card className="bg-primary/5 border dark:border-none-primary/20">
                             <CardContent className="p-8 text-center">
                                 <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-6">
                                     <Mail className="w-8 h-8 text-primary" />
                                 </div>
                                 <h2 className="text-2xl font-bold mb-4">Questions About These Terms?</h2>
                                 <p className="text-muted-foreground mb-6 max-w-2xl mx-auto">
-                                    If you have any questions about these terms and conditions, need clarification on any policies, 
+                                    If you have any questions about these terms and conditions, need clarification on any policies,
                                     or want to discuss your specific use case, please contact us.
                                 </p>
                                 <div className="flex flex-col sm:flex-row gap-4 justify-center">
@@ -465,12 +465,12 @@ export default function TermsConditions() {
                         </Card>
 
                         {/* Last Updated */}
-                        <div className="text-center pt-8 border-t">
+                        <div className="text-center pt-8 border dark:border-none-t">
                             <p className="text-sm text-muted-foreground">
-                                <strong>Last Updated:</strong> {new Date().toLocaleDateString('en-US', { 
-                                    year: 'numeric', 
-                                    month: 'long', 
-                                    day: 'numeric' 
+                                <strong>Last Updated:</strong> {new Date().toLocaleDateString('en-US', {
+                                    year: 'numeric',
+                                    month: 'long',
+                                    day: 'numeric'
                                 })}
                             </p>
                             <p className="text-sm text-muted-foreground mt-2">

@@ -288,7 +288,7 @@ export default function Dashboard() {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+          <div className="animate-spin rounded-full h-8 w-8 border dark:border-none-b-2 border dark:border-none-primary"></div>
           <p className="text-muted-foreground">Loading your dashboard...</p>
         </div>
       </div>
@@ -298,13 +298,19 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen bg-background scrollbar-hide">
       {/* Mobile-first Header */}
-      <div className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+      <div className="sticky top-0 z-40 border dark:border-none-b dark:border dark:border-none -none bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="flex h-14 lg:h-16 items-center justify-between px-4 lg:px-6">
-          <div className="flex items-center gap-2 ml-12 lg:ml-0">
-            <LayoutDashboardIcon className="h-5 w-5" />
-            <h1 className="text-lg lg:text-xl font-semibold">Dashboard</h1>
+          <div>
+            <div className="flex items-center gap-2 ml-12 lg:ml-0">
+              <LayoutDashboardIcon className="h-5 w-5" />
+              <div>
+                <h1 className="text-lg lg:text-xl font-semibold">Dashboard</h1>
+                {/* <p className='text-sm'>Your Overview of Activities</p> */}
+              </div>
+            </div>
+
           </div>
-          <DropdownMenu>
+          {/* <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm">
                 <Filter className="h-4 w-4 mr-2" />
@@ -327,7 +333,7 @@ export default function Dashboard() {
                 Last 90 Days
               </DropdownMenuItem>
             </DropdownMenuContent>
-          </DropdownMenu>
+          </DropdownMenu> */}
         </div>
       </div>
 
@@ -368,7 +374,7 @@ export default function Dashboard() {
               <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
                 <Button size="sm" className="flex items-center gap-2" onClick={handleBrowsePlans}>
                   <ServerIcon className="h-4 w-4" />
-                 IP Stock (Buy Now)
+                  IP Stock (Buy Now)
                 </Button>
                 <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={handleDownloadInvoice}>
                   <Download className="h-4 w-4" />
@@ -486,7 +492,7 @@ export default function Dashboard() {
                       </div>
                       <span className="font-semibold">{stats?.orderStatusBreakdown?.completed || 0}</span>
                     </div>
-                 <Progress value={((stats?.orderStatusBreakdown?.completed || 0) / Math.max(stats?.totalOrders || 1, 1)) * 100} className="h-2" />
+                    <Progress value={((stats?.orderStatusBreakdown?.completed || 0) / Math.max(stats?.totalOrders || 1, 1)) * 100} className="h-2" />
                   </div>
 
                   <div className="space-y-3">
@@ -545,7 +551,7 @@ export default function Dashboard() {
                     <Separator />
                     <div className="flex justify-between items-center">
                       <span className="text-sm text-muted-foreground">Account Status</span>
-                      <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 text-xs">
+                      <Badge variant="outline" className="bg-green-50 text-green-700 border dark:border-none-green-200 text-xs">
                         Active
                       </Badge>
                     </div>
@@ -569,7 +575,7 @@ export default function Dashboard() {
                 {stats?.recentOrders?.length ? (
                   <div className="space-y-3">
                     {stats.recentOrders.slice(0, 5).map((order) => (
-                      <div key={order._id} className="flex items-center justify-between p-3 rounded-lg border bg-card hover:bg-muted/50 transition-colors">
+                      <div key={order._id} className="flex items-center justify-between p-3 rounded-lg  border dark:border-none bg-card hover:bg-muted/50 transition-colors">
                         <div className="flex items-center gap-3 min-w-0 flex-1">
                           <div className={cn("h-2 w-2 rounded-full flex-shrink-0", getStatusColor(order.status))} />
                           <div className="min-w-0 flex-1">
@@ -612,7 +618,7 @@ export default function Dashboard() {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="rounded-lg border overflow-hidden">
+                <div className="rounded-lg border dark:border-none overflow-hidden">
                   <div className="overflow-x-auto">
                     <Table>
                       <TableHeader>
@@ -654,9 +660,9 @@ export default function Dashboard() {
                                 variant="outline"
                                 className={cn(
                                   "text-xs",
-                                  order.status === 'completed' && "bg-green-50 text-green-700 border-green-200",
-                                  order.status === 'pending' && "bg-yellow-50 text-yellow-700 border-yellow-200",
-                                  order.status === 'failed' && "bg-red-50 text-red-700 border-red-200"
+                                  order.status === 'completed' && "bg-green-50 text-green-700 border dark:border-none-green-200",
+                                  order.status === 'pending' && "bg-yellow-50 text-yellow-700 border dark:border-none-yellow-200",
+                                  order.status === 'failed' && "bg-red-50 text-red-700 border dark:border-none-red-200"
                                 )}
                               >
                                 {getStatusIcon(order.status)}
@@ -828,7 +834,7 @@ export default function Dashboard() {
             >
               {isDownloadingInvoice ? (
                 <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                  <div className="animate-spin rounded-full h-4 w-4 border dark:border-none-b-2 border dark:border-none-white"></div>
                   Generating...
                 </>
               ) : (
@@ -928,9 +934,9 @@ export default function Dashboard() {
               </div>
 
               {settingsData.newPassword && settingsData.confirmPassword &&
-               settingsData.newPassword !== settingsData.confirmPassword && (
-                <p className="text-sm text-red-500">Passwords do not match</p>
-              )}
+                settingsData.newPassword !== settingsData.confirmPassword && (
+                  <p className="text-sm text-red-500">Passwords do not match</p>
+                )}
             </div>
 
             {/* Account Status */}
@@ -940,7 +946,7 @@ export default function Dashboard() {
                 <h4 className="text-sm font-semibold">Account Status</h4>
                 <p className="text-sm text-muted-foreground">Your account is currently active</p>
               </div>
-              <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 text-xs">
+              <Badge variant="outline" className="bg-green-50 text-green-700 border dark:border-none-green-200 text-xs">
                 Active
               </Badge>
             </div>
@@ -970,7 +976,7 @@ export default function Dashboard() {
             >
               {isUpdatingSettings ? (
                 <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                  <div className="animate-spin rounded-full h-4 w-4 border dark:border-none-b-2 border dark:border-none-white"></div>
                   Updating...
                 </>
               ) : (

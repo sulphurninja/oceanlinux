@@ -75,12 +75,12 @@ const AdminOrders = () => {
 
   return (
     <div className="p-4">
-      <h1 className="text-center text-xl font-bold border-b -gray-300 pb-4">
+      <h1 className="text-center text-xl font-bold border dark:border-none-b -gray-300 pb-4">
         All Orders
       </h1>
 
       {/* Responsive table container */}
-      <div className="my-5 mx-auto w-full max-w-4xl border border-gray-300 rounded overflow-x-auto">
+      <div className="my-5 mx-auto w-full max-w-4xl border dark:border-none border dark:border-none-gray-300 rounded overflow-x-auto">
         <table className="min-w-full table-auto">
           <thead className="-gray-200">
             <tr>
@@ -95,7 +95,7 @@ const AdminOrders = () => {
           </thead>
           <tbody>
             {orders.map(order => (
-              <tr key={order._id} className="border-t">
+              <tr key={order._id} className="border dark:border-none-t">
                 <td className="px-4 py-2">{order.transactionId}</td>
                 <td className="px-4 py-2">{order.productName}</td>
                 <td className="px-4 py-2">{order.memory}</td>
@@ -135,28 +135,28 @@ const AdminOrders = () => {
             placeholder="IP Address"
             value={selectedOrder.ipAddress}
             onChange={(e) => handleInputChange('ipAddress', e.target.value)}
-            className="w-full px-3 py-2 mb-2 border border-gray-300 rounded"
+            className="w-full px-3 py-2 mb-2 border dark:border-none border dark:border-none-gray-300 rounded"
           />
           <input
             type="text"
             placeholder="Username"
             value={selectedOrder.username}
             onChange={(e) => handleInputChange('username', e.target.value)}
-            className="w-full px-3 py-2 mb-2 border border-gray-300 rounded"
+            className="w-full px-3 py-2 mb-2 border dark:border-none border dark:border-none-gray-300 rounded"
           />
           <input
             type="password"
             placeholder="Password"
             value={selectedOrder.password}
             onChange={(e) => handleInputChange('password', e.target.value)}
-            className="w-full px-3 py-2 mb-2 border border-gray-300 rounded"
+            className="w-full px-3 py-2 mb-2 border dark:border-none border dark:border-none-gray-300 rounded"
           />
 
           {/* OS Field */}
           <select
             value={selectedOrder.os}
             onChange={(e) => handleInputChange('os', e.target.value)}
-            className="w-full px-3 py-2 mb-2 border border-gray-300 rounded"
+            className="w-full px-3 py-2 mb-2 border dark:border-none border dark:border-none-gray-300 rounded"
           >
             <option value="CentOS 7">CentOS 7</option>
             <option value="Ubuntu 22">Ubuntu 22</option>
@@ -166,7 +166,7 @@ const AdminOrders = () => {
           <select
             value={selectedOrder.status}
             onChange={(e) => handleInputChange('status', e.target.value)}
-            className="w-full px-3 py-2 mb-2 border border-gray-300 rounded"
+            className="w-full px-3 py-2 mb-2 border dark:border-none border dark:border-none-gray-300 rounded"
           >
             <option value="pending">Pending</option>
             <option value="verified">Verified</option>

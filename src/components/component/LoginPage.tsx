@@ -130,7 +130,7 @@ function LoginPage({ className, ...props }: React.ComponentPropsWithoutRef<"div"
                 <img src="/oceanlinux.png" className="h-16" alt="OceanLinux" />
               </div>
               <div>
-                <h1 className="text-3xl font-bold bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">
+                <h1 className="text-3xl font-bold bg-gradient-to-r from-primary to-foreground bg-clip-text text-transparent">
                   OceanLinux
                 </h1>
                 <p className="text-sm text-muted-foreground">The Ocean of Linux</p>
@@ -157,7 +157,7 @@ function LoginPage({ className, ...props }: React.ComponentPropsWithoutRef<"div"
               </div>
 
               {/* Dashboard Preview Stats */}
-              <div className="grid grid-cols-2 gap-6 p-6 bg-muted/30 rounded-xl border">
+              <div className="grid grid-cols-2 gap-6 p-6 bg-muted/30 rounded-xl border dark:border-none">
                 <div className="space-y-2">
                   <div className="text-2xl font-bold text-green-500">Online</div>
                   <p className="text-sm text-muted-foreground">All Systems</p>
@@ -208,7 +208,7 @@ function LoginPage({ className, ...props }: React.ComponentPropsWithoutRef<"div"
               </div>
 
               {/* Trust Indicators */}
-              <div className="flex items-center gap-6 pt-4 border-t border-border/50">
+              <div className="flex items-center gap-6 pt-4 border dark:border-none-t border dark:border-none ">
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <Shield className="w-4 h-4 text-green-500" />
                   <span>Secure Login</span>
@@ -229,7 +229,7 @@ function LoginPage({ className, ...props }: React.ComponentPropsWithoutRef<"div"
         {/* Right Login Form */}
         <div className="w-full  flex items-center md:-mt-[80%] justify-center p-6 ">
           <div className="w-full max-w-md">
-            <Card className="shadow-2xl border-2">
+            <Card className="shadow-2xl border dark:border-none-2">
               {/* Logo for mobile */}
               <div className='flex justify-center items-center pt-6 lg:hidden'>
                 <div className='text-center'>
@@ -273,7 +273,7 @@ function LoginPage({ className, ...props }: React.ComponentPropsWithoutRef<"div"
               <CardContent>
                 <form onSubmit={handleSubmit} className="space-y-4">
                   {error && (
-                    <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+                    <div className="p-3 bg-red-50 border dark:border-none border dark:border-none-red-200 rounded-lg">
                       <p className="text-red-600 text-sm">{error}</p>
                     </div>
                   )}
@@ -335,13 +335,13 @@ function LoginPage({ className, ...props }: React.ComponentPropsWithoutRef<"div"
                     >
                       {isLoading ? (
                         <>
-                          <div className="w-4 h-4 mr-2 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                          <div className="w-4 h-4 mr-2  dark:border-none-2  dark:border-none-current border dark:border-none-t-transparent rounded-full animate-spin" />
                           Signing In...
                         </>
                       ) : (
                         <>
                           <LogIn className="w-4 h-4 mr-2" />
-                          Access Dashboard
+                          Login to Dashboard
                         </>
                       )}
                     </Button>
@@ -351,10 +351,10 @@ function LoginPage({ className, ...props }: React.ComponentPropsWithoutRef<"div"
                 <div className="mt-6 space-y-4">
                   <div className="relative">
                     <div className="absolute inset-0 flex items-center">
-                      <div className="w-full border-t border-border/50" />
+                      <div className="w-full border dark:border-none-t  dark:border-none -border " />
                     </div>
                     <div className="relative flex justify-center text-xs">
-                      <span className="bg-background px-2 text-muted-foreground">
+                      <span className="bg- mb-2 px-2 text-muted-foreground">
                         Don't have an account?
                       </span>
                     </div>

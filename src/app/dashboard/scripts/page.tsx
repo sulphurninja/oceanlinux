@@ -87,8 +87,8 @@ const ScriptsPage = () => {
                     <div className='h-screen'>
                         <iframe
                             src="https://sshterminal.advps.store/"
-                            style={{ width: '100%', height: '100%', border: 'none' }}
-                            title="SSH Terminal"
+                            style={{ width: '100%', height: '100%'  }}
+                        title="SSH Terminal"
                         />
                     </div>
                 </TabsContent>

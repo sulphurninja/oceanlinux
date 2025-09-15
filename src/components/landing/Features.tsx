@@ -73,11 +73,11 @@ export default function Features() {
         {/* Header */}
         <div className="text-center mb-16 animate-fade-in">
           <h2 className="text-4xl lg:text-5xl font-bold mb-6">
-            Why Choose the Most Affordable 
+            Why Choose the Most Affordable
             <span className="text-gradient"> Premium Linux VPS?</span>
           </h2>
           <p className="text-xl text-muted-foreground max-w-3xl mx-auto">
-            Get professional hosting features without the premium price tag. 
+            Get professional hosting features without the premium price tag.
             We believe quality hosting should be accessible to everyone.
           </p>
         </div>
@@ -85,8 +85,8 @@ export default function Features() {
         {/* Main Features Grid */}
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8 mb-20">
           {features.map((feature, index) => (
-            <div 
-              key={index} 
+            <div
+              key={index}
               className="feature-card group animate-slide-up hover-lift"
               style={{ animationDelay: `${index * 0.1}s` }}
             >
@@ -113,16 +113,16 @@ export default function Features() {
           <div className="text-center mb-12">
             <h3 className="text-3xl font-bold mb-4">Our Most Popular Linux Server Series</h3>
             <p className="text-muted-foreground max-w-2xl mx-auto">
-              Choose from our carefully crafted server series, each optimized for different use cases 
+              Choose from our carefully crafted server series, each optimized for different use cases
               while maintaining our promise of affordability.
             </p>
           </div>
 
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
             {serverSeries.map((series, index) => (
-              <div 
-                key={index} 
-                className="text-center p-6 rounded-xl bg-background/50 hover:bg-background/80 transition-all hover-lift border border-border/50"
+              <div
+                key={index}
+                className="text-center p-6 rounded-xl bg-background/50 hover:bg-background/80 transition-all hover-lift border dark:border-none border dark:border-none-border dark:border-none/50"
               >
                 <div className="flex justify-center mb-4">
                   <div className="p-3 rounded-lg bg-muted">
@@ -143,7 +143,7 @@ export default function Features() {
         <div className="text-center bg-gradient-to-r from-primary/10 to-secondary/10 rounded-2xl p-8 animate-fade-in">
           <h3 className="text-2xl font-bold mb-4">Get More, Pay Less</h3>
           <p className="text-lg text-muted-foreground mb-6 max-w-2xl mx-auto">
-            Why pay premium prices for basic features? With OceanLinux, you get enterprise-grade 
+            Why pay premium prices for basic features? With OceanLinux, you get enterprise-grade
             hosting at prices that make sense for your budget.
           </p>
           <div className="grid sm:grid-cols-3 gap-6 max-w-3xl mx-auto">

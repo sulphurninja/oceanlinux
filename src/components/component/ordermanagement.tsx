@@ -42,7 +42,7 @@ export function ordermanagement() {
     <div className="bg-background p-6 md:p-8 lg:p-10">
       <h1 className="mb-6 text-2xl font-bold text-primary-foreground">Order Management</h1>
       <div className="overflow-x-auto">
-        <table className="w-full border-collapse text-left text-sm">
+        <table className="w-full border dark:border-none-collapse text-left text-sm">
           <thead>
             <tr className="bg-muted">
               <th className="px-4 py-3 font-medium text-primary-foreground">Order ID</th>
@@ -53,7 +53,7 @@ export function ordermanagement() {
           </thead>
           <tbody>
             {orders.map((order, index) => (
-              <tr key={order.id} className="border-b border-muted/40 hover:bg-muted/20">
+              <tr key={order.id} className="border dark:border-none-b border dark:border-none-muted/40 hover:bg-muted/20">
                 <td className="px-4 py-3 font-medium text-primary-foreground">{order.id}</td>
                 <td className="px-4 py-3 text-primary-foreground">{order.user}</td>
                 <td className="px-4 py-3 text-primary-foreground">

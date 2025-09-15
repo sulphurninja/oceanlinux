@@ -3,11 +3,11 @@ import Header from "@/components/landing/Header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { 
-    RefreshCw, 
-    Rocket, 
-    Zap, 
-    Crown, 
+import {
+    RefreshCw,
+    Rocket,
+    Zap,
+    Crown,
     Star,
     CheckCircle,
     ArrowRight,
@@ -26,7 +26,7 @@ const serverSeries = [
         startingPrice: 299,
         features: [
             "Dynamic Resource Allocation",
-            "Intelligent Load Balancing", 
+            "Intelligent Load Balancing",
             "Auto-Scaling Capabilities",
             "Cost-Optimized Performance",
             "24/7 Automated Monitoring"
@@ -72,7 +72,7 @@ const serverSeries = [
     {
         name: "Titan Series",
         icon: Crown,
-        tagline: "Enterprise Excellence", 
+        tagline: "Enterprise Excellence",
         description: "Our premium enterprise-grade series with dedicated resources and white-glove support. The ultimate hosting solution for mission-critical applications.",
         startingPrice: 1999,
         features: [
@@ -89,15 +89,15 @@ const serverSeries = [
 ];
 
 const colorClasses = {
-    amber: "from-amber-500/10 to-amber-600/5 border-amber-500/20",
-    blue: "from-blue-500/10 to-blue-600/5 border-blue-500/20",
-    yellow: "from-yellow-500/10 to-yellow-600/5 border-yellow-500/20", 
-    purple: "from-purple-500/10 to-purple-600/5 border-purple-500/20"
+    amber: "from-amber-500/10 to-amber-600/5 morder dark:morder-none-amber-500/20",
+    blue: "from-blue-500/10 to-blue-600/5 morder dark:morder-none-blue-500/20",
+    yellow: "from-yellow-500/10 to-yellow-600/5 morder dark:morder-none-yellow-500/20",
+    purple: "from-purple-500/10 to-purple-600/5 morder dark:morder-none-purple-500/20"
 };
 
 const iconColors = {
     amber: "text-amber-500",
-    blue: "text-blue-500", 
+    blue: "text-blue-500",
     yellow: "text-yellow-500",
     purple: "text-purple-500"
 };
@@ -106,27 +106,27 @@ export default function ServerSeries() {
     return (
         <>
             <Header />
-            
+
             {/* Hero Section */}
-            <section className="section-padding gradient- relative overflow-hidden">
+            <section className="section-padding gradient- bg-background relative overflow-hidden">
                 <div className="absolute inset-0 opacity-10">
                     <div className="absolute inset-0 bg-[url('/grid-pattern.svg')] bg-center"></div>
                 </div>
-                
+
                 <div className="container mx-auto container-padding relative z-10 text-center">
                     <div className="max-w-4xl mx-auto animate-slide-up">
-                        <div className="inline-flex items-center px-4 py-2 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 mb-6">
+                        <div className="inline-flex items-center px-4 py-2 rounded-full bg-white/10 backdrop-blur-sm  dark:morder-none morder dark:morder-none -white/20 mb-6">
                             <Server className="w-4 h-4 mr-2 text-purple-400" />
                             <span className="text-sm font-medium text-white">4 Unique Series • Specialized Performance • Your Perfect Match</span>
                         </div>
-                        
+
                         <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold mb-6 leading-tight text-white">
                             🔄 Server Series
                             <span className="text-gradient block">Choose Your Performance Tier</span>
                         </h1>
-                        
+
                         <p className="text-xl text-white/90 mb-8 max-w-3xl mx-auto">
-                            From intelligent resource rotation to enterprise-grade dedicated servers, 
+                            From intelligent resource rotation to enterprise-grade dedicated servers,
                             find the perfect hosting solution tailored to your specific needs and budget.
                         </p>
 
@@ -169,7 +169,7 @@ export default function ServerSeries() {
                                         </Badge>
                                     </div>
                                 )}
-                                
+
                                 <CardContent className="p-8">
                                     <div className="flex items-start gap-4 mb-6">
                                         <div className={`w-16 h-16 bg-white/80 rounded-lg flex items-center justify-center flex-shrink-0`}>
@@ -198,7 +198,7 @@ export default function ServerSeries() {
                                         ))}
                                     </div>
 
-                                    <div className="flex items-center justify-between pt-4 border-t border-border/50">
+                                    <div className="flex items-center justify-between pt-4 morder dark:morder-none-t morder dark:morder-none-morder dark:morder-none/50">
                                         <div className="text-sm">
                                             <span className="text-muted-foreground">Ideal for:</span>
                                             <span className="font-medium ml-1">{series.ideal}</span>
@@ -218,9 +218,9 @@ export default function ServerSeries() {
             </section>
 
             {/* CTA Section */}
-            <section className="py-16 bg-gradient-to-br from-primary/5 to-secondary/5">
+            <section className="py-16 bg-background -to-br from-primary/5 to-secondary/5">
                 <div className="container mx-auto px-6 text-center">
-                    <h2 className="text-3xl font-bold mb-4">Can't Decide Which Series is Right?</h2>
+                    <h2 className="text-3xl font-bold mb-4">Can&apos;t Decide Which Series is Right?</h2>
                     <p className="text-muted-foreground mb-8 max-w-2xl mx-auto">
                         Our experts can help you choose the perfect server series for your specific requirements and budget.
                     </p>

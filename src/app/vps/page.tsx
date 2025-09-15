@@ -3,13 +3,13 @@ import Header from "@/components/landing/Header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { 
-    Server, 
-    Cpu, 
-    MemoryStick, 
-    HardDrive, 
-    Network, 
-    Shield, 
+import {
+    Server,
+    Cpu,
+    MemoryStick,
+    HardDrive,
+    Network,
+    Shield,
     Zap,
     CheckCircle,
     Monitor,
@@ -32,7 +32,7 @@ const vpsFeatures = [
         icon: Settings
     },
     {
-        title: "NVMe SSD Storage", 
+        title: "NVMe SSD Storage",
         description: "Lightning-fast storage for optimal performance",
         icon: HardDrive
     },
@@ -57,27 +57,27 @@ export default function LinuxVPS() {
     return (
         <>
             <Header />
-            
+
             {/* Hero Section */}
-            <section className="section-padding gradient- relative overflow-hidden">
+            <section className="section-padding gradient- bg-background relative overflow-hidden">
                 <div className="absolute inset-0 opacity-10">
                     <div className="absolute inset-0 bg-[url('/grid-pattern.svg')] bg-center"></div>
                 </div>
-                
+
                 <div className="container mx-auto container-padding relative z-10 text-center">
                     <div className="max-w-4xl mx-auto animate-slide-up">
-                        <div className="inline-flex items-center px-4 py-2 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 mb-6">
+                        <div className="inline-flex items-center px-4 py-2 rounded-full bg-white/10 backdrop-blur-sm border dark:border-none border dark:border-none-white/20 mb-6">
                             <Server className="w-4 h-4 mr-2 text-blue-400" />
                             <span className="text-sm font-medium text-white">Enterprise Grade • Full Control • Linux Powered</span>
                         </div>
-                        
+
                         <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold mb-6 leading-tight text-white">
                             🚀 Linux VPS & Servers
                             <span className="text-gradient block">Powerful Virtual Private Servers</span>
                         </h1>
-                        
+
                         <p className="text-xl text-white/90 mb-8 max-w-3xl mx-auto">
-                            Deploy scalable Linux VPS with full root access, premium hardware, and enterprise-grade security. 
+                            Deploy scalable Linux VPS with full root access, premium hardware, and enterprise-grade security.
                             Perfect for developers, businesses, and high-traffic applications.
                         </p>
 
@@ -210,7 +210,7 @@ export default function LinuxVPS() {
                             { name: "Rocky Linux", desc: "CentOS successor, enterprise-grade" },
                             { name: "AlmaLinux", desc: "Community-driven, RHEL compatible" }
                         ].map((distro, index) => (
-                            <div key={index} className="p-4 bg-muted/50 rounded-lg border">
+                            <div key={index} className="p-4 bg-muted/50 rounded-lg border dark:border-none">
                                 <div className="flex items-center gap-3">
                                     <div className="w-10 h-10 bg-primary/10 rounded-full flex items-center justify-center">
                                         <Terminal className="w-5 h-5 text-primary" />
@@ -227,7 +227,7 @@ export default function LinuxVPS() {
             </section>
 
             {/* CTA Section */}
-            <section className="py-16 bg-gradient-to-br from-primary/5 to-secondary/5">
+            <section className="py-16 bg-background -to-br from-primary/5 to-secondary/5">
                 <div className="container mx-auto px-6 text-center">
                     <h2 className="text-3xl font-bold mb-4">Ready to Deploy Your Linux VPS?</h2>
                     <p className="text-muted-foreground mb-8 max-w-2xl mx-auto">

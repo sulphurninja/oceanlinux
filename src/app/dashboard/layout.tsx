@@ -7,10 +7,10 @@ type Props = { children: React.ReactNode }
 export default function Layout({ children }: Props) {
     return (
         <AuthProvider>
-            <div className='flex min-h-screen bg-background safe-area-top'>
+            <div className='flex min-h-screen bg-background'>
                 <ResponsiveSidebar />
-                <main className='flex-1 lg:ml-72 min-h-screen'>
-                    <div className='pt-16 lg:pt-0 min-h-full safe-area-bottom'>
+                <main className='flex-1 lg:ml-80 transition-all duration-300 ease-in-out'>
+                    <div className='pt-16 lg:pt-0 min-h-screen'>
                         {children}
                     </div>
                 </main>

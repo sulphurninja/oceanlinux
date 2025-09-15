@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button"
 
 export function dashbord() {
   return (
-    <div className="bg-background rounded-lg border p-6 w-full max-w-4xl">
+    <div className="bg-background rounded-lg border dark:border-none p-6 w-full max-w-4xl">
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
         <Card className="bg-primary text-primary-foreground">
           <CardHeader className="flex items-center justify-between">

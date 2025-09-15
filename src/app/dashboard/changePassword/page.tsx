@@ -27,7 +27,7 @@ const ChangePassword = () => {
 
   return (
     <div className='w-full'>
-      <div className='h-[63px] flex items-center border-b gap-2 p-4'>
+      <div className='h-[63px] flex items-center border dark:border-none-b gap-2 p-4'>
         <LockKeyhole />
         <h1 className='text-xl'>Change Password</h1>
       </div>

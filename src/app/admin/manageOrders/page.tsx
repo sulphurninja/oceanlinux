@@ -316,7 +316,7 @@ const ManageOrders = () => {
             <div className="lg:hidden h-16" />
 
             {/* Page Header */}
-            <div className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+            <div className="border dark:border-none-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
                 <div className="flex flex-col gap-6 p-6">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                         <div>
@@ -552,7 +552,7 @@ const ManageOrders = () => {
             <div className="flex-1 overflow-hidden">
                 <ScrollArea className="h-full">
                     <div className="p-6">
-                        <div className="rounded-lg border bg-card">
+                        <div className="rounded-lg border dark:border-none bg-card">
                             <Table>
                                 <TableHeader>
                                     <TableRow>
@@ -723,7 +723,7 @@ const ManageOrders = () => {
                             </div>
 
                             {/* Server Credentials Section */}
-                            <div className="space-y-4 border-t pt-6">
+                            <div className="space-y-4 border dark:border-none-t pt-6">
                                 <div className="flex items-center gap-2">
                                     <Settings className="w-5 h-5" />
                                     <h3 className="text-lg font-semibold">Server Credentials</h3>
@@ -774,7 +774,7 @@ const ManageOrders = () => {
 
                             {/* Error Display */}
                             {currentOrder.provisioningError && (
-                                <div className="border border-destructive/50 rounded-lg p-4 bg-destructive/5">
+                                <div className="border dark:border-none border dark:border-none-destructive/50 rounded-lg p-4 bg-destructive/5">
                                     <div className="flex items-start gap-2">
                                         <AlertCircle className="w-5 h-5 text-destructive mt-0.5" />
                                         <div>
@@ -789,9 +789,9 @@ const ManageOrders = () => {
 
                             {/* Service ID Display */}
                             {currentOrder.hostycareServiceId && (
-                                <div className="border rounded-lg p-4 bg-muted/50">
+                                <div className="border dark:border-none rounded-lg p-4 bg-muted/50">
                                     <h4 className="font-medium mb-2">Hostycare Service ID</h4>
-                                    <code className="text-sm bg-background px-2 py-1 rounded border">
+                                    <code className="text-sm bg-background px-2 py-1 rounded border dark:border-none">
                                         {currentOrder.hostycareServiceId}
                                     </code>
                                 </div>
@@ -822,7 +822,7 @@ const ManageOrders = () => {
                         </DialogHeader>
 
                         <div className="space-y-4">
-                            <div className="border rounded-lg p-4 bg-muted/50">
+                            <div className="border dark:border-none rounded-lg p-4 bg-muted/50">
                                 <div className="flex items-start gap-3">
                                     <div className="p-2 rounded-full bg-primary/10">
                                         <Play className="h-4 w-4 text-primary" />
@@ -852,7 +852,7 @@ const ManageOrders = () => {
                             </div>
 
                             {currentOrder.provisioningError && (
-                                <div className="border border-destructive/50 rounded-lg p-3 bg-destructive/5">
+                                <div className="border dark:border-none border dark:border-none-destructive/50 rounded-lg p-3 bg-destructive/5">
                                     <Label className="text-destructive font-medium">Previous Error:</Label>
                                     <p className="text-sm text-destructive/80 mt-1">
                                         {currentOrder.provisioningError}

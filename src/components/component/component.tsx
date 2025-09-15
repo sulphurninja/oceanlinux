@@ -7,7 +7,7 @@ import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink, BreadcrumbS
 
 export function Component() {
   return (
-    <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b bg-background px-4 sm:static sm:h-auto sm:border-0 sm:bg-transparent sm:px-6">
+    <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border dark:border-none-b bg-background px-4 sm:static sm:h-auto sm:border dark:border-none-0 sm:bg-transparent sm:px-6">
       <div className="flex items-center gap-2">
         <HomeIcon className="h-5 w-5" />
         <div className="text-2xl font-bold">Dashboard</div>

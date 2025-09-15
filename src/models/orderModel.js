@@ -5,10 +5,10 @@ const orderSchema = new mongoose.Schema({
     productName: { type: String, required: true },
     memory: { type: String, required: true },
     price: { type: Number, required: true },
-    originalPrice: { type: Number }, // For promo code tracking
-    promoCode: { type: String }, // Applied promo code
-    promoDiscount: { type: Number, default: 0 }, // Discount amount
-    ipStockId: { type: String }, // Reference to IP Stock
+    originalPrice: { type: Number },
+    promoCode: { type: String },
+    promoDiscount: { type: Number, default: 0 },
+    ipStockId: { type: String },
     transactionId: { type: String, default: '' },
     status: { type: String, default: 'pending' },
     ipAddress: { type: String, default: '' },
@@ -32,9 +32,21 @@ const orderSchema = new mongoose.Schema({
     webhookCustomerName: { type: String },
     webhookCustomerEmail: { type: String },
 
+    // Provider identification
+    provider: {
+        type: String,
+        enum: ['hostycare', 'smartvps'],
+        default: 'hostycare'
+    },
+
     // Hostycare integration fields
     hostycareServiceId: { type: String },
     hostycareProductId: { type: String },
+
+    // SmartVPS integration fields
+    smartvpsServiceId: { type: String },
+    smartvpsProductId: { type: String },
+
     provisioningStatus: {
         type: String,
         enum: ['pending', 'provisioning', 'active', 'failed', 'suspended', 'terminated'],
@@ -44,9 +56,9 @@ const orderSchema = new mongoose.Schema({
     autoProvisioned: { type: Boolean, default: false },
 
     // VPS Management tracking fields
-    lastAction: { type: String }, // 'start', 'stop', 'reboot', 'changepassword', 'reinstall', 'renew'
+    lastAction: { type: String }, // 'start', 'stop', 'reboot', 'changepassword', 'reinstall', 'format', 'renew'
     lastActionTime: { type: Date },
-    lastSyncTime: { type: Date }, // When we last synced with Hostycare API
+    lastSyncTime: { type: Date },
     serverDetails: {
         lastUpdated: { type: Date },
         rawDetails: { type: mongoose.Schema.Types.Mixed },
@@ -64,11 +76,13 @@ const orderSchema = new mongoose.Schema({
     }]
 }, { timestamps: true });
 
-// ✅ add indexes so sort & lookups are fast
+// Indexes
 orderSchema.index({ createdAt: -1 });
 orderSchema.index({ user: 1 });
 orderSchema.index({ hostycareServiceId: 1 });
+orderSchema.index({ smartvpsServiceId: 1 });
 orderSchema.index({ lastSyncTime: -1 });
-orderSchema.index({ expiryDate: 1 }); // Add index for expiry queries
+orderSchema.index({ expiryDate: 1 });
+orderSchema.index({ provider: 1 });
 
 export default mongoose.models.Order || mongoose.model('Order', orderSchema);

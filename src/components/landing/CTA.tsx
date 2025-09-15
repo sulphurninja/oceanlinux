@@ -13,18 +13,18 @@ export default function CTA() {
             <div className="container mx-auto container-padding relative z-10">
                 {/* Main CTA Content */}
                 <div className="text-white animate-fade-in">
-                    <div className="inline-flex items-center px-4 py-2 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 mb-6">
+                    <div className="inline-flex items-center px-4 py-2 rounded-full bg-white/10 backdrop-blur-sm border dark:border-none border dark:border-none-white/20 mb-6">
                         <IndianRupee className="w-4 h-4 mr-2 text-green-400" />
                         <span className="text-sm font-medium">Most Affordable Premium Linux VPS Hosting</span>
                     </div>
-                    
+
                     <h2 className="text-4xl sm:text-5xl lg:text-6xl font-bold mb-6 leading-tight">
-                        Ready to Start Your 
+                        Ready to Start Your
                         <span className="text-gradient block"> Affordable Linux Journey?</span>
                     </h2>
-                    
+
                     <p className="text-xl text-white/90 mb-8 max-w-3xl mx-auto">
-                        Join thousands of developers and businesses who chose quality over cost. 
+                        Join thousands of developers and businesses who chose quality over cost.
                         Experience premium Linux VPS hosting at prices that make sense for your budget.
                     </p>
 
@@ -52,12 +52,12 @@ export default function CTA() {
                             </Button>
                         </Link>
                         <Link href="/pricing">
-                            <Button 
-                                size="lg" 
-                                variant="outline" 
-                                className="border-white/30 text-white hover:bg-white/10 backdrop-blur-sm px-10 py-6 text-xl font-bold w-full sm:w-auto"
+                            <Button
+                                size="lg"
+                                variant="outline"
+                                className="border dark:border-none-white/30 text-white hover:bg-white/10 backdrop-blur-sm px-10 py-6 text-xl font-bold w-full sm:w-auto"
                             >
-                                 View All Plans & Pricing
+                                View All Plans & Pricing
                             </Button>
                         </Link>
                     </div>

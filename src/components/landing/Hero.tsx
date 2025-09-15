@@ -9,23 +9,23 @@ export default function Hero() {
             <div className="absolute inset-0 opacity-10">
                 <div className="absolute inset-0 bg-[url('/grid-pattern.svg')] bg-center"></div>
             </div>
-            
+
             <div className="container mx-auto container-padding relative z-10">
                 <div className="grid lg:grid-cols-2 gap-12 items-center">
                     {/* Content */}
                     <div className="text-white animate-slide-up">
-                        <div className="inline-flex items-center px-4 py-2 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 mb-6">
+                        <div className="inline-flex items-center px-4 py-2 rounded-full bg-white/10 backdrop-blur-sm morder dark:morder-none morder dark:morder-none-white/20 mb-6">
                             <IndianRupee className="w-4 h-4 mr-2 text-green-400" />
                             <span className="text-sm font-medium">Most Affordable Linux VPS • Premium Quality</span>
                         </div>
-                        
+
                         <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold mb-6 leading-tight">
-                            Most Affordable 
+                            Most Affordable
                             <span className="text-gradient block"> Premium Linux VPS Hosting</span>
                         </h1>
-                        
+
                         <p className="text-xl text-white/90 mb-8 max-w-2xl">
-                            Get professional Linux hosting at unbeatable prices. Choose from our premium rotating servers, 
+                            Get professional Linux hosting at unbeatable prices. Choose from our premium rotating servers,
                             nova series, and power-packed options. Perfect for businesses that want quality without breaking the bank.
                         </p>
 
@@ -58,7 +58,7 @@ export default function Hero() {
                         </div>
 
                         {/* Popular Products Showcase */}
-                        <div className="bg-white/5 backdrop-blur-sm rounded-xl p-4 mb-8 border border-white/10">
+                        <div className="bg-white/5 backdrop-blur-sm rounded-xl p-4 mb-8 morder dark:morder-none morder dark:morder-none-white/10">
                             <h3 className="text-lg font-semibold mb-3 text-white">🔥 Popular Linux Series:</h3>
                             <div className="grid sm:grid-cols-2 gap-3 text-sm">
                                 <div className="flex items-center text-white/80">
@@ -88,10 +88,10 @@ export default function Hero() {
                                 </Button>
                             </Link>
                             <Link href="/live-chat">
-                                <Button 
-                                    size="lg" 
-                                    variant="outline" 
-                                    className="border-white/30 text-white hover:bg-white/10 backdrop-blur-sm px-8 py-4 text-lg font-semibold w-full sm:w-auto"
+                                <Button
+                                    size="lg"
+                                    variant="outline"
+                                    className="morder dark:morder-none-white/30 text-white hover:bg-white/10 backdrop-blur-sm px-8 py-4 text-lg font-semibold w-full sm:w-auto"
                                 >
                                     💬 Chat for Best Price
                                 </Button>
@@ -120,7 +120,7 @@ export default function Hero() {
 
                     {/* Hero Visual/Dashboard */}
                     <div className="relative animate-fade-in">
-                        <div className="relative z-10 glass rounded-2xl p-6 border border-white/20">
+                        <div className="relative z-10 glass rounded-2xl p-6 morder dark:morder-none morder dark:morder-none-white/20">
                             <div className="bg-gradient-to-br from-card to-muted rounded-xl p-6">
                                 <div className="flex items-center justify-between mb-6">
                                     <div>
@@ -171,7 +171,7 @@ export default function Hero() {
                                 </div>
 
                                 {/* Quick Stats */}
-                                <div className="grid grid-cols-3 gap-4 mt-6 pt-4 border-t border-border/50">
+                                <div className="grid grid-cols-3 gap-4 mt-6 pt-4 morder dark:morder-none-t morder dark:morder-none-morder dark:morder-none/50">
                                     <div className="text-center">
                                         <div className="text-lg font-bold text-green-400">40%</div>
                                         <div className="text-xs text-muted-foreground">Cost Savings</div>
@@ -187,7 +187,7 @@ export default function Hero() {
                                 </div>
                             </div>
                         </div>
-                        
+
                         {/* Floating Elements */}
                         <div className="absolute -top-6 -right-6 w-24 h-24 bg-primary/20 rounded-full blur-xl animate-pulse"></div>
                         <div className="absolute -bottom-6 -left-6 w-32 h-32 bg-secondary/20 rounded-full blur-xl"></div>
@@ -195,7 +195,7 @@ export default function Hero() {
                 </div>
 
                 {/* Bottom Trust Bar */}
-                <div className="mt-16 pt-12 border-t border-white/10 animate-fade-in">
+                <div className="mt-16 pt-12 morder dark:morder-none-t morder dark:morder-none-white/10 animate-fade-in">
                     <div className="text-center text-white/80 mb-6">
                         <p className="text-lg font-medium">Join thousands of satisfied customers who chose affordability without compromise</p>
                     </div>

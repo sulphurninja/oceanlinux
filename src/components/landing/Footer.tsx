@@ -45,7 +45,7 @@ const footerSections = {
 
 export default function Footer() {
   return (
-    <footer className="bg-card border-t border-border">
+    <footer className="bg-card border dark:border-none-t border dark:border-none-border dark:border-none">
       {/* Main Footer */}
       <div className="container mx-auto container-padding">
         <div className="section-padding">
@@ -57,7 +57,7 @@ export default function Footer() {
                   <img src='/oceanlinux.png' className="h-20" />
                 </div>
                 <div>
-                  <span className="text-2xl font-bold bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">
+                  <span className="text-2xl font-bold bg-gradient-to-r from-primary to-foreground bg-clip-text text-transparent">
                     OceanLinux
                   </span>
                   <div className="text-xs text-muted-foreground -mt-1">The Ocean of Linux</div>
@@ -128,7 +128,7 @@ export default function Footer() {
                             </li>
                           );
                         }
-                        
+
                         return (
                           <li key={index}>
                             <Link
@@ -150,7 +150,7 @@ export default function Footer() {
       </div>
 
       {/* Bottom Bar */}
-      <div className="border-t border-border bg-muted/30">
+      <div className="border dark:border-none-t border dark:border-none-border dark:border-none bg-muted/30">
         <div className="container mx-auto container-padding">
           <div className="py-6 flex flex-col sm:flex-row justify-between items-center">
             <div className="text-sm text-muted-foreground mb-4 sm:mb-0">

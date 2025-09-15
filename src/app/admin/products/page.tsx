@@ -137,7 +137,7 @@ const HostycareProductsPage = () => {
 
   return (
     <div className="w-full">
-      <div className="h-[63px] flex gap-2 items-center border-b p-4">
+      <div className="h-[63px] flex gap-2 items-center border dark:border-none-b p-4">
         <h1 className="text-xl flex items-center gap-2">
           <ExternalLink className="h-5 w-5" />
           Hostycare Products & IDs
@@ -151,7 +151,7 @@ const HostycareProductsPage = () => {
       <div className="p-6">
         {/* Debug Info (show if no products found) */}
         {!loading && products.length === 0 && debugInfo && (
-          <Card className="mb-6 border-orange-200 bg-orange-50">
+          <Card className="mb-6 border dark:border-none-orange-200 bg-orange-50">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-orange-700">
                 <AlertCircle className="h-5 w-5" />
@@ -159,7 +159,7 @@ const HostycareProductsPage = () => {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <pre className="text-xs bg-white p-3 rounded border overflow-auto max-h-40">
+              <pre className="text-xs bg-white p-3 rounded border dark:border-none overflow-auto max-h-40">
                 {JSON.stringify(debugInfo, null, 2)}
               </pre>
               <p className="text-sm text-orange-700 mt-2">
@@ -310,7 +310,7 @@ const HostycareProductsPage = () => {
                               variant="outline"
                               size="sm"
                               onClick={() => copyProductId(product.id)}
-                              className="font-mono text-xs px-2 py-1 h-auto bg-blue-50 hover:bg-blue-100 border-blue-200"
+                              className="font-mono text-xs px-2 py-1 h-auto bg-blue-50 hover:bg-blue-100 border dark:border-none-blue-200"
                               title="Click to copy Product ID"
                             >
                               {product.id}
@@ -482,7 +482,7 @@ const HostycareProductsPage = () => {
               )}
 
               {/* Actions */}
-              <div className="flex gap-3 pt-4 border-t">
+              <div className="flex gap-3 pt-4 border dark:border-none-t">
                 <Button
                   onClick={() => openCreateIPStock(selectedProduct.id)}
                   className="bg-green-600 hover:bg-green-700"

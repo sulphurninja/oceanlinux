@@ -157,7 +157,7 @@ const BulkProvisionPage = () => {
 
     return (
         <div className='w-full'>
-            <div className='h-[63px] flex gap-2 items-center border-b p-4'>
+            <div className='h-[63px] flex gap-2 items-center border dark:border-none-b p-4'>
                 <h1 className='text-xl flex items-center gap-2'>
                     <Server className="h-5 w-5" />
                     Bulk Auto-Provision
@@ -390,15 +390,15 @@ const BulkProvisionPage = () => {
                             </div>
 
                             {/* Detailed Results */}
-                            <div className="border rounded-lg">
-                                <div className="p-3 border-b bg-gray-50">
+                            <div className="border dark:border-none rounded-lg">
+                                <div className="p-3 border dark:border-none-b bg-gray-50">
                                     <h4 className="font-medium">Detailed Results</h4>
                                 </div>
                                 <div className="max-h-60 overflow-y-auto">
                                     {provisioningResults.map((result, index) => {
                                         const order = orders.find(o => o._id === result.orderId);
                                         return (
-                                            <div key={index} className="p-3 border-b last:border-b-0">
+                                            <div key={index} className="p-3 border dark:border-none-b last:border dark:border-none-b-0">
                                                 <div className="flex items-start justify-between">
                                                     <div>
                                                         <div className="font-medium">

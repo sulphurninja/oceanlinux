@@ -1,12 +1,12 @@
 import Footer from "@/components/landing/Footer";
 import Header from "@/components/landing/Header";
 import { Card, CardContent } from "@/components/ui/card";
-import { 
-    Shield, 
-    Lock, 
-    Eye, 
-    Server, 
-    Mail, 
+import {
+    Shield,
+    Lock,
+    Eye,
+    Server,
+    Mail,
     CreditCard,
     Users,
     FileText,
@@ -22,27 +22,27 @@ export default function PrivacyPolicy() {
     return (
         <>
             <Header />
-            
+
             {/* Hero Section */}
             <section className="section-padding gradient- relative overflow-hidden">
                 <div className="absolute inset-0 opacity-10">
                     <div className="absolute inset-0 bg-[url('/grid-pattern.svg')] bg-center"></div>
                 </div>
-                
+
                 <div className="container mx-auto container-padding relative z-10 text-center">
                     <div className="max-w-4xl mx-auto animate-slide-up">
-                        <div className="inline-flex items-center px-4 py-2 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 mb-6">
+                        <div className="inline-flex items-center px-4 py-2 rounded-full bg-white/10 backdrop-blur-sm border dark:border-none border dark:border-none-white/20 mb-6">
                             <Shield className="w-4 h-4 mr-2 text-green-400" />
                             <span className="text-sm font-medium text-white">Your Privacy • Our Priority</span>
                         </div>
-                        
+
                         <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold mb-6 leading-tight text-white">
                             Privacy Policy
                             <span className="text-gradient block">Transparency & Trust</span>
                         </h1>
-                        
+
                         <p className="text-xl text-white/90 mb-8 max-w-3xl mx-auto">
-                            At OceanLinux, your privacy is critically important to us. This policy explains how we collect, 
+                            At OceanLinux, your privacy is critically important to us. This policy explains how we collect,
                             use, and protect your personal information when you use our affordable Linux hosting services.
                         </p>
 
@@ -68,7 +68,7 @@ export default function PrivacyPolicy() {
             <section className="py-16 bg-background">
                 <div className="container mx-auto px-6">
                     <div className="max-w-4xl mx-auto space-y-12">
-                        
+
                         {/* Information We Collect */}
                         <Card>
                             <CardContent className="p-8">
@@ -164,7 +164,7 @@ export default function PrivacyPolicy() {
                                     </div>
                                 </div>
 
-                                <div className="mt-6 p-4 bg-green-500/10 border border-green-500/20 rounded-lg">
+                                <div className="mt-6 p-4 bg-green-500/10 border dark:border-none border dark:border-none-green-500/20 rounded-lg">
                                     <div className="flex items-start gap-3">
                                         <CheckCircle className="w-5 h-5 text-green-500 mt-0.5" />
                                         <div>
@@ -195,7 +195,7 @@ export default function PrivacyPolicy() {
 
                                 <div className="space-y-6">
                                     <div className="grid md:grid-cols-2 gap-6">
-                                        <div className="p-4 border rounded-lg">
+                                        <div className="p-4 border dark:border-none rounded-lg">
                                             <h3 className="font-semibold mb-3">Secure Payment Gateways</h3>
                                             <ul className="space-y-2 text-sm text-muted-foreground">
                                                 <li>• <strong>Razorpay:</strong> PCI DSS compliant payment processing</li>
@@ -203,7 +203,7 @@ export default function PrivacyPolicy() {
                                                 <li>• <strong>UPI Gateway:</strong> Secure UPI and digital wallet payments</li>
                                             </ul>
                                         </div>
-                                        <div className="p-4 border rounded-lg">
+                                        <div className="p-4 border dark:border-none rounded-lg">
                                             <h3 className="font-semibold mb-3">Data Protection</h3>
                                             <ul className="space-y-2 text-sm text-muted-foreground">
                                                 <li>• Your payment data is encrypted and tokenized</li>
@@ -214,14 +214,14 @@ export default function PrivacyPolicy() {
                                         </div>
                                     </div>
 
-                                    <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+                                    <div className="p-4 bg-blue-500/10 border dark:border-none border dark:border-none-blue-500/20 rounded-lg">
                                         <div className="flex items-start gap-3">
                                             <Shield className="w-5 h-5 text-blue-500 mt-0.5" />
                                             <div>
                                                 <p className="font-semibold text-blue-800 dark:text-blue-300">Payment Gateway Privacy</p>
                                                 <p className="text-sm text-blue-700 dark:text-blue-400">
-                                                    When you make payments, our payment gateway partners (Razorpay, Cashfree, UPI Gateway) 
-                                                    collect and process payment information according to their respective privacy policies 
+                                                    When you make payments, our payment gateway partners (Razorpay, Cashfree, UPI Gateway)
+                                                    collect and process payment information according to their respective privacy policies
                                                     and PCI DSS compliance standards.
                                                 </p>
                                             </div>
@@ -307,7 +307,7 @@ export default function PrivacyPolicy() {
                                 </div>
 
                                 <div className="space-y-4">
-                                    <div className="p-4 border-l-4 border-green-500 bg-green-500/5">
+                                    <div className="p-4 border dark:border-none-l-4 border dark:border-none-green-500 bg-green-500/5">
                                         <h3 className="font-semibold text-green-800 dark:text-green-300">Limited Data Sharing</h3>
                                         <p className="text-sm text-green-700 dark:text-green-400 mt-1">
                                             We only share your data when necessary for service delivery, legal compliance, or with your consent.
@@ -399,14 +399,14 @@ export default function PrivacyPolicy() {
                         </Card>
 
                         {/* Contact Information */}
-                        <Card className="bg-primary/5 border-primary/20">
+                        <Card className="bg-primary/5 border dark:border-none-primary/20">
                             <CardContent className="p-8 text-center">
                                 <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-6">
                                     <Mail className="w-8 h-8 text-primary" />
                                 </div>
                                 <h2 className="text-2xl font-bold mb-4">Questions About Your Privacy?</h2>
                                 <p className="text-muted-foreground mb-6 max-w-2xl mx-auto">
-                                    If you have any questions about this privacy policy, need to exercise your privacy rights, 
+                                    If you have any questions about this privacy policy, need to exercise your privacy rights,
                                     or have concerns about how we handle your data, please don't hesitate to contact us.
                                 </p>
                                 <div className="flex flex-col sm:flex-row gap-4 justify-center">
@@ -429,12 +429,12 @@ export default function PrivacyPolicy() {
                         </Card>
 
                         {/* Last Updated */}
-                        <div className="text-center pt-8 border-t">
+                        <div className="text-center pt-8 border dark:border-none-t">
                             <p className="text-sm text-muted-foreground">
-                                <strong>Last Updated:</strong> {new Date().toLocaleDateString('en-US', { 
-                                    year: 'numeric', 
-                                    month: 'long', 
-                                    day: 'numeric' 
+                                <strong>Last Updated:</strong> {new Date().toLocaleDateString('en-US', {
+                                    year: 'numeric',
+                                    month: 'long',
+                                    day: 'numeric'
                                 })}
                             </p>
                             <p className="text-sm text-muted-foreground mt-2">

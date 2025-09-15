@@ -125,19 +125,19 @@ const styles = {
         padding: '16px',
         fontSize: '20px',
         fontWeight: 'bold',
-        borderBottom: '2px solid #ddd',
+        border dark: border - noneBottom: '2px solid #ddd',
         textAlign: 'center'
     },
     tableContainer: {
         margin: '20px auto',
         width: '90%',
-        border: '1px solid #ddd',
-        borderRadius: '5px',
+        border dark: border - none: '1px solid #ddd',
+        border dark: border - noneRadius: '5px',
         overflow: 'hidden'
     },
     table: {
         width: '100%',
-        borderCollapse: 'collapse',
+        border dark: border - noneCollapse: 'collapse',
         textAlign: 'left'
     },
     button: {
@@ -145,24 +145,24 @@ const styles = {
         margin: '5px',
         backgroundColor: '#007bff',
         color: 'white',
-        border: 'none',
+        border dark: border - none: 'none',
         cursor: 'pointer',
-        borderRadius: '5px'
+        border dark: border - noneRadius: '5px'
     },
     buttonClose: {
         padding: '8px 12px',
         margin: '5px',
         backgroundColor: '#dc3545',
         color: 'white',
-        border: 'none',
+        border dark: border - none: 'none',
         cursor: 'pointer',
-        borderRadius: '5px'
+        border dark: border - noneRadius: '5px'
     },
     dialog: {
         width: '300px',
         padding: '20px',
-        borderRadius: '8px',
-        border: 'none',
+        border dark: border - noneRadius: '8px',
+        border dark: border - none: 'none',
         backgroundColor: 'white',
         boxShadow: '0px 4px 10px rgba(0, 0, 0, 0.1)'
     },
@@ -171,8 +171,8 @@ const styles = {
         width: '100%',
         padding: '8px',
         marginBottom: '10px',
-        border: '1px solid #ddd',
-        borderRadius: '4px'
+        border dark: border - none: '1px solid #ddd',
+        border dark: border - noneRadius: '4px'
     },
     buttonGroup: {
         display: 'flex',

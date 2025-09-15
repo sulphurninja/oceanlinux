@@ -11,7 +11,9 @@ export default function Layout({ children }: Props) {
   useEffect(() => {
     const fetchMe = async () => {
       try {
-        const response = await fetch('/api/users/me');
+        const response = await fetch('/api/users/me', {
+          credentials: 'include'
+        });
         const data = await response.json();
         setRole(data?.role || '');
       } catch {
@@ -32,10 +34,13 @@ export default function Layout({ children }: Props) {
   return (
     <div className="min-h-screen bg-background">
       {role === 'Admin' ? (
-        <div className="flex h-screen overflow-hidden">
+        <div className="flex min-h-screen">
           <AdminSidebar />
-          <main className="flex-1 overflow-auto">
-            <div className="h-full">
+          <main className="flex-1 lg:pl-80">
+            <div className="lg:hidden pt-16"> {/* Add padding top for mobile header */}
+              {children}
+            </div>
+            <div className="hidden lg:block">
               {children}
             </div>
           </main>

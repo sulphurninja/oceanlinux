@@ -217,19 +217,19 @@ const ManageIpStock = () => {
         if (configuredCount === 0) {
             return <Badge variant="destructive">No Auto-Provision</Badge>;
         } else if (configuredCount === totalConfigs) {
-            return <Badge className="bg-green-50 text-green-700 border-green-200">Full Auto-Provision</Badge>;
+            return <Badge className="bg-green-50 text-green-700 border dark:border-none-green-200">Full Auto-Provision</Badge>;
         } else {
-            return <Badge className="bg-orange-50 text-orange-700 border-orange-200">Partial Auto-Provision</Badge>;
+            return <Badge className="bg-orange-50 text-orange-700 border dark:border-none-orange-200">Partial Auto-Provision</Badge>;
         }
     };
 
     return (
         <div className='w-full'>
-            <div className='h-[63px] flex gap-2 items-center border-b p-4'>
+            <div className='h-[63px] flex gap-2 items-center border dark:border-none-b p-4'>
                 <h1 className='text-xl'>Manage IP Stock</h1>
             </div>
             <div className='mx-12 mt-6'>
-                <Table className='w-full border'>
+                <Table className='w-full border dark:border-none'>
                     <TableHeader>
                         <TableRow>
                             <TableHead>Name</TableHead>
@@ -331,7 +331,7 @@ const ManageIpStock = () => {
                                     <div>
                                         <Label>Available:</Label>
                                         <select
-                                            className='flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1'
+                                            className='flex h-10 w-full items-center justify-between rounded-md border dark:border-none border dark:border-none-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1'
                                             value={currentStock.available.toString()}
                                             onChange={(e) => handleAvailableChange(e.target.value)}
                                         >
@@ -344,7 +344,7 @@ const ManageIpStock = () => {
                                 <div>
                                     <Label>Description:</Label>
                                     <textarea
-                                        className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                                        className="flex min-h-[80px] w-full rounded-md border dark:border-none border dark:border-none-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                                         value={currentStock.description || ''}
                                         onChange={(e) => setCurrentStock({ ...currentStock, description: e.target.value })}
                                         placeholder="Server description..."
@@ -367,9 +367,9 @@ const ManageIpStock = () => {
                                 {/* Memory Options and Hostycare Mapping */}
                                 <div>
                                     <Label className="text-base font-semibold">Memory Configuration & Hostycare Mapping:</Label>
-                                    <div className="bg--50 p-4 rounded-lg border space-y-4">
+                                    <div className="bg--50 p-4 rounded-lg border dark:border-none space-y-4">
                                         {Object.keys(currentStock.memoryOptions).map((size) => (
-                                            <div key={size} className="border-b pb-3 last:border-b-0 last:pb-0">
+                                            <div key={size} className="border dark:border-none-b pb-3 last:border dark:border-none-b-0 last:pb-0">
                                                 <h4 className="font-medium mb-2">{size} Configuration</h4>
                                                 <div className="grid grid-cols-2 gap-3">
                                                     <div>
@@ -464,7 +464,7 @@ const ManageIpStock = () => {
                                     </div>
 
                                     {currentStock.promoCodes && currentStock.promoCodes.length > 0 && (
-                                        <div className="border rounded p-2 max-h-32 overflow-y-auto">
+                                        <div className="border dark:border-none rounded p-2 max-h-32 overflow-y-auto">
                                             {currentStock.promoCodes.map((promo, index) => (
                                                 <div key={index} className="flex justify-between items-center mb-1 p-2 bg--50 rounded">
                                                     <div className="flex items-center gap-2">

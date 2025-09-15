@@ -137,16 +137,16 @@ export default function PricingSection() {
             <div className="container mx-auto container-padding">
                 {/* Header */}
                 <div className="text-center mb-16 animate-fade-in">
-                    <Badge variant="outline" className="mb-4 px-4 py-2 text-primary border-primary/20">
+                    <Badge variant="outline" className="mb-4 px-4 py-2 text-primary morder dark:morder-none-primary/20">
                         <Zap className="w-4 h-4 mr-2" />
                         Most Affordable Premium Linux VPS
                     </Badge>
                     <h2 className="text-4xl lg:text-5xl font-bold mb-6">
-                        Choose Your Perfect 
+                        Choose Your Perfect
                         <span className="text-gradient block">Linux Server Series</span>
                     </h2>
                     <p className="text-xl text-muted-foreground max-w-3xl mx-auto">
-                        From rotating premium IPs to enterprise-grade power - all our Linux server series 
+                        From rotating premium IPs to enterprise-grade power - all our Linux server series
                         offer professional features at the most affordable prices in the industry.
                     </p>
                 </div>
@@ -154,8 +154,8 @@ export default function PricingSection() {
                 {/* Pricing Cards */}
                 <div className="grid lg:grid-cols-2 xl:grid-cols-3 gap-8 max-w-7xl mx-auto">
                     {plans.map((plan, index) => (
-                        <Card 
-                            key={index} 
+                        <Card
+                            key={index}
                             className={`pricing-card relative ${plan.popular ? 'popular lg:scale-105' : ''} animate-scale-in`}
                             style={{ animationDelay: `${index * 0.1}s` }}
                         >
@@ -167,14 +167,14 @@ export default function PricingSection() {
                                     </Badge>
                                 </div>
                             )}
-                            
+
                             <CardHeader className="text-center pb-6">
                                 <div className="flex justify-center mb-4">
                                     <Badge variant="secondary" className="px-3 py-1">
                                         {plan.badge}
                                     </Badge>
                                 </div>
-                                
+
                                 <CardTitle className="text-xl font-bold mb-2">{plan.name}</CardTitle>
                                 <CardDescription className="text-muted-foreground text-sm mb-6">
                                     {plan.description}
@@ -225,7 +225,7 @@ export default function PricingSection() {
                                             <span className="font-medium">{plan.specs.bandwidth}</span>
                                         </div>
                                     </div>
-                                    <div className="text-xs text-muted-foreground pt-2 border-t border-border/50">
+                                    <div className="text-xs text-muted-foreground pt-2 morder dark:morder-none-t morder dark:morder-none-morder dark:morder-none/50">
                                         IP Range: {plan.specs.ip}
                                     </div>
                                 </div>
@@ -251,12 +251,11 @@ export default function PricingSection() {
                                 {/* CTA Button */}
                                 <div className="pt-4">
                                     <Link href={`/get-started?plan=${plan.name.toLowerCase().replace(/\s+/g, '-').replace(/[^\w-]/g, '')}`}>
-                                        <Button 
-                                            className={`w-full py-4 text-base font-semibold ${
-                                                plan.popular 
-                                                    ? 'btn-primary' 
+                                        <Button
+                                            className={`w-full py-4 text-base font-semibold ${plan.popular
+                                                    ? 'btn-primary'
                                                     : 'btn-outline hover:btn-primary'
-                                            }`}
+                                                }`}
                                         >
                                             {plan.popular ? '🚀 Get Started Now' : '📋 Choose This Plan'}
                                         </Button>

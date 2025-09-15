@@ -28,11 +28,11 @@ export default function Scalability() {
         {/* Header */}
         <div className="text-center mb-16 animate-fade-in">
           <h2 className="text-4xl lg:text-5xl font-bold mb-6">
-            Scale Without Breaking 
+            Scale Without Breaking
             <span className="text-gradient"> Your Budget</span>
           </h2>
           <p className="text-xl text-muted-foreground max-w-3xl mx-auto">
-            Grow your business without worrying about hosting costs. 
+            Grow your business without worrying about hosting costs.
             Our affordable VPS plans scale with you, keeping prices low as you expand.
           </p>
         </div>
@@ -40,8 +40,8 @@ export default function Scalability() {
         {/* Scaling Options */}
         <div className="grid lg:grid-cols-3 gap-8 mb-16">
           {scalingOptions.map((option, index) => (
-            <div 
-              key={index} 
+            <div
+              key={index}
               className="feature-card animate-slide-up hover-lift"
               style={{ animationDelay: `${index * 0.1}s` }}
             >
@@ -52,7 +52,7 @@ export default function Scalability() {
                 <h3 className="text-xl font-semibold mb-3">{option.title}</h3>
                 <p className="text-muted-foreground leading-relaxed">{option.description}</p>
               </div>
-              
+
               <div className="space-y-2">
                 {option.features.map((feature, i) => (
                   <div key={i} className="flex items-center text-sm">
@@ -82,7 +82,7 @@ export default function Scalability() {
                     </p>
                   </div>
                 </div>
-                
+
                 <div className="flex items-start space-x-4">
                   <div className="p-2 rounded-lg bg-blue-500/10">
                     <Zap className="w-5 h-5 text-blue-500" />
@@ -94,7 +94,7 @@ export default function Scalability() {
                     </p>
                   </div>
                 </div>
-                
+
                 <div className="flex items-start space-x-4">
                   <div className="p-2 rounded-lg bg-purple-500/10">
                     <Settings className="w-5 h-5 text-purple-500" />
@@ -110,7 +110,7 @@ export default function Scalability() {
             </div>
 
             <div className="text-center">
-              <div className="bg-gradient-to-br from-card to-muted rounded-xl p-8 border border-border">
+              <div className="bg-gradient-to-br from-card to-muted rounded-xl p-8 border dark:border-none border dark:border-none-border dark:border-none">
                 <h4 className="text-lg font-semibold mb-6">Scaling Dashboard Preview</h4>
                 <div className="space-y-4">
                   <div className="flex justify-between items-center p-3 bg-background/50 rounded-lg">
@@ -123,7 +123,7 @@ export default function Scalability() {
                       <span className="text-primary">8</span>
                     </div>
                   </div>
-                  
+
                   <div className="flex justify-between items-center p-3 bg-background/50 rounded-lg">
                     <span className="text-sm">RAM (GB)</span>
                     <div className="flex items-center space-x-2">
@@ -134,7 +134,7 @@ export default function Scalability() {
                       <span className="text-blue-500">16</span>
                     </div>
                   </div>
-                  
+
                   <div className="flex justify-between items-center p-3 bg-background/50 rounded-lg">
                     <span className="text-sm">Storage (GB)</span>
                     <div className="flex items-center space-x-2">
@@ -163,7 +163,7 @@ export default function Scalability() {
             </span>
           </div>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-            Begin with our most affordable plan and scale as your business grows. 
+            Begin with our most affordable plan and scale as your business grows.
             No surprises, no hidden costs, just transparent pricing that works for you.
           </p>
         </div>

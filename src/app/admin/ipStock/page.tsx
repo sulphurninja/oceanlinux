@@ -257,7 +257,7 @@ const IPStockFormWithParams = () => {
 
     return (
         <div>
-            <div className='p-4 border-b'>
+            <div className='p-4 border dark:border-none-b'>
                 <h1 className='text-lg '>Admin - Create IP Stock </h1>
             </div>
             <div className='p-4'>
@@ -271,7 +271,7 @@ const IPStockFormWithParams = () => {
                                 <Label className="block text-sm font-medium mb-1">Name:</Label>
                                 <Input
                                     type="text"
-                                    className="input input-bordered w-full"
+                                    className="input input-border dark:border-noneed w-full"
                                     placeholder="IP Stock Name"
                                     value={name}
                                     onChange={(e) => setName(e.target.value)}
@@ -281,7 +281,7 @@ const IPStockFormWithParams = () => {
                             <div className="mb-4">
                                 <Label className="block text-sm font-medium mb-1">Description:</Label>
                                 <textarea
-                                    className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                                    className="flex min-h-[80px] w-full rounded-md border dark:border-none border dark:border-none-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                                     placeholder="Describe the server configuration, features, etc."
                                     value={description}
                                     onChange={(e) => setDescription(e.target.value)}
@@ -350,7 +350,7 @@ const IPStockFormWithParams = () => {
                             {/* Memory Options with Price and Hostycare Product ID */}
                             <div className="mb-6">
                                 <Label className="block text-sm font-medium mb-3 text-base">Memory Configuration & Hostycare Mapping</Label>
-                                <div className="bg-ay-50 p-4 rounded-lg border">
+                                <div className="bg-ay-50 p-4 rounded-lg border dark:border-none">
                                     {Object.keys(prices).map(size => (
                                         <div key={size} className="mb-4 last:mb-0">
                                             <h4 className="font-medium text-sm mb-2">{size} Configuration</h4>
@@ -417,7 +417,7 @@ const IPStockFormWithParams = () => {
                                 </div>
 
                                 {promoCodes.length > 0 && (
-                                    <div className="border rounded p-2">
+                                    <div className="border dark:border-none rounded p-2">
                                         <h4 className="text-sm font-medium mb-2">Added Promo Codes:</h4>
                                         {promoCodes.map((promo, index) => (
                                             <div key={index} className="flex justify-between items-center mb-1 p-2 bg-gray-50 rounded">
@@ -453,7 +453,7 @@ const IPStockFormWithParams = () => {
                                 </span>
                             </div>
 
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 border rounded-lg p-4">
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 border dark:border-none rounded-lg p-4">
                                 {(['4GB', '8GB', '16GB'] as const).map(mem => (
                                     <div key={mem} className="space-y-2">
                                         <Label className="text-sm font-medium">{mem} SmartVPS IP</Label>
@@ -509,7 +509,7 @@ const IPStockFormWithParams = () => {
 // Loading component for Suspense fallback
 const IPStockFormLoading = () => (
     <div className='w-full'>
-        <div className='h-[63px] flex gap-2 items-center border-b p-4'>
+        <div className='h-[63px] flex gap-2 items-center border dark:border-none-b p-4'>
             <h1 className='text-xl'>Add IP Stock</h1>
         </div>
         <div className='mx-12 mt-6'>

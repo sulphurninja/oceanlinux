@@ -2,14 +2,14 @@ import Footer from "@/components/landing/Footer";
 import Header from "@/components/landing/Header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { 
-    CheckCircle, 
-    AlertTriangle, 
-    XCircle, 
-    Clock, 
-    Server, 
-    Globe, 
-    Wifi, 
+import {
+    CheckCircle,
+    AlertTriangle,
+    XCircle,
+    Clock,
+    Server,
+    Globe,
+    Wifi,
     Database,
     Shield,
     Zap,
@@ -27,7 +27,7 @@ const serviceStatus = [
     },
     {
         name: "Linux VPS Servers",
-        status: "operational", 
+        status: "operational",
         uptime: "99.99%",
         responseTime: "189ms",
         lastChecked: "1 minute ago"
@@ -71,7 +71,7 @@ const datacenters = [
         load: "23%"
     },
     {
-        name: "Bangalore, India", 
+        name: "Bangalore, India",
         region: "AS-South",
         status: "operational",
         uptime: "99.98%",
@@ -79,7 +79,7 @@ const datacenters = [
     },
     {
         name: "Delhi, India",
-        region: "AS-North", 
+        region: "AS-North",
         status: "operational",
         uptime: "99.97%",
         load: "28%"
@@ -96,7 +96,7 @@ const recentIncidents = [
         duration: "2 hours (estimated)"
     },
     {
-        date: "2024-12-18", 
+        date: "2024-12-18",
         title: "Network Latency Issues Resolved",
         status: "resolved",
         severity: "minor",
@@ -106,7 +106,7 @@ const recentIncidents = [
     {
         date: "2024-12-15",
         title: "DNS Propagation Delays",
-        status: "resolved", 
+        status: "resolved",
         severity: "minor",
         description: "Some users experienced DNS propagation delays. Root cause identified and fixed.",
         duration: "45 minutes"
@@ -131,17 +131,17 @@ const getStatusIcon = (status: string) => {
 const getStatusBadge = (status: string) => {
     switch (status) {
         case 'operational':
-            return <Badge className="bg-green-100 text-green-800 border-green-200">Operational</Badge>;
+            return <Badge className="bg-green-100 text-green-800 border dark:border-none-green-200">Operational</Badge>;
         case 'maintenance':
-            return <Badge className="bg-orange-100 text-orange-800 border-orange-200">Maintenance</Badge>;
+            return <Badge className="bg-orange-100 text-orange-800 border dark:border-none-orange-200">Maintenance</Badge>;
         case 'degraded':
-            return <Badge className="bg-yellow-100 text-yellow-800 border-yellow-200">Degraded</Badge>;
+            return <Badge className="bg-yellow-100 text-yellow-800 border dark:border-none-yellow-200">Degraded</Badge>;
         case 'outage':
-            return <Badge className="bg-red-100 text-red-800 border-red-200">Outage</Badge>;
+            return <Badge className="bg-red-100 text-red-800 border dark:border-none-red-200">Outage</Badge>;
         case 'ongoing':
-            return <Badge className="bg-blue-100 text-blue-800 border-blue-200">Ongoing</Badge>;
+            return <Badge className="bg-blue-100 text-blue-800 border dark:border-none-blue-200">Ongoing</Badge>;
         case 'resolved':
-            return <Badge className="bg-gray-100 text-gray-800 border-gray-200">Resolved</Badge>;
+            return <Badge className="bg-gray-100 text-gray-800 border dark:border-none-gray-200">Resolved</Badge>;
         default:
             return <Badge>Unknown</Badge>;
     }
@@ -150,15 +150,15 @@ const getStatusBadge = (status: string) => {
 const getSeverityColor = (severity: string) => {
     switch (severity) {
         case 'critical':
-            return 'border-l-red-500';
+            return 'border dark:border-none-l-red-500';
         case 'major':
-            return 'border-l-orange-500';
+            return 'border dark:border-none-l-orange-500';
         case 'minor':
-            return 'border-l-yellow-500';
+            return 'border dark:border-none-l-yellow-500';
         case 'maintenance':
-            return 'border-l-blue-500';
+            return 'border dark:border-none-l-blue-500';
         default:
-            return 'border-l-gray-500';
+            return 'border dark:border-none-l-gray-500';
     }
 };
 
@@ -166,27 +166,27 @@ export default function ServerStatus() {
     return (
         <>
             <Header />
-            
+
             {/* Hero Section */}
-            <section className="section-padding gradient- relative overflow-hidden">
+            <section className="section-padding bg-background - relative overflow-hidden">
                 <div className="absolute inset-0 opacity-10">
                     <div className="absolute inset-0 bg-[url('/grid-pattern.svg')] bg-center"></div>
                 </div>
-                
+
                 <div className="container mx-auto container-padding relative z-10 text-center">
                     <div className="max-w-4xl mx-auto animate-slide-up">
-                        <div className="inline-flex items-center px-4 py-2 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 mb-6">
+                        <div className="inline-flex items-center px-4 py-2 rounded-full bg-white/10 backdrop-blur-sm border dark:border-none border dark:border-none-white/20 mb-6">
                             <Activity className="w-4 h-4 mr-2 text-green-400" />
                             <span className="text-sm font-medium text-white">Real-Time Status • 24/7 Monitoring • Transparent Updates</span>
                         </div>
-                        
+
                         <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold mb-6 leading-tight text-white">
                             📋 System Status
                             <span className="text-gradient block">All Systems Operational</span>
                         </h1>
-                        
+
                         <p className="text-xl text-white/90 mb-8 max-w-3xl mx-auto">
-                            Monitor the real-time status of all OceanLinux services and infrastructure. 
+                            Monitor the real-time status of all OceanLinux services and infrastructure.
                             Stay informed about any incidents, maintenance, or performance updates.
                         </p>
 
@@ -212,7 +212,7 @@ export default function ServerStatus() {
                 <div className="container mx-auto px-6">
                     {/* Overall Status */}
                     <div className="max-w-4xl mx-auto mb-12">
-                        <Card className="mb-8 bg-green-50 border-green-200">
+                        <Card className="mb-8 bg-green-50 border dark:border-none-green-200">
                             <CardContent className="p-6">
                                 <div className="flex items-center justify-center gap-3">
                                     <CheckCircle className="w-8 h-8 text-green-600" />
@@ -241,7 +241,7 @@ export default function ServerStatus() {
                         {/* Service Status */}
                         <div className="space-y-6">
                             <h2 className="text-2xl font-bold mb-6">Service Status</h2>
-                            
+
                             <div className="grid gap-4">
                                 {serviceStatus.map((service, index) => (
                                     <Card key={index}>
@@ -275,9 +275,9 @@ export default function ServerStatus() {
                         </div>
 
                         {/* Datacenter Status */}
-                        <div className="mt-12">
+                        {/* <div className="mt-12">
                             <h2 className="text-2xl font-bold mb-6">Datacenter Status</h2>
-                            
+
                             <div className="grid md:grid-cols-3 gap-6">
                                 {datacenters.map((dc, index) => (
                                     <Card key={index}>
@@ -292,7 +292,7 @@ export default function ServerStatus() {
                                                 </div>
                                                 {getStatusIcon(dc.status)}
                                             </div>
-                                            
+
                                             <div className="space-y-2 text-sm">
                                                 <div className="flex justify-between">
                                                     <span>Uptime:</span>
@@ -307,15 +307,15 @@ export default function ServerStatus() {
                                     </Card>
                                 ))}
                             </div>
-                        </div>
+                        </div> */}
 
                         {/* Recent Incidents */}
-                        <div className="mt-12">
+                        {/* <div className="mt-12">
                             <h2 className="text-2xl font-bold mb-6">Recent Incidents</h2>
-                            
+
                             <div className="space-y-4">
                                 {recentIncidents.map((incident, index) => (
-                                    <Card key={index} className={`border-l-4 ${getSeverityColor(incident.severity)}`}>
+                                    <Card key={index} className={`border dark:border-none-l-4 ${getSeverityColor(incident.severity)}`}>
                                         <CardContent className="p-6">
                                             <div className="flex items-start justify-between mb-3">
                                                 <div>
@@ -334,7 +334,7 @@ export default function ServerStatus() {
                                     </Card>
                                 ))}
                             </div>
-                        </div>
+                        </div> */}
                     </div>
                 </div>
             </section>

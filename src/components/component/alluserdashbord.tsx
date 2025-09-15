@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge"
 export function alluserdashbord() {
   return (
     <div className="flex flex-col min-h-screen w-full bg-muted/40">
-      <header className="flex items-center h-16 px-4 border-b bg-background shrink-0 md:px-6">
+      <header className="flex items-center h-16 px-4 border dark:border-none-b bg-background shrink-0 md:px-6">
         <div className="flex items-center gap-2 text-lg font-semibold sm:text-base mr-4">
           <Package2Icon className="w-6 h-6" />
           <span className="sr-only">Acme VPS</span>

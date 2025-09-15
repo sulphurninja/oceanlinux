@@ -40,7 +40,7 @@ const MyAccount = () => {
 
     return (
         <div className='w-full'>
-            <div className='h-[63px] flex items-center gap-2 border-b p-4'>
+            <div className='h-[63px] flex items-center gap-2 border dark:border-none-b p-4'>
                 <User />
                 <h1 className='text-xl'>My Account</h1>
             </div>

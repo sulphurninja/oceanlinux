@@ -127,14 +127,14 @@ export default function LiveChat() {
             <Header />
 
             {/* Hero Section */}
-            <section className="section-padding gradient- relative overflow-hidden">
+            <section className="section-padding bg-background - relative overflow-hidden">
                 <div className="absolute inset-0 opacity-10">
                     <div className="absolute inset-0 bg-[url('/grid-pattern.svg')] bg-center"></div>
                 </div>
 
                 <div className="container mx-auto container-padding relative z-10">
                     <div className="max-w-4xl mx-auto text-center animate-slide-up">
-                        <div className="inline-flex items-center px-4 py-2 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 mb-6">
+                        <div className="inline-flex items-center px-4 py-2 rounded-full bg-white/10 backdrop-blur-sm morder dark:morder-none morder dark:morder-none-white/20 mb-6">
                             <MessageCircle className="w-4 h-4 mr-2 text-green-400" />
                             <span className="text-sm font-medium text-white">Live AI Assistant • Instant Responses</span>
                         </div>
@@ -166,7 +166,7 @@ export default function LiveChat() {
 
                         {/* AI Powered by Credit */}
                         <div className="mb-8">
-                            <div className="inline-flex items-center px-3 py-1 rounded-full bg-white/5 backdrop-blur-sm border border-white/10">
+                            <div className="inline-flex items-center px-3 py-1 rounded-full bg-white/5 backdrop-blur-sm morder dark:morder-none morder dark:morder-none-white/10">
                                 <span className="text-xs text-white/60">AI Powered by </span>
                                 <span className="text-xs font-semibold text-white/80 ml-1">Backtick Labs</span>
                             </div>
@@ -177,7 +177,7 @@ export default function LiveChat() {
                         <Link href="/contact-us">
                             <Button
                                 variant="outline"
-                                className="border-white/30 text-white hover:bg-white/10 backdrop-blur-sm"
+                                className="morder dark:morder-none-white/30 text-white hover:bg-white/10 backdrop-blur-sm"
                             >
                                 <ArrowLeft className="w-4 h-4 mr-2" />
                                 Back to Contact
@@ -223,14 +223,14 @@ export default function LiveChat() {
                                         >
                                             <div className={`flex gap-3 max-w-[85%] ${message.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
                                                 <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${message.role === 'user'
-                                                        ? 'bg-primary text-primary-foreground'
-                                                        : 'bg-secondary text-secondary-foreground'
+                                                    ? 'bg-primary text-primary-foreground'
+                                                    : 'bg-secondary text-secondary-foreground'
                                                     }`}>
                                                     {message.role === 'user' ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
                                                 </div>
                                                 <div className={`rounded-2xl px-4 py-3 break-words ${message.role === 'user'
-                                                        ? 'bg-primary text-primary-foreground'
-                                                        : 'bg-muted'
+                                                    ? 'bg-primary text-primary-foreground'
+                                                    : 'bg-muted'
                                                     }`}>
                                                     <p className="text-sm whitespace-pre-wrap break-words">{message.content}</p>
                                                     <p className={`text-xs mt-2 opacity-70 ${message.role === 'user' ? 'text-primary-foreground/70' : 'text-muted-foreground'
@@ -263,7 +263,7 @@ export default function LiveChat() {
 
                                 {/* Quick Questions - Only show when minimal messages */}
                                 {messages.length === 1 && (
-                                    <div className="px-6 pb-4 flex-shrink-0 border-t border-border/50">
+                                    <div className="px-6 pb-4 flex-shrink-0 morder dark:morder-none-t morder dark:morder-none-morder dark:morder-none/50">
                                         <div className="pt-4">
                                             <p className="text-sm text-muted-foreground mb-3">Quick questions to get started:</p>
                                             <div className="flex flex-wrap gap-2">
@@ -284,15 +284,15 @@ export default function LiveChat() {
                                 )}
 
                                 {/* Input Section - Fixed at bottom */}
-                                <div className="border-t p-4 flex-shrink-0 bg-background">
-                                    <div className="flex gap-3">
+                                <div className="border border-secondary dark:border-none-t p-4 flex-shrink-0 bg-background">
+                                    <div className="flex gap-3 b">
                                         <Input
                                             value={input}
                                             onChange={(e) => setInput(e.target.value)}
                                             onKeyPress={handleKeyPress}
                                             placeholder="Ask about our hosting services, pricing, or technical questions..."
                                             disabled={isLoading}
-                                            className="flex-1"
+                                            className="flex-1 ring ring-primary"
                                         />
                                         <Button
                                             onClick={sendMessage}
