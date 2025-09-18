@@ -52,6 +52,7 @@
     "react-day-picker": "^9.9.0",
     "react-dom": "^18",
     "react-quill": "^2.0.0",
+    "react-resizable-panels": "^3.0.6",
     "recharts": "^2.12.7",
     "sonner": "^1.7.4",
     "tailwind-merge": "^2.4.0",

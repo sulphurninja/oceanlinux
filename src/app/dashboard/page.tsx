@@ -272,95 +272,75 @@ export default function Dashboard() {
     switch (status.toLowerCase()) {
       case 'completed':
       case 'active':
-        return <CheckCircleIcon className="h-4 w-4" />;
+        return <CheckCircleIcon className="h-3 w-3 sm:h-4 sm:w-4" />;
       case 'pending':
       case 'provisioning':
-        return <ClockIcon className="h-4 w-4" />;
+        return <ClockIcon className="h-3 w-3 sm:h-4 sm:w-4" />;
       case 'failed':
       case 'terminated':
-        return <XCircleIcon className="h-4 w-4" />;
+        return <XCircleIcon className="h-3 w-3 sm:h-4 sm:w-4" />;
       default:
-        return <AlertCircleIcon className="h-4 w-4" />;
+        return <AlertCircleIcon className="h-3 w-3 sm:h-4 sm:w-4" />;
     }
   };
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center px-4">
         <div className="flex flex-col items-center gap-4">
-          <div className="animate-spin rounded-full h-8 w-8 border dark:border-none-b-2 border dark:border-none-primary"></div>
-          <p className="text-muted-foreground">Loading your dashboard...</p>
+          <div className="relative">
+            <div className="w-12 h-12 sm:w-16 sm:h-16 bg-primary/20 rounded-full animate-pulse"></div>
+            <div className="absolute inset-0 m-auto animate-spin rounded-full h-6 w-6 sm:h-8 sm:w-8 border-b-2 border-primary"></div>
+          </div>
+          <p className="text-muted-foreground text-sm sm:text-base">Loading your dashboard...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-background scrollbar-hide">
+    <div className="min-h-screen bg-background">
+      {/* Mobile Header */}
+      <div className="lg:hidden h-16" />
+
       {/* Mobile-first Header */}
-      <div className="sticky top-0 z-40 border dark:border-none-b dark:border dark:border-none -none bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="flex h-14 lg:h-16 items-center justify-between px-4 lg:px-6">
-          <div>
-            <div className="flex items-center gap-2 ml-12 lg:ml-0">
-              <LayoutDashboardIcon className="h-5 w-5" />
-              <div>
-                <h1 className="text-lg lg:text-xl font-semibold">Dashboard</h1>
-                {/* <p className='text-sm'>Your Overview of Activities</p> */}
+      <div className="sticky lg:top-0 z-40  bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        <div className="w-full max-w-7xl -mt-12 mx-auto px-3 sm:px-6">
+          <div className="flex h-14 sm:h-16 items-center justify-between">
+            <div className="flex items-center gap-2 min-w-0 flex-1">
+              <LayoutDashboardIcon className="h-4 w-4 sm:h-5 sm:w-5 flex-shrink-0" />
+              <div className="min-w-0 flex-1">
+                <h1 className="text-base sm:text-lg lg:text-xl font-semibold truncate">Dashboard</h1>
+                <p className="text-xs text-muted-foreground hidden sm:block">Your Overview of Activities</p>
               </div>
             </div>
-
           </div>
-          {/* <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm">
-                <Filter className="h-4 w-4 mr-2" />
-                <span className="hidden sm:inline">
-                  {timeframe === '7d' ? '7 Days' : timeframe === '30d' ? '30 Days' : '90 Days'}
-                </span>
-                <span className="sm:hidden">
-                  {timeframe === '7d' ? '7d' : timeframe === '30d' ? '30d' : '90d'}
-                </span>
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => setTimeframe('7d')}>
-                Last 7 Days
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setTimeframe('30d')}>
-                Last 30 Days
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setTimeframe('90d')}>
-                Last 90 Days
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu> */}
         </div>
       </div>
 
-      <div className="p-4 lg:p-6 space-y-6 max-w-7xl mx-auto">
+      <div className="w-full md:max-w-7xl mt- mx-auto px-3 md:mt-12  sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-6">
         {/* Welcome Banner - Mobile Optimized */}
-        <Card className="relative bg-gradient-to-br from-purple-500/10 to-purple-600/5 overflow-hidden">
-          {/* <div className="absolute inset-0 bg-gradient-to-r from-primary/10 via-primary/5 to-transparent" /> */}
-          <CardContent className="relative p-4 lg:p-6">
-            <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
-              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+        <Card className="relative  bg-gradient-to-br from-purple-500/10 to-purple-600/5 overflow-hidden">
+          <CardContent className="relative p-3 sm:p-6">
+            <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3 lg:gap-4">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 flex-1 min-w-0">
                 <div className="hidden sm:block flex-shrink-0">
                   <DotLottieReact
                     src="/welcome.lottie"
                     loop
                     autoplay
-                    className="h-16 w-16 lg:h-20 lg:w-20"
+                    className="h-12 w-12 sm:h-16 sm:w-16 lg:h-20 lg:w-20"
                   />
                 </div>
-                <div>
-                  <h2 className="text-xl lg:text-2xl xl:text-3xl font-bold">
-                    Welcome back, {user?.name}!
+                <div className="min-w-0 flex-1">
+                  <h2 className="text-lg sm:text-xl lg:text-2xl xl:text-3xl font-bold break-words">
+                    Welcome back, {user?.name?.split(' ')[0] || user?.name}!
                   </h2>
                   <p className="text-muted-foreground mt-1 text-sm lg:text-base">
                     Here's what's happening with your services
                   </p>
                   <div className="flex items-center gap-2 mt-2 text-xs lg:text-sm text-muted-foreground">
-                    <CalendarIcon className="h-3 w-3 lg:h-4 lg:w-4" />
+                    <CalendarIcon className="h-3 w-3 lg:h-4 lg:w-4 flex-shrink-0" />
                     <span className="truncate">
                       {new Date().toLocaleDateString('en-IN', {
                         weekday: 'short',
@@ -371,15 +351,14 @@ export default function Dashboard() {
                   </div>
                 </div>
               </div>
-              <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
-                <Button size="sm" className="flex items-center gap-2" onClick={handleBrowsePlans}>
-                  <ServerIcon className="h-4 w-4" />
-                  IP Stock (Buy Now)
+              <div className="flex flex-row gap-2 w-full sm:w-auto">
+                <Button size="sm" className="flex items-center gap-1 h-8 px-3 text-xs flex-1 sm:flex-initial" onClick={handleBrowsePlans}>
+                  <ServerIcon className="h-3 w-3" />
+                  <span>Buy Now</span>
                 </Button>
-                <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={handleDownloadInvoice}>
-                  <Download className="h-4 w-4" />
-                  <span className="hidden sm:inline">Export</span>
-                  <span className="sm:hidden">Export</span>
+                <Button variant="outline" size="sm" className="flex items-center gap-1 h-8 px-3 text-xs flex-1 sm:flex-initial" onClick={handleDownloadInvoice}>
+                  <Download className="h-3 w-3" />
+                  <span>Export</span>
                 </Button>
               </div>
             </div>
@@ -387,74 +366,74 @@ export default function Dashboard() {
         </Card>
 
         {/* Stats Grid - Responsive */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
-          <Card className="p-3 lg:p-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <Card className="p-3">
             <CardContent className="p-0">
-              <div className="flex items-center justify-between">
+              <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0 flex-1">
-                  <p className="text-xs lg:text-sm font-medium text-muted-foreground truncate">Total Orders</p>
-                  <p className="text-lg lg:text-2xl font-bold">{stats?.totalOrders || 0}</p>
+                  <p className="text-xs font-medium text-muted-foreground line-clamp-2">Total Orders</p>
+                  <p className="text-lg sm:text-xl font-bold">{stats?.totalOrders || 0}</p>
                 </div>
-                <div className="h-8 w-8 lg:h-10 lg:w-10 bg-blue-100 dark:bg-blue-900/20 rounded-lg flex items-center justify-center flex-shrink-0">
-                  <ShoppingCartIcon className="h-4 w-4 lg:h-5 lg:w-5 text-blue-600 dark:text-blue-400" />
+                <div className="h-6 w-6 sm:h-8 sm:w-8 bg-blue-100 dark:bg-blue-900/20 rounded-lg flex items-center justify-center flex-shrink-0">
+                  <ShoppingCartIcon className="h-3 w-3 sm:h-4 sm:w-4 text-blue-600 dark:text-blue-400" />
                 </div>
               </div>
-              <div className="flex items-center gap-1 text-xs text-muted-foreground mt-2">
-                <TrendingUpIcon className="h-3 w-3" />
+              <div className="flex items-center gap-1 text-xs text-muted-foreground mt-1">
+                <TrendingUpIcon className="h-2.5 w-2.5" />
                 <span>All time</span>
               </div>
             </CardContent>
           </Card>
 
-          <Card className="p-3 lg:p-4">
+          <Card className="p-3">
             <CardContent className="p-0">
-              <div className="flex items-center justify-between">
+              <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0 flex-1">
-                  <p className="text-xs lg:text-sm font-medium text-muted-foreground truncate">Active Services</p>
-                  <p className="text-lg lg:text-2xl font-bold">{stats?.activeServices || 0}</p>
+                  <p className="text-xs font-medium text-muted-foreground line-clamp-2">Active Services</p>
+                  <p className="text-lg sm:text-xl font-bold">{stats?.activeServices || 0}</p>
                 </div>
-                <div className="h-8 w-8 lg:h-10 lg:w-10 bg-green-100 dark:bg-green-900/20 rounded-lg flex items-center justify-center flex-shrink-0">
-                  <ServerIcon className="h-4 w-4 lg:h-5 lg:w-5 text-green-600 dark:text-green-400" />
+                <div className="h-6 w-6 sm:h-8 sm:w-8 bg-green-100 dark:bg-green-900/20 rounded-lg flex items-center justify-center flex-shrink-0">
+                  <ServerIcon className="h-3 w-3 sm:h-4 sm:w-4 text-green-600 dark:text-green-400" />
                 </div>
               </div>
-              <div className="flex items-center gap-1 text-xs text-muted-foreground mt-2">
-                <ActivityIcon className="h-3 w-3" />
+              <div className="flex items-center gap-1 text-xs text-muted-foreground mt-1">
+                <ActivityIcon className="h-2.5 w-2.5" />
                 <span>Running</span>
               </div>
             </CardContent>
           </Card>
 
-          <Card className="p-3 lg:p-4">
+          <Card className="p-3">
             <CardContent className="p-0">
-              <div className="flex items-center justify-between">
+              <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0 flex-1">
-                  <p className="text-xs lg:text-sm font-medium text-muted-foreground truncate">Total Spent</p>
-                  <p className="text-lg lg:text-2xl font-bold">{formatCurrency(stats?.totalSpent || 0)}</p>
+                  <p className="text-xs font-medium text-muted-foreground line-clamp-2">Total Spent</p>
+                  <p className="text-sm sm:text-lg font-bold break-words">{formatCurrency(stats?.totalSpent || 0)}</p>
                 </div>
-                <div className="h-8 w-8 lg:h-10 lg:w-10 bg-purple-100 dark:bg-purple-900/20 rounded-lg flex items-center justify-center flex-shrink-0">
-                  <CreditCardIcon className="h-4 w-4 lg:h-5 lg:w-5 text-purple-600 dark:text-purple-400" />
+                <div className="h-6 w-6 sm:h-8 sm:w-8 bg-purple-100 dark:bg-purple-900/20 rounded-lg flex items-center justify-center flex-shrink-0">
+                  <CreditCardIcon className="h-3 w-3 sm:h-4 sm:w-4 text-purple-600 dark:text-purple-400" />
                 </div>
               </div>
-              <div className="flex items-center gap-1 text-xs text-muted-foreground mt-2">
-                <IndianRupee className="h-3 w-3" />
+              <div className="flex items-center gap-1 text-xs text-muted-foreground mt-1">
+                <IndianRupee className="h-2.5 w-2.5" />
                 <span>Lifetime</span>
               </div>
             </CardContent>
           </Card>
 
-          <Card className="p-3 lg:p-4">
+          <Card className="p-3">
             <CardContent className="p-0">
-              <div className="flex items-center justify-between">
+              <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0 flex-1">
-                  <p className="text-xs lg:text-sm font-medium text-muted-foreground truncate">Pending</p>
-                  <p className="text-lg lg:text-2xl font-bold">{stats?.pendingOrders || 0}</p>
+                  <p className="text-xs font-medium text-muted-foreground line-clamp-2">Pending</p>
+                  <p className="text-lg sm:text-xl font-bold">{stats?.pendingOrders || 0}</p>
                 </div>
-                <div className="h-8 w-8 lg:h-10 lg:w-10 bg-orange-100 dark:bg-orange-900/20 rounded-lg flex items-center justify-center flex-shrink-0">
-                  <ClockIcon className="h-4 w-4 lg:h-5 lg:w-5 text-orange-600 dark:text-orange-400" />
+                <div className="h-6 w-6 sm:h-8 sm:w-8 bg-orange-100 dark:bg-orange-900/20 rounded-lg flex items-center justify-center flex-shrink-0">
+                  <ClockIcon className="h-3 w-3 sm:h-4 sm:w-4 text-orange-600 dark:text-orange-400" />
                 </div>
               </div>
-              <div className="flex items-center gap-1 text-xs text-muted-foreground mt-2">
-                <AlertCircleIcon className="h-3 w-3" />
+              <div className="flex items-center gap-1 text-xs text-muted-foreground mt-1">
+                <AlertCircleIcon className="h-2.5 w-2.5" />
                 <span>Attention</span>
               </div>
             </CardContent>
@@ -462,59 +441,61 @@ export default function Dashboard() {
         </div>
 
         {/* Responsive Tabs */}
-        <Tabs defaultValue="overview" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-3 max-w-md mx-auto lg:max-w-lg">
-            <TabsTrigger value="overview" className="text-xs lg:text-sm">Overview</TabsTrigger>
-            <TabsTrigger value="orders" className="text-xs lg:text-sm">Orders</TabsTrigger>
-            <TabsTrigger value="analytics" className="text-xs lg:text-sm">Analytics</TabsTrigger>
-          </TabsList>
+        <Tabs defaultValue="overview" className="space-y-4 sm:space-y-6">
+          <div className="flex justify-center">
+            <TabsList className="grid w-full max-w-sm grid-cols-3">
+              <TabsTrigger value="overview" className="text-xs sm:text-sm px-2">Overview</TabsTrigger>
+              <TabsTrigger value="orders" className="text-xs sm:text-sm px-2">Orders</TabsTrigger>
+              <TabsTrigger value="analytics" className="text-xs sm:text-sm px-2">Analytics</TabsTrigger>
+            </TabsList>
+          </div>
 
           {/* Overview Tab */}
-          <TabsContent value="overview" className="space-y-6">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <TabsContent value="overview" className="space-y-4 sm:space-y-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
               {/* Order Status Breakdown */}
               <Card>
                 <CardHeader className="pb-3">
-                  <CardTitle className="flex items-center gap-2 text-base lg:text-lg">
-                    <Package className="h-4 w-4 lg:h-5 lg:w-5" />
+                  <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
+                    <Package className="h-4 w-4" />
                     Order Status
                   </CardTitle>
-                  <CardDescription className="text-xs lg:text-sm">
+                  <CardDescription className="text-xs sm:text-sm">
                     Current status of your orders
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-3">
+                <CardContent className="space-y-3">
+                  <div className="space-y-2">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <div className="h-3 w-3 bg-green-500 rounded-full"></div>
-                        <span className="text-sm">Completed</span>
+                        <div className="h-2.5 w-2.5 bg-green-500 rounded-full"></div>
+                        <span className="text-xs sm:text-sm">Completed</span>
                       </div>
-                      <span className="font-semibold">{stats?.orderStatusBreakdown?.completed || 0}</span>
+                      <span className="font-semibold text-xs sm:text-sm">{stats?.orderStatusBreakdown?.completed || 0}</span>
                     </div>
-                    <Progress value={((stats?.orderStatusBreakdown?.completed || 0) / Math.max(stats?.totalOrders || 1, 1)) * 100} className="h-2" />
+                    <Progress value={((stats?.orderStatusBreakdown?.completed || 0) / Math.max(stats?.totalOrders || 1, 1)) * 100} className="h-1.5" />
                   </div>
 
-                  <div className="space-y-3">
+                  <div className="space-y-2">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <div className="h-3 w-3 bg-yellow-500 rounded-full"></div>
-                        <span className="text-sm">Pending</span>
+                        <div className="h-2.5 w-2.5 bg-yellow-500 rounded-full"></div>
+                        <span className="text-xs sm:text-sm">Pending</span>
                       </div>
-                      <span className="font-semibold">{stats?.orderStatusBreakdown?.pending || 0}</span>
+                      <span className="font-semibold text-xs sm:text-sm">{stats?.orderStatusBreakdown?.pending || 0}</span>
                     </div>
-                    <Progress value={((stats?.orderStatusBreakdown?.pending || 0) / Math.max(stats?.totalOrders || 1, 1)) * 100} className="h-2" />
+                    <Progress value={((stats?.orderStatusBreakdown?.pending || 0) / Math.max(stats?.totalOrders || 1, 1)) * 100} className="h-1.5" />
                   </div>
 
-                  <div className="space-y-3">
+                  <div className="space-y-2">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <div className="h-3 w-3 bg-red-500 rounded-full"></div>
-                        <span className="text-sm">Failed</span>
+                        <div className="h-2.5 w-2.5 bg-red-500 rounded-full"></div>
+                        <span className="text-xs sm:text-sm">Failed</span>
                       </div>
-                      <span className="font-semibold">{stats?.orderStatusBreakdown?.failed || 0}</span>
+                      <span className="font-semibold text-xs sm:text-sm">{stats?.orderStatusBreakdown?.failed || 0}</span>
                     </div>
-                    <Progress value={((stats?.orderStatusBreakdown?.failed || 0) / Math.max(stats?.totalOrders || 1, 1)) * 100} className="h-2" />
+                    <Progress value={((stats?.orderStatusBreakdown?.failed || 0) / Math.max(stats?.totalOrders || 1, 1)) * 100} className="h-1.5" />
                   </div>
                 </CardContent>
               </Card>
@@ -522,36 +503,39 @@ export default function Dashboard() {
               {/* Account Information */}
               <Card>
                 <CardHeader className="pb-3">
-                  <CardTitle className="flex items-center gap-2 text-base lg:text-lg">
-                    <Users className="h-4 w-4 lg:h-5 lg:w-5" />
+                  <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
+                    <Users className="h-4 w-4" />
                     Account Information
                   </CardTitle>
-                  <CardDescription className="text-xs lg:text-sm">
+                  <CardDescription className="text-xs sm:text-sm">
                     Your account details and preferences
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-3">
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm text-muted-foreground">Name</span>
-                      <span className="font-medium text-sm truncate ml-2">{user?.name}</span>
+                <CardContent className="space-y-3">
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-start gap-2">
+                      <span className="text-xs sm:text-sm text-muted-foreground">Name</span>
+                      <span className="font-medium text-xs sm:text-sm break-words text-right max-w-[60%]">{user?.name}</span>
                     </div>
                     <Separator />
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm text-muted-foreground">Email</span>
-                      <span className="font-medium text-sm truncate ml-2">{user?.email}</span>
+                    <div className="flex justify-between items-start gap-2">
+                      <span className="text-xs sm:text-sm text-muted-foreground">Email</span>
+                      <span className="font-medium text-xs sm:text-sm break-all text-right max-w-[60%]">{user?.email}</span>
                     </div>
                     <Separator />
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm text-muted-foreground">Member Since</span>
-                      <span className="font-medium text-sm">
-                        {user?.createdAt ? formatDate(user.createdAt) : 'N/A'}
+                    <div className="flex justify-between items-start gap-2">
+                      <span className="text-xs sm:text-sm text-muted-foreground">Member Since</span>
+                      <span className="font-medium text-xs sm:text-sm text-right">
+                        {user?.createdAt ? new Date(user.createdAt).toLocaleDateString('en-IN', {
+                          year: 'numeric',
+                          month: 'short'
+                        }) : 'N/A'}
                       </span>
                     </div>
                     <Separator />
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm text-muted-foreground">Account Status</span>
-                      <Badge variant="outline" className="bg-green-50 text-green-700 border dark:border-none-green-200 text-xs">
+                    <div className="flex justify-between items-center gap-2">
+                      <span className="text-xs sm:text-sm text-muted-foreground">Account Status</span>
+                      <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 text-xs">
                         Active
                       </Badge>
                     </div>
@@ -563,35 +547,37 @@ export default function Dashboard() {
             {/* Recent Activity */}
             <Card>
               <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base lg:text-lg">
-                  <ActivityIcon className="h-4 w-4 lg:h-5 lg:w-5" />
+                <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
+                  <ActivityIcon className="h-4 w-4" />
                   Recent Orders
                 </CardTitle>
-                <CardDescription className="text-xs lg:text-sm">
+                <CardDescription className="text-xs sm:text-sm">
                   Your latest order activity
                 </CardDescription>
               </CardHeader>
               <CardContent>
                 {stats?.recentOrders?.length ? (
-                  <div className="space-y-3">
+                  <div className="space-y-2">
                     {stats.recentOrders.slice(0, 5).map((order) => (
-                      <div key={order._id} className="flex items-center justify-between p-3 rounded-lg  border dark:border-none bg-card hover:bg-muted/50 transition-colors">
-                        <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <div key={order._id} className="flex items-center justify-between p-2 rounded-lg  dark:shadow-white shadow bg-card hover:bg-muted/50 transition-colors gap-2">
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
                           <div className={cn("h-2 w-2 rounded-full flex-shrink-0", getStatusColor(order.status))} />
                           <div className="min-w-0 flex-1">
-                            <p className="font-medium text-sm truncate">{order.productName}</p>
-                            <p className="text-xs text-muted-foreground">
-                              <span className="truncate">{order.memory}</span>
-                              <span className="hidden sm:inline"> • {formatDate(order.createdAt)}</span>
-                            </p>
-                            <p className="text-xs text-muted-foreground sm:hidden">
-                              {new Date(order.createdAt).toLocaleDateString()}
-                            </p>
+                            <p className="font-medium text-xs sm:text-sm line-clamp-1">{order.productName}</p>
+                            <div className="flex flex-col text-xs text-muted-foreground">
+                              <span className="line-clamp-1">{order.memory}</span>
+                              <span className="line-clamp-1">
+                                {new Date(order.createdAt).toLocaleDateString('en-IN', {
+                                  month: 'short',
+                                  day: 'numeric'
+                                })}
+                              </span>
+                            </div>
                           </div>
                         </div>
-                        <div className="text-right flex-shrink-0 ml-3">
-                          <p className="font-semibold text-sm">{formatCurrency(order.price)}</p>
-                          <Badge variant="outline" className="text-xs mt-1">
+                        <div className="text-right flex-shrink-0">
+                          <p className="font-semibold text-xs">{formatCurrency(order.price)}</p>
+                          <Badge variant="outline" className="text-xs mt-1 hidden sm:inline-flex">
                             {order.status}
                           </Badge>
                         </div>
@@ -599,9 +585,9 @@ export default function Dashboard() {
                     ))}
                   </div>
                 ) : (
-                  <div className="text-center py-8">
-                    <Package className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                    <p className="text-muted-foreground">No recent orders found</p>
+                  <div className="text-center py-6">
+                    <Package className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
+                    <p className="text-muted-foreground text-sm">No recent orders found</p>
                   </div>
                 )}
               </CardContent>
@@ -611,48 +597,45 @@ export default function Dashboard() {
           {/* Orders Tab */}
           <TabsContent value="orders">
             <Card>
-              <CardHeader>
-                <CardTitle className="text-base lg:text-lg">All Orders</CardTitle>
-                <CardDescription className="text-xs lg:text-sm">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base sm:text-lg">All Orders</CardTitle>
+                <CardDescription className="text-xs sm:text-sm">
                   Complete history of your orders and services
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="rounded-lg border dark:border-none overflow-hidden">
+                <div className="rounded-lg border overflow-hidden">
                   <div className="overflow-x-auto">
-                    <Table>
+                    <Table className=''>
                       <TableHeader>
                         <TableRow>
-                          <TableHead className="min-w-[150px]">Product</TableHead>
-                          <TableHead className="hidden sm:table-cell min-w-[120px]">Configuration</TableHead>
-                          <TableHead className="hidden md:table-cell min-w-[140px]">Date</TableHead>
-                          <TableHead className="min-w-[100px]">Status</TableHead>
-                          <TableHead className="text-right min-w-[100px]">Amount</TableHead>
+                          <TableHead className="min-w-[120px] text-xs">Product</TableHead>
+                          <TableHead className="hidden sm:table-cell min-w-[80px] text-xs">Config</TableHead>
+                          <TableHead className="hidden md:table-cell min-w-[90px] text-xs">Date</TableHead>
+                          <TableHead className="min-w-[70px] text-xs">Status</TableHead>
+                          <TableHead className="text-right min-w-[70px] text-xs">Amount</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {stats?.recentOrders?.map((order) => (
                           <TableRow key={order._id}>
-                            <TableCell className="max-w-[150px]">
+                            <TableCell className="max-w-[120px]">
                               <div>
-                                <p className="font-medium truncate text-sm">{order.productName}</p>
-                                <p className="text-xs text-muted-foreground sm:hidden truncate">
+                                <p className="font-medium line-clamp-2 text-xs">{order.productName}</p>
+                                <p className="text-xs text-muted-foreground sm:hidden line-clamp-1">
                                   {order.memory}
                                 </p>
                               </div>
                             </TableCell>
                             <TableCell className="hidden sm:table-cell">
-                              <span className="text-sm">{order.memory}</span>
+                              <span className="text-xs line-clamp-1">{order.memory}</span>
                             </TableCell>
                             <TableCell className="hidden md:table-cell">
-                              <div className="text-sm">
-                                <p>{new Date(order.createdAt).toLocaleDateString()}</p>
-                                <p className="text-muted-foreground text-xs">
-                                  {new Date(order.createdAt).toLocaleTimeString([], {
-                                    hour: '2-digit',
-                                    minute: '2-digit'
-                                  })}
-                                </p>
+                              <div className="text-xs">
+                                <p>{new Date(order.createdAt).toLocaleDateString('en-IN', {
+                                  month: 'short',
+                                  day: 'numeric'
+                                })}</p>
                               </div>
                             </TableCell>
                             <TableCell>
@@ -660,17 +643,17 @@ export default function Dashboard() {
                                 variant="outline"
                                 className={cn(
                                   "text-xs",
-                                  order.status === 'completed' && "bg-green-50 text-green-700 border dark:border-none-green-200",
-                                  order.status === 'pending' && "bg-yellow-50 text-yellow-700 border dark:border-none-yellow-200",
-                                  order.status === 'failed' && "bg-red-50 text-red-700 border dark:border-none-red-200"
+                                  order.status === 'completed' && "bg-green-50 text-green-700 border-green-200",
+                                  order.status === 'pending' && "bg-yellow-50 text-yellow-700 border-yellow-200",
+                                  order.status === 'failed' && "bg-red-50 text-red-700 border-red-200"
                                 )}
                               >
                                 {getStatusIcon(order.status)}
                                 <span className="ml-1 capitalize hidden sm:inline">{order.status}</span>
                               </Badge>
                             </TableCell>
-                            <TableCell className="text-right font-semibold text-sm">
-                              {formatCurrency(order.price)}
+                            <TableCell className="text-right font-semibold text-xs">
+                              <div className="break-words">{formatCurrency(order.price)}</div>
                             </TableCell>
                           </TableRow>
                         ))}
@@ -684,27 +667,27 @@ export default function Dashboard() {
 
           {/* Analytics Tab */}
           <TabsContent value="analytics">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
               <Card>
-                <CardHeader>
-                  <CardTitle className="text-base lg:text-lg">Spending Overview</CardTitle>
-                  <CardDescription className="text-xs lg:text-sm">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base sm:text-lg">Spending Overview</CardTitle>
+                  <CardDescription className="text-xs sm:text-sm">
                     Your spending patterns over time
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
-                      <span className="text-sm">This Month</span>
-                      <span className="font-semibold">{formatCurrency(stats?.monthlySpending?.[0] || 0)}</span>
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between p-2 rounded-lg bg-muted/50">
+                      <span className="text-xs sm:text-sm">This Month</span>
+                      <span className="font-semibold text-xs sm:text-sm break-words">{formatCurrency(stats?.monthlySpending?.[0] || 0)}</span>
                     </div>
-                    <div className="flex items-center justify-between p-3 rounded-lg bg-muted/30">
-                      <span className="text-sm">Last Month</span>
-                      <span className="font-semibold">{formatCurrency(stats?.monthlySpending?.[1] || 0)}</span>
+                    <div className="flex items-center justify-between p-2 rounded-lg bg-muted/30">
+                      <span className="text-xs sm:text-sm">Last Month</span>
+                      <span className="font-semibold text-xs sm:text-sm break-words">{formatCurrency(stats?.monthlySpending?.[1] || 0)}</span>
                     </div>
-                    <div className="flex items-center justify-between p-3 rounded-lg bg-muted/20">
-                      <span className="text-sm">Average Monthly</span>
-                      <span className="font-semibold">
+                    <div className="flex items-center justify-between p-2 rounded-lg bg-muted/20">
+                      <span className="text-xs sm:text-sm">Average Monthly</span>
+                      <span className="font-semibold text-xs sm:text-sm break-words">
                         {formatCurrency(
                           (stats?.monthlySpending?.reduce((a, b) => a + b, 0) || 0) /
                           Math.max(stats?.monthlySpending?.length || 1, 1)
@@ -717,45 +700,45 @@ export default function Dashboard() {
 
               {/* Updated Quick Actions */}
               <Card>
-                <CardHeader>
-                  <CardTitle className="text-base lg:text-lg">Quick Actions</CardTitle>
-                  <CardDescription className="text-xs lg:text-sm">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base sm:text-lg">Quick Actions</CardTitle>
+                  <CardDescription className="text-xs sm:text-sm">
                     Frequently used actions
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <div className="grid grid-cols-1 gap-3">
+                  <div className="grid grid-cols-1 gap-2">
                     <Button
                       variant="outline"
-                      className="justify-start h-10 lg:h-12 text-sm"
+                      className="justify-start h-9 text-xs sm:text-sm"
                       onClick={handleBrowsePlans}
                     >
-                      <ServerIcon className="h-4 w-4 mr-3" />
-                      Browse New Plans
+                      <ServerIcon className="h-3 w-3 mr-2" />
+                      <span className="truncate">Browse New Plans</span>
                     </Button>
                     <Button
                       variant="outline"
-                      className="justify-start h-10 lg:h-12 text-sm"
+                      className="justify-start h-9 text-xs sm:text-sm"
                       onClick={handleViewAllOrders}
                     >
-                      <Eye className="h-4 w-4 mr-3" />
-                      View All Orders
+                      <Eye className="h-3 w-3 mr-2" />
+                      <span className="truncate">View All Orders</span>
                     </Button>
                     <Button
                       variant="outline"
-                      className="justify-start h-10 lg:h-12 text-sm"
+                      className="justify-start h-9 text-xs sm:text-sm"
                       onClick={handleDownloadInvoice}
                     >
-                      <Download className="h-4 w-4 mr-3" />
-                      Download Invoice
+                      <Download className="h-3 w-3 mr-2" />
+                      <span className="truncate">Download Invoice</span>
                     </Button>
                     <Button
                       variant="outline"
-                      className="justify-start h-10 lg:h-12 text-sm"
+                      className="justify-start h-9 text-xs sm:text-sm"
                       onClick={handleAccountSettings}
                     >
-                      <Settings className="h-4 w-4 mr-3" />
-                      Account Settings
+                      <Settings className="h-3 w-3 mr-2" />
+                      <span className="truncate">Account Settings</span>
                     </Button>
                   </div>
                 </CardContent>
@@ -765,32 +748,32 @@ export default function Dashboard() {
         </Tabs>
       </div>
 
-      {/* Download Invoice Dialog */}
+      {/* Download Invoice Dialog - Mobile Responsive */}
       <Dialog open={showInvoiceDialog} onOpenChange={setShowInvoiceDialog}>
-        <DialogContent className="sm:max-w-md mx-4">
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-md mx-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-base">
-              <Download className="h-5 w-5" />
+              <Download className="h-4 w-4" />
               Download Invoice
             </DialogTitle>
-            <DialogDescription className="text-sm">
+            <DialogDescription className="text-xs sm:text-sm">
               Select an order to download its invoice as PDF
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4">
+          <div className="space-y-3">
             <div className="space-y-2">
-              <Label className="text-sm">Select Order</Label>
+              <Label className="text-xs sm:text-sm">Select Order</Label>
               <Select value={selectedOrderForInvoice} onValueChange={setSelectedOrderForInvoice}>
-                <SelectTrigger>
+                <SelectTrigger className="h-9 text-xs sm:text-sm">
                   <SelectValue placeholder="Choose an order..." />
                 </SelectTrigger>
                 <SelectContent>
                   {stats?.recentOrders?.map((order) => (
                     <SelectItem key={order._id} value={order._id}>
-                      <div className="flex items-center justify-between w-full">
-                        <span className="truncate max-w-[150px]">{order.productName}</span>
-                        <span className="ml-2 text-sm text-muted-foreground">
+                      <div className="flex items-center justify-between w-full gap-2">
+                        <span className="truncate max-w-[120px] text-xs">{order.productName}</span>
+                        <span className="text-xs text-muted-foreground flex-shrink-0">
                           {formatCurrency(order.price)}
                         </span>
                       </div>
@@ -801,12 +784,12 @@ export default function Dashboard() {
             </div>
 
             {selectedOrderForInvoice && (
-              <div className="p-3 rounded-lg bg-muted/50 text-sm">
+              <div className="p-2 rounded-lg bg-muted/50 text-xs">
                 <div className="flex justify-between items-center">
                   <span>Order Date:</span>
-                  <span>
+                  <span className="break-words">
                     {stats?.recentOrders?.find(o => o._id === selectedOrderForInvoice)?.createdAt
-                      ? formatDate(stats.recentOrders.find(o => o._id === selectedOrderForInvoice)!.createdAt)
+                      ? new Date(stats.recentOrders.find(o => o._id === selectedOrderForInvoice)!.createdAt).toLocaleDateString('en-IN')
                       : 'N/A'
                     }
                   </span>
@@ -815,7 +798,7 @@ export default function Dashboard() {
             )}
           </div>
 
-          <DialogFooter className="gap-2 flex-col sm:flex-row">
+          <DialogFooter className="gap-2 flex-col-reverse sm:flex-row">
             <Button
               variant="outline"
               onClick={() => {
@@ -823,23 +806,23 @@ export default function Dashboard() {
                 setSelectedOrderForInvoice('');
               }}
               disabled={isDownloadingInvoice}
-              className="w-full sm:w-auto"
+              className="w-full h-9 text-xs sm:text-sm"
             >
               Cancel
             </Button>
             <Button
               onClick={downloadInvoiceForOrder}
               disabled={!selectedOrderForInvoice || isDownloadingInvoice}
-              className="flex items-center gap-2 w-full sm:w-auto"
+              className="flex items-center gap-2 w-full h-9 text-xs sm:text-sm"
             >
               {isDownloadingInvoice ? (
                 <>
-                  <div className="animate-spin rounded-full h-4 w-4 border dark:border-none-b-2 border dark:border-none-white"></div>
-                  Generating...
+                  <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white"></div>
+                  <span>Loading...</span>
                 </>
               ) : (
                 <>
-                  <Download className="h-4 w-4" />
+                  <Download className="h-3 w-3" />
                   Download PDF
                 </>
               )}
@@ -848,42 +831,42 @@ export default function Dashboard() {
         </DialogContent>
       </Dialog>
 
-      {/* Account Settings Dialog */}
+      {/* Account Settings Dialog - Mobile Responsive */}
       <Dialog open={showSettingsDialog} onOpenChange={setShowSettingsDialog}>
-        <DialogContent className="sm:max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-lg mx-auto max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-base">
-              <Settings className="h-5 w-5" />
+              <Settings className="h-4 w-4" />
               Account Settings
             </DialogTitle>
-            <DialogDescription className="text-sm">
+            <DialogDescription className="text-xs sm:text-sm">
               Update your account information and security settings
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-6">
+          <div className="space-y-4">
             {/* Personal Information */}
-            <div className="space-y-4">
+            <div className="space-y-3">
               <div className="space-y-2">
-                <Label htmlFor="name" className="text-sm">Full Name</Label>
+                <Label htmlFor="name" className="text-xs sm:text-sm">Full Name</Label>
                 <Input
                   id="name"
                   value={settingsData.name}
                   onChange={(e) => setSettingsData(prev => ({ ...prev, name: e.target.value }))}
                   placeholder="Enter your full name"
-                  className="text-sm"
+                  className="text-xs sm:text-sm h-9"
                 />
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="email" className="text-sm">Email Address</Label>
+                <Label htmlFor="email" className="text-xs sm:text-sm">Email Address</Label>
                 <Input
                   id="email"
                   type="email"
                   value={settingsData.email}
                   onChange={(e) => setSettingsData(prev => ({ ...prev, email: e.target.value }))}
                   placeholder="Enter your email address"
-                  className="text-sm"
+                  className="text-xs sm:text-sm h-9"
                 />
               </div>
             </div>
@@ -891,68 +874,68 @@ export default function Dashboard() {
             <Separator />
 
             {/* Password Change Section */}
-            <div className="space-y-4">
-              <h4 className="text-sm font-semibold">Change Password</h4>
-              <p className="text-sm text-muted-foreground">
+            <div className="space-y-3">
+              <h4 className="text-xs sm:text-sm font-semibold">Change Password</h4>
+              <p className="text-xs text-muted-foreground">
                 Leave password fields empty if you don't want to change your password
               </p>
 
               <div className="space-y-2">
-                <Label htmlFor="currentPassword" className="text-sm">Current Password</Label>
+                <Label htmlFor="currentPassword" className="text-xs sm:text-sm">Current Password</Label>
                 <Input
                   id="currentPassword"
                   type="password"
                   value={settingsData.currentPassword}
                   onChange={(e) => setSettingsData(prev => ({ ...prev, currentPassword: e.target.value }))}
                   placeholder="Enter current password"
-                  className="text-sm"
+                  className="text-xs sm:text-sm h-9"
                 />
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="newPassword" className="text-sm">New Password</Label>
+                <Label htmlFor="newPassword" className="text-xs sm:text-sm">New Password</Label>
                 <Input
                   id="newPassword"
                   type="password"
                   value={settingsData.newPassword}
                   onChange={(e) => setSettingsData(prev => ({ ...prev, newPassword: e.target.value }))}
                   placeholder="Enter new password"
-                  className="text-sm"
+                  className="text-xs sm:text-sm h-9"
                 />
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="confirmPassword" className="text-sm">Confirm New Password</Label>
+                <Label htmlFor="confirmPassword" className="text-xs sm:text-sm">Confirm New Password</Label>
                 <Input
                   id="confirmPassword"
                   type="password"
                   value={settingsData.confirmPassword}
                   onChange={(e) => setSettingsData(prev => ({ ...prev, confirmPassword: e.target.value }))}
                   placeholder="Confirm new password"
-                  className="text-sm"
+                  className="text-xs sm:text-sm h-9"
                 />
               </div>
 
               {settingsData.newPassword && settingsData.confirmPassword &&
                 settingsData.newPassword !== settingsData.confirmPassword && (
-                  <p className="text-sm text-red-500">Passwords do not match</p>
+                  <p className="text-xs text-red-500">Passwords do not match</p>
                 )}
             </div>
 
             {/* Account Status */}
             <Separator />
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
               <div>
-                <h4 className="text-sm font-semibold">Account Status</h4>
-                <p className="text-sm text-muted-foreground">Your account is currently active</p>
+                <h4 className="text-xs sm:text-sm font-semibold">Account Status</h4>
+                <p className="text-xs text-muted-foreground">Your account is currently active</p>
               </div>
-              <Badge variant="outline" className="bg-green-50 text-green-700 border dark:border-none-green-200 text-xs">
+              <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 text-xs self-start">
                 Active
               </Badge>
             </div>
           </div>
 
-          <DialogFooter className="gap-2 flex-col sm:flex-row">
+          <DialogFooter className="gap-2 flex-col-reverse sm:flex-row pt-4">
             <Button
               variant="outline"
               onClick={() => {
@@ -965,23 +948,23 @@ export default function Dashboard() {
                 }));
               }}
               disabled={isUpdatingSettings}
-              className="w-full sm:w-auto"
+              className="w-full h-9 text-xs sm:text-sm"
             >
               Cancel
             </Button>
             <Button
               onClick={updateAccountSettings}
               disabled={isUpdatingSettings}
-              className="flex items-center gap-2 w-full sm:w-auto"
+              className="flex items-center gap-2 w-full h-9 text-xs sm:text-sm"
             >
               {isUpdatingSettings ? (
                 <>
-                  <div className="animate-spin rounded-full h-4 w-4 border dark:border-none-b-2 border dark:border-none-white"></div>
-                  Updating...
+                  <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white"></div>
+                  <span>Saving...</span>
                 </>
               ) : (
                 <>
-                  <Settings className="h-4 w-4" />
+                  <Settings className="h-3 w-3" />
                   Save Changes
                 </>
               )}

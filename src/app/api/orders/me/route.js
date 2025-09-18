@@ -11,7 +11,7 @@ export async function GET(request) {
         const userId = await getDataFromToken(request);
 
         // Find orders by user ID
-        const orders = await Order.find({ user: userId }).lean();
+        const orders = await Order.find({ user: userId }).lean().sort({ createdAt: -1 });
 
         // Return orders to client
         return new Response(JSON.stringify(orders), {

@@ -29,6 +29,13 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   ServerIcon,
   Check,
   AlertCircle,
@@ -45,14 +52,17 @@ import {
   Shield,
   ChevronDown,
   ChevronRight,
-  Package
+  Package,
+  Search,
+  Filter,
+  SlidersHorizontal
 } from "lucide-react";
 import { z } from "zod";
 import { cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-// ... keep all existing interfaces and schema unchanged ...
+// Keep all existing interfaces and global declarations unchanged...
 
 declare global {
   interface Window {
@@ -84,7 +94,6 @@ interface IPStock {
 }
 
 export default function IPStockPage() {
-  // ... keep all existing state and effects unchanged ...
   const [ipStocks, setIpStocks] = useState<IPStock[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showDialog, setShowDialog] = useState(false);
@@ -96,6 +105,11 @@ export default function IPStockPage() {
   } | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [paymentInitiating, setPaymentInitiating] = useState(false);
+
+  // NEW: Search and filter states
+  const [searchTerm, setSearchTerm] = useState("");
+  const [priceFilter, setPriceFilter] = useState<string>("all");
+  const [sortBy, setSortBy] = useState<string>("name");
 
   // Promo code states
   const [promoCode, setPromoCode] = useState("");
@@ -129,13 +143,72 @@ export default function IPStockPage() {
     fetchIPStocks();
   }, []);
 
-  // ... keep all existing functions unchanged until the return statement ...
+  // NEW: Filter and sort logic
+  const getFilteredAndSortedStocks = () => {
+    let filtered = ipStocks;
 
-  // Filter the ipStocks based on selected tab
-  const filteredIpStocks = ipStocks.filter(stock => {
-    if (activeTab === 'all') return true;
-    return stock.serverType === activeTab;
-  });
+    // Filter by tab
+    if (activeTab !== 'all') {
+      filtered = filtered.filter(stock => stock.serverType === activeTab);
+    }
+
+    // Search filter
+    if (searchTerm.trim()) {
+      filtered = filtered.filter(stock =>
+        stock.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        stock.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        stock.tags.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase()))
+      );
+    }
+
+    // Price filter
+    if (priceFilter !== 'all') {
+      filtered = filtered.filter(stock => {
+        const prices = Object.values(stock.memoryOptions)
+          .filter(option => option.price !== null)
+          .map(option => option.price!);
+
+        if (prices.length === 0) return false;
+
+        const minPrice = Math.min(...prices);
+
+        switch (priceFilter) {
+          case 'under-500':
+            return minPrice < 500;
+          case '500-1000':
+            return minPrice >= 500 && minPrice <= 1000;
+          case '1000-2000':
+            return minPrice > 1000 && minPrice <= 2000;
+          case 'above-2000':
+            return minPrice > 2000;
+          default:
+            return true;
+        }
+      });
+    }
+
+    // Sort
+    filtered.sort((a, b) => {
+      switch (sortBy) {
+        case 'price-low':
+          const aMinPrice = Math.min(...Object.values(a.memoryOptions).map(o => o.price || Infinity));
+          const bMinPrice = Math.min(...Object.values(b.memoryOptions).map(o => o.price || Infinity));
+          return aMinPrice - bMinPrice;
+        case 'price-high':
+          const aMaxPrice = Math.max(...Object.values(a.memoryOptions).map(o => o.price || 0));
+          const bMaxPrice = Math.max(...Object.values(b.memoryOptions).map(o => o.price || 0));
+          return bMaxPrice - aMaxPrice;
+        case 'name':
+        default:
+          return a.name.localeCompare(b.name);
+      }
+    });
+
+    return filtered;
+  };
+
+  // Use filtered stocks instead of original filteredIpStocks
+  const filteredIpStocks = getFilteredAndSortedStocks();
 
   // Get counts for each tab
   const getCounts = () => {
@@ -356,15 +429,17 @@ export default function IPStockPage() {
       {/* Mobile Header */}
       <div className="lg:hidden h-16" />
 
-      {/* Header - More Compact */}
+      {/* UPDATED Header with Search and Filters */}
       <div className="morder dark:morder-none-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-40">
-        <div className="container mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="container mx-auto -mt-14 px-4 sm:px-6 lg:px-8">
           <div className="flex flex-col gap-4 py-4">
+            {/* Title Section */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
                 <div className="flex items-center gap-3">
-                  <div className="flex items-center justify-center w-8 h-8 rounded-full bg-primary/10">
-                    <ServerIcon className="h-4 w-4 text-primary" />
+                  <div className="flex items-center justify-center w-10 h-10 text-xl rounded-full bg-primary/10">
+                    {/* <ServerIcon className="h-4 w-4 text-primary" /> */}
+                    🌊
                   </div>
                   <div>
                     <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Server Plans</h1>
@@ -383,11 +458,70 @@ export default function IPStockPage() {
                 </Badge>
               </div>
             </div>
+
+            {/* NEW: Search and Filters Section */}
+            <div className="flex flex-col lg:flex-row gap-3 items-stretch lg:items-center">
+              {/* Search Bar */}
+              <div className="relative flex-1 max-w-">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search servers, configurations, or tags..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-10 w-full h-10 ring-1 ring-primary "
+                />
+              </div>
+
+              {/* Filters */}
+              <div className="flex gap-2 md:ml-auto flex-wrap">
+                <Select value={priceFilter} onValueChange={setPriceFilter}>
+                  <SelectTrigger className="w-44 h-10">
+                    <Filter className="h-4 w-4 mr-2" />
+                    <SelectValue placeholder="Price Range" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Prices</SelectItem>
+                    <SelectItem value="under-500">Under ₹500</SelectItem>
+                    <SelectItem value="500-1000">₹500 - ₹1,000</SelectItem>
+                    <SelectItem value="1000-2000">₹1,000 - ₹2,000</SelectItem>
+                    <SelectItem value="above-2000">Above ₹2,000</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                <Select value={sortBy} onValueChange={setSortBy}>
+                  <SelectTrigger className="w-40 h-10">
+                    <SlidersHorizontal className="h-4 w-4 mr-2" />
+                    <SelectValue placeholder="Sort By" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="name">Name (A-Z)</SelectItem>
+                    <SelectItem value="price-low">Price (Low to High)</SelectItem>
+                    <SelectItem value="price-high">Price (High to Low)</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                {/* Clear Filters Button */}
+                {(searchTerm || priceFilter !== 'all' || sortBy !== 'name') && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setSearchTerm("");
+                      setPriceFilter("all");
+                      setSortBy("name");
+                    }}
+                    className="h-10 px-3"
+                  >
+                    Clear
+                  </Button>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Main Content */}
+      {/* Main Content - Keep everything else exactly the same */}
       <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-6">
         {isLoading ? (
           <div className="flex flex-col items-center justify-center py-16">
@@ -395,7 +529,7 @@ export default function IPStockPage() {
             <p className="text-muted-foreground">Loading server plans...</p>
           </div>
         ) : (
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6 mt-12">
             <TabsList className="grid grid-cols-3 w-full max-w-md mx-auto">
               <TabsTrigger value="all" className="flex items-center gap-2">
                 <Grid3X3 className="h-4 w-4" />
@@ -427,11 +561,27 @@ export default function IPStockPage() {
                     <AlertCircle className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
                     <h3 className="text-lg font-semibold mb-2">No Plans Available</h3>
                     <p className="text-muted-foreground max-w-md mx-auto">
-                      {activeTab === 'all'
+                      {searchTerm
+                        ? `No servers match your search "${searchTerm}". Try adjusting your search or filters.`
+                        : activeTab === 'all'
                         ? 'No server plans are currently available. Please check back later.'
                         : `No ${activeTab} plans are currently available. Try browsing other categories.`
                       }
                     </p>
+                    {/* Show clear filters button when no results */}
+                    {(searchTerm || priceFilter !== 'all') && (
+                      <Button
+                        variant="outline"
+                        onClick={() => {
+                          setSearchTerm("");
+                          setPriceFilter("all");
+                          setSortBy("name");
+                        }}
+                        className="mt-4"
+                      >
+                        Clear Filters
+                      </Button>
+                    )}
                   </CardContent>
                 </Card>
               ) : (
@@ -642,7 +792,7 @@ export default function IPStockPage() {
   );
 }
 
-// New Collapsible Server Plan Component
+// Mobile-responsive CollapsibleServerPlan component
 function CollapsibleServerPlan({
   stock,
   onBuyNow
@@ -663,125 +813,117 @@ function CollapsibleServerPlan({
     <Card className="overflow-hidden transition-all duration-200 hover:shadow-md">
       <Collapsible open={isOpen} onOpenChange={setIsOpen}>
         <CollapsibleTrigger asChild>
-          <div className="flex items-center justify-between p-4 cursor-pointer hover:bg-muted/30 transition-colors">
-            <div className="flex items-center gap-3 flex-1 min-w-0">
-              <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary/10 flex-shrink-0">
+          <div className="flex items-center justify-between p-3 sm:p-4 cursor-pointer hover:bg-muted/30 transition-colors">
+            <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
+              <div className="flex items-center justify-center w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-primary/10 flex-shrink-0">
                 {stock.serverType === 'VPS' ? (
-                  <Cloud className="h-4 w-4 text-primary" />
+                  <Cloud className="h-3 w-3 sm:h-4 sm:w-4 text-primary" />
                 ) : (
-                  <Server className="h-4 w-4 text-primary" />
+                  <Server className="h-3 w-3 sm:h-4 sm:w-4 text-primary" />
                 )}
               </div>
 
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <h3 className="font-semibold text-sm sm:text-base truncate">
+                <div className="flex items-center gap-1 sm:gap-2 flex-wrap">
+                  <h3 className="font-semibold text-sm sm:text-base break-words leading-tight">
                     {stock.name}
                   </h3>
-                  <Badge variant="outline" className="text-xs">
+                  <Badge variant="outline" className="text-xs px-1.5 py-0.5 bg-foreground text-white dark:text-black flex-shrink-0">
                     {stock.serverType}
                   </Badge>
                   {hasPromoCodes && (
-                    <Badge variant="secondary" className="text-xs gap-1 hidden sm:flex">
-                      <Tag className="h-3 w-3" />
-                      Promo
+                    <Badge className="text-xs gap-1 bg-transparent text-green-500 border border-green-500 hidden xs:flex px-1.5 py-0.5 flex-shrink-0">
+                      <Tag className="h-2.5 w-2.5" />
+                      <span className="hidden sm:inline">Promo</span>
+                      <span className="sm:hidden">P</span>
                     </Badge>
                   )}
                 </div>
 
-                {stock.description && (
-                  <p className="text-xs text-muted-foreground mt-1 line-clamp-1">
-                    {stock.description}
-                  </p>
-                )}
-
-                {/* Tags - Mobile optimized */}
-                {stock.tags && stock.tags.length > 0 && (
-                  <div className="flex flex-wrap gap-1 mt-2">
-                    {/* {stock.tags.slice(0, 2).map((tag, idx) => (
-                      <Badge key={idx} variant="outline" className="text-xs">
-                        {tag}
-                      </Badge>
-                    ))} */}
-                    {stock.tags.length > 2 && (
-                      <Badge variant="outline" className="text-xs">
-                        +{stock.tags.length - 2} more
-                      </Badge>
-                    )}
+                {/* Show promo indicator on mobile when badges are hidden */}
+                {hasPromoCodes && (
+                  <div className="xs:hidden mt-1">
+                    <span className="text-xs text-green-500 flex items-center gap-1">
+                      <Tag className="h-2.5 w-2.5" />
+                      Promo available
+                    </span>
                   </div>
                 )}
               </div>
             </div>
 
-            <div className="flex items-center gap-3 flex-shrink-0">
+            <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
               <div className="text-right">
                 <p className="text-xs text-muted-foreground">From</p>
-                <p className="font-bold text-white -100 text-sm sm:text-base">₹{startingPrice}</p>
+                <p className="font-bold dark:text-white text-black text-sm sm:text-base">₹{startingPrice}</p>
               </div>
 
               {isOpen ? (
-                <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform" />
+                <ChevronDown className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground transition-transform" />
               ) : (
-                <ChevronRight className="h-4 w-4 text-muted-foreground transition-transform" />
+                <ChevronRight className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground transition-transform" />
               )}
             </div>
           </div>
         </CollapsibleTrigger>
 
         <CollapsibleContent className="data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down">
-          <div className="px-4 pb-4 pt-0">
-            <Separator className="mb-4" />
+          <div className="px-3 pb-3 pt-0 sm:px-4 sm:pb-4">
+            <Separator className="mb-3 sm:mb-4" />
 
             {memoryOptions.length > 0 ? (
               <div className="space-y-3">
                 <Label className="text-sm font-medium flex items-center gap-2">
-                  <Package className="h-4 w-4" />
-                  Available Configurations ({memoryOptions.length})
+                  <Package className="h-3 w-3 sm:h-4 sm:w-4" />
+                  <span className="text-xs sm:text-sm">Available Configurations ({memoryOptions.length})</span>
                 </Label>
 
                 <div className="grid gap-2">
                   {memoryOptions.map(([memory, details]) => (
                     <div
                       key={memory}
-                      className="flex items-center justify-between p-3 rounded-lg morder dark:morder-none bg-card hover:bg-muted/50 transition-colors"
+                      className="flex items-center justify-between p-2 sm:p-3 rounded-lg  bg-card hover:bg-muted/50 transition-colors"
                     >
-                      <div className="flex-1">
-                        <p className="font-medium text-sm">{memory}</p>
-                      </div>
+                      {/* Mobile Layout */}
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between w-full gap-2 sm:gap-3">
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-sm break-words">{memory}</p>
+                        </div>
 
-                      <div className="flex items-center gap-3">
-                        <span className="font-bold text-white text-sm sm:text-base">
-                          ₹{details.price}
-                        </span>
-                        <Button
-                          size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onBuyNow(stock.name, memory, details.price!, stock._id);
-                          }}
-                          className="h-8 px-3 text-xs"
-                        >
-                          <Zap className="h-3 w-3 mr-1" />
-                          <span className="hidden sm:inline">Buy Now</span>
-                          <span className="sm:hidden">Buy</span>
-                        </Button>
+                        <div className="flex items-center justify-between sm:justify-end gap-2 sm:gap-3">
+                          <span className="font-bold dark:text-white text-black text-sm sm:text-base">
+                            ₹{details.price}
+                          </span>
+                          <Button
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onBuyNow(stock.name, memory, details.price!, stock._id);
+                            }}
+                            className="h-7 px-2 text-xs sm:h-8 sm:px-3 flex-shrink-0"
+                          >
+                            <Zap className="h-2.5 w-2.5 sm:h-3 sm:w-3 mr-1" />
+                            <span className="hidden xs:inline">Buy Now</span>
+                            <span className="xs:hidden">Buy</span>
+                          </Button>
+                        </div>
                       </div>
                     </div>
                   ))}
                 </div>
 
                 {hasPromoCodes && (
-                  <div className="mt-3 p-2 rounded-lg text-white bg-green-500 dark:bg-green-500/10 morder dark:morder-none morder dark:morder-none-green-200 dark:morder dark:morder-none-green-800">
-                    <p className="text-xs text-white dark:text-green-400 flex items-center gap-1">
-                      <Tag className="h-3 w-3" />
-                      Promo codes available for additional discounts!
+                  <div className="mt-3 p-2 sm:p-3 rounded-lg text-white bg-green-500 dark:bg-green-500/10  dark:border-green-200 dark:border-green-800">
+                    <p className="text-xs text-white dark:text-green-400 flex items-center gap-1 sm:gap-2">
+                      <Tag className="h-2.5 w-2.5 sm:h-3 sm:w-3 flex-shrink-0" />
+                      <span className="leading-relaxed">Promo codes available for additional discounts!</span>
                     </p>
                   </div>
                 )}
               </div>
             ) : (
-              <div className="text-center py-6">
-                <AlertCircle className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
+              <div className="text-center py-4 sm:py-6">
+                <AlertCircle className="h-6 w-6 sm:h-8 sm:w-8 text-muted-foreground mx-auto mb-2" />
                 <p className="text-sm text-muted-foreground">No configurations available</p>
               </div>
             )}

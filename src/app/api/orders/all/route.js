@@ -10,7 +10,7 @@ export async function GET() {
   try {
     // requireAdmin(); // If you have an admin check, do it here
 
-    const orders = await Order.find().populate('user', 'email'); 
+    const orders = await Order.find().populate('user', 'email').sort({createdAt: -1});
     return NextResponse.json(orders, { status: 200 });
   } catch (error) {
     console.error('Error fetching orders:', error);
