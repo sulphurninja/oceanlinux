@@ -99,8 +99,8 @@ class SmartVpsAPI {
   ipstock() { return httpFetch('api/oceansmart/ipstock', { method: 'POST' }); }
 
   // Power
-  start(ip)  { return httpFetch('api/oceansmart/start',  { jsonBody: { ip } }); }
-  stop(ip)   { return httpFetch('api/oceansmart/stop',   { jsonBody: { ip } }); }
+  start(ip) { return httpFetch('api/oceansmart/start', { jsonBody: { ip } }); }
+  stop(ip) { return httpFetch('api/oceansmart/stop', { jsonBody: { ip } }); }
   format(ip) { return httpFetch('api/oceansmart/format', { jsonBody: { ip } }); }
   status(ip) { return httpFetch('api/oceansmart/status', { jsonBody: { ip } }); }
 
@@ -109,6 +109,13 @@ class SmartVpsAPI {
 
   // Buy (call ipstock first and pick a usable IP; ram string/number)
   buyVps(ip, ram) { return httpFetch('api/oceansmart/buyvps', { jsonBody: { ip, ram: String(ram) } }); }
+
+  // Renew VPS - NEW METHOD
+  renewVps(ip) {
+    console.log('[SMARTVPS] Renewing VPS for IP:', ip);
+    return httpFetch('api/oceansmart/renewvps', { jsonBody: { ip } });
+  }
+
 }
 
 module.exports = SmartVpsAPI;

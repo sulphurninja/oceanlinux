@@ -11,6 +11,34 @@ const razorpay = new Razorpay({
   key_secret: process.env.RAZORPAY_KEY_SECRET,
 });
 
+// Helper function to determine provider from order
+function getProviderFromOrder(order, ipStock = null) {
+  // Primary logic: Check if order has hostycare service ID
+  if (order.hostycareServiceId) {
+    return 'hostycare';
+  }
+
+  // Secondary logic: Check if ipStock has smartvps tag
+  if (ipStock && ipStock.tags && ipStock.tags.includes('smartvps')) {
+    return 'smartvps';
+  }
+
+  // Additional fallback: Check smartvps service ID
+  if (order.smartvpsServiceId) {
+    return 'smartvps';
+  }
+
+  // Final fallback: Check product name patterns for SmartVPS
+  if (order.productName.includes('103.195') ||
+      order.ipAddress?.startsWith('103.195') ||
+      order.productName.includes('🏅')) {
+    return 'smartvps';
+  }
+
+  // Default to oceanlinux
+  return 'oceanlinux';
+}
+
 export async function POST(request) {
   await connectDB();
   console.log("MongoDB connected");
@@ -50,18 +78,34 @@ export async function POST(request) {
 
     // Allow renewal if expiring within 30 days or expired but not more than 7 days ago
     if (diffDays > 30 || diffDays < -7) {
-      return NextResponse.json({ 
-        message: 'Order is not eligible for renewal at this time' 
+      return NextResponse.json({
+        message: 'Order is not eligible for renewal at this time'
       }, { status: 400 });
     }
 
-    // 6. Generate a unique renewal transaction ID
+    // 6. Determine the provider for this order
+    const provider = getProviderFromOrder(order);
+    console.log('[RENEWAL] Determined provider for order:', provider);
+
+    // 7. For SmartVPS orders, validate that we have the necessary identifiers
+    if (provider === 'smartvps') {
+      const serviceIdentifier = order.smartvpsServiceId || order.ipAddress;
+      if (!serviceIdentifier) {
+        console.log('[RENEWAL] SmartVPS order missing service identifier');
+        return NextResponse.json({
+          message: 'SmartVPS order missing required service identifier'
+        }, { status: 400 });
+      }
+      console.log('[RENEWAL] SmartVPS renewal for service:', serviceIdentifier);
+    }
+
+    // 8. Generate a unique renewal transaction ID
     const renewalTxnId = `RENEWAL_${Date.now()}_${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
 
-    // 7. Use the original order price for renewal
+    // 9. Use the original order price for renewal
     const renewalPrice = order.price;
 
-    // 8. Create Razorpay order for renewal
+    // 10. Create Razorpay order for renewal
     const razorpayOrderOptions = {
       amount: Math.round(renewalPrice * 100), // Razorpay expects amount in paise
       currency: 'INR',
@@ -72,23 +116,29 @@ export async function POST(request) {
         memory: order.memory,
         customer_email: user.email,
         customer_name: user.name,
-        renewal_type: 'service_renewal'
+        renewal_type: 'service_renewal',
+        provider: provider, // Store provider info
+        service_identifier: provider === 'smartvps' ? (order.smartvpsServiceId || order.ipAddress) : null
       }
     };
 
-    console.log("Creating Razorpay renewal order:", razorpayOrderOptions);
+    console.log("Creating Razorpay renewal order:", {
+      ...razorpayOrderOptions,
+      notes: {
+        ...razorpayOrderOptions.notes,
+        service_identifier: razorpayOrderOptions.notes.service_identifier ? '[SERVICE_ID_PRESENT]' : null
+      }
+    });
 
     const razorpayOrder = await razorpay.orders.create(razorpayOrderOptions);
-    console.log("Razorpay renewal order created:", razorpayOrder);
+    console.log("Razorpay renewal order created:", razorpayOrder.id);
 
-    // 9. Store renewal transaction details temporarily (you might want to create a separate renewals table)
-    // For now, we'll use the notes in Razorpay and handle it in the confirmation
-
-    // 10. Return Razorpay order details for frontend
+    // 11. Return Razorpay order details for frontend
     return NextResponse.json({
       message: 'Renewal payment initiated',
       orderId: order._id,
       renewalTxnId: renewalTxnId,
+      provider: provider,
       razorpay: {
         order_id: razorpayOrder.id,
         amount: razorpayOrder.amount,
@@ -103,7 +153,8 @@ export async function POST(request) {
         serviceName: order.productName,
         memory: order.memory,
         currentExpiry: order.expiryDate,
-        renewalPrice: renewalPrice
+        renewalPrice: renewalPrice,
+        provider: provider
       }
     });
 
