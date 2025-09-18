@@ -4,6 +4,7 @@ import Order from '@/models/orderModel';
 import { getDataFromToken } from '@/helper/getDataFromToken';
 const SmartVPSAPI = require('@/services/smartvpsApi');
 
+
 export async function GET(request) {
   console.log('[SMARTVPS-ACTION][GET] === REQUEST START ===');
   console.log('[SMARTVPS-ACTION][GET] Request URL:', request.url);
@@ -65,78 +66,32 @@ export async function GET(request) {
       // Use the status endpoint to get service details
       const statusResponse = await api.status(serviceIdentifier);
 
-      // 🔧 FIX: Parse the string response properly
-      let parsedResponse = statusResponse;
-
-      // Check if the response is a string that needs parsing
-      if (typeof statusResponse === 'string') {
-        try {
-          parsedResponse = JSON.parse(statusResponse);
-          console.log('[SMARTVPS-ACTION][GET] Parsed string response to JSON:', parsedResponse);
-        } catch (parseError) {
-          console.error('[SMARTVPS-ACTION][GET] Failed to parse response string:', parseError);
-          parsedResponse = statusResponse;
-        }
-      }
-      // If it's an object with numeric keys (character array), reconstruct the string
-      else if (statusResponse && typeof statusResponse === 'object' && Object.keys(statusResponse).every(key => !isNaN(key))) {
-        try {
-          // Reconstruct string from character array
-          const jsonString = Object.keys(statusResponse)
-            .sort((a, b) => parseInt(a) - parseInt(b))
-            .map(key => statusResponse[key])
-            .join('');
-          console.log('[SMARTVPS-ACTION][GET] Reconstructed JSON string:', jsonString);
-          parsedResponse = JSON.parse(jsonString);
-          console.log('[SMARTVPS-ACTION][GET] Parsed reconstructed string to JSON:', parsedResponse);
-        } catch (parseError) {
-          console.error('[SMARTVPS-ACTION][GET] Failed to parse reconstructed string:', parseError);
-          parsedResponse = statusResponse;
-        }
-      }
+      // Parse the response specifically for status action
+      const parsedResponse = parseSmartVPSResponse(statusResponse, 'status');
 
       // 🔍 ENHANCED DEBUGGING: Log the parsed response
       console.log('[SMARTVPS-ACTION][GET] === PARSED STATUS RESPONSE ===');
       console.log('[SMARTVPS-ACTION][GET] Parsed response:', JSON.stringify(parsedResponse, null, 2));
       console.log('[SMARTVPS-ACTION][GET] Response keys:', Object.keys(parsedResponse || {}));
-
-      // Extract credentials from the PARSED response using SmartVPS field names
-      const extractedCredentials = {
-        // SmartVPS uses capitalized field names
-        ip: parsedResponse?.IP || parsedResponse?.ip,
-        username: parsedResponse?.Username || parsedResponse?.username || parsedResponse?.User || parsedResponse?.user,
-        password: parsedResponse?.Password || parsedResponse?.password,
-        os: parsedResponse?.OS || parsedResponse?.os,
-        status: parsedResponse?.MachineStatus || parsedResponse?.PowerStatus || parsedResponse?.ActionStatus,
-        ram: parsedResponse?.RAM || parsedResponse?.ram,
-        expiryDate: parsedResponse?.ExpiryDate || parsedResponse?.expiryDate
-      };
-
-      console.log('[SMARTVPS-ACTION][GET] Extracted credentials from SmartVPS:', {
-        ip: extractedCredentials.ip,
-        username: extractedCredentials.username,
-        password: extractedCredentials.password ? '[NEW PASSWORD FROM SMARTVPS]' : 'missing',
-        os: extractedCredentials.os,
-        status: extractedCredentials.status,
-        ram: extractedCredentials.ram,
-        expiryDate: extractedCredentials.expiryDate
-      });
       console.log('[SMARTVPS-ACTION][GET] === END PARSED RESPONSE ===');
+
+      // Extract credentials from the parsed response
+      const extractedCredentials = extractSmartVPSCredentials(parsedResponse, order);
 
       // Transform the response to include the extracted credentials
       const transformedDetails = {
         id: serviceIdentifier,
-        ip: extractedCredentials.ip || order.ipAddress || serviceIdentifier,
+        ip: extractedCredentials.ip || serviceIdentifier,
 
         // Use extracted status and map to our format
         status: extractedCredentials.status === 'active' ? 'active' :
                extractedCredentials.status === 'Online' ? 'active' :
                extractedCredentials.status === 'completed' ? 'active' : 'unknown',
 
-        // Use the NEW credentials from SmartVPS, fallback to order if not found
-        username: extractedCredentials.username || order.username || 'Administrator',
-        password: extractedCredentials.password || order.password, // This should now get the NEW password
-        os: extractedCredentials.os || order.os,
+        // Use the credentials from SmartVPS, fallback to order if not found
+        username: extractedCredentials.username || 'Administrator',
+        password: extractedCredentials.password, // This should now get the NEW password
+        os: extractedCredentials.os,
 
         // Additional fields
         ram: extractedCredentials.ram,
@@ -146,14 +101,14 @@ export async function GET(request) {
         ...parsedResponse
       };
 
-      console.log('[SMARTVPS-ACTION][GET] Transformed details with NEW credentials:', {
+      console.log('[SMARTVPS-ACTION][GET] Transformed details with credentials:', {
         id: transformedDetails.id,
         ip: transformedDetails.ip,
         status: transformedDetails.status,
         username: transformedDetails.username,
         password: transformedDetails.password ? '[FINAL PASSWORD FOR SYNC]' : 'null',
         os: transformedDetails.os,
-        passwordSource: extractedCredentials.password ? 'SmartVPS API' : 'Order Document'
+        passwordSource: extractedCredentials.password !== order.password ? 'SmartVPS API' : 'Order Document'
       });
 
       details = transformedDetails;
@@ -206,123 +161,451 @@ export async function GET(request) {
   }
 }
 
-
-// ... rest of existing syncServerState function stays the same ...
-// Also update the POST method for format action with the same parsing logic
 export async function POST(request) {
-  // ... existing code until the format case and post-format sync attempts ...
+  console.log('[SMARTVPS-ACTION][POST] === REQUEST START ===');
+  console.log('[SMARTVPS-ACTION][POST] Request URL:', request.url);
+  console.log('[SMARTVPS-ACTION][POST] Headers:', Object.fromEntries(request.headers.entries()));
 
-  syncAttempts.forEach((delay, index) => {
-    setTimeout(async () => {
-      console.log(`[SMARTVPS-ACTION][POST] Post-format sync attempt ${index + 1}/${syncAttempts.length} after ${delay}ms`);
+  try {
+    await connectDB();
+    console.log('[SMARTVPS-ACTION][POST] Database connected successfully');
+
+    const userId = await getDataFromToken(request);
+    console.log('[SMARTVPS-ACTION][POST] User ID from token:', userId);
+
+    if (!userId) {
+      console.log('[SMARTVPS-ACTION][POST] No user ID found - unauthorized');
+      return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
+    }
+
+    const requestBody = await request.json();
+    console.log('[SMARTVPS-ACTION][POST] Request body:', requestBody);
+
+    const { orderId, action, payload } = requestBody;
+    console.log('[SMARTVPS-ACTION][POST] Parsed params:', { orderId, action, payload });
+
+    if (!orderId || !action) {
+      console.log('[SMARTVPS-ACTION][POST] Missing required parameters');
+      return NextResponse.json({ message: 'orderId and action are required' }, { status: 400 });
+    }
+
+    console.log('[SMARTVPS-ACTION][POST] Searching for order:', { _id: orderId, user: userId });
+    const order = await Order.findOne({ _id: orderId, user: userId });
+    console.log('[SMARTVPS-ACTION][POST] Found order:', order ? {
+      _id: order._id,
+      productName: order.productName,
+      provider: order.provider,
+      smartvpsServiceId: order.smartvpsServiceId,
+      ipAddress: order.ipAddress,
+      status: order.status,
+      provisioningStatus: order.provisioningStatus,
+      lastAction: order.lastAction,
+      lastActionTime: order.lastActionTime
+    } : 'null');
+
+    if (!order) {
+      console.log('[SMARTVPS-ACTION][POST] Order not found');
+      return NextResponse.json({ message: 'Order not found' }, { status: 404 });
+    }
+
+    // For SmartVPS, we can use either the smartvpsServiceId or ipAddress as the identifier
+    const serviceIdentifier = order.smartvpsServiceId || order.ipAddress;
+    if (!serviceIdentifier) {
+      console.log('[SMARTVPS-ACTION][POST] No SmartVPS service ID or IP address attached to order');
+      return NextResponse.json({ message: 'No SmartVPS service or IP address attached' }, { status: 400 });
+    }
+
+    console.log('[SMARTVPS-ACTION][POST] Using service identifier:', serviceIdentifier);
+    console.log('[SMARTVPS-ACTION][POST] Initializing SmartVPS API');
+    const api = new SmartVPSAPI();
+
+    let result;
+
+    console.log('[SMARTVPS-ACTION][POST] Executing action:', action);
+    switch (action) {
+      case 'start':
+        console.log('[SMARTVPS-ACTION][POST] Starting service:', serviceIdentifier);
+        result = await api.start(serviceIdentifier);
+        console.log('[SMARTVPS-ACTION][POST] Start service result:', result);
+
+        console.log('[SMARTVPS-ACTION][POST] Updating order status to active');
+        await Order.findByIdAndUpdate(orderId, {
+          provisioningStatus: 'active',
+          lastAction: 'start',
+          lastActionTime: new Date()
+        });
+        console.log('[SMARTVPS-ACTION][POST] Order updated successfully');
+        break;
+
+      case 'stop':
+        console.log('[SMARTVPS-ACTION][POST] Stopping service:', serviceIdentifier);
+        result = await api.stop(serviceIdentifier);
+        console.log('[SMARTVPS-ACTION][POST] Stop service result:', result);
+
+        console.log('[SMARTVPS-ACTION][POST] Updating order status to suspended');
+        await Order.findByIdAndUpdate(orderId, {
+          provisioningStatus: 'suspended',
+          lastAction: 'stop',
+          lastActionTime: new Date()
+        });
+        console.log('[SMARTVPS-ACTION][POST] Order updated successfully');
+        break;
+
+      case 'reboot':
+        console.log('[SMARTVPS-ACTION][POST] Rebooting service:', serviceIdentifier);
+        // SmartVPS doesn't have direct reboot, so we stop then start
+        try {
+          console.log('[SMARTVPS-ACTION][POST] Stopping for reboot...');
+          await api.stop(serviceIdentifier);
+          console.log('[SMARTVPS-ACTION][POST] Waiting 2 seconds before restart...');
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          console.log('[SMARTVPS-ACTION][POST] Starting after stop...');
+          result = await api.start(serviceIdentifier);
+          console.log('[SMARTVPS-ACTION][POST] Reboot sequence completed:', result);
+        } catch (error) {
+          console.error('[SMARTVPS-ACTION][POST] Reboot sequence failed:', error);
+          throw new Error(`Reboot failed: ${error.message}`);
+        }
+
+        console.log('[SMARTVPS-ACTION][POST] Updating order last action to reboot');
+        await Order.findByIdAndUpdate(orderId, {
+          lastAction: 'reboot',
+          lastActionTime: new Date()
+        });
+        console.log('[SMARTVPS-ACTION][POST] Order updated successfully');
+        break;
+
+      case 'format':
+        console.log('[SMARTVPS-ACTION][POST] Format action requested');
+        console.log('[SMARTVPS-ACTION][POST] Format payload:', {
+          templateId: payload?.templateId
+        });
+
+        try {
+          let formatResult;
+
+          // If templateId is provided, change OS first then format
+          if (payload?.templateId) {
+            console.log('[SMARTVPS-ACTION][POST] Changing OS to template:', payload.templateId);
+            await api.changeOS(serviceIdentifier, payload.templateId);
+            console.log('[SMARTVPS-ACTION][POST] OS change completed, now formatting...');
+
+            // Format - SmartVPS format doesn't take OS parameter, just format the service
+            formatResult = await api.format(serviceIdentifier);
+          } else {
+            // Just format without OS change
+            formatResult = await api.format(serviceIdentifier);
+          }
+
+          console.log('[SMARTVPS-ACTION][POST] Format API Success:', formatResult);
+          result = formatResult;
+
+          console.log('[SMARTVPS-ACTION][POST] Updating order provisioning status to provisioning');
+          await Order.findByIdAndUpdate(orderId, {
+            provisioningStatus: 'provisioning',
+            lastAction: 'format',
+            lastActionTime: new Date()
+          });
+          console.log('[SMARTVPS-ACTION][POST] Order updated successfully');
+
+          // Immediately schedule multiple sync attempts after format to capture new credentials
+          console.log('[SMARTVPS-ACTION][POST] Scheduling post-format sync attempts for credential updates');
+          const syncAttempts = [5000, 15000, 30000, 60000, 120000]; // 5s, 15s, 30s, 1m, 2m
+
+          syncAttempts.forEach((delay, index) => {
+            setTimeout(async () => {
+              console.log(`[SMARTVPS-ACTION][POST] Post-format sync attempt ${index + 1}/${syncAttempts.length} after ${delay}ms`);
+              try {
+                const statusData = await api.status(serviceIdentifier);
+
+                // Parse the response specifically for status action
+                const parsedStatusData = parseSmartVPSResponse(statusData, 'status');
+
+                // 🔍 ENHANCED DEBUGGING for post-format sync
+                console.log(`[SMARTVPS-ACTION][POST] === POST-FORMAT SYNC ${index + 1} PARSED RESPONSE ===`);
+                console.log(`[SMARTVPS-ACTION][POST] Parsed response:`, JSON.stringify(parsedStatusData, null, 2));
+                console.log(`[SMARTVPS-ACTION][POST] === END POST-FORMAT SYNC ${index + 1} RESPONSE ===`);
+
+                // Extract credentials from the parsed response
+                const extractedCredentials = extractSmartVPSCredentials(parsedStatusData, order);
+
+                const details = {
+                  id: serviceIdentifier,
+                  ip: extractedCredentials.ip || serviceIdentifier,
+                  status: extractedCredentials.status === 'active' || extractedCredentials.status === 'Online' ? 'active' : 'provisioning',
+
+                  // Use the credentials from SmartVPS
+                  username: extractedCredentials.username,
+                  password: extractedCredentials.password, // This should now get the NEW password
+                  os: extractedCredentials.os,
+
+                  // Include all original response data
+                  ...parsedStatusData
+                };
+
+                console.log(`[SMARTVPS-ACTION][POST] Post-format sync ${index + 1} - Final details for sync:`, {
+                  id: details.id,
+                  ip: details.ip,
+                  status: details.status,
+                  username: details.username,
+                  password: details.password ? '[FINAL PASSWORD FOR SYNC]' : 'no password found',
+                  os: details.os,
+                  passwordSource: extractedCredentials.password !== order.password ? 'SmartVPS API' : 'Order Document'
+                });
+
+                const syncResult = await syncServerState(orderId, details, details);
+                console.log(`[SMARTVPS-ACTION][POST] Post-format sync ${index + 1} completed:`, {
+                  credentialsUpdated: !!(syncResult.username || syncResult.password || syncResult.os),
+                  usernameUpdated: !!syncResult.username,
+                  passwordUpdated: !!syncResult.password,
+                  osUpdated: !!syncResult.os
+                });
+
+                // If we got new credentials, log success
+                if (syncResult.username || syncResult.password || syncResult.os) {
+                  console.log(`[SMARTVPS-ACTION][POST] ✅ Credentials updated in sync attempt ${index + 1}:`);
+                  if (syncResult.username) console.log(`[SMARTVPS-ACTION][POST] - Username: ${syncResult.username}`);
+                  if (syncResult.password) console.log(`[SMARTVPS-ACTION][POST] - Password: [UPDATED]`);
+                  if (syncResult.os) console.log(`[SMARTVPS-ACTION][POST] - OS: ${syncResult.os}`);
+                }
+              } catch (syncError) {
+                console.error(`[SMARTVPS-ACTION][POST] Post-format sync ${index + 1} error:`, syncError);
+              }
+            }, delay);
+          });
+
+        } catch (error) {
+          console.error('[SMARTVPS-ACTION][POST] Format API Error:', error.message);
+          console.error('[SMARTVPS-ACTION][POST] Format API Error Stack:', error.stack);
+          throw error;
+        }
+        break;
+
+      case 'changepassword':
+        console.log('[SMARTVPS-ACTION][POST] Change password action requested');
+        console.log('[SMARTVPS-ACTION][POST] SmartVPS does not support direct password change via API');
+        return NextResponse.json({ message: 'Password change not supported by SmartVPS API. Use format instead.' }, { status: 400 });
+
+      case 'templates':
+        console.log('[SMARTVPS-ACTION][POST] Fetching templates for service:', serviceIdentifier);
+        try {
+          // Return available OS templates based on SmartVPS documentation
+          result = {
+            '2012': 'Windows Server 2012',
+            '2016': 'Windows Server 2016',
+            '2019': 'Windows Server 2019',
+            '2022': 'Windows Server 2022',
+            '11': 'Windows 11',
+            'centos': 'CentOS 7',
+            'ubuntu': 'Ubuntu 22'
+          };
+          console.log('[SMARTVPS-ACTION][POST] Templates returned:', result);
+        } catch (error) {
+          console.error('[SMARTVPS-ACTION][POST] Templates fetch error:', error.message);
+          console.error('[SMARTVPS-ACTION][POST] Templates fetch error stack:', error.stack);
+          throw error;
+        }
+        break;
+
+      case 'details':
+        console.log('[SMARTVPS-ACTION][POST] Fetching service details for:', serviceIdentifier);
+        try {
+          const statusData = await api.status(serviceIdentifier);
+
+          // Parse the response specifically for status action
+          const parsedStatusData = parseSmartVPSResponse(statusData, 'status');
+
+          // Extract credentials from the parsed response
+          const extractedCredentials = extractSmartVPSCredentials(parsedStatusData, order);
+
+          // Transform the response to match expected format with enhanced credential extraction
+          result = {
+            id: serviceIdentifier,
+            ip: extractedCredentials.ip || serviceIdentifier,
+            status: extractedCredentials.status === 'active' || extractedCredentials.status === 'Online' ? 'active' : 'unknown',
+
+            // Use credentials from SmartVPS
+            username: extractedCredentials.username || 'Administrator',
+            password: extractedCredentials.password,
+            os: extractedCredentials.os,
+
+            ...parsedStatusData
+          };
+
+          console.log('[SMARTVPS-ACTION][POST] Transformed service details:', {
+            ...result,
+            password: result.password ? '[PASSWORD PRESENT]' : 'null'
+          });
+        } catch (error) {
+          console.error('[SMARTVPS-ACTION][POST] Service details fetch error:', error);
+          throw error;
+        }
+        break;
+
+      default:
+        console.log('[SMARTVPS-ACTION][POST] Unsupported action:', action);
+        return NextResponse.json({ message: 'Unsupported action' }, { status: 400 });
+    }
+
+    console.log('[SMARTVPS-ACTION][POST] Action completed, checking if sync is needed');
+
+    // After any other action (start, stop, reboot), fetch the latest server state and sync it
+    if (['start', 'stop', 'reboot'].includes(action)) {
+      console.log('[SMARTVPS-ACTION][POST] Action requires sync, scheduling delayed sync');
       try {
-        const statusData = await api.status(serviceIdentifier);
-
-        // 🔧 FIX: Parse the string response properly for post-format sync
-        let parsedStatusData = statusData;
-
-        // Check if the response is a string that needs parsing
-        if (typeof statusData === 'string') {
+        setTimeout(async () => {
+          console.log('[SMARTVPS-ACTION][POST] Executing delayed sync after action:', action);
           try {
-            parsedStatusData = JSON.parse(statusData);
-            console.log(`[SMARTVPS-ACTION][POST] Post-format sync ${index + 1} - Parsed string response:`, parsedStatusData);
-          } catch (parseError) {
-            console.error(`[SMARTVPS-ACTION][POST] Post-format sync ${index + 1} - Failed to parse response string:`, parseError);
-            parsedStatusData = statusData;
+            let details = null;
+            let info = null;
+
+            try {
+              const statusData = await api.status(serviceIdentifier);
+
+              // Parse the response specifically for status action
+              const parsedStatusData = parseSmartVPSResponse(statusData, 'status');
+
+              // Extract credentials from the parsed response
+              const extractedCredentials = extractSmartVPSCredentials(parsedStatusData, order);
+
+              console.log('[SMARTVPS-ACTION][POST] Delayed sync - parsed status data:', parsedStatusData);
+
+              details = {
+                id: serviceIdentifier,
+                ip: extractedCredentials.ip || serviceIdentifier,
+                status: extractedCredentials.status === 'active' || extractedCredentials.status === 'Online' ? 'active' : 'unknown',
+                username: extractedCredentials.username || 'Administrator',
+                password: extractedCredentials.password,
+                os: extractedCredentials.os,
+                ...parsedStatusData
+              };
+              info = details;
+              console.log('[SMARTVPS-ACTION][POST] Delayed sync - transformed details:', {
+                ...details,
+                password: details.password ? '[PASSWORD PRESENT]' : 'null'
+              });
+            } catch (statusError) {
+              console.log('[SMARTVPS-ACTION][POST] Delayed sync - status error (ignored):', statusError.message);
+              details = {
+                id: serviceIdentifier,
+                ip: order.ipAddress || serviceIdentifier,
+                status: 'unknown'
+              };
+              info = details;
+            }
+
+            await syncServerState(orderId, details, info);
+            console.log('[SMARTVPS-ACTION][POST] Delayed sync completed successfully');
+          } catch (syncError) {
+            console.error('[SMARTVPS-ACTION][POST] Delayed sync error:', syncError);
           }
-        }
-        // If it's an object with numeric keys (character array), reconstruct the string
-        else if (statusData && typeof statusData === 'object' && Object.keys(statusData).every(key => !isNaN(key))) {
-          try {
-            // Reconstruct string from character array
-            const jsonString = Object.keys(statusData)
-              .sort((a, b) => parseInt(a) - parseInt(b))
-              .map(key => statusData[key])
-              .join('');
-            console.log(`[SMARTVPS-ACTION][POST] Post-format sync ${index + 1} - Reconstructed JSON string:`, jsonString);
-            parsedStatusData = JSON.parse(jsonString);
-            console.log(`[SMARTVPS-ACTION][POST] Post-format sync ${index + 1} - Parsed reconstructed string:`, parsedStatusData);
-          } catch (parseError) {
-            console.error(`[SMARTVPS-ACTION][POST] Post-format sync ${index + 1} - Failed to parse reconstructed string:`, parseError);
-            parsedStatusData = statusData;
-          }
-        }
-
-        // 🔍 ENHANCED DEBUGGING for post-format sync
-        console.log(`[SMARTVPS-ACTION][POST] === POST-FORMAT SYNC ${index + 1} PARSED RESPONSE ===`);
-        console.log(`[SMARTVPS-ACTION][POST] Parsed response:`, JSON.stringify(parsedStatusData, null, 2));
-
-        // Extract credentials from the PARSED response using SmartVPS field names
-        const extractedCredentials = {
-          ip: parsedStatusData?.IP || parsedStatusData?.ip,
-          username: parsedStatusData?.Username || parsedStatusData?.username,
-          password: parsedStatusData?.Password || parsedStatusData?.password,
-          os: parsedStatusData?.OS || parsedStatusData?.os,
-          status: parsedStatusData?.MachineStatus || parsedStatusData?.PowerStatus || parsedStatusData?.ActionStatus
-        };
-
-        console.log(`[SMARTVPS-ACTION][POST] Post-format sync ${index + 1} - Extracted credentials:`, {
-          ip: extractedCredentials.ip,
-          username: extractedCredentials.username,
-          password: extractedCredentials.password ? '[NEW PASSWORD FROM SMARTVPS]' : 'missing',
-          os: extractedCredentials.os,
-          status: extractedCredentials.status
-        });
-        console.log(`[SMARTVPS-ACTION][POST] === END POST-FORMAT SYNC ${index + 1} RESPONSE ===`);
-
-        const details = {
-          id: serviceIdentifier,
-          ip: extractedCredentials.ip || order.ipAddress || serviceIdentifier,
-          status: extractedCredentials.status === 'active' || extractedCredentials.status === 'Online' ? 'active' : 'provisioning',
-
-          // Use the NEW credentials from SmartVPS
-          username: extractedCredentials.username || order.username,
-          password: extractedCredentials.password || order.password, // This should now get the NEW password
-          os: extractedCredentials.os || order.os,
-
-          // Include all original response data
-          ...parsedStatusData
-        };
-
-        console.log(`[SMARTVPS-ACTION][POST] Post-format sync ${index + 1} - Final details for sync:`, {
-          id: details.id,
-          ip: details.ip,
-          status: details.status,
-          username: details.username,
-          password: details.password ? '[FINAL PASSWORD FOR SYNC]' : 'no password found',
-          os: details.os,
-          passwordSource: extractedCredentials.password ? 'SmartVPS API' : 'Order Document'
-        });
-
-        const syncResult = await syncServerState(orderId, details, details);
-        console.log(`[SMARTVPS-ACTION][POST] Post-format sync ${index + 1} completed:`, {
-          credentialsUpdated: !!(syncResult.username || syncResult.password || syncResult.os),
-          usernameUpdated: !!syncResult.username,
-          passwordUpdated: !!syncResult.password,
-          osUpdated: !!syncResult.os
-        });
-
-        // If we got new credentials, log success
-        if (syncResult.username || syncResult.password || syncResult.os) {
-          console.log(`[SMARTVPS-ACTION][POST] ✅ Credentials updated in sync attempt ${index + 1}:`);
-          if (syncResult.username) console.log(`[SMARTVPS-ACTION][POST] - Username: ${syncResult.username}`);
-          if (syncResult.password) console.log(`[SMARTVPS-ACTION][POST] - Password: [UPDATED]`);
-          if (syncResult.os) console.log(`[SMARTVPS-ACTION][POST] - OS: ${syncResult.os}`);
-        }
+        }, 2000);
+        console.log('[SMARTVPS-ACTION][POST] Delayed sync scheduled for 2 seconds');
       } catch (syncError) {
-        console.error(`[SMARTVPS-ACTION][POST] Post-format sync ${index + 1} error:`, syncError);
+        console.error('[SMARTVPS-ACTION][POST] Sync scheduling error:', syncError);
       }
-    }, delay);
-  });
+    } else {
+      console.log('[SMARTVPS-ACTION][POST] Action does not require sync');
+    }
 
-  // ... rest of existing code ...
+    const response = { success: true, action, result };
+    console.log('[SMARTVPS-ACTION][POST] Returning response:', {
+      ...response,
+      result: result ? '[Result object present]' : null
+    });
+
+    return NextResponse.json(response);
+  } catch (error) {
+    console.error('[SMARTVPS-ACTION][POST] === ERROR ===');
+    console.error('[SMARTVPS-ACTION][POST] Error type:', error.constructor.name);
+    console.error('[SMARTVPS-ACTION][POST] Error message:', error.message);
+    console.error('[SMARTVPS-ACTION][POST] Error stack:', error.stack);
+    console.error('[SMARTVPS-ACTION][POST] Error details:', error);
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  }
+}
+// Helper function to parse SmartVPS API responses
+function parseSmartVPSResponse(response, actionType = 'unknown') {
+  console.log(`[SMARTVPS-PARSE] Parsing response for action: ${actionType}`);
+  console.log(`[SMARTVPS-PARSE] Raw response type:`, typeof response);
+
+  // For status action, expect JSON data
+  if (actionType === 'status') {
+    // If it's already a proper object with meaningful keys, return as-is
+    if (response && typeof response === 'object' && !Array.isArray(response)) {
+      const keys = Object.keys(response);
+      const hasNonNumericKeys = keys.some(key => isNaN(key));
+
+      if (hasNonNumericKeys) {
+        console.log(`[SMARTVPS-PARSE] Response is already parsed object:`, response);
+        return response;
+      }
+
+      // If it's an object with only numeric keys (character array), reconstruct the string
+      if (keys.every(key => !isNaN(key))) {
+        try {
+          const jsonString = keys
+            .sort((a, b) => parseInt(a) - parseInt(b))
+            .map(key => response[key])
+            .join('');
+          console.log(`[SMARTVPS-PARSE] Reconstructed JSON string:`, jsonString);
+          const parsed = JSON.parse(jsonString);
+          console.log(`[SMARTVPS-PARSE] Successfully parsed reconstructed JSON:`, parsed);
+          return parsed;
+        } catch (parseError) {
+          console.error(`[SMARTVPS-PARSE] Failed to parse reconstructed string:`, parseError);
+          return response;
+        }
+      }
+    }
+
+    // If it's a string, try to parse as JSON
+    if (typeof response === 'string') {
+      try {
+        const parsed = JSON.parse(response);
+        console.log(`[SMARTVPS-PARSE] Successfully parsed JSON string:`, parsed);
+        return parsed;
+      } catch (parseError) {
+        console.error(`[SMARTVPS-PARSE] Failed to parse JSON string:`, parseError);
+        return response;
+      }
+    }
+  }
+
+  // For other actions (start, stop, reboot, format, etc.), return as-is
+  console.log(`[SMARTVPS-PARSE] Non-status action, returning response as-is`);
+  return response;
 }
 
-// ... rest of existing syncServerState function stays the same ...
+// Helper function to extract credentials from parsed SmartVPS response
+function extractSmartVPSCredentials(parsedResponse, order) {
+  console.log(`[SMARTVPS-EXTRACT] Extracting credentials from parsed response`);
 
-// ... rest of existing syncServerState function stays the same ...
+  const extracted = {
+    // SmartVPS uses capitalized field names in status responses
+    ip: parsedResponse?.IP || parsedResponse?.ip || order.ipAddress,
+    username: parsedResponse?.Username || parsedResponse?.username || parsedResponse?.User || parsedResponse?.user || order.username,
+    password: parsedResponse?.Password || parsedResponse?.password || order.password,
+    os: parsedResponse?.OS || parsedResponse?.os || order.os,
+    status: parsedResponse?.MachineStatus || parsedResponse?.PowerStatus || parsedResponse?.ActionStatus || parsedResponse?.status,
+    ram: parsedResponse?.RAM || parsedResponse?.ram,
+    expiryDate: parsedResponse?.ExpiryDate || parsedResponse?.expiryDate
+  };
 
-// ... existing imports and code ...
+  console.log(`[SMARTVPS-EXTRACT] Extracted credentials:`, {
+    ip: extracted.ip,
+    username: extracted.username,
+    password: extracted.password ? '[EXTRACTED PASSWORD]' : 'no password found',
+    os: extracted.os,
+    status: extracted.status,
+    ram: extracted.ram,
+    expiryDate: extracted.expiryDate,
+    passwordSource: parsedResponse?.Password || parsedResponse?.password ? 'SmartVPS API' : 'Order Document'
+  });
+
+  return extracted;
+}
+
 
 // Helper function to sync server state from SmartVPS API to our database
 async function syncServerState(orderId, details, info) {
