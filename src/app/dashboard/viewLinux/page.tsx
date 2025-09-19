@@ -162,7 +162,7 @@ const ViewLinux = () => {
         }
     };
 
-        const getDaysUntilExpiry = (expiryDate: Date | string | null | undefined) => {
+    const getDaysUntilExpiry = (expiryDate: Date | string | null | undefined) => {
         if (!expiryDate) return 0;
         const now = new Date();
         const expiry = new Date(expiryDate);
@@ -174,6 +174,7 @@ const ViewLinux = () => {
 
     // Get server status for filtering
 
+    // Get server status for filtering
     const getServerStatus = (order: Order): 'active' | 'expired' | 'pending' | 'failed' => {
         const currentStatus = order.provisioningStatus || order.status;
 
@@ -182,22 +183,54 @@ const ViewLinux = () => {
             return 'expired';
         }
 
-        // Check for failed states
-        if (currentStatus.toLowerCase() === 'failed' || currentStatus.toLowerCase() === 'terminated') {
-            return 'failed';
-        }
-
-        // Check for pending states
-        if (currentStatus.toLowerCase() === 'pending' || currentStatus.toLowerCase() === 'provisioning') {
-            return 'pending';
-        }
-
-        // Everything else is active
+        // Check for active states
         if (currentStatus.toLowerCase() === 'completed' || currentStatus.toLowerCase() === 'active') {
             return 'active';
         }
 
-        return 'active'; // Default fallback
+        // 🆕 Special handling for configuration errors - these should be pending, not failed
+        // If it's a configuration error (missing hostycareProductId, etc.), treat as pending
+        if (order.provisioningError &&
+            (order.provisioningError.includes('Missing hostycareProductId') ||
+                order.provisioningError.includes('CONFIG:') ||
+                order.provisioningError.includes('Memory configuration not found') ||
+                order.provisioningError.includes('lacks hostycareProductId'))) {
+            return 'pending';
+        }
+
+        // Check for explicitly failed states (actual API failures, not config issues)
+        if (currentStatus.toLowerCase() === 'failed' || currentStatus.toLowerCase() === 'terminated') {
+            // But if it's just a config issue, treat as pending
+            if (order.provisioningError && order.provisioningError.includes('CONFIG:')) {
+                return 'pending';
+            }
+            return 'failed';
+        }
+
+        // Check for pending/provisioning states
+        if (currentStatus.toLowerCase() === 'pending' ||
+            currentStatus.toLowerCase() === 'provisioning' ||
+            currentStatus.toLowerCase() === 'confirmed') {
+            return 'pending';
+        }
+
+        // For orders that don't have proper auto-provisioning setup, default to pending
+        const provider = getProviderDisplayName(order);
+        const isAutoProvisionedProvider = provider === 'Hostycare' || provider === 'SmartVPS';
+
+        // If it's marked as auto-provisioned provider but has config errors, it's pending
+        if (isAutoProvisionedProvider && order.provisioningError) {
+            return 'pending';
+        }
+
+        // If it's not an auto-provisioned provider and status isn't explicitly failed/active,
+        // treat it as pending (awaiting manual activation)
+        if (!isAutoProvisionedProvider) {
+            return 'pending';
+        }
+
+        // For properly configured auto-provisioned providers, unknown status defaults to active
+        return 'active';
     };
 
     // Filter orders based on search query, status filter, and tab
@@ -296,7 +329,7 @@ const ViewLinux = () => {
         return getDaysUntilExpiry(order.expiryDate) < 0;
     };
 
-    const getStatusBadge = (status: string, provisioningStatus?: string, lastAction?: string) => {
+    const getStatusBadge = (status: string, provisioningStatus?: string, lastAction?: string, order?: Order) => {
         if (status.toLowerCase() === 'completed') {
             return (
                 <Badge className="bg-green-50 text-green-700 border border-green-200 dark:bg-green-950 dark:text-green-300 dark:border-green-800">
@@ -308,6 +341,20 @@ const ViewLinux = () => {
 
         const currentStatus = provisioningStatus || status;
 
+        // 🆕 Check for configuration errors first
+        if (order?.provisioningError &&
+            (order.provisioningError.includes('Missing hostycareProductId') ||
+                order.provisioningError.includes('CONFIG:') ||
+                order.provisioningError.includes('Memory configuration not found') ||
+                order.provisioningError.includes('lacks hostycareProductId'))) {
+            return (
+                <Badge className="bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800">
+                    <Settings className="w-3 h-3 mr-1" />
+                    Pending
+                </Badge>
+            );
+        }
+
         switch (currentStatus.toLowerCase()) {
             case 'active':
                 return (
@@ -317,10 +364,11 @@ const ViewLinux = () => {
                     </Badge>
                 );
             case 'pending':
+            case 'confirmed':
                 return (
                     <Badge className="bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800">
                         <Clock className="w-3 h-3 mr-1" />
-                        Pending
+                        Pending Setup
                     </Badge>
                 );
             case 'provisioning':
@@ -338,6 +386,15 @@ const ViewLinux = () => {
                     </Badge>
                 );
             case 'failed':
+                // Double-check for config errors even in failed status
+                if (order?.provisioningError && order.provisioningError.includes('CONFIG:')) {
+                    return (
+                        <Badge className="bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800">
+                            <Settings className="w-3 h-3 mr-1" />
+                            Awaiting Config
+                        </Badge>
+                    );
+                }
                 return (
                     <Badge className="bg-red-50 text-red-700 border border-red-200 dark:bg-red-950 dark:text-red-300 dark:border-red-800">
                         <XCircle className="w-3 h-3 mr-1" />
@@ -352,6 +409,17 @@ const ViewLinux = () => {
                     </Badge>
                 );
             default:
+                // Enhanced default case
+                const isManualOrder = !lastAction || lastAction.includes('manual');
+                if (isManualOrder || currentStatus.toLowerCase() === 'confirmed') {
+                    return (
+                        <Badge className="bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800">
+                            <Clock className="w-3 h-3 mr-1" />
+                            Awaiting Setup
+                        </Badge>
+                    );
+                }
+
                 return (
                     <Badge variant="secondary" className="bg-gray-50 text-gray-700 dark:bg-gray-950 dark:text-gray-300">
                         <Shield className="w-3 h-3 mr-1" />
@@ -636,7 +704,7 @@ const ViewLinux = () => {
                                             onClick={() => router.push(`/dashboard/order/${order._id}`)}
                                         >
                                             <CardContent className="p-3 sm:p-4 lg:p-6">
-                            {/* Mobile Layout - Completely responsive */}
+                                                {/* Mobile Layout - Completely responsive */}
                                                 <div className="block lg:hidden space-y-3">
                                                     <div className="flex items-start justify-between gap-2">
                                                         <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
@@ -649,7 +717,7 @@ const ViewLinux = () => {
                                                                     <Badge variant="secondary" className="text-xs px-1.5 py-0.5">
                                                                         {getProviderDisplayName(order)}
                                                                     </Badge>
-                                                                    {getStatusBadge(order.status, order.provisioningStatus, order.lastAction)}
+                                                                    {getStatusBadge(order.status, order.provisioningStatus, order.lastAction, order)}
                                                                 </div>
                                                             </div>
                                                         </div>
@@ -792,7 +860,7 @@ const ViewLinux = () => {
                                                     </div>
 
                                                     <div className="flex items-center gap-2 xl:gap-3 ml-4 flex-shrink-0">
-                                                        {getStatusBadge(order.status, order.provisioningStatus, order.lastAction)}
+                                                        {getStatusBadge(order.status, order.provisioningStatus, order.lastAction, order)}
                                                         <div className="flex gap-2">
                                                             <Button
                                                                 variant="outline"

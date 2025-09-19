@@ -842,7 +842,9 @@ const OrderDetails = () => {
     }
   };
 
-  const getStatusBadge = (status: string, provisioningStatus?: string, lastAction?: string) => {
+  // ... existing imports and code ...
+
+  const getStatusBadge = (status: string, provisioningStatus?: string, lastAction?: string, order?: Order) => {
     if (actionBusy) {
       const actionLabels = {
         'reboot': { label: 'Rebooting', icon: RefreshCw, color: 'bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-800' },
@@ -866,7 +868,7 @@ const OrderDetails = () => {
       }
     }
 
-    if (status.toLowerCase() === 'completed' || status.toLowerCase() === 'active') {
+    if (status.toLowerCase() === 'completed') {
       return (
         <Badge className="bg-green-50 text-green-700 border border-green-200 dark:bg-green-950 dark:text-green-300 dark:border-green-800">
           <div className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></div>
@@ -876,42 +878,96 @@ const OrderDetails = () => {
     }
 
     const currentStatus = provisioningStatus || status;
-    const statusConfigs = {
-      'active': { label: 'Active', color: 'bg-green-50 text-green-700 border border-green-200 dark:bg-green-950 dark:text-green-300 dark:border-green-800', icon: 'pulse' },
-      'pending': { label: 'Pending', color: 'bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800', icon: Clock },
-      'provisioning': { label: 'Provisioning', color: 'bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800', icon: Loader2 },
-      'suspended': { label: 'Suspended', color: 'bg-orange-50 text-orange-700 border border-orange-200 dark:bg-orange-950 dark:text-orange-300 dark:border-orange-800', icon: AlertTriangle },
-      'failed': { label: 'Failed', color: 'bg-red-50 text-red-700 border border-red-200 dark:bg-red-950 dark:text-red-300 dark:border-red-800', icon: XCircle },
-      'terminated': { label: 'Terminated', color: 'bg-red-50 text-red-700 border border-red-200 dark:bg-red-950 dark:text-red-300 dark:border-red-800', icon: XCircle }
-    };
 
-    const statusConfig = statusConfigs[currentStatus.toLowerCase() as keyof typeof statusConfigs];
-    if (statusConfig) {
-      if (statusConfig.icon === 'pulse') {
-        return (
-          <Badge className={statusConfig.color}>
-            <div className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></div>
-            {statusConfig.label}
-          </Badge>
-        );
-      }
-      const Icon = statusConfig.icon as React.ElementType;
+    // 🆕 Check for configuration errors first
+    if (order?.provisioningError &&
+      (order.provisioningError.includes('Missing hostycareProductId') ||
+        order.provisioningError.includes('CONFIG:') ||
+        order.provisioningError.includes('Memory configuration not found') ||
+        order.provisioningError.includes('lacks hostycareProductId'))) {
       return (
-        <Badge className={statusConfig.color}>
-          <Icon className="w-3 h-3 mr-1" />
-          {statusConfig.label}
+        <Badge className="bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800">
+          <Settings2 className="w-3 h-3 mr-1" />
+          Pending
         </Badge>
       );
     }
 
-    return (
-      <Badge variant="secondary" className="bg-gray-50 text-gray-700 dark:bg-gray-950 dark:text-gray-300">
-        <Shield className="w-3 h-3 mr-1" />
-        {currentStatus}
-      </Badge>
-    );
+    switch (currentStatus.toLowerCase()) {
+      case 'active':
+        return (
+          <Badge className="bg-green-50 text-green-700 border border-green-200 dark:bg-green-950 dark:text-green-300 dark:border-green-800">
+            <div className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></div>
+            Active
+          </Badge>
+        );
+      case 'pending':
+      case 'confirmed':
+        return (
+          <Badge className="bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800">
+            <Clock className="w-3 h-3 mr-1" />
+            Pending Setup
+          </Badge>
+        );
+      case 'provisioning':
+        return (
+          <Badge className="bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800">
+            <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+            Provisioning
+          </Badge>
+        );
+      case 'suspended':
+        return (
+          <Badge className="bg-orange-50 text-orange-700 border border-orange-200 dark:bg-orange-950 dark:text-orange-300 dark:border-orange-800">
+            <AlertTriangle className="w-3 h-3 mr-1" />
+            Suspended
+          </Badge>
+        );
+      case 'failed':
+        // Double-check for config errors even in failed status
+        if (order?.provisioningError && order.provisioningError.includes('CONFIG:')) {
+          return (
+            <Badge className="bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800">
+              <Settings2 className="w-3 h-3 mr-1" />
+              Awaiting Config
+            </Badge>
+          );
+        }
+        return (
+          <Badge className="bg-red-50 text-red-700 border border-red-200 dark:bg-red-950 dark:text-red-300 dark:border-red-800">
+            <XCircle className="w-3 h-3 mr-1" />
+            Failed
+          </Badge>
+        );
+      case 'terminated':
+        return (
+          <Badge className="bg-red-50 text-red-700 border border-red-200 dark:bg-red-950 dark:text-red-300 dark:border-red-800">
+            <XCircle className="w-3 h-3 mr-1" />
+            Terminated
+          </Badge>
+        );
+      default:
+        // Enhanced default case
+        const isManualOrder = !lastAction || lastAction.includes('manual');
+        if (isManualOrder || currentStatus.toLowerCase() === 'confirmed') {
+          return (
+            <Badge className="bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800">
+              <Clock className="w-3 h-3 mr-1" />
+              Awaiting Setup
+            </Badge>
+          );
+        }
+
+        return (
+          <Badge variant="secondary" className="bg-gray-50 text-gray-700 dark:bg-gray-950 dark:text-gray-300">
+            <Shield className="w-3 h-3 mr-1" />
+            {currentStatus}
+          </Badge>
+        );
+    }
   };
 
+  // ... rest of existing code ...
   const formatDate = (date: Date | string) => {
     return new Date(date).toLocaleDateString('en-US', {
       year: 'numeric',
@@ -987,7 +1043,7 @@ const OrderDetails = () => {
                     <Badge variant="secondary" className="text-xs">
                       {getProviderDisplayName(provider)}
                     </Badge>
-                    {getStatusBadge(order.status, order.provisioningStatus, order.lastAction)}
+                    {getStatusBadge(order.status, order.provisioningStatus, order.lastAction, order)}
                   </div>
                 </div>
               </div>
@@ -1234,7 +1290,7 @@ const OrderDetails = () => {
                           <div className="min-w-0 flex-1">
                             <p className="text-xs font-medium text-green-600 dark:text-green-400 uppercase tracking-wide">Status</p>
                             <p className="font-semibold text-green-900 dark:text-green-100 text-sm lg:text-base capitalize break-words">
-                              {order.provisioningStatus || order.status}
+                              {getStatusBadge(order.status, order.provisioningStatus, order.lastAction, order)}
                             </p>
                           </div>
                         </div>

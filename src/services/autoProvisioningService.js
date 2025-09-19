@@ -269,6 +269,10 @@ class AutoProvisioningService {
 
   // --- SMARTVPS PATH -------------------------------------------------------
 
+// ... existing code ...
+
+  // --- SMARTVPS PATH -------------------------------------------------------
+
   async provisionViaSmartVps(order, ipStock, startTime) {
     L.head(`SMARTVPS PATH — order ${order._id}`);
 
@@ -288,36 +292,99 @@ class AutoProvisioningService {
     L.kv('[SMARTVPS] parsed RAM (GB)', ram);
     if (!ram) throw new Error(`Unable to parse RAM from memory "${order.memory}" for SmartVPS`);
 
-    // NEW:
+    // Get package with retry logic
     const pkg = await this.pickSmartVpsPackage(ipStock, order);
     L.kv('[SMARTVPS] Using package for buy', pkg);
 
-    // Per SmartVPS docs, the field is named "ip", but it’s actually the package key.
-    // We’ll pass the package *name* (e.g., "103.195"). Server returns a string that includes the assigned IP.
-    L.line('[SMARTVPS] Calling buyVps(packageName, ram) …');
-    const buyRes = await this.smartvpsApi.buyVps(pkg.name, ram);
-    const buyText = typeof buyRes === 'string' ? buyRes : JSON.stringify(buyRes);
-    L.kv('[SMARTVPS] buyVps raw response', buyText);
+    // Buy VPS with timeout and retry logic
+    let buyRes, boughtIp;
+    const maxRetries = 3;
+    let lastError;
 
-    // Extract the *assigned* IP from the buy response
-    const boughtIp = this.extractIp(buyText);
-    L.kv('[SMARTVPS] assigned/bought IP', boughtIp);
-    if (!boughtIp) throw new Error('SmartVPS buyVps did not return an assigned IP');
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        L.line(`[SMARTVPS] Calling buyVps(${pkg.name}, ${ram}) - attempt ${attempt}/${maxRetries} …`);
 
-    // 3) status(ip) → credentials
-    L.line('[SMARTVPS] Calling status(ip) …');
-    const statusRaw = await this.smartvpsApi.status(boughtIp);
-    const statusNormalized = this.normalizeSmartVpsResponse(statusRaw);
-    L.kv('[SMARTVPS] status raw', typeof statusRaw === 'string' ? statusRaw.slice(0, 500) : statusRaw);
-    L.kv('[SMARTVPS] status normalized', statusNormalized);
+        // Add timeout wrapper around the API call
+        buyRes = await this.withTimeout(
+          this.smartvpsApi.buyVps(pkg.name, ram),
+          45000, // 45 second timeout
+          `SmartVPS buyVps timeout (attempt ${attempt})`
+        );
 
-    let statusObj = statusNormalized;
-    if (typeof statusObj === 'string') {
-      try { statusObj = JSON.parse(statusObj); } catch {
-        try {
-          const unquoted = statusObj.replace(/^"+|"+$/g, '').replace(/\\"/g, '"');
-          statusObj = JSON.parse(unquoted);
-        } catch { statusObj = {}; }
+        const buyText = typeof buyRes === 'string' ? buyRes : JSON.stringify(buyRes);
+        L.kv(`[SMARTVPS] buyVps attempt ${attempt} response`, buyText.slice(0, 500));
+
+        // Extract the assigned IP from the buy response
+        boughtIp = this.extractIp(buyText);
+        L.kv('[SMARTVPS] assigned/bought IP', boughtIp);
+
+        if (!boughtIp) {
+          throw new Error('SmartVPS buyVps did not return an assigned IP');
+        }
+
+        // Success - break out of retry loop
+        L.line(`[SMARTVPS] ✅ buyVps succeeded on attempt ${attempt}`);
+        break;
+
+      } catch (error) {
+        lastError = error;
+        L.line(`[SMARTVPS] ❌ buyVps attempt ${attempt} failed: ${error.message}`);
+
+        if (attempt < maxRetries) {
+          const delay = attempt * 5000; // 5s, 10s delay between retries
+          L.line(`[SMARTVPS] Waiting ${delay}ms before retry...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+    }
+
+    // If all retries failed
+    if (!buyRes || !boughtIp) {
+      throw new Error(`SmartVPS buyVps failed after ${maxRetries} attempts. Last error: ${lastError?.message || 'Unknown'}`);
+    }
+
+    // Get credentials with retry logic
+    let statusObj = {};
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        L.line(`[SMARTVPS] Calling status(${boughtIp}) - attempt ${attempt}/${maxRetries} …`);
+
+        const statusRaw = await this.withTimeout(
+          this.smartvpsApi.status(boughtIp),
+          30000, // 30 second timeout for status
+          `SmartVPS status timeout (attempt ${attempt})`
+        );
+
+        const statusNormalized = this.normalizeSmartVpsResponse(statusRaw);
+        L.kv(`[SMARTVPS] status attempt ${attempt} normalized`, statusNormalized);
+
+        statusObj = statusNormalized;
+        if (typeof statusObj === 'string') {
+          try {
+            statusObj = JSON.parse(statusObj);
+          } catch {
+            try {
+              const unquoted = statusObj.replace(/^"+|"+$/g, '').replace(/\\"/g, '"');
+              statusObj = JSON.parse(unquoted);
+            } catch {
+              statusObj = {};
+            }
+          }
+        }
+
+        // Success - break out of retry loop
+        L.line(`[SMARTVPS] ✅ status succeeded on attempt ${attempt}`);
+        break;
+
+      } catch (error) {
+        L.line(`[SMARTVPS] ❌ status attempt ${attempt} failed: ${error.message}`);
+
+        if (attempt < maxRetries) {
+          const delay = attempt * 3000; // 3s, 6s delay between retries
+          L.line(`[SMARTVPS] Waiting ${delay}ms before retry...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
       }
     }
 
@@ -367,6 +434,29 @@ class AutoProvisioningService {
       totalTime
     };
   }
+
+  // --- UTILITY METHODS -----------------------------------------------------
+
+  // Timeout wrapper for API calls
+  async withTimeout(promise, timeoutMs, errorMessage) {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(new Error(errorMessage || `Operation timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+
+      promise
+        .then(result => {
+          clearTimeout(timer);
+          resolve(result);
+        })
+        .catch(error => {
+          clearTimeout(timer);
+          reject(error);
+        });
+    });
+  }
+
+  // ... rest of existing code ...
 
   // --- HOSTYCARE PATH (same logic, extra logs) -----------------------------
 
