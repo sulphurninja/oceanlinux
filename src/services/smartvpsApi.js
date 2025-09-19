@@ -110,12 +110,54 @@ class SmartVpsAPI {
   // Buy (call ipstock first and pick a usable IP; ram string/number)
   buyVps(ip, ram) { return httpFetch('api/oceansmart/buyvps', { jsonBody: { ip, ram: String(ram) } }); }
 
-  // Renew VPS - NEW METHOD
+  // Renew VPS - FIXED WITH EXPLICIT POST METHOD AND ENHANCED LOGGING
   renewVps(ip) {
-    console.log('[SMARTVPS] Renewing VPS for IP:', ip);
-    return httpFetch('api/oceansmart/renewvps', { jsonBody: { ip } });
-  }
+    console.log('[SMARTVPS-RENEW] === RENEWAL REQUEST START ===');
+    console.log('[SMARTVPS-RENEW] Initiating VPS renewal for IP:', ip);
+    console.log('[SMARTVPS-RENEW] Target endpoint: api/oceansmart/renewvps');
+    console.log('[SMARTVPS-RENEW] Request method: POST (EXPLICIT)');
+    console.log('[SMARTVPS-RENEW] Request payload: { ip:', ip, '}');
+    console.log('[SMARTVPS-RENEW] Full URL will be:', BASE_URL + 'api/oceansmart/renewvps');
 
+    const startTime = Date.now();
+    console.log('[SMARTVPS-RENEW] Request started at:', new Date().toISOString());
+
+    // 🔧 EXPLICIT POST METHOD TO OVERRIDE DEFAULT
+    return httpFetch('api/oceansmart/renewvps', {
+      method: 'POST',  // Explicitly specify POST
+      jsonBody: { ip }
+    })
+      .then(result => {
+        const endTime = Date.now();
+        const duration = endTime - startTime;
+
+        console.log('[SMARTVPS-RENEW] === RENEWAL REQUEST SUCCESS ===');
+        console.log('[SMARTVPS-RENEW] Request completed at:', new Date().toISOString());
+        console.log('[SMARTVPS-RENEW] Request duration:', duration + 'ms');
+        console.log('[SMARTVPS-RENEW] Response received for IP:', ip);
+        console.log('[SMARTVPS-RENEW] Response type:', typeof result);
+        console.log('[SMARTVPS-RENEW] Response data:', JSON.stringify(result, null, 2));
+        console.log('[SMARTVPS-RENEW] ✅ SmartVPS renewal API call completed successfully');
+
+        return result;
+      })
+      .catch(error => {
+        const endTime = Date.now();
+        const duration = endTime - startTime;
+
+        console.log('[SMARTVPS-RENEW] === RENEWAL REQUEST FAILED ===');
+        console.log('[SMARTVPS-RENEW] Request failed at:', new Date().toISOString());
+        console.log('[SMARTVPS-RENEW] Request duration:', duration + 'ms');
+        console.log('[SMARTVPS-RENEW] Error for IP:', ip);
+        console.log('[SMARTVPS-RENEW] Error type:', error.constructor.name);
+        console.log('[SMARTVPS-RENEW] Error message:', error.message);
+        console.log('[SMARTVPS-RENEW] Error stack:', error.stack);
+        console.log('[SMARTVPS-RENEW] ❌ SmartVPS renewal API call failed');
+
+        throw error;
+      });
+  }
 }
+
 
 module.exports = SmartVpsAPI;

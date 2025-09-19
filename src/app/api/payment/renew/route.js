@@ -3,6 +3,7 @@ import connectDB from '@/lib/db';
 import { getDataFromToken } from '@/helper/getDataFromToken';
 import Order from '@/models/orderModel';
 import User from '@/models/userModel';
+import IPStock from '@/models/ipStockModel'; // Add IPStock import
 import Razorpay from 'razorpay';
 
 // Initialize Razorpay with your credentials
@@ -11,20 +12,58 @@ const razorpay = new Razorpay({
   key_secret: process.env.RAZORPAY_KEY_SECRET,
 });
 
-// Helper function to determine provider from order
-function getProviderFromOrder(order, ipStock = null) {
+// Enhanced helper function to determine provider from order with IPStock data
+async function getProviderFromOrder(order) {
+  console.log('[RENEWAL-INIT-PROVIDER] === PROVIDER DETECTION START ===');
+  console.log('[RENEWAL-INIT-PROVIDER] Determining provider for order:', {
+    orderId: order._id,
+    explicitProvider: order.provider,
+    hostycareServiceId: order.hostycareServiceId,
+    smartvpsServiceId: order.smartvpsServiceId,
+    ipStockId: order.ipStockId,
+    ipAddress: order.ipAddress,
+    productName: order.productName
+  });
+
   // Primary logic: Check if order has hostycare service ID
   if (order.hostycareServiceId) {
+    console.log('[RENEWAL-INIT-PROVIDER] ✅ Detected Hostycare via serviceId:', order.hostycareServiceId);
     return 'hostycare';
   }
 
   // Secondary logic: Check if ipStock has smartvps tag
-  if (ipStock && ipStock.tags && ipStock.tags.includes('smartvps')) {
-    return 'smartvps';
+  if (order.ipStockId) {
+    try {
+      console.log('[RENEWAL-INIT-PROVIDER] Fetching IPStock data for ID:', order.ipStockId);
+      const ipStock = await IPStock.findById(order.ipStockId);
+
+      if (ipStock) {
+        console.log('[RENEWAL-INIT-PROVIDER] IPStock found:', {
+          _id: ipStock._id,
+          name: ipStock.name,
+          tags: ipStock.tags,
+          serverType: ipStock.serverType
+        });
+
+        if (ipStock.tags && ipStock.tags.includes('smartvps')) {
+          console.log('[RENEWAL-INIT-PROVIDER] ✅ Detected SmartVPS via ipStock tags:', ipStock.tags);
+          return 'smartvps';
+        } else {
+          console.log('[RENEWAL-INIT-PROVIDER] IPStock tags do not include smartvps:', ipStock.tags);
+        }
+      } else {
+        console.log('[RENEWAL-INIT-PROVIDER] IPStock not found for ID:', order.ipStockId);
+      }
+    } catch (ipStockError) {
+      console.error('[RENEWAL-INIT-PROVIDER] Error fetching IPStock:', ipStockError);
+    }
+  } else {
+    console.log('[RENEWAL-INIT-PROVIDER] No ipStockId in order');
   }
 
   // Additional fallback: Check smartvps service ID
   if (order.smartvpsServiceId) {
+    console.log('[RENEWAL-INIT-PROVIDER] ✅ Detected SmartVPS via serviceId:', order.smartvpsServiceId);
     return 'smartvps';
   }
 
@@ -32,10 +71,15 @@ function getProviderFromOrder(order, ipStock = null) {
   if (order.productName.includes('103.195') ||
       order.ipAddress?.startsWith('103.195') ||
       order.productName.includes('🏅')) {
+    console.log('[RENEWAL-INIT-PROVIDER] ✅ Detected SmartVPS via patterns');
+    console.log('[RENEWAL-INIT-PROVIDER] Product name:', order.productName);
+    console.log('[RENEWAL-INIT-PROVIDER] IP address:', order.ipAddress);
     return 'smartvps';
   }
 
   // Default to oceanlinux
+  console.log('[RENEWAL-INIT-PROVIDER] ⚪ Defaulting to OceanLinux');
+  console.log('[RENEWAL-INIT-PROVIDER] === PROVIDER DETECTION END ===');
   return 'oceanlinux';
 }
 
@@ -83,20 +127,20 @@ export async function POST(request) {
       }, { status: 400 });
     }
 
-    // 6. Determine the provider for this order
-    const provider = getProviderFromOrder(order);
-    console.log('[RENEWAL] Determined provider for order:', provider);
+    // 6. Determine the provider for this order using enhanced detection
+    const provider = await getProviderFromOrder(order);
+    console.log('[RENEWAL-INIT] Final determined provider for order:', provider);
 
     // 7. For SmartVPS orders, validate that we have the necessary identifiers
     if (provider === 'smartvps') {
       const serviceIdentifier = order.smartvpsServiceId || order.ipAddress;
       if (!serviceIdentifier) {
-        console.log('[RENEWAL] SmartVPS order missing service identifier');
+        console.log('[RENEWAL-INIT] SmartVPS order missing service identifier');
         return NextResponse.json({
           message: 'SmartVPS order missing required service identifier'
         }, { status: 400 });
       }
-      console.log('[RENEWAL] SmartVPS renewal for service:', serviceIdentifier);
+      console.log('[RENEWAL-INIT] SmartVPS renewal for service:', serviceIdentifier);
     }
 
     // 8. Generate a unique renewal transaction ID

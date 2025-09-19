@@ -85,8 +85,8 @@ export async function GET(request) {
 
         // Use extracted status and map to our format
         status: extractedCredentials.status === 'active' ? 'active' :
-               extractedCredentials.status === 'Online' ? 'active' :
-               extractedCredentials.status === 'completed' ? 'active' : 'unknown',
+          extractedCredentials.status === 'Online' ? 'active' :
+            extractedCredentials.status === 'completed' ? 'active' : 'unknown',
 
         // Use the credentials from SmartVPS, fallback to order if not found
         username: extractedCredentials.username || 'Administrator',
@@ -397,7 +397,8 @@ export async function POST(request) {
             '2022': 'Windows Server 2022',
             '11': 'Windows 11',
             'centos': 'CentOS 7',
-            'ubuntu': 'Ubuntu 22'
+            'ubuntu': 'Ubuntu 22',
+            '2025': 'Windows 2025', // New addition
           };
           console.log('[SMARTVPS-ACTION][POST] Templates returned:', result);
         } catch (error) {
@@ -578,43 +579,216 @@ function parseSmartVPSResponse(response, actionType = 'unknown') {
 }
 
 // Helper function to extract credentials from parsed SmartVPS response
+// Helper function to extract credentials from parsed SmartVPS response
 function extractSmartVPSCredentials(parsedResponse, order) {
-  console.log(`[SMARTVPS-EXTRACT] Extracting credentials from parsed response`);
+  console.log(`[SMARTVPS-EXTRACT] === CREDENTIAL EXTRACTION START ===`);
+  console.log(`[SMARTVPS-EXTRACT] Parsing response for credential extraction`);
+  console.log(`[SMARTVPS-EXTRACT] Parsed response type:`, typeof parsedResponse);
+  console.log(`[SMARTVPS-EXTRACT] Parsed response keys:`, Object.keys(parsedResponse || {}));
+
+  // 🔍 LOG THE ENTIRE PARSED RESPONSE FOR DEBUGGING
+  console.log(`[SMARTVPS-EXTRACT] === FULL PARSED RESPONSE ===`);
+  console.log(`[SMARTVPS-EXTRACT] Complete response object:`, JSON.stringify(parsedResponse, null, 2));
+  console.log(`[SMARTVPS-EXTRACT] === END FULL RESPONSE ===`);
+
+  // Log all possible username fields INCLUDING THE TYPO
+  console.log(`[SMARTVPS-EXTRACT] All possible username fields:`, {
+    Username: parsedResponse?.Username,
+    username: parsedResponse?.username,
+    Usernane: parsedResponse?.Usernane, // 🔧 TYPO FIELD FROM SMARTVPS
+    User: parsedResponse?.User,
+    user: parsedResponse?.user,
+    login: parsedResponse?.login,
+    Login: parsedResponse?.Login,
+    admin_user: parsedResponse?.admin_user,
+    AdminUser: parsedResponse?.AdminUser,
+    root_user: parsedResponse?.root_user,
+    RootUser: parsedResponse?.RootUser,
+    user_name: parsedResponse?.user_name,
+    UserName: parsedResponse?.UserName,
+    loginName: parsedResponse?.loginName,
+    LoginName: parsedResponse?.LoginName,
+    account: parsedResponse?.account,
+    Account: parsedResponse?.Account,
+    admin: parsedResponse?.admin,
+    Admin: parsedResponse?.Admin
+  });
 
   const extracted = {
     // SmartVPS uses capitalized field names in status responses
     ip: parsedResponse?.IP || parsedResponse?.ip || order.ipAddress,
-    username: parsedResponse?.Username || parsedResponse?.username || parsedResponse?.User || parsedResponse?.user || order.username,
-    password: parsedResponse?.Password || parsedResponse?.password || order.password,
-    os: parsedResponse?.OS || parsedResponse?.os || order.os,
+
+    // Extract raw username from SmartVPS response - FIXED WITH TYPO FIELD
+    rawUsername: parsedResponse?.Username ||
+                parsedResponse?.username ||
+                parsedResponse?.Usernane || // 🔧 SMARTVPS TYPO FIELD
+                parsedResponse?.User ||
+                parsedResponse?.user ||
+                parsedResponse?.Login ||
+                parsedResponse?.login ||
+                parsedResponse?.AdminUser ||
+                parsedResponse?.admin_user ||
+                parsedResponse?.RootUser ||
+                parsedResponse?.root_user ||
+                parsedResponse?.UserName ||
+                parsedResponse?.user_name ||
+                parsedResponse?.LoginName ||
+                parsedResponse?.loginName ||
+                parsedResponse?.Account ||
+                parsedResponse?.account ||
+                parsedResponse?.Admin ||
+                parsedResponse?.admin ||
+                order.username,
+
+    // Try ALL possible password field variations
+    password: parsedResponse?.Password ||
+             parsedResponse?.password ||
+             parsedResponse?.AdminPassword ||
+             parsedResponse?.admin_password ||
+             parsedResponse?.RootPassword ||
+             parsedResponse?.root_password ||
+             parsedResponse?.UserPassword ||
+             parsedResponse?.user_password ||
+             parsedResponse?.LoginPassword ||
+             parsedResponse?.login_password ||
+             parsedResponse?.Pass ||
+             parsedResponse?.pass ||
+             parsedResponse?.PWD ||
+             parsedResponse?.pwd ||
+             order.password,
+
+    // Try ALL possible OS field variations
+    os: parsedResponse?.OS ||
+        parsedResponse?.os ||
+        parsedResponse?.OperatingSystem ||
+        parsedResponse?.operating_system ||
+        parsedResponse?.Template ||
+        parsedResponse?.template ||
+        parsedResponse?.OSTemplate ||
+        parsedResponse?.os_template ||
+        parsedResponse?.Distro ||
+        parsedResponse?.distro ||
+        parsedResponse?.System ||
+        parsedResponse?.system ||
+        parsedResponse?.OSName ||
+        parsedResponse?.os_name ||
+        parsedResponse?.operating_system_name ||
+        order.os,
+
     status: parsedResponse?.MachineStatus || parsedResponse?.PowerStatus || parsedResponse?.ActionStatus || parsedResponse?.status,
     ram: parsedResponse?.RAM || parsedResponse?.ram,
     expiryDate: parsedResponse?.ExpiryDate || parsedResponse?.expiryDate
   };
 
+  // 🔧 SPECIAL LOGIC: Determine correct username based on ACTUAL OS FROM SMARTVPS
+  console.log(`[SMARTVPS-EXTRACT] === USERNAME OS-BASED LOGIC ===`);
+  console.log(`[SMARTVPS-EXTRACT] Extracted OS from SmartVPS:`, extracted.os);
+  console.log(`[SMARTVPS-EXTRACT] Order OS (for reference):`, order.os);
+  console.log(`[SMARTVPS-EXTRACT] Raw username from SmartVPS:`, extracted.rawUsername);
+  console.log(`[SMARTVPS-EXTRACT] Current username in order:`, order.username);
+
+  // Use the ACTUAL OS from SmartVPS, not the order OS
+  const actualOS = extracted.os || order.os;
+  const osLower = (actualOS || '').toLowerCase();
+  const isLinux = osLower.includes('ubuntu') || osLower.includes('centos') || osLower.includes('linux');
+  const isWindows = osLower.includes('windows') || osLower.includes('win');
+
+  console.log(`[SMARTVPS-EXTRACT] OS Analysis:`, {
+    actualOSFromSmartVPS: extracted.os,
+    orderOS: order.os,
+    osForAnalysis: actualOS,
+    osLower: osLower,
+    containsUbuntu: osLower.includes('ubuntu'),
+    containsCentos: osLower.includes('centos'),
+    containsLinux: osLower.includes('linux'),
+    containsWindows: osLower.includes('windows'),
+    isLinuxDetected: isLinux,
+    isWindowsDetected: isWindows
+  });
+
+  if (isLinux) {
+    console.log(`[SMARTVPS-EXTRACT] ✅ Linux OS detected (${actualOS}) - setting username to 'root'`);
+    extracted.username = 'root';
+    extracted.usernameSource = 'Linux OS Rule';
+    extracted.usernameReason = `OS contains linux identifier: ${osLower}`;
+  } else if (isWindows) {
+    console.log(`[SMARTVPS-EXTRACT] ✅ Windows OS detected (${actualOS}) - using username from SmartVPS`);
+    extracted.username = extracted.rawUsername;
+    extracted.usernameSource = extracted.rawUsername === order.username ? 'Order Document' : 'SmartVPS API';
+    extracted.usernameReason = `Windows OS detected, using SmartVPS username: ${extracted.rawUsername}`;
+  } else {
+    console.log(`[SMARTVPS-EXTRACT] ⚠️ Unknown OS detected (${actualOS}) - using username from SmartVPS`);
+    extracted.username = extracted.rawUsername;
+    extracted.usernameSource = extracted.rawUsername === order.username ? 'Order Document' : 'SmartVPS API';
+    extracted.usernameReason = `Unknown OS, using SmartVPS username: ${extracted.rawUsername}`;
+  }
+
+  console.log(`[SMARTVPS-EXTRACT] === EXTRACTION RESULTS ===`);
   console.log(`[SMARTVPS-EXTRACT] Extracted credentials:`, {
     ip: extracted.ip,
     username: extracted.username,
+    usernameSource: extracted.usernameSource,
+    usernameReason: extracted.usernameReason,
+    rawUsernameFromSmartVPS: extracted.rawUsername,
     password: extracted.password ? '[EXTRACTED PASSWORD]' : 'no password found',
     os: extracted.os,
+    actualOSUsed: actualOS,
+    isLinuxOS: isLinux,
+    isWindowsOS: isWindows,
     status: extracted.status,
     ram: extracted.ram,
-    expiryDate: extracted.expiryDate,
-    passwordSource: parsedResponse?.Password || parsedResponse?.password ? 'SmartVPS API' : 'Order Document'
+    expiryDate: extracted.expiryDate
   });
 
+  console.log(`[SMARTVPS-EXTRACT] Source comparison:`, {
+    username: {
+      final: extracted.username,
+      rawFromSmartVPS: extracted.rawUsername,
+      fromOrder: order.username,
+      source: extracted.usernameSource,
+      osBasedRule: isLinux ? 'Applied (Linux -> root)' : isWindows ? 'Applied (Windows -> use SmartVPS)' : 'Unknown OS',
+      willUpdate: extracted.username !== order.username
+    },
+    password: {
+      hasExtracted: !!extracted.password,
+      fromOrder: !!order.password,
+      isFromSmartVPS: extracted.password !== order.password,
+      source: extracted.password === order.password ? 'Order Document' : 'SmartVPS API',
+      willUpdate: extracted.password !== order.password
+    },
+    os: {
+      extracted: extracted.os,
+      fromOrder: order.os,
+      isFromSmartVPS: extracted.os !== order.os,
+      source: extracted.os === order.os ? 'Order Document' : 'SmartVPS API',
+      willUpdate: extracted.os !== order.os
+    }
+  });
+
+  console.log(`[SMARTVPS-EXTRACT] === CREDENTIAL EXTRACTION END ===`);
   return extracted;
 }
 
-
-// Helper function to sync server state from SmartVPS API to our database
+// ... rest of the existing code stays the same ...
+// Also update the syncServerState function to handle the username logic properly
 async function syncServerState(orderId, details, info) {
   console.log('[SMARTVPS-SYNC] === SYNC START ===');
   console.log('[SMARTVPS-SYNC] Order ID:', orderId);
   console.log('[SMARTVPS-SYNC] Details received:', details ? '[Details object present]' : null);
-  console.log('[SMARTVPS-SYNC] Info received:', info ? '[Info object present]' : null);
 
   try {
+    // Get the current order to compare against
+    const currentOrder = await Order.findById(orderId);
+    if (!currentOrder) {
+      throw new Error('Order not found for sync');
+    }
+
+    console.log('[SMARTVPS-SYNC] Current order credentials:', {
+      username: currentOrder.username,
+      password: currentOrder.password ? '[PASSWORD SET]' : 'no password',
+      os: currentOrder.os
+    });
+
     const updateData = {
       lastSyncTime: new Date()
     };
@@ -626,17 +800,13 @@ async function syncServerState(orderId, details, info) {
       console.log('[SMARTVPS-SYNC] Raw details for credential extraction:', {
         status: details.status,
         username: details.username,
+        usernameSource: details.usernameSource,
         password: details.password ? '[PASSWORD PRESENT]' : 'null',
         os: details.os,
-        operating_system: details.operating_system,
-        template: details.template,
-        admin_password: details.admin_password,
-        root_password: details.root_password,
-        user: details.user,
-        login: details.login
+        ip: details.ip
       });
 
-      // Status mapping
+      // Status mapping (unchanged)
       let smartvpsStatus;
       if (typeof details.status === 'string') {
         smartvpsStatus = details.status.toLowerCase();
@@ -702,57 +872,84 @@ async function syncServerState(orderId, details, info) {
           break;
       }
 
-      // IP Address sync
+      // IP Address sync (unchanged)
       if (details.ip && details.ip !== 'pending') {
         console.log('[SMARTVPS-SYNC] Found IP address:', details.ip);
         updateData.ipAddress = details.ip;
       }
 
-      // Username sync - check multiple possible fields
-      const possibleUsernames = [
-        details.username,
-        details.user,
-        details.login,
-        details.admin_user,
-        details.root_user
-      ].filter(Boolean);
+      // Username sync - enhanced with OS-based logic and FORCED UPDATE for Linux systems
+      console.log('[SMARTVPS-SYNC] === USERNAME SYNC ===');
+      console.log('[SMARTVPS-SYNC] Username from details:', details.username);
+      console.log('[SMARTVPS-SYNC] Username source:', details.usernameSource);
+      console.log('[SMARTVPS-SYNC] Current username in order:', currentOrder.username);
 
-      if (possibleUsernames.length > 0) {
-        const newUsername = possibleUsernames[0];
-        console.log('[SMARTVPS-SYNC] Found username:', newUsername, 'from fields:', possibleUsernames);
-        updateData.username = newUsername;
+      // Determine the correct username based on OS
+      const currentOS = details.os || currentOrder.os;
+      const osLower = (currentOS || '').toLowerCase();
+      const isLinux = osLower.includes('ubuntu') || osLower.includes('centos');
+
+      console.log('[SMARTVPS-SYNC] OS analysis:', {
+        currentOS: currentOS,
+        osLower: osLower,
+        isLinux: isLinux
+      });
+
+      let correctUsername;
+      let usernameUpdateReason;
+
+      if (isLinux) {
+        // For Linux systems, username should ALWAYS be root
+        correctUsername = 'root';
+        usernameUpdateReason = 'Linux OS Rule (Ubuntu/CentOS -> root)';
+        console.log('[SMARTVPS-SYNC] Linux OS detected - setting username to root');
+      } else {
+        // For non-Linux systems, use the username from SmartVPS API
+        correctUsername = details.username || currentOrder.username;
+        usernameUpdateReason = details.username ? 'SmartVPS API Response' : 'No Change';
+        console.log('[SMARTVPS-SYNC] Non-Linux OS detected - using SmartVPS username');
       }
 
-      // Password sync - check multiple possible fields
-      const possiblePasswords = [
-        details.password,
-        details.admin_password,
-        details.root_password,
-        details.user_password,
-        details.login_password
-      ].filter(Boolean);
+      console.log('[SMARTVPS-SYNC] Username determination result:', {
+        correctUsername: correctUsername,
+        currentUsername: currentOrder.username,
+        needsUpdate: correctUsername !== currentOrder.username,
+        updateReason: usernameUpdateReason
+      });
 
-      if (possiblePasswords.length > 0) {
-        const newPassword = possiblePasswords[0];
-        console.log('[SMARTVPS-SYNC] Found password from SmartVPS response');
-        updateData.password = newPassword;
+      // Always update username if it doesn't match the correct value
+      if (correctUsername && correctUsername !== currentOrder.username) {
+        console.log('[SMARTVPS-SYNC] ✅ Username update needed:');
+        console.log('[SMARTVPS-SYNC] Current username:', currentOrder.username);
+        console.log('[SMARTVPS-SYNC] Correct username:', correctUsername);
+        console.log('[SMARTVPS-SYNC] Update reason:', usernameUpdateReason);
+        updateData.username = correctUsername;
+      } else if (correctUsername === currentOrder.username) {
+        console.log('[SMARTVPS-SYNC] Username already correct:', correctUsername);
+      } else {
+        console.log('[SMARTVPS-SYNC] No valid username found, keeping current:', currentOrder.username);
       }
 
-      // OS sync - check multiple possible fields and map to standard names
-      const possibleOSFields = [
-        details.os,
-        details.operating_system,
-        details.template,
-        details.os_template,
-        details.distro,
-        details.system
-      ].filter(Boolean);
+      // Password sync - enhanced with better comparison
+      console.log('[SMARTVPS-SYNC] === PASSWORD SYNC ===');
+      if (details.password && details.password !== currentOrder.password) {
+        console.log('[SMARTVPS-SYNC] ✅ Password update detected (passwords differ)');
+        console.log('[SMARTVPS-SYNC] Password source: SmartVPS API');
+        updateData.password = details.password;
+      } else if (details.password === currentOrder.password) {
+        console.log('[SMARTVPS-SYNC] Password unchanged (same as current)');
+      } else {
+        console.log('[SMARTVPS-SYNC] No password in SmartVPS response, keeping current');
+      }
 
-      if (possibleOSFields.length > 0) {
-        const osInfo = possibleOSFields[0];
-        console.log('[SMARTVPS-SYNC] Found OS info:', osInfo);
+      // OS sync - enhanced with better comparison
+      console.log('[SMARTVPS-SYNC] === OS SYNC ===');
+      if (details.os && details.os !== currentOrder.os) {
+        console.log('[SMARTVPS-SYNC] ✅ OS update detected:');
+        console.log('[SMARTVPS-SYNC] Current OS:', currentOrder.os);
+        console.log('[SMARTVPS-SYNC] New OS:', details.os);
 
-        let mappedOS = osInfo;
+        let mappedOS = details.os;
 
         // Map SmartVPS OS identifiers to our standard display names
         const osMapping = {
@@ -774,27 +971,56 @@ async function syncServerState(orderId, details, info) {
           'win11': 'Windows 11'
         };
 
-        if (typeof osInfo === 'string') {
-          const osKey = osInfo.toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (typeof details.os === 'string') {
+          const osKey = details.os.toLowerCase().replace(/[^a-z0-9]/g, '');
           if (osMapping[osKey]) {
             mappedOS = osMapping[osKey];
-          } else if (osMapping[osInfo.toLowerCase()]) {
-            mappedOS = osMapping[osInfo.toLowerCase()];
+          } else if (osMapping[details.os.toLowerCase()]) {
+            mappedOS = osMapping[details.os.toLowerCase()];
           } else {
-            // If no direct mapping, try to create a readable name
-            mappedOS = osInfo.charAt(0).toUpperCase() + osInfo.slice(1);
+            // If no direct mapping, use the OS as-is (it might already be properly formatted)
+            mappedOS = details.os;
           }
         }
 
         updateData.os = mappedOS;
-        console.log('[SMARTVPS-SYNC] Mapped OS:', osInfo, '->', mappedOS);
+        console.log('[SMARTVPS-SYNC] Mapped OS:', details.os, '->', mappedOS);
+      } else if (details.os === currentOrder.os) {
+        console.log('[SMARTVPS-SYNC] OS unchanged:', details.os);
+
+        // Even if OS is unchanged, we still need to check if username is correct for the OS
+        if (isLinux && currentOrder.username !== 'root') {
+          console.log('[SMARTVPS-SYNC] 🔧 OS unchanged but username correction needed for Linux');
+          console.log('[SMARTVPS-SYNC] Current OS is Linux but username is not root');
+          if (!updateData.username) {
+            updateData.username = 'root';
+            console.log('[SMARTVPS-SYNC] ✅ Correcting username to root for Linux OS');
+          }
+        }
+      } else {
+        console.log('[SMARTVPS-SYNC] No OS in SmartVPS response, using current:', currentOrder.os);
+
+        // Check if username is correct for current OS
+        if (isLinux && currentOrder.username !== 'root') {
+          console.log('[SMARTVPS-SYNC] 🔧 No OS update but username correction needed for existing Linux OS');
+          if (!updateData.username) {
+            updateData.username = 'root';
+            console.log('[SMARTVPS-SYNC] ✅ Correcting username to root for existing Linux OS');
+          }
+        }
       }
 
       // Store raw server details for debugging and future reference
       updateData.serverDetails = {
         lastUpdated: new Date(),
         rawDetails: details,
-        rawInfo: info
+        rawInfo: info,
+        usernameLogic: {
+          detectedOS: currentOS,
+          isLinux: isLinux,
+          correctUsername: correctUsername,
+          usernameUpdateReason: usernameUpdateReason
+        }
       };
       console.log('[SMARTVPS-SYNC] Added server details to update data');
     }
@@ -804,9 +1030,9 @@ async function syncServerState(orderId, details, info) {
       lastSyncTime: updateData.lastSyncTime,
       provisioningStatus: updateData.provisioningStatus,
       ipAddress: updateData.ipAddress,
-      username: updateData.username,
-      password: updateData.password ? '[PASSWORD UPDATED]' : undefined,
-      os: updateData.os,
+      username: updateData.username ? `${updateData.username} (UPDATED)` : 'unchanged',
+      password: updateData.password ? '[PASSWORD UPDATED]' : 'unchanged',
+      os: updateData.os ? `${updateData.os} (UPDATED)` : 'unchanged',
       hasServerDetails: !!updateData.serverDetails
     });
 
@@ -820,8 +1046,7 @@ async function syncServerState(orderId, details, info) {
         username: updatedOrder.username,
         password: updatedOrder.password ? '[PASSWORD UPDATED]' : 'null',
         os: updatedOrder.os,
-        lastSyncTime: updatedOrder.lastSyncTime,
-        serverDetails: updatedOrder.serverDetails ? '[Raw data stored]' : undefined
+        lastSyncTime: updatedOrder.lastSyncTime
       });
     } else {
       console.log(`[SMARTVPS-SYNC] No meaningful updates for order ${orderId}`);
@@ -835,10 +1060,12 @@ async function syncServerState(orderId, details, info) {
     console.error('[SMARTVPS-SYNC] Error type:', error.constructor.name);
     console.error('[SMARTVPS-SYNC] Error message:', error.message);
     console.error('[SMARTVPS-SYNC] Error stack:', error.stack);
-    console.error('[SMARTVPS-SYNC] Details object:', details);
-    console.error('[SMARTVPS-SYNC] Info object:', info);
     throw error;
   }
 }
 
+// ... rest of the existing code stays the same ...
+// ... rest of the existing code stays the same ...
+
+// ... rest of the existing code stays the same ...
 
