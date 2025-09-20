@@ -35,7 +35,8 @@ import {
     Filter,
     SlidersHorizontal,
     LifeBuoy,
-    ExternalLink
+    ExternalLink,
+    XIcon
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -504,7 +505,7 @@ const ViewLinux = () => {
                                         onClick={clearSearch}
                                         className="absolute right-1 top-1/2 transform -translate-y-1/2 h-6 w-6 p-0 hover:bg-muted/80"
                                     >
-                                        <X className="h-3 w-3" />
+                                        <XIcon className="h-3 w-3" />
                                     </Button>
                                 )}
                             </div>
@@ -656,7 +657,7 @@ const ViewLinux = () => {
                                     <div className="flex gap-2 justify-center">
                                         {(searchQuery || statusFilter !== 'all' || activeTab !== 'all') && (
                                             <Button variant="outline" onClick={clearFilters} className="gap-2" size="sm">
-                                                <X className="h-4 w-4" />
+                                                <XIcon className="h-4 w-4" />
                                                 Clear Filters
                                             </Button>
                                         )}
