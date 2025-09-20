@@ -173,6 +173,38 @@ const ViewLinux = () => {
     };
 
 
+    // Get provider display name
+    const getProviderDisplayName = (order: Order): string => {
+        // Check explicit provider field first
+        if (order.provider) {
+            switch (order.provider) {
+                case 'smartvps':
+                    return 'SmartVPS';
+                case 'hostycare':
+                    return 'Hostycare';
+                case 'oceanlinux':
+                    return 'OceanLinux';
+                default:
+                    return order.provider.charAt(0).toUpperCase() + order.provider.slice(1);
+            }
+        }
+
+        // Fallback logic based on service IDs or patterns
+        if (order.hostycareServiceId) {
+            return 'Hostycare';
+        }
+        if (order.smartvpsServiceId) {
+            return 'SmartVPS';
+        }
+        if (order.productName.includes('103.195') || order.ipAddress?.startsWith('103.195') || order.productName.includes('🏅')) {
+            return 'SmartVPS';
+        }
+
+        return 'OceanLinux';
+    };
+
+
+
     // Get server status for filtering
 
     // Get server status for filtering
@@ -284,36 +316,6 @@ const ViewLinux = () => {
         setSearchQuery('');
         setStatusFilter('all');
         setActiveTab('all');
-    };
-
-    // Get provider display name
-    const getProviderDisplayName = (order: Order): string => {
-        // Check explicit provider field first
-        if (order.provider) {
-            switch (order.provider) {
-                case 'smartvps':
-                    return 'SmartVPS';
-                case 'hostycare':
-                    return 'Hostycare';
-                case 'oceanlinux':
-                    return 'OceanLinux';
-                default:
-                    return order.provider.charAt(0).toUpperCase() + order.provider.slice(1);
-            }
-        }
-
-        // Fallback logic based on service IDs or patterns
-        if (order.hostycareServiceId) {
-            return 'Hostycare';
-        }
-        if (order.smartvpsServiceId) {
-            return 'SmartVPS';
-        }
-        if (order.productName.includes('103.195') || order.ipAddress?.startsWith('103.195') || order.productName.includes('🏅')) {
-            return 'SmartVPS';
-        }
-
-        return 'OceanLinux';
     };
 
 
