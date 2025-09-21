@@ -1,15 +1,16 @@
-export const runtime = "nodejs"; // ensure Node runtime
+// src/app/api/dev/virtualizor/route.js
+export const runtime = "nodejs";
 
-import { NextRequest, NextResponse } from "next/server";
-import { VirtualizorAPI } from "@/services/virtualizorApi"; // named import that DEFINITELY has findVpsId
+import { NextResponse } from "next/server";
+import { VirtualizorAPI } from "@/services/virtualizorApi";
 
-function requireAdmin(req: NextRequest) {
+function requireAdmin(req) {
   const sent = req.headers.get("x-admin-token") || "";
   const need = process.env.HOSTYCARE_INSPECT_TOKEN || "";
   return !!need && sent === need;
 }
 
-export async function POST(req: NextRequest) {
+export async function POST(req) {
   try {
     if (!requireAdmin(req)) {
       return NextResponse.json({ message: "Forbidden" }, { status: 403 });
@@ -28,10 +29,6 @@ export async function POST(req: NextRequest) {
       if (!ip && !hostname && !username) {
         return NextResponse.json({ message: "Provide ip or hostname or username" }, { status: 400 });
       }
-
-      // DEBUG (optional): list instance methods to verify shape
-      // console.log("VZ methods:", Object.getOwnPropertyNames(Object.getPrototypeOf(vz)));
-
       const vpsid = await vz.findVpsId({ ip, hostname, username });
       return NextResponse.json({ ok: true, vpsid });
     }
@@ -53,7 +50,7 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json({ message: "unknown action" }, { status: 400 });
-  } catch (err: any) {
+  } catch (err) {
     return NextResponse.json({ ok: false, error: err?.message || "Unknown error" }, { status: 500 });
   }
 }
