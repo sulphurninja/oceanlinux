@@ -1,141 +1,115 @@
-const crypto = require('crypto');
+import https from "https";
+import querystring from "querystring";
 
-class VirtualizorAPI {
-  constructor(endpoint = null) {
-    this.endpoint = endpoint || process.env.VIRTUALIZOR_ENDPOINT;
-    this.apiKey = process.env.VIRTUALIZOR_API_KEY;
-    this.apiPassword = process.env.VIRTUALIZOR_API_PASSWORD;
+type PostBody = Record<string, string | number | boolean>;
 
-    // Auto-convert HTTP to HTTPS if needed
-    if (this.endpoint && this.endpoint.startsWith('http://')) {
-      this.endpoint = this.endpoint.replace('http://', 'https://');
-      console.log('[VIRTUALIZOR] Auto-converted endpoint to HTTPS:', this.endpoint);
-    }
+const insecure = String(process.env.VIRTUALIZOR_INSECURE || "").toLowerCase() === "true";
 
-    console.log('[VIRTUALIZOR] Constructor:');
-    console.log('  Endpoint:', this.endpoint ? 'SET' : 'MISSING');
-    console.log('  API Key:', this.apiKey ? 'SET' : 'MISSING');
-  }
+// Create an HTTPS agent only if we’re on Node runtime (our route enforces that)
+const AGENT = new https.Agent({ rejectUnauthorized: !insecure });
 
-  // Generate API hash for Virtualizor authentication
-  generateApiHash(action, post = {}) {
-    const apikey = this.apiKey;
-    const apipass = this.apiPassword;
+export class VirtualizorAPI {
+  host: string;
+  port: number;
+  key: string;
+  pass: string;
 
-    // Create the string to hash
-    let hashString = `${apikey}${action}`;
+  constructor() {
+    this.host = process.env.VIRTUALIZOR_HOST!;
+    this.port = Number(process.env.VIRTUALIZOR_PORT || 4083);
+    this.key = process.env.VIRTUALIZOR_API_KEY!;
+    this.pass = process.env.VIRTUALIZOR_API_PASSWORD!;
 
-    // Add POST parameters to hash string in alphabetical order
-    const sortedKeys = Object.keys(post).sort();
-    for (const key of sortedKeys) {
-      hashString += `${key}${post[key]}`;
-    }
-
-    hashString += apipass;
-
-    // Generate SHA1 hash
-    return crypto.createHash('sha1').update(hashString).digest('hex');
-  }
-
-  async makeRequest(action, params = {}, method = 'POST') {
-    try {
-      console.log(`[VIRTUALIZOR] Making ${method} request for action: ${action}`);
-
-      const postData = {
-        ...params,
-        api: 'json',
-        apikey: this.apiKey,
-        apipass: this.apiPassword
-      };
-
-      // Generate the API hash
-      const hash = this.generateApiHash(action, postData);
-      postData.hash = hash;
-
-      const formData = new URLSearchParams();
-      for (const [key, value] of Object.entries(postData)) {
-        formData.append(key, value);
-      }
-
-      const response = await fetch(`${this.endpoint}/?act=${action}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'User-Agent': 'OceanLinux-VirtualizorAPI/1.0'
-        },
-        body: formData,
-        redirect: 'follow' // Follow redirects automatically
-      });
-
-      const responseText = await response.text();
-      console.log('[VIRTUALIZOR] Raw response:', responseText.substring(0, 500));
-
-      let data;
-
-      try {
-        data = JSON.parse(responseText);
-      } catch (parseError) {
-        console.error('[VIRTUALIZOR] JSON parse error:', parseError);
-        console.error('[VIRTUALIZOR] Response text:', responseText);
-        throw new Error(`Invalid JSON response from Virtualizor API: ${responseText.substring(0, 200)}`);
-      }
-
-      if (!response.ok || data.error) {
-        const errorMsg = data.error || data.msg || `Request failed with status ${response.status}`;
-        console.error('[VIRTUALIZOR] API error response:', data);
-        throw new Error(errorMsg);
-      }
-
-      return data;
-    } catch (error) {
-      console.error('[VIRTUALIZOR] API Error:', error);
-      throw error;
+    if (!this.host || !this.key || !this.pass) {
+      throw new Error("VirtualizorAPI: VIRTUALIZOR_HOST/KEY/PASSWORD missing");
     }
   }
 
-  // Get VPS details
-  async getVPSDetails(vpsId) {
-    return await this.makeRequest('vpsmanage', { vps: vpsId });
+  private qsAuth() {
+    // Enduser auth: apikey + apipass
+    return `apikey=${encodeURIComponent(this.key)}&apipass=${encodeURIComponent(this.pass)}`;
   }
 
-  // Get available OS templates
-  async getOSTemplates() {
-    return await this.makeRequest('ostemplates');
+  private baseUrl() {
+    // If your panel doesn’t support JSON, change to api=serialize and add a serializer.
+    return `https://${this.host}:${this.port}/index.php?api=json&${this.qsAuth()}`;
   }
 
-  // Reinstall VPS
-  async reinstallVPS(vpsId, osTemplateId, newPassword) {
-    const params = {
-      vps: vpsId,
-      newos: osTemplateId,
-      newpass: newPassword
+  private async call(path: string, post?: PostBody) {
+    const url = `${this.baseUrl()}&${path}`;
+    const init: RequestInit = {
+      method: post ? "POST" : "GET",
+      headers: post ? { "Content-Type": "application/x-www-form-urlencoded" } : undefined,
+      body: post ? querystring.stringify(post as any) : undefined,
+      // @ts-ignore: node https agent
+      agent: AGENT,
     };
 
-    return await this.makeRequest('rebuild', params);
+    const res = await fetch(url, init);
+    const text = await res.text();
+
+    let data: any;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      throw new Error(`Virtualizor non-JSON response: ${text.slice(0, 300)}`);
+    }
+    if (!res.ok || data?.error) {
+      const err = Array.isArray(data?.error) ? data.error.join("; ") : (data?.error || `HTTP ${res.status}`);
+      throw new Error(err);
+    }
+    return data;
   }
 
-  // Start VPS
-  async startVPS(vpsId) {
-    return await this.makeRequest('start', { vps: vpsId });
+  /** Search Virtualizor by IP / hostname / username, return FIRST matching vpsid (exact IP wins). */
+  async findVpsId(by: { ip?: string; hostname?: string; username?: string }): Promise<string | null> {
+    const trySearch = async (q: Record<string, string>) => {
+      const qs = Object.entries(q)
+        .filter(([, v]) => !!v)
+        .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
+        .join("&");
+      const r = await this.call(`act=listvs&search=1&${qs}&page=1&reslen=100`);
+      const vsMap = r?.vs || r?.vps || r;
+      if (!vsMap || typeof vsMap !== "object") return null;
+
+      const list = Object.values(vsMap) as any[];
+      if (!list.length) return null;
+
+      if (q.ip) {
+        const exact = list.find(v => Array.isArray(v?.ips) && v.ips.includes(q.ip));
+        if (exact?.vpsid || exact?.vid || exact?.subid) return String(exact.vpsid ?? exact.vid ?? exact.subid);
+      }
+      if (q.hostname) {
+        const exact = list.find(v => (v?.hostname || "").toLowerCase() === q.hostname.toLowerCase());
+        if (exact?.vpsid || exact?.vid || exact?.subid) return String(exact.vpsid ?? exact.vid ?? exact.subid);
+      }
+
+      const first = list[0];
+      return first?.vpsid ? String(first.vpsid) : (first?.vid ? String(first.vid) : (first?.subid ? String(first.subid) : null));
+    };
+
+    return (
+      (by.ip && await trySearch({ ip: by.ip })) ||
+      (by.hostname && await trySearch({ hostname: by.hostname })) ||
+      (by.username && await trySearch({ username: by.username })) ||
+      null
+    );
   }
 
-  // Stop VPS
-  async stopVPS(vpsId) {
-    return await this.makeRequest('stop', { vps: vpsId });
+  async getTemplates(vpsid: string | number) {
+    return this.call(`svs=${vpsid}&act=ostemplate`);
   }
 
-  // Restart VPS
-  async restartVPS(vpsId) {
-    return await this.makeRequest('restart', { vps: vpsId });
-  }
-
-  // Change VPS password
-  async changePassword(vpsId, newPassword) {
-    return await this.makeRequest('changepassword', {
-      vps: vpsId,
-      newpass: newPassword
-    });
+  async reinstall(vpsid: string | number, templateId: string | number, newPassword: string) {
+    const post: PostBody = {
+      newos: String(templateId),
+      newpass: newPassword,
+      conf: newPassword,
+      reinsos: "Reinstall",
+    };
+    return this.call(`svs=${vpsid}&act=ostemplate`, post);
   }
 }
 
-module.exports = VirtualizorAPI;
+// keep a default export too, in case you prefer `import VirtualizorAPI from ...`
+export default VirtualizorAPI;

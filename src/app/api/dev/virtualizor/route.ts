@@ -1,6 +1,7 @@
-// src/app/api/dev/virtualizor/route.ts
+export const runtime = "nodejs"; // ensure Node runtime
+
 import { NextRequest, NextResponse } from "next/server";
-import VirtualizorAPI from "@/services/virtualizorApi";
+import { VirtualizorAPI } from "@/services/virtualizorApi"; // named import that DEFINITELY has findVpsId
 
 function requireAdmin(req: NextRequest) {
   const sent = req.headers.get("x-admin-token") || "";
@@ -10,9 +11,9 @@ function requireAdmin(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    // if (!requireAdmin(req)) {
-    //   return NextResponse.json({ message: "Forbidden" }, { status: 403 });
-    // }
+    if (!requireAdmin(req)) {
+      return NextResponse.json({ message: "Forbidden" }, { status: 403 });
+    }
 
     const body = await req.json();
     const { action } = body || {};
@@ -27,6 +28,10 @@ export async function POST(req: NextRequest) {
       if (!ip && !hostname && !username) {
         return NextResponse.json({ message: "Provide ip or hostname or username" }, { status: 400 });
       }
+
+      // DEBUG (optional): list instance methods to verify shape
+      // console.log("VZ methods:", Object.getOwnPropertyNames(Object.getPrototypeOf(vz)));
+
       const vpsid = await vz.findVpsId({ ip, hostname, username });
       return NextResponse.json({ ok: true, vpsid });
     }
