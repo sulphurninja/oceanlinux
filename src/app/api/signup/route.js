@@ -5,6 +5,7 @@ import jwt from 'jsonwebtoken';
 import User from '../../../models/userModel'; // Adjust the import path to your User model
 import connectDB from '../../../lib/db'; // Adjust the import path for database connection
 import { NextRequest, NextResponse } from 'next/server';
+import EmailService from '../../../lib/sendgrid';
 
 export async function POST(request) {
     await connectDB();
@@ -38,6 +39,16 @@ export async function POST(request) {
         };
         // Generate the JWT token
         const token = jwt.sign(tokenData, process.env.TOKEN_SECRET, { expiresIn: "1d" });
+
+        // Send welcome email
+        try {
+            const emailService = new EmailService();
+            await emailService.sendWelcomeEmail(newUser.email, newUser.name);
+        } catch (emailError) {
+            // Don't fail signup if email fails
+            console.error('Welcome email failed:', emailError);
+        }
+
 
         // Send success response
         return new NextResponse(JSON.stringify({ user: newUser, token }), {

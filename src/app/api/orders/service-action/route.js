@@ -3,163 +3,423 @@ import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 import { getDataFromToken } from '@/helper/getDataFromToken';
 const HostycareAPI = require('@/services/hostycareApi');
+// at top of /api/orders/service-action/route.js
+import { VirtualizorAPI } from '@/services/virtualizorApi';   // you exported the class by name
+// or: import VirtualizorAPI from '@/services/virtualizorApi'; // you also export default
 
-export async function GET(request) {
-  try {
-    await connectDB();
-    const userId = await getDataFromToken(request);
-    if (!userId) return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
-    const { searchParams } = new URL(request.url);
-    const orderId = searchParams.get('orderId');
-    if (!orderId) return NextResponse.json({ message: 'orderId is required' }, { status: 400 });
 
-    const order = await Order.findOne({ _id: orderId, user: userId });
-    if (!order) return NextResponse.json({ message: 'Order not found' }, { status: 404 });
-    if (!order.hostycareServiceId) return NextResponse.json({ message: 'No Hostycare service attached' }, { status: 400 });
+// Helper function to generate secure password
+// Helper function to generate a stronger secure password
+function generateSecurePassword() {
+  const length = 20; // Increased length
+  // More complex character set for higher strength
+  const lowercase = "abcdefghijklmnopqrstuvwxyz";
+  const uppercase = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  const numbers = "0123456789";
+  const symbols = "@#&$";
 
-    const api = new HostycareAPI();
-    const [details, info] = await Promise.all([
-      api.getServiceDetails(order.hostycareServiceId),
-      api.getServiceInfo(order.hostycareServiceId).catch(() => null)
-    ]);
+  let password = "";
 
-    // Sync the latest server state to our database
-    await syncServerState(order._id, details, info);
+  // Ensure we have at least one of each type for strength
+  password += lowercase[Math.floor(Math.random() * lowercase.length)];
+  password += uppercase[Math.floor(Math.random() * uppercase.length)];
+  password += numbers[Math.floor(Math.random() * numbers.length)];
+  password += symbols[Math.floor(Math.random() * symbols.length)];
 
-    return NextResponse.json({ success: true, serviceId: order.hostycareServiceId, details, info });
-  } catch (error) {
-    console.error('[SERVICE-ACTION][GET] Error:', error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  // Fill the rest randomly
+  const allChars = lowercase + uppercase + numbers + symbols;
+  for (let i = password.length; i < length; i++) {
+    password += allChars[Math.floor(Math.random() * allChars.length)];
   }
+
+  // Shuffle the password to randomize the order
+  return password.split('').sort(() => Math.random() - 0.5).join('');
 }
+
+
+function flattenOslist(oslist) {
+  // Accept shapes like: oslist[virt][distro][osid] = { osid, name, filename, ... }
+  const out = {};
+  if (!oslist || typeof oslist !== 'object') return out;
+
+  // first level can be virt (kvm/xen/proxk/etc)
+  for (const virt of Object.values(oslist)) {
+    if (!virt || typeof virt !== 'object') continue;
+    // second level can be distro
+    for (const distro of Object.values(virt)) {
+      if (!distro || typeof distro !== 'object') continue;
+      // third level are templates keyed by osid
+      for (const [id, tpl] of Object.entries(distro)) {
+        if (!id || !tpl || typeof tpl !== 'object') continue;
+        const name =
+          (tpl).name ||
+          (tpl).filename ||
+          (tpl).desc ||
+          String(id);
+        out[String(id)] = String(name);
+      }
+    }
+  }
+  return out;
+}
+
+
+function guessHostnameFromOrder(order) {
+  return (
+    order?.serverDetails?.rawDetails?.hostname ||
+    order?.hostname ||
+    undefined
+  );
+}
+
+
 
 export async function POST(request) {
   try {
     await connectDB();
-    const userId = await getDataFromToken(request);
-    if (!userId) return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
 
-    const { orderId, action, payload } = await request.json();
-    if (!orderId || !action) return NextResponse.json({ message: 'orderId and action are required' }, { status: 400 });
+    // ✅ Read ONCE
+    const body = await request.json();
+    const { orderId, action, templateId, newPassword, payload } = body;
 
-    const order = await Order.findOne({ _id: orderId, user: userId });
-    if (!order) return NextResponse.json({ message: 'Order not found' }, { status: 404 });
-    if (!order.hostycareServiceId) return NextResponse.json({ message: 'No Hostycare service attached' }, { status: 400 });
+    console.log(`[SERVICE-ACTION][POST] Action: ${action}, Order: ${orderId}, Template: ${templateId}`);
 
-    const api = new HostycareAPI();
-    const sid = order.hostycareServiceId;
+    // Get order details
+    const order = await Order.findById(orderId);
+    if (!order) {
+      return NextResponse.json({ success: false, error: 'Order not found' }, { status: 404 });
+    }
+
+    // Debug order details
+    console.log(`[SERVICE-ACTION][POST] Order productName: ${order.productName}`);
+    console.log(`[SERVICE-ACTION][POST] Order provider: ${order.provider}`);
+
+    // Check if this is a VPS order (more flexible validation)
+    const isVPSOrder = order.productType === 'vps' ||
+      order.productType === 'VPS' ||
+      (order.productName && order.productName.toLowerCase().includes('vps')) ||
+      (order.productName && order.productName.toLowerCase().includes('server')) ||
+      (order.productName && order.productName.toLowerCase().includes('linux')) ||
+      (order.productName && order.productName.toLowerCase().includes('premium')) ||
+      (order.productName && order.productName.toLowerCase().includes('windows')) ||
+      (order.productName && order.productName.toLowerCase().includes('rdp')) ||
+      order.ipAddress || // Has IP address
+      (order.serverDetails && order.serverDetails.rawDetails && order.serverDetails.rawDetails.ips);
+
+    if (!isVPSOrder) {
+      return NextResponse.json({
+        success: false,
+        error: `This action is only available for VPS orders. Product name: ${order.productName}`
+      }, { status: 400 });
+    }
+
+    // Extract IP address from order details
+    let ipAddress = null;
+
+    // Check top-level ipAddress field (this is where it is!)
+    if (order.ipAddress) {
+      ipAddress = order.ipAddress;
+      console.log(`[SERVICE-ACTION][POST] Found IP in order.ipAddress: ${ipAddress}`);
+    }
+
+    // Check serverDetails.rawDetails.ips array
+    if (!ipAddress && order.serverDetails?.rawDetails?.ips && order.serverDetails.rawDetails.ips.length > 0) {
+      ipAddress = order.serverDetails.rawDetails.ips[0];
+      console.log(`[SERVICE-ACTION][POST] Found IP in serverDetails.rawDetails.ips: ${ipAddress}`);
+    }
+
+    // Check other possible locations
+    if (!ipAddress) {
+      ipAddress = order.serviceDetails?.ipAddress ||
+        order.serviceDetails?.ip ||
+        order.productDetails?.ipAddress ||
+        order.productDetails?.ip ||
+        order.ip;
+    }
+
+    if (!ipAddress) {
+      return NextResponse.json({
+        success: false,
+        error: `No IP address found for this VPS order. Available order fields: ${Object.keys(order).join(', ')}`
+      }, { status: 400 });
+    }
+
+    console.log(`[SERVICE-ACTION][POST] Using IP address: ${ipAddress}`);
+
     let result;
+
+    // Initialize the appropriate API based on order provider
+    let virtualizorApi = null;
+    let hostycareApi = null;
+
+    if (order.provider === 'hostycare' || !order.provider) {
+      hostycareApi = new HostycareAPI();
+
+      // Always initialize VirtualizorAPI for hostycare orders since they use Virtualizor backend
+      virtualizorApi = new VirtualizorAPI();
+    }
 
     switch (action) {
       case 'start':
-        result = await api.startService(sid);
-        // Update local status to reflect starting state
-        await Order.findByIdAndUpdate(orderId, {
-          provisioningStatus: 'active',
-          lastAction: 'start',
-          lastActionTime: new Date()
-        });
+        console.log('[START] Starting VPS service');
+        if (virtualizorApi) {
+          console.log('[START] Using Virtualizor API');
+          const vpsInfo = await virtualizorApi.findVPSByIP(ipAddress);
+          if (!vpsInfo) {
+            throw new Error(`No VPS found with IP address: ${ipAddress}`);
+          }
+
+          const startResult = await virtualizorApi.start(vpsInfo.vpsId);
+          result = { success: startResult, message: startResult ? 'VPS started successfully' : 'Failed to start VPS' };
+        } else if (hostycareApi) {
+          console.log('[START] Using Hostycare API');
+          result = await hostycareApi.performAction(order.hostycareServiceId, 'start');
+        } else {
+          throw new Error('No API available for this VPS provider');
+        }
         break;
 
       case 'stop':
-        result = await api.stopService(sid);
-        // Update local status to reflect stopped state
-        await Order.findByIdAndUpdate(orderId, {
-          provisioningStatus: 'suspended',
-          lastAction: 'stop',
-          lastActionTime: new Date()
-        });
-        break;
+        console.log('[STOP] Stopping VPS service');
+        if (virtualizorApi) {
+          console.log('[STOP] Using Virtualizor API');
+          const vpsInfo = await virtualizorApi.findVPSByIP(ipAddress);
+          if (!vpsInfo) {
+            throw new Error(`No VPS found with IP address: ${ipAddress}`);
+          }
 
-      case 'reboot':
-        result = await api.rebootService(sid);
-        // Update local status to reflect reboot action
-        await Order.findByIdAndUpdate(orderId, {
-          lastAction: 'reboot',
-          lastActionTime: new Date()
-        });
-        break;
-
-      case 'changepassword':
-        if (!payload?.password) return NextResponse.json({ message: 'password is required' }, { status: 400 });
-        result = await api.changePassword(sid, payload.password);
-        // Sync the new password into our Order record
-        await Order.findByIdAndUpdate(orderId, {
-          password: payload.password,
-          lastAction: 'changepassword',
-          lastActionTime: new Date()
-        });
-        break;
-
-      case 'reinstall':
-        if (!payload?.password) return NextResponse.json({ message: 'password is required' }, { status: 400 });
-
-        console.log('[REINSTALL] Starting reinstall for service:', sid);
-        console.log('[REINSTALL] Payload:', payload);
-
-        try {
-          // Call reinstall with or without template
-          result = await api.reinstallService(sid, payload.password, payload.templateId || null);
-          console.log('[REINSTALL] API Success:', result);
-
-          // Update local password and status
-          await Order.findByIdAndUpdate(orderId, {
-            password: payload.password,
-            provisioningStatus: 'provisioning',
-            lastAction: 'reinstall',
-            lastActionTime: new Date()
-          });
-        } catch (error) {
-          console.error('[REINSTALL] API Error:', error.message);
-          throw error;
+          const stopResult = await virtualizorApi.stop(vpsInfo.vpsId);
+          result = { success: stopResult, message: stopResult ? 'VPS stopped successfully' : 'Failed to stop VPS' };
+        } else if (hostycareApi) {
+          console.log('[STOP] Using Hostycare API');
+          result = await hostycareApi.performAction(order.hostycareServiceId, 'stop');
+        } else {
+          throw new Error('No API available for this VPS provider');
         }
         break;
 
-      case 'templates':
-        console.log('[TEMPLATES] Fetching templates for service:', sid);
-        try {
-          // Get available OS templates
-          result = await api.getReinstallTemplates(sid);
-          console.log('[TEMPLATES] Available templates:', result);
-        } catch (error) {
-          console.error('[TEMPLATES] Error:', error.message);
-          throw error;
+      case 'restart':
+        console.log('[RESTART] Restarting VPS service');
+        if (virtualizorApi) {
+          console.log('[RESTART] Using Virtualizor API');
+          const vpsInfo = await virtualizorApi.findVPSByIP(ipAddress);
+          if (!vpsInfo) {
+            throw new Error(`No VPS found with IP address: ${ipAddress}`);
+          }
+
+          const restartResult = await virtualizorApi.restart(vpsInfo.vpsId);
+          result = { success: restartResult, message: restartResult ? 'VPS restarted successfully' : 'Failed to restart VPS' };
+        } else if (hostycareApi) {
+          console.log('[RESTART] Using Hostycare API');
+          result = await hostycareApi.performAction(order.hostycareServiceId, 'restart');
+        } else {
+          throw new Error('No API available for this VPS provider');
         }
         break;
 
-      case 'details':
-        result = await api.getServiceDetails(sid);
-        break;
+      // In the reinstall case, update to match PHP SDK approach:
+
+      // inside your POST handler, in case 'reinstall':
+      // -------------------- REINSTALL via Virtualizor --------------------
+      case 'reinstall': {
+        if (!virtualizorApi) {
+          return NextResponse.json({ success: false, error: 'Virtualizor required for reinstall' }, { status: 400 });
+        }
+
+        // 🔁 Use values from the one parsed body
+        const chosenTemplateId = templateId ?? payload?.templateId;
+        const providedPwd = newPassword ?? payload?.password;
+
+        if (!chosenTemplateId) {
+          return NextResponse.json({ success: false, error: 'templateId is required' }, { status: 400 });
+        }
+
+        const hostname = guessHostnameFromOrder(order);
+        const vpsid = await virtualizorApi.findVpsId({ ip: ipAddress, hostname });
+        if (!vpsid) {
+          return NextResponse.json({ success: false, error: `No VPS visible for IP ${ipAddress}` }, { status: 404 });
+        }
+
+        const pwd = providedPwd || generateSecurePassword();
+        const apiRes = await virtualizorApi.reinstall(vpsid, chosenTemplateId, pwd);
+
+        await Order.findByIdAndUpdate(orderId, {
+          $set: { password: pwd, lastAction: 'reinstall', lastActionTime: new Date() },
+          $push: { logs: { action: 'reinstall', timestamp: new Date(), details: `Reinstall submitted (osid: ${chosenTemplateId})`, success: true } }
+        });
+
+        return NextResponse.json({
+          success: true,
+          result: {
+            accepted: true,
+            vpsId: vpsid,
+            templateId: chosenTemplateId,
+            message: 'Reinstall submitted',
+            newPassword: pwd,
+            raw: apiRes
+          }
+        });
+      }
+
+
+      case 'templates': {
+        if (!virtualizorApi) {
+          return NextResponse.json({ success: false, error: 'Virtualizor not available for this provider' }, { status: 400 });
+        }
+
+        const hostname = guessHostnameFromOrder(order);
+        const vpsid = await virtualizorApi.findVpsId({ ip: ipAddress, hostname });
+        if (!vpsid) {
+          return NextResponse.json({ success: false, error: `No VPS visible for IP ${ipAddress}` }, { status: 404 });
+        }
+
+        const tplRaw = await virtualizorApi.getTemplates(vpsid);
+        const flat = flattenOslist(tplRaw?.oslist || tplRaw?.os || tplRaw);
+
+        return NextResponse.json({ success: true, result: flat, vpsId: vpsid, raw: tplRaw });
+      }
 
       default:
-        return NextResponse.json({ message: 'Unsupported action' }, { status: 400 });
+        return NextResponse.json({ success: false, error: 'Invalid action' }, { status: 400 });
     }
 
-    // After any action, fetch the latest server state and sync it
-    if (['start', 'stop', 'reboot', 'changepassword', 'reinstall'].includes(action)) {
-      try {
-        // Wait a moment for the action to take effect
-        setTimeout(async () => {
-          const [details, info] = await Promise.all([
-            api.getServiceDetails(sid),
-            api.getServiceInfo(sid).catch(() => null)
-          ]);
-          await syncServerState(orderId, details, info);
-        }, 2000); // 2 second delay to allow action to complete
-      } catch (syncError) {
-        console.error('[SERVICE-ACTION] Sync error:', syncError);
-        // Don't fail the request if sync fails
+    // Log the action to the order
+    await Order.findByIdAndUpdate(orderId, {
+      $push: {
+        logs: {
+          action,
+          timestamp: new Date(),
+          details: result.message || `Action ${action} performed`,
+          success: result.success || false
+        }
       }
-    }
+    });
 
-    return NextResponse.json({ success: true, action, result });
+    return NextResponse.json({ success: true, result });
+
   } catch (error) {
     console.error('[SERVICE-ACTION][POST] Error:', error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return NextResponse.json({
+      success: false,
+      error: error.message || 'Internal server error'
+    }, { status: 500 });
+  }
+}
+// GET method for fetching templates
+export async function GET(request) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const orderId = searchParams.get('orderId');
+
+    if (!orderId) {
+      return NextResponse.json({ success: false, error: 'Order ID is required' }, { status: 400 });
+    }
+
+    await connectDB();
+
+    console.log(`[SERVICE-ACTION][GET] Fetching templates for order: ${orderId}`);
+
+    // Get order details
+    const order = await Order.findById(orderId);
+    if (!order) {
+      return NextResponse.json({ success: false, error: 'Order not found' }, { status: 404 });
+    }
+
+    // Extract IP address from order details
+    let ipAddress = null;
+
+    if (order.ipAddress) {
+      ipAddress = order.ipAddress;
+    } else if (order.serverDetails?.rawDetails?.ips && order.serverDetails.rawDetails.ips.length > 0) {
+      ipAddress = order.serverDetails.rawDetails.ips[0];
+    }
+
+    if (!ipAddress) {
+      return NextResponse.json({
+        success: false,
+        error: 'No IP address found for this VPS order'
+      }, { status: 400 });
+    }
+
+    console.log(`[SERVICE-ACTION][GET] Using IP address: ${ipAddress}`);
+
+    // Initialize Virtualizor API
+    const virtualizorApi = new VirtualizorAPI();
+
+    try {
+      // Find the VPS
+      const vpsInfo = await virtualizorApi.findVPSByIP(ipAddress);
+      if (!vpsInfo) {
+        throw new Error(`No VPS found with IP address: ${ipAddress}`);
+      }
+
+      // Get available templates
+      const templates = await virtualizorApi.getOSTemplates(vpsInfo.vpsId);
+
+      if (!templates.oslist) {
+        throw new Error('No OS templates available for this VPS');
+      }
+
+      // Process templates into a more user-friendly format
+      const processedTemplates = {};
+
+      for (const [virtType, distros] of Object.entries(templates.oslist)) {
+        for (const [distroName, templateList] of Object.entries(distros)) {
+          if (templateList && typeof templateList === 'object' && Object.keys(templateList).length > 0) {
+            if (!processedTemplates[distroName]) {
+              processedTemplates[distroName] = [];
+            }
+
+            for (const [templateId, templateData] of Object.entries(templateList)) {
+              // Check if this template is available for this VPS's management group
+              const templateMG = templateData.mg || [];
+              const vpsMG = parseInt(vpsInfo.vpsData.mg);
+
+              if (templateMG.includes(vpsMG) || templateMG.length === 0) {
+                processedTemplates[distroName].push({
+                  id: templateId,
+                  name: templateData.name || templateData.filename || `Template ${templateId}`,
+                  filename: templateData.filename,
+                  size: templateData.size,
+                  virtType: virtType,
+                  current: templateId === vpsInfo.vpsData.osid
+                });
+              }
+            }
+          }
+        }
+      }
+
+      console.log(`[SERVICE-ACTION][GET] Processed templates:`, Object.keys(processedTemplates));
+
+      return NextResponse.json({
+        success: true,
+        vpsId: vpsInfo.vpsId,
+        currentTemplate: vpsInfo.vpsData.osid,
+        currentOS: vpsInfo.vpsData.os_name,
+        templates: processedTemplates
+      });
+
+    } catch (error) {
+      console.error('[SERVICE-ACTION][GET] Error:', error);
+      return NextResponse.json({
+        success: false,
+        error: error.message || 'Failed to fetch templates'
+      }, { status: 500 });
+    }
+
+  } catch (error) {
+    console.error('[SERVICE-ACTION][GET] Error:', error);
+    return NextResponse.json({
+      success: false,
+      error: error.message || 'Internal server error'
+    }, { status: 500 });
   }
 }
 
-// Helper function to sync server state from Hostycare API to our database
+// ... existing syncServerState function remains the same ...
+
+// ... existing syncServerState function remains the same ...
 async function syncServerState(orderId, details, info) {
   try {
     const updateData = {

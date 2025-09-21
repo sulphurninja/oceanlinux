@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import {
   ArrowLeft,
@@ -157,6 +157,14 @@ const OrderDetails = () => {
   const [selectedTemplate, setSelectedTemplate] = useState<string>('');
   const [formatProgress, setFormatProgress] = useState<string>('');
 
+  // With:
+  const [osDialogOpen, setOsDialogOpen] = useState(false);
+  const [osLoading, setOsLoading] = useState(false);
+  const [osTemplates, setOsTemplates] = useState<any>({});
+  const [selectedOs, setSelectedOs] = useState<string>('');
+  const [osProgress, setOsProgress] = useState<string>('');
+  const [osMode, setOsMode] = useState<'reinstall' | 'format'>('reinstall'); // label + behavior
+
 
   useEffect(() => {
     if (orderId) {
@@ -290,6 +298,113 @@ const OrderDetails = () => {
     }
   };
 
+  const OS_DIALOG_AUTO_CLOSE_MS = 120_000; // 2 minutes
+  const osAutoCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const startOsAutoCloseTimer = () => {
+    if (osAutoCloseTimer.current) clearTimeout(osAutoCloseTimer.current);
+    osAutoCloseTimer.current = setTimeout(() => {
+      // Close and reset dialog state
+      setOsDialogOpen(false);
+      setOsLoading(false);
+      setOsProgress('');
+      setSelectedOs('');
+    }, OS_DIALOG_AUTO_CLOSE_MS);
+  };
+
+  // Clear timer on dialog close/unmount to avoid leaks
+  useEffect(() => {
+    if (!osDialogOpen && osAutoCloseTimer.current) {
+      clearTimeout(osAutoCloseTimer.current);
+      osAutoCloseTimer.current = null;
+    }
+  }, [osDialogOpen]);
+
+  useEffect(() => {
+    return () => {
+      if (osAutoCloseTimer.current) clearTimeout(osAutoCloseTimer.current);
+    };
+  }, []);
+
+  const openOsDialog = async (provider: 'hostycare' | 'smartvps') => {
+    if (osAutoCloseTimer.current) {
+      clearTimeout(osAutoCloseTimer.current);
+      osAutoCloseTimer.current = null;
+    }
+    setOsMode(provider === 'smartvps' ? 'format' : 'reinstall');
+    setOsProgress('Loading available operating systems...');
+    setOsDialogOpen(true);
+    setOsLoading(true);
+    setSelectedOs('');
+
+    try {
+      const endpoint = provider === 'smartvps' ? 'smartvps-action' : 'service-action';
+      const templatesRes = await fetch(`/api/orders/${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderId: order!._id, action: 'templates' })
+      });
+      const templatesData = await templatesRes.json();
+
+      if (templatesData.success && templatesData.result) {
+        setOsTemplates(templatesData.result); // expects { [id]: name }
+        setOsProgress('');
+        setOsLoading(false);
+      } else {
+        throw new Error(templatesData.error || 'Failed to load templates');
+      }
+    } catch (err: any) {
+      setOsProgress(`Failed to load operating systems: ${err.message || 'unknown error'}`);
+      setOsLoading(false);
+    }
+  };
+
+
+  const executeOsAction = async () => {
+    if (!selectedOs) {
+      toast.error('Please select an operating system');
+      return;
+    }
+    const provider = getProviderFromOrder(order!, ipStock);
+    setOsLoading(true);
+    setOsProgress(osMode === 'format' ? 'Initiating server format...' : 'Submitting reinstall...');
+
+    try {
+      const endpoint = provider === 'smartvps' ? 'smartvps-action' : 'service-action';
+      const action = provider === 'smartvps' ? 'format' : 'reinstall';
+
+      const res = await fetch(`/api/orders/${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderId: order!._id,
+          action,
+          payload: { templateId: selectedOs } // server reads payload.templateId
+        })
+      });
+      const data = await res.json();
+
+      if (!data.success) throw new Error(data.error || 'Failed');
+      startOsAutoCloseTimer();
+      setOsProgress(osMode === 'format'
+        ? 'Format initiated. Waiting for server to update...'
+        : 'Reinstall submitted. Waiting for server to update...'
+      );
+
+      // re-use your existing poller
+      await pollForServerUpdates();
+
+    } catch (err: any) {
+      setOsProgress(`Error: ${err.message || 'unknown error'}`);
+      setTimeout(() => {
+        setOsDialogOpen(false);
+        setOsLoading(false);
+        setOsProgress('');
+      }, 3000);
+    }
+  };
+
+
   // Check if server management actions are available
   const isServerManagementAvailable = (order: Order, ipStock: IPStock | null): boolean => {
     const provider = getProviderFromOrder(order, ipStock);
@@ -413,11 +528,13 @@ const OrderDetails = () => {
     const confirmed = confirm(`Are you sure you want to ${actionName}? This will erase all data!`);
     if (!confirmed) return;
 
-    // For SmartVPS format, use the new dialog
-    if (provider === 'smartvps' && action === 'format') {
-      await openFormatDialog();
+    // NEW
+    if ((provider === 'smartvps' && action === 'format') ||
+      (provider === 'hostycare' && action === 'reinstall')) {
+      await openOsDialog(provider);
       return;
     }
+
 
     // For other providers, use the existing prompt-based approach
     try {
@@ -1512,39 +1629,40 @@ const OrderDetails = () => {
                   </Card>
                 )}
               </div>
-              <Dialog open={formatDialogOpen} onOpenChange={(open) => {
-                if (!formatLoading) {
-                  setFormatDialogOpen(open);
-                  if (!open) {
-                    setSelectedTemplate('');
-                    setAvailableTemplates({});
-                    setFormatProgress('');
+              <Dialog
+                open={osDialogOpen}
+                onOpenChange={(open) => {
+                  if (!osLoading) {
+                    setOsDialogOpen(open);
+                    if (!open) {
+                      setSelectedOs('');
+                      setOsTemplates({});
+                      setOsProgress('');
+                    }
                   }
-                }
-              }}>
+                }}
+              >
                 <DialogContent className="sm:max-w-[425px]">
                   <DialogHeader>
                     <DialogTitle className="flex items-center gap-2">
                       <HardDriveIcon className="h-5 w-5 text-primary" />
-                      Format Server
+                      {osMode === 'format' ? 'Format Server' : 'Reinstall OS'}
                     </DialogTitle>
                     <DialogDescription>
-                      Select a new operating system for your server. This will erase all data and install a fresh OS.
+                      Select an operating system. This will erase all data and install a fresh OS.
                     </DialogDescription>
                   </DialogHeader>
 
                   <div className="space-y-6 py-4">
-                    {formatLoading && formatProgress ? (
+                    {osLoading && osProgress ? (
                       <div className="flex flex-col items-center gap-4 py-6">
                         <div className="relative">
                           <div className="w-16 h-16 bg-primary/20 rounded-full animate-pulse"></div>
                           <Loader2 className="absolute inset-0 m-auto animate-spin h-8 w-8 text-primary" />
                         </div>
                         <div className="text-center">
-                          <p className="font-medium text-sm">{formatProgress}</p>
-                          <p className="text-xs text-muted-foreground mt-1">
-                            Please don't close this dialog
-                          </p>
+                          <p className="font-medium text-sm">{osProgress}</p>
+                          <p className="text-xs text-muted-foreground mt-1">Please don't close this dialog</p>
                         </div>
                       </div>
                     ) : (
@@ -1553,17 +1671,14 @@ const OrderDetails = () => {
                           <Label htmlFor="os-select" className="text-sm font-medium">
                             Select Operating System
                           </Label>
-                          <Select
-                            value={selectedTemplate}
-                            onValueChange={setSelectedTemplate}
-                          >
+                          <Select value={selectedOs} onValueChange={setSelectedOs}>
                             <SelectTrigger>
                               <SelectValue placeholder="Choose an operating system" />
                             </SelectTrigger>
                             <SelectContent>
-                              {Object.entries(availableTemplates).map(([id, name]) => (
+                              {Object.entries(osTemplates).map(([id, name]) => (
                                 <SelectItem key={id} value={id}>
-                                  {typeof name === 'string' ? name : name?.name || `Template ${id}`}
+                                  {typeof name === 'string' ? name : (name as any)?.name || `Template ${id}`}
                                 </SelectItem>
                               ))}
                             </SelectContent>
@@ -1573,25 +1688,25 @@ const OrderDetails = () => {
                         <Alert>
                           <AlertTriangle className="h-4 w-4" />
                           <AlertDescription className="text-sm">
-                            <strong>Warning:</strong> This will permanently delete all data on your server and install the selected operating system. New login credentials will be automatically generated.
+                            <strong>Warning:</strong> This will permanently delete all data on your server and install the selected operating system.
                           </AlertDescription>
                         </Alert>
 
                         <div className="flex gap-3 pt-4">
                           <Button
                             variant="outline"
-                            onClick={() => setFormatDialogOpen(false)}
+                            onClick={() => setOsDialogOpen(false)}
                             className="flex-1"
-                            disabled={formatLoading}
+                            disabled={osLoading}
                           >
                             Cancel
                           </Button>
                           <Button
-                            onClick={executeSmartVPSFormat}
-                            disabled={!selectedTemplate || formatLoading}
+                            onClick={executeOsAction}
+                            disabled={!selectedOs || osLoading}
                             className="flex-1 bg-destructive hover:bg-destructive/90"
                           >
-                            Format Server
+                            {osMode === 'format' ? 'Format Server' : 'Reinstall OS'}
                           </Button>
                         </div>
                       </>
@@ -1599,6 +1714,7 @@ const OrderDetails = () => {
                   </div>
                 </DialogContent>
               </Dialog>
+
 
               {/* Right Column - Management & Billing */}
               <div className="space-y-4 lg:space-y-6">

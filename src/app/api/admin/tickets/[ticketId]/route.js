@@ -85,7 +85,20 @@ export async function PATCH(request, { params }) {
                 headers: { 'Content-Type': 'application/json' }
             });
         }
-
+        // Send ticket update email
+        try {
+            const emailService = new EmailService();
+            await emailService.sendTicketUpdateEmail(
+                user.email,
+                user.name,
+                ticket.ticketId,
+                ticket.subject,
+                ticket.status,
+                message
+            );
+        } catch (emailError) {
+            console.error('Ticket update email failed:', emailError);
+        }
         return new Response(JSON.stringify({
             message: 'Ticket updated successfully',
             ticket

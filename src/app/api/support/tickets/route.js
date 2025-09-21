@@ -2,6 +2,7 @@ import connectDB from "@/lib/db";
 import SupportTicket from "@/models/supportTicketModel";
 import User from "@/models/userModel";
 import { getDataFromToken } from "@/helper/getDataFromToken";
+import EmailService from '../../../../lib/sendgrid';
 
 function generateTicketId() {
     const timestamp = Date.now().toString(36);
@@ -58,6 +59,21 @@ export async function POST(request) {
         });
 
         await ticket.save();
+
+        // Send ticket created email
+        try {
+            const emailService = new EmailService();
+            await emailService.sendTicketCreatedEmail(
+                user.email,
+                user.name,
+                ticket.ticketId,
+                ticket.subject,
+                ticket.category
+            );
+        } catch (emailError) {
+            console.error('Ticket created email failed:', emailError);
+        }
+
 
         return new Response(JSON.stringify({
             message: 'Support ticket created successfully',

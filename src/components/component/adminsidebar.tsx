@@ -23,7 +23,8 @@ import {
   FileText,
   MessageSquare,
   Users,
-  BarChart3
+  BarChart3,
+  Megaphone
 } from 'lucide-react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../ui/collapsible';
 import { useRouter, usePathname } from 'next/navigation';
@@ -86,6 +87,7 @@ const AdminSidebar = () => {
     }
   };
 
+
   const navItems: NavItem[] = [
     {
       href: '/admin/dashboard',
@@ -112,6 +114,12 @@ const AdminSidebar = () => {
       href: '/admin/orders',
       label: 'Orders',
       icon: BarChart3,
+    },
+    {
+      href: '/admin/announcements',
+      label: 'Announcements',
+      icon: Megaphone,
+      badge: 'New'
     }
   ];
 
