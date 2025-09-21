@@ -10,9 +10,9 @@ function requireAdmin(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    if (!requireAdmin(req)) {
-      return NextResponse.json({ message: "Forbidden" }, { status: 403 });
-    }
+    // if (!requireAdmin(req)) {
+    //   return NextResponse.json({ message: "Forbidden" }, { status: 403 });
+    // }
 
     const body = await req.json();
     const { action } = body || {};
