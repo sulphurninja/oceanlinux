@@ -213,10 +213,10 @@ export default function DashboardLayout({
                 title: 'Order Details',
                 description: 'View order information and status',
                 icon: ShoppingBag,
-                breadcrumb: [
-                    { name: 'Dashboard', href: '/dashboard' },
-                    { name: 'Orders', href: '/dashboard/orders' }
-                ]
+                // breadcrumb: [
+                //     { name: 'Dashboard', href: '/dashboard' },
+                //     { name: 'Orders', href: '/dashboard/orders' }
+                // ]
             };
         }
 
@@ -225,7 +225,7 @@ export default function DashboardLayout({
                 title: 'Ticket Details',
                 description: 'View and manage support ticket',
                 icon: MessageCircle,
-                breadcrumb: [{ name: 'Support', href: '/support/tickets' }]
+                // breadcrumb: [{ name: 'Support', href: '/support/tickets' }]
             };
         }
 
