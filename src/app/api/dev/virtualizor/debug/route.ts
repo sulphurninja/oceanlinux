@@ -4,7 +4,6 @@ import { VirtualizorAPI } from "@/services/virtualizorApi";
 export const runtime = "nodejs";
 
 export async function GET() {
-  const vz = new VirtualizorAPI();
-  const vms = await vz._listMyVms();
-  return NextResponse.json({ vms });
+
+  return NextResponse.json({ message:"Nothing here anymore!" });
 }

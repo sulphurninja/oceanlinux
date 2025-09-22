@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
-import { validateAPIKey } from '@/lib/api-auth';
+import { validateAPIKey } from '@/lib/api-utils';
 import Wallet from '@/models/walletModel';
 import Order from '@/models/orderModel';
 import IPStock from '@/models/ipStockModel';
