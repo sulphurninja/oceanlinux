@@ -2,6 +2,7 @@ import connectDB from '@/lib/db';
 import Announcement from '@/models/announcementModel';
 import User from '@/models/userModel';
 import EmailService from '@/lib/sendgrid';
+import NotificationService from '@/services/notificationService'; // Add this import
 import { getDataFromToken } from '@/helper/getDataFromToken';
 
 export async function GET(request) {
@@ -87,9 +88,10 @@ export async function POST(request) {
 
     await announcement.save();
 
-    // If status is 'sent', send emails immediately
+    // If status is 'sent', send emails and notifications immediately
     if (status === 'sent') {
       await sendAnnouncementEmails(announcement);
+      await sendAnnouncementNotifications(announcement); // Add this line
     }
 
     return new Response(JSON.stringify({
@@ -109,7 +111,7 @@ export async function POST(request) {
   }
 }
 
-// Helper function to send announcement emails
+// Helper function to send announcement emails (existing)
 async function sendAnnouncementEmails(announcement) {
   try {
     // Get target users based on audience
@@ -159,7 +161,7 @@ async function sendAnnouncementEmails(announcement) {
             });
             sentCount++;
           } catch (error) {
-            console.error(`Failed to send to ${user.email}:`, error);
+            console.error(`Failed to send email to ${user.email}:`, error);
           }
         })
       );
@@ -174,9 +176,67 @@ async function sendAnnouncementEmails(announcement) {
     announcement.sentAt = new Date();
     await announcement.save();
 
-    console.log(`Announcement sent to ${sentCount} users`);
+    console.log(`Announcement emails sent to ${sentCount} users`);
   } catch (error) {
     console.error('Error sending announcement emails:', error);
+    throw error;
+  }
+}
+
+// NEW: Helper function to send announcement notifications
+async function sendAnnouncementNotifications(announcement) {
+  try {
+    // Get target users based on audience (same logic as emails)
+    let users = [];
+
+    switch (announcement.targetAudience) {
+      case 'all':
+        users = await User.find().select('_id');
+        break;
+      case 'customers':
+        // Get users who have orders
+        const Order = require('@/models/orderModel').default;
+        const customerIds = await Order.distinct('user');
+        users = await User.find({ _id: { $in: customerIds } }).select('_id');
+        break;
+      case 'new-users':
+        // Users created in last 30 days
+        const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+        users = await User.find({ createdAt: { $gte: thirtyDaysAgo } }).select('_id');
+        break;
+      case 'premium':
+        // Define your premium user logic here
+        users = await User.find().select('_id'); // Placeholder
+        break;
+      default:
+        users = await User.find().select('_id');
+    }
+
+    let notificationCount = 0;
+
+    // Create notifications in batches
+    const batchSize = 100;
+    for (let i = 0; i < users.length; i += batchSize) {
+      const batch = users.slice(i, i + batchSize);
+
+      const notificationPromises = batch.map(async (user) => {
+        try {
+          await NotificationService.notifyAnnouncement(user._id, announcement);
+          notificationCount++;
+        } catch (error) {
+          console.error(`Failed to create notification for user ${user._id}:`, error);
+        }
+      });
+
+      await Promise.allSettled(notificationPromises);
+
+      // Small delay between batches
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+
+    console.log(`Announcement notifications created for ${notificationCount} users`);
+  } catch (error) {
+    console.error('Error sending announcement notifications:', error);
     throw error;
   }
 }

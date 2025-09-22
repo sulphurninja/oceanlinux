@@ -31,7 +31,8 @@ const footerSections = {
       { name: "📚 Knowledge Base", href: "/knowledge-base" },
       { name: "💬 Live Chat Support", href: "/live-chat" },
       { name: "🎟️ Support Tickets", href: "/support/tickets" },
-      { name: "📋 Server Status", href: "/status" }
+      { name: "⚠️ Server Status", href: "/status" },
+      { name: "📋 API Documentation", href: "/docs/api" },
     ]
   },
   company: {

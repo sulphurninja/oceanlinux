@@ -3,6 +3,7 @@ import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 import crypto from 'crypto';
 import Razorpay from 'razorpay';
+import NotificationService from '@/services/notificationService'; //
 const AutoProvisioningService = require('@/services/autoProvisioningService');
 
 const razorpay = new Razorpay({
@@ -12,7 +13,7 @@ const razorpay = new Razorpay({
 
 export async function POST(request) {
   await connectDB();
-  
+
   console.log("========== PAYMENT CONFIRMATION API ==========");
 
   try {
@@ -47,22 +48,44 @@ export async function POST(request) {
     order.status = 'confirmed';
     order.transactionId = razorpay_payment_id;
     await order.save();
-    
+
     console.log(`Order ${order._id} confirmed with payment ${razorpay_payment_id}`);
+
+    try {
+      await NotificationService.notifyOrderConfirmed(order.user, order);
+    } catch (notifError) {
+      console.error('Failed to create payment confirmation notification:', notifError);
+    }
 
     // Trigger auto-provisioning
     try {
       const provisioningService = new AutoProvisioningService();
-      
+
+      // Create notification for provisioning start
+      await NotificationService.notifyOrderProvisioning(order.user, order);
+
       // Start provisioning in background
       provisioningService.provisionServer(order._id.toString())
-        .then(result => {
+        .then(async result => {
           console.log(`Auto-provisioning completed for order ${order._id}:`, result);
+
+          // Create notification for successful provisioning
+          if (result.success) {
+            await NotificationService.notifyOrderCompleted(order.user, order, {
+              ipAddress: result.ipAddress || 'Available in dashboard',
+              username: result.username || 'root',
+              password: result.password || 'Check dashboard'
+            });
+          } else {
+            await NotificationService.notifyOrderFailed(order.user, order, result.error);
+          }
         })
-        .catch(error => {
+        .catch(async error => {
           console.error(`Auto-provisioning failed for order ${order._id}:`, error);
+          await NotificationService.notifyOrderFailed(order.user, order, error.message);
         });
-        
+
+
       console.log("Auto-provisioning initiated");
     } catch (error) {
       console.error("Error starting auto-provisioning:", error);

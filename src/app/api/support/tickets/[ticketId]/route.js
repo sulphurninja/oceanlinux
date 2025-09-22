@@ -2,6 +2,7 @@ import connectDB from "@/lib/db";
 import SupportTicket from "@/models/supportTicketModel";
 import User from "@/models/userModel";
 import { getDataFromToken } from "@/helper/getDataFromToken";
+import NotificationService from '@/services/notificationService'; // Add this import
 
 export async function GET(request, { params }) {
     try {
@@ -88,6 +89,14 @@ export async function POST(request, { params }) {
                 headers: { 'Content-Type': 'application/json' }
             });
         }
+
+        // Create notification for user reply
+        try {
+            await NotificationService.notifyTicketReplied(userId, ticket, false); // false = not from admin
+        } catch (notifError) {
+            console.error('Failed to create ticket reply notification:', notifError);
+        }
+
 
         return new Response(JSON.stringify({ message: 'Reply added successfully' }), {
             status: 200,

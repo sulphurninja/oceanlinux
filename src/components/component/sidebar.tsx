@@ -113,7 +113,7 @@ const ResponsiveSidebar = () => {
     },
     {
       href: '/dashboard/viewLinux',
-      label: 'My Orders',
+      label: 'Manage Orders',
       icon: ShoppingBag,
     },
     {
@@ -252,14 +252,14 @@ const ResponsiveSidebar = () => {
           <Separator className="my-4 bg-background/20 dark:bg-border" />
 
           {/* Account Section */}
-          {(!isCollapsed || isMobile) && (
-            <p className="text-xs font-semibold text-background/60 dark:text-muted-foreground uppercase tracking-wider mb-3 px-3">
+          {/* {(!isCollapsed || isMobile) && (
+            <p className="text-xs  font-semibold text-background/60 dark:text-muted-foreground uppercase tracking-wider my-4 pt-4 px-3">
               Account
             </p>
-          )}
+          )} */}
           <Collapsible open={accountOpen} onOpenChange={setAccountOpen}>
             <CollapsibleTrigger className={cn(
-              "group flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200",
+              "group flex w-full items-center justify-between  mt-4 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200",
               "hover:bg-background/10 dark:hover:bg-accent/50 text-background/90 dark:text-foreground/80 hover:text-background dark:hover:text-foreground",
               "[&[data-state=open]>svg]:rotate-180",
               isCollapsed && !isMobile ? "justify-center px-2" : ""
@@ -415,8 +415,8 @@ const ResponsiveSidebar = () => {
             </SheetContent>
           </Sheet>
 
-          <div className="flex items-center space-x-2">
-            <img src='/oceanlinux.png' className='h-7 w-auto object-contain' alt="OceanLinux" />
+          <div className="flex justify-center items-center space-x-2">
+            <img src='/oceanlinux.png' className='h-12 w-auto object-contain' alt="OceanLinux" />
             {/* <span className="text-base font-semibold text-foreground">OceanLinux</span> */}
           </div>
 

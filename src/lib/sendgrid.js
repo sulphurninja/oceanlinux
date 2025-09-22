@@ -202,7 +202,7 @@ class EmailService {
                     Click the button below to create a new password. This link will expire in 1 hour for security reasons.
                 </div>
 
-                <div style="text-align: center;">
+                <div style="text-align: center; color: white">
                     <a href="${resetUrl}" class="reset-button">🔑 Reset My Password</a>
                 </div>
 

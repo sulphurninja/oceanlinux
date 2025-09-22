@@ -148,75 +148,64 @@ export async function POST(request) {
 
     let result;
 
-    // Initialize the appropriate API based on order provider
+    // Initialize the appropriate APIs
     let virtualizorApi = null;
     let hostycareApi = null;
 
     if (order.provider === 'hostycare' || !order.provider) {
       hostycareApi = new HostycareAPI();
 
-      // Always initialize VirtualizorAPI for hostycare orders since they use Virtualizor backend
-      virtualizorApi = new VirtualizorAPI();
+      // Only initialize VirtualizorAPI for actions that need it (reinstall, templates)
+      if (action === 'reinstall' || action === 'templates') {
+        virtualizorApi = new VirtualizorAPI();
+      }
     }
 
     switch (action) {
       case 'start':
         console.log('[START] Starting VPS service');
-        if (virtualizorApi) {
-          console.log('[START] Using Virtualizor API');
-          const vpsInfo = await virtualizorApi.findVPSByIP(ipAddress);
-          if (!vpsInfo) {
-            throw new Error(`No VPS found with IP address: ${ipAddress}`);
-          }
-
-          const startResult = await virtualizorApi.start(vpsInfo.vpsId);
-          result = { success: startResult, message: startResult ? 'VPS started successfully' : 'Failed to start VPS' };
-        } else if (hostycareApi) {
-          console.log('[START] Using Hostycare API');
-          result = await hostycareApi.performAction(order.hostycareServiceId, 'start');
+        if (hostycareApi && order.hostycareServiceId) {
+          console.log('[START] Using Hostycare API with service ID:', order.hostycareServiceId);
+          result = await hostycareApi.startService(order.hostycareServiceId);
+          result = {
+            success: true,
+            message: 'VPS start command sent successfully',
+            apiResponse: result
+          };
         } else {
-          throw new Error('No API available for this VPS provider');
+          throw new Error('Hostycare service ID not found for this order');
         }
         break;
 
       case 'stop':
         console.log('[STOP] Stopping VPS service');
-        if (virtualizorApi) {
-          console.log('[STOP] Using Virtualizor API');
-          const vpsInfo = await virtualizorApi.findVPSByIP(ipAddress);
-          if (!vpsInfo) {
-            throw new Error(`No VPS found with IP address: ${ipAddress}`);
-          }
-
-          const stopResult = await virtualizorApi.stop(vpsInfo.vpsId);
-          result = { success: stopResult, message: stopResult ? 'VPS stopped successfully' : 'Failed to stop VPS' };
-        } else if (hostycareApi) {
-          console.log('[STOP] Using Hostycare API');
-          result = await hostycareApi.performAction(order.hostycareServiceId, 'stop');
+        if (hostycareApi && order.hostycareServiceId) {
+          console.log('[STOP] Using Hostycare API with service ID:', order.hostycareServiceId);
+          result = await hostycareApi.stopService(order.hostycareServiceId);
+          result = {
+            success: true,
+            message: 'VPS stop command sent successfully',
+            apiResponse: result
+          };
         } else {
-          throw new Error('No API available for this VPS provider');
+          throw new Error('Hostycare service ID not found for this order');
         }
         break;
 
       case 'restart':
         console.log('[RESTART] Restarting VPS service');
-        if (virtualizorApi) {
-          console.log('[RESTART] Using Virtualizor API');
-          const vpsInfo = await virtualizorApi.findVPSByIP(ipAddress);
-          if (!vpsInfo) {
-            throw new Error(`No VPS found with IP address: ${ipAddress}`);
-          }
-
-          const restartResult = await virtualizorApi.restart(vpsInfo.vpsId);
-          result = { success: restartResult, message: restartResult ? 'VPS restarted successfully' : 'Failed to restart VPS' };
-        } else if (hostycareApi) {
-          console.log('[RESTART] Using Hostycare API');
-          result = await hostycareApi.performAction(order.hostycareServiceId, 'restart');
+        if (hostycareApi && order.hostycareServiceId) {
+          console.log('[RESTART] Using Hostycare API with service ID:', order.hostycareServiceId);
+          result = await hostycareApi.rebootService(order.hostycareServiceId);
+          result = {
+            success: true,
+            message: 'VPS restart command sent successfully',
+            apiResponse: result
+          };
         } else {
-          throw new Error('No API available for this VPS provider');
+          throw new Error('Hostycare service ID not found for this order');
         }
         break;
-
       // In the reinstall case, update to match PHP SDK approach:
 
       // inside your POST handler, in case 'reinstall':

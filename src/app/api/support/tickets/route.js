@@ -3,6 +3,7 @@ import SupportTicket from "@/models/supportTicketModel";
 import User from "@/models/userModel";
 import { getDataFromToken } from "@/helper/getDataFromToken";
 import EmailService from '../../../../lib/sendgrid';
+import NotificationService from '@/services/notificationService'; // Add this import
 
 function generateTicketId() {
     const timestamp = Date.now().toString(36);
@@ -59,6 +60,14 @@ export async function POST(request) {
         });
 
         await ticket.save();
+
+        // Create notification for ticket creation
+        try {
+            await NotificationService.notifyTicketCreated(userId, ticket);
+        } catch (notifError) {
+            console.error('Failed to create ticket notification:', notifError);
+        }
+
 
         // Send ticket created email
         try {

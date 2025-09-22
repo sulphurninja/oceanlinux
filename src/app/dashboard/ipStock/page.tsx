@@ -430,7 +430,7 @@ export default function IPStockPage() {
       <div className="lg:hidden h-16" />
 
       {/* UPDATED Header with Search and Filters */}
-      <div className="morder dark:morder-none-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-40">
+      <div className="morder md:hidden dark:morder-none-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-40">
         <div className="container mx-auto -mt-14 px-4 sm:px-6 lg:px-8">
           <div className="flex flex-col gap-4 py-4">
             {/* Title Section */}
@@ -522,14 +522,14 @@ export default function IPStockPage() {
       </div>
 
       {/* Main Content - Keep everything else exactly the same */}
-      <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <div className="container mx-auto px-4 sm:px-6 lg:px-8 md:py-6 ">
         {isLoading ? (
           <div className="flex flex-col items-center justify-center py-16">
             <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
             <p className="text-muted-foreground">Loading server plans...</p>
           </div>
         ) : (
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6 mt-12">
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6 md:mt-0">
             <TabsList className="grid grid-cols-3 w-full max-w-md mx-auto">
               <TabsTrigger value="all" className="flex items-center gap-2">
                 <Grid3X3 className="h-4 w-4" />

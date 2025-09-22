@@ -448,7 +448,7 @@ const ViewLinux = () => {
             <div className="lg:hidden h-16" />
 
             {/* Responsive Header with proper mobile spacing */}
-            <div className='sticky  lg:top-0 z-40 bg-background/95 backdrop-blur-sm shadow-sm border-b border-border'>
+            <div className='sticky md:hidden  lg:top-0 z-40 bg-background/95 backdrop-blur-sm shadow-sm border-b border-border'>
                 <div className='container mx-auto -mt-14 md:mt-0 px-3 sm:px-4 md:px-6 lg:px-8'>
                     <div className='flex h-14 sm:h-16 items-center justify-between gap-2 sm:gap-4'>
                         <div className='flex items-center gap-2 sm:gap-3 min-w-0 flex-1'>

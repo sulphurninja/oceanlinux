@@ -303,22 +303,9 @@ export default function Dashboard() {
       {/* Mobile Header */}
       <div className="lg:hidden h-16" />
 
-      {/* Mobile-first Header */}
-      <div className="sticky lg:top-0 z-40  bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="w-full max-w-7xl -mt-12 mx-auto px-3 sm:px-6">
-          <div className="flex h-14 sm:h-16 items-center justify-between">
-            <div className="flex items-center gap-2 min-w-0 flex-1">
-              <LayoutDashboardIcon className="h-4 w-4 sm:h-5 sm:w-5 flex-shrink-0" />
-              <div className="min-w-0 flex-1">
-                <h1 className="text-base sm:text-lg lg:text-xl font-semibold truncate">Dashboard</h1>
-                <p className="text-xs text-muted-foreground hidden sm:block">Your Overview of Activities</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
 
-      <div className="w-full md:max-w-7xl mt- mx-auto px-3 md:mt-12  sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-6">
+
+      <div className="w-full md:max-w-7xl mt- mx-auto px-3 md:mt-0 -mt-12  sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-6">
         {/* Welcome Banner - Mobile Optimized */}
         <Card className="relative  bg-gradient-to-br from-purple-500/10 to-purple-600/5 overflow-hidden">
           <CardContent className="relative p-3 sm:p-6">
@@ -559,7 +546,7 @@ export default function Dashboard() {
                 {stats?.recentOrders?.length ? (
                   <div className="space-y-2">
                     {stats.recentOrders.slice(0, 5).map((order) => (
-                      <div key={order._id} className="flex items-center justify-between p-2 rounded-lg  dark:shadow-white shadow bg-card hover:bg-muted/50 transition-colors gap-2">
+                      <div key={order._id} className="flex items-center justify-between p-2 rounded-lg  border border-primary/30  bg-card hover:bg-muted/50 transition-colors gap-2">
                         <div className="flex items-center gap-2 min-w-0 flex-1">
                           <div className={cn("h-2 w-2 rounded-full flex-shrink-0", getStatusColor(order.status))} />
                           <div className="min-w-0 flex-1">

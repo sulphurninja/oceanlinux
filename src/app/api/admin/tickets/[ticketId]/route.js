@@ -1,5 +1,8 @@
 import connectDB from "@/lib/db";
 import SupportTicket from "@/models/supportTicketModel";
+import User from "@/models/userModel";
+import EmailService from "@/lib/sendgrid";
+import NotificationService from "@/services/notificationService"; // Add this import
 import { getDataFromToken } from "@/helper/getDataFromToken";
 
 export async function GET(request, { params }) {
@@ -45,8 +48,8 @@ export async function PATCH(request, { params }) {
         await connectDB();
 
         // Check if user is admin
-        const userId = getDataFromToken(request);
-        if (!userId) {
+        const adminUserId = getDataFromToken(request);
+        if (!adminUserId) {
             return new Response(JSON.stringify({ message: 'Authentication required' }), {
                 status: 401,
                 headers: { 'Content-Type': 'application/json' }
@@ -55,11 +58,29 @@ export async function PATCH(request, { params }) {
 
         const { status, assignedTo, tags, adminReply } = await request.json();
 
+        // First, get the current ticket to compare status changes
+        const currentTicket = await SupportTicket.findOne({ ticketId: params.ticketId })
+            .populate('userId', 'name email');
+
+        if (!currentTicket) {
+            return new Response(JSON.stringify({ message: 'Ticket not found' }), {
+                status: 404,
+                headers: { 'Content-Type': 'application/json' }
+            });
+        }
+
         const updateData = {};
+        const previousStatus = currentTicket.status;
+
         if (status) updateData.status = status;
         if (assignedTo) updateData.assignedTo = assignedTo;
         if (tags) updateData.tags = tags;
         updateData.updatedAt = new Date();
+
+        // Set resolved date if status is being changed to resolved
+        if (status === 'resolved' && previousStatus !== 'resolved') {
+            updateData.resolvedAt = new Date();
+        }
 
         // Add admin reply if provided
         if (adminReply) {
@@ -68,7 +89,8 @@ export async function PATCH(request, { params }) {
                     author: 'admin',
                     authorName: 'Support Team',
                     message: adminReply,
-                    timestamp: new Date()
+                    timestamp: new Date(),
+                    isInternal: false
                 }
             };
         }
@@ -79,26 +101,57 @@ export async function PATCH(request, { params }) {
             { new: true }
         ).populate('userId', 'name email');
 
-        if (!ticket) {
-            return new Response(JSON.stringify({ message: 'Ticket not found' }), {
-                status: 404,
-                headers: { 'Content-Type': 'application/json' }
-            });
-        }
-        // Send ticket update email
+        // Send email notification
         try {
             const emailService = new EmailService();
-            await emailService.sendTicketUpdateEmail(
-                user.email,
-                user.name,
-                ticket.ticketId,
-                ticket.subject,
-                ticket.status,
-                message
-            );
+
+            if (adminReply) {
+                await emailService.sendTicketReplyEmail(
+                    ticket.userId.email,
+                    ticket.userId.name,
+                    ticket.ticketId,
+                    ticket.subject,
+                    adminReply
+                );
+            }
+
+            if (status && status !== previousStatus) {
+                await emailService.sendTicketStatusUpdateEmail(
+                    ticket.userId.email,
+                    ticket.userId.name,
+                    ticket.ticketId,
+                    ticket.subject,
+                    previousStatus,
+                    status
+                );
+            }
         } catch (emailError) {
-            console.error('Ticket update email failed:', emailError);
+            console.error('Ticket email notification failed:', emailError);
         }
+
+        // Send in-app notifications
+        try {
+            const userId = ticket.userId._id;
+
+            // Send notification for admin reply
+            if (adminReply) {
+                await NotificationService.notifyTicketReplied(userId, ticket, true); // true = from admin
+            }
+
+            // Send notification for status change
+            if (status && status !== previousStatus) {
+                await NotificationService.notifyTicketStatusChanged(userId, ticket, previousStatus, status);
+            }
+
+            // Send special notification for resolved tickets
+            if (status === 'resolved' && previousStatus !== 'resolved') {
+                await NotificationService.notifyTicketResolved(userId, ticket);
+            }
+
+        } catch (notificationError) {
+            console.error('Ticket notification failed:', notificationError);
+        }
+
         return new Response(JSON.stringify({
             message: 'Ticket updated successfully',
             ticket
