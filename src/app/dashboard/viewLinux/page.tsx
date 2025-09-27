@@ -208,6 +208,7 @@ const ViewLinux = () => {
     // Get server status for filtering
 
     // Get server status for filtering
+    // Get server status for filtering
     const getServerStatus = (order: Order): 'active' | 'expired' | 'pending' | 'failed' => {
         const currentStatus = order.provisioningStatus || order.status;
 
@@ -221,8 +222,29 @@ const ViewLinux = () => {
             return 'active';
         }
 
+        // 🆕 NEW: Check if this is a non-auto-provisioned service first
+        const provider = getProviderDisplayName(order);
+        const isAutoProvisionedProvider = provider === 'Hostycare' || provider === 'SmartVPS';
+
+        // For non-auto-provisioned services, they should be pending unless explicitly active
+        if (!isAutoProvisionedProvider) {
+            // Only consider it failed if it's explicitly marked as terminated or has a real API failure
+            if (currentStatus.toLowerCase() === 'terminated' ||
+                (currentStatus.toLowerCase() === 'failed' &&
+                    order.provisioningError &&
+                    !order.provisioningError.includes('CONFIG:') &&
+                    !order.provisioningError.includes('Missing hostycareProductId') &&
+                    !order.provisioningError.includes('Memory configuration not found') &&
+                    !order.provisioningError.includes('lacks hostycareProductId'))) {
+                return 'failed';
+            }
+            // All other non-auto-provisioned services should be pending (awaiting manual setup)
+            return 'pending';
+        }
+
+        // For auto-provisioned services, continue with existing logic
+
         // 🆕 Special handling for configuration errors - these should be pending, not failed
-        // If it's a configuration error (missing hostycareProductId, etc.), treat as pending
         if (order.provisioningError &&
             (order.provisioningError.includes('Missing hostycareProductId') ||
                 order.provisioningError.includes('CONFIG:') ||
@@ -247,23 +269,8 @@ const ViewLinux = () => {
             return 'pending';
         }
 
-        // For orders that don't have proper auto-provisioning setup, default to pending
-        const provider = getProviderDisplayName(order);
-        const isAutoProvisionedProvider = provider === 'Hostycare' || provider === 'SmartVPS';
-
-        // If it's marked as auto-provisioned provider but has config errors, it's pending
-        if (isAutoProvisionedProvider && order.provisioningError) {
-            return 'pending';
-        }
-
-        // If it's not an auto-provisioned provider and status isn't explicitly failed/active,
-        // treat it as pending (awaiting manual activation)
-        if (!isAutoProvisionedProvider) {
-            return 'pending';
-        }
-
-        // For properly configured auto-provisioned providers, unknown status defaults to active
-        return 'active';
+        // Default to pending for unknown states on auto-provisioned providers
+        return 'pending';
     };
 
     // Filter orders based on search query, status filter, and tab
@@ -332,105 +339,130 @@ const ViewLinux = () => {
         return getDaysUntilExpiry(order.expiryDate) < 0;
     };
 
-    const getStatusBadge = (status: string, provisioningStatus?: string, lastAction?: string, order?: Order) => {
-        if (status.toLowerCase() === 'completed') {
+const getStatusBadge = (status: string, provisioningStatus?: string, lastAction?: string, order?: Order) => {
+    if (status.toLowerCase() === 'completed') {
+        return (
+            <Badge className="bg-green-50 text-green-700 border border-green-200 dark:bg-green-950 dark:text-green-300 dark:border-green-800">
+                <div className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></div>
+                Active
+            </Badge>
+        );
+    }
+
+    const currentStatus = provisioningStatus || status;
+
+    // 🆕 NEW: Check if this is a non-auto-provisioned service
+    const provider = order ? getProviderDisplayName(order) : 'Unknown';
+    const isAutoProvisionedProvider = provider === 'Hostycare' || provider === 'SmartVPS';
+
+    // For non-auto-provisioned services, show appropriate pending status
+    if (!isAutoProvisionedProvider) {
+        if (currentStatus.toLowerCase() === 'terminated') {
+            return (
+                <Badge className="bg-red-50 text-red-700 border border-red-200 dark:bg-red-950 dark:text-red-300 dark:border-red-800">
+                    <XCircle className="w-3 h-3 mr-1" />
+                    Terminated
+                </Badge>
+            );
+        }
+        // All other states for non-auto-provisioned should show as awaiting manual setup
+        return (
+            <Badge className="bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800">
+                <User className="w-3 h-3 mr-1" />
+                Awaiting Manual Setup
+            </Badge>
+        );
+    }
+
+    // Rest of the existing logic for auto-provisioned services...
+
+    // 🆕 Check for configuration errors first
+    if (order?.provisioningError &&
+        (order.provisioningError.includes('Missing hostycareProductId') ||
+            order.provisioningError.includes('CONFIG:') ||
+            order.provisioningError.includes('Memory configuration not found') ||
+            order.provisioningError.includes('lacks hostycareProductId'))) {
+        return (
+            <Badge className="bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800">
+                <Settings className="w-3 h-3 mr-1" />
+                Awaiting Config
+            </Badge>
+        );
+    }
+
+    switch (currentStatus.toLowerCase()) {
+        case 'active':
             return (
                 <Badge className="bg-green-50 text-green-700 border border-green-200 dark:bg-green-950 dark:text-green-300 dark:border-green-800">
                     <div className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></div>
                     Active
                 </Badge>
             );
-        }
-
-        const currentStatus = provisioningStatus || status;
-
-        // 🆕 Check for configuration errors first
-        if (order?.provisioningError &&
-            (order.provisioningError.includes('Missing hostycareProductId') ||
-                order.provisioningError.includes('CONFIG:') ||
-                order.provisioningError.includes('Memory configuration not found') ||
-                order.provisioningError.includes('lacks hostycareProductId'))) {
+        case 'pending':
+        case 'confirmed':
             return (
                 <Badge className="bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800">
-                    <Settings className="w-3 h-3 mr-1" />
-                    Pending
+                    <Clock className="w-3 h-3 mr-1" />
+                    Pending Setup
                 </Badge>
             );
-        }
-
-        switch (currentStatus.toLowerCase()) {
-            case 'active':
+        case 'provisioning':
+            return (
+                <Badge className="bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800">
+                    <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                    Provisioning
+                </Badge>
+            );
+        case 'suspended':
+            return (
+                <Badge className="bg-orange-50 text-orange-700 border border-orange-200 dark:bg-orange-950 dark:text-orange-300 dark:border-orange-800">
+                    <AlertTriangle className="w-3 h-3 mr-1" />
+                    Suspended
+                </Badge>
+            );
+        case 'failed':
+            // Double-check for config errors even in failed status
+            if (order?.provisioningError && order.provisioningError.includes('CONFIG:')) {
                 return (
-                    <Badge className="bg-green-50 text-green-700 border border-green-200 dark:bg-green-950 dark:text-green-300 dark:border-green-800">
-                        <div className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></div>
-                        Active
+                    <Badge className="bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800">
+                        <Settings className="w-3 h-3 mr-1" />
+                        Awaiting Config
                     </Badge>
                 );
-            case 'pending':
-            case 'confirmed':
+            }
+            return (
+                <Badge className="bg-red-50 text-red-700 border border-red-200 dark:bg-red-950 dark:text-red-300 dark:border-red-800">
+                    <XCircle className="w-3 h-3 mr-1" />
+                    Failed
+                </Badge>
+            );
+        case 'terminated':
+            return (
+                <Badge className="bg-red-50 text-red-700 border border-red-200 dark:bg-red-950 dark:text-red-300 dark:border-red-800">
+                    <XCircle className="w-3 h-3 mr-1" />
+                    Terminated
+                </Badge>
+            );
+        default:
+            // Enhanced default case for auto-provisioned services
+            const isManualOrder = !lastAction || lastAction.includes('manual');
+            if (isManualOrder || currentStatus.toLowerCase() === 'confirmed') {
                 return (
                     <Badge className="bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800">
                         <Clock className="w-3 h-3 mr-1" />
-                        Pending Setup
+                        Awaiting Setup
                     </Badge>
                 );
-            case 'provisioning':
-                return (
-                    <Badge className="bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800">
-                        <Loader2 className="w-3 h-3 mr-1 animate-spin" />
-                        Provisioning
-                    </Badge>
-                );
-            case 'suspended':
-                return (
-                    <Badge className="bg-orange-50 text-orange-700 border border-orange-200 dark:bg-orange-950 dark:text-orange-300 dark:border-orange-800">
-                        <AlertTriangle className="w-3 h-3 mr-1" />
-                        Suspended
-                    </Badge>
-                );
-            case 'failed':
-                // Double-check for config errors even in failed status
-                if (order?.provisioningError && order.provisioningError.includes('CONFIG:')) {
-                    return (
-                        <Badge className="bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800">
-                            <Settings className="w-3 h-3 mr-1" />
-                            Awaiting Config
-                        </Badge>
-                    );
-                }
-                return (
-                    <Badge className="bg-red-50 text-red-700 border border-red-200 dark:bg-red-950 dark:text-red-300 dark:border-red-800">
-                        <XCircle className="w-3 h-3 mr-1" />
-                        Failed
-                    </Badge>
-                );
-            case 'terminated':
-                return (
-                    <Badge className="bg-red-50 text-red-700 border border-red-200 dark:bg-red-950 dark:text-red-300 dark:border-red-800">
-                        <XCircle className="w-3 h-3 mr-1" />
-                        Terminated
-                    </Badge>
-                );
-            default:
-                // Enhanced default case
-                const isManualOrder = !lastAction || lastAction.includes('manual');
-                if (isManualOrder || currentStatus.toLowerCase() === 'confirmed') {
-                    return (
-                        <Badge className="bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800">
-                            <Clock className="w-3 h-3 mr-1" />
-                            Awaiting Setup
-                        </Badge>
-                    );
-                }
+            }
 
-                return (
-                    <Badge variant="secondary" className="bg-gray-50 text-gray-700 dark:bg-gray-950 dark:text-gray-300">
-                        <Shield className="w-3 h-3 mr-1" />
-                        {currentStatus}
-                    </Badge>
-                );
-        }
-    };
+            return (
+                <Badge variant="secondary" className="bg-gray-50 text-gray-700 dark:bg-gray-950 dark:text-gray-300">
+                    <Shield className="w-3 h-3 mr-1" />
+                    {currentStatus}
+                </Badge>
+            );
+    }
+};
 
     const formatDate = (date: Date | string) => {
         return new Date(date).toLocaleDateString('en-US', {
