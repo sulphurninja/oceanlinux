@@ -208,10 +208,12 @@ export async function POST(request) {
         break;
       // In the reinstall case, update to match PHP SDK approach:
 
-      // inside your POST handler, in case 'reinstall':
       // -------------------- REINSTALL via Virtualizor --------------------
       case 'reinstall': {
+        console.log(`[SERVICE-ACTION][POST] ========== REINSTALL OPERATION ==========`);
+
         if (!virtualizorApi) {
+          console.error(`[SERVICE-ACTION][POST] VirtualizorAPI not available for reinstall`);
           return NextResponse.json({ success: false, error: 'Virtualizor required for reinstall' }, { status: 400 });
         }
 
@@ -219,56 +221,171 @@ export async function POST(request) {
         const chosenTemplateId = templateId ?? payload?.templateId;
         const providedPwd = newPassword ?? payload?.password;
 
+        console.log(`[SERVICE-ACTION][POST] Template ID: ${chosenTemplateId}`);
+        console.log(`[SERVICE-ACTION][POST] Password provided: ${providedPwd ? 'Yes' : 'No (will generate)'}`);
+
         if (!chosenTemplateId) {
+          console.error(`[SERVICE-ACTION][POST] Template ID is required for reinstall`);
           return NextResponse.json({ success: false, error: 'templateId is required' }, { status: 400 });
         }
 
-        const hostname = guessHostnameFromOrder(order);
-        const vpsid = await virtualizorApi.findVpsId({ ip: ipAddress, hostname });
-        if (!vpsid) {
-          return NextResponse.json({ success: false, error: `No VPS visible for IP ${ipAddress}` }, { status: 404 });
-        }
+        try {
+          console.log(`[SERVICE-ACTION][POST] Step 1: Finding VPS by IP...`);
+          const hostname = guessHostnameFromOrder(order);
+          console.log(`[SERVICE-ACTION][POST] Order hostname: ${hostname || 'Not found'}`);
 
-        const pwd = providedPwd || generateSecurePassword();
-        const apiRes = await virtualizorApi.reinstall(vpsid, chosenTemplateId, pwd);
+          const vpsid = await virtualizorApi.findVpsId({ ip: ipAddress, hostname });
 
-        await Order.findByIdAndUpdate(orderId, {
-          $set: { password: pwd, lastAction: 'reinstall', lastActionTime: new Date() },
-          $push: { logs: { action: 'reinstall', timestamp: new Date(), details: `Reinstall submitted (osid: ${chosenTemplateId})`, success: true } }
-        });
+          if (!vpsid) {
+            console.error(`[SERVICE-ACTION][POST] No VPS found for IP ${ipAddress}`);
+            return NextResponse.json({
+              success: false,
+              error: `No VPS visible for IP ${ipAddress}. This could mean:
+              1. The IP is not assigned to any VPS across our Virtualizor panels
+              2. The VPS is on a different panel not configured
+              3. There's a connectivity issue with the Virtualizor panel
 
-        return NextResponse.json({
-          success: true,
-          result: {
-            accepted: true,
-            vpsId: vpsid,
-            templateId: chosenTemplateId,
-            message: 'Reinstall submitted',
-            newPassword: pwd,
-            raw: apiRes
+              Please check if the IP ${ipAddress} is correct and the VPS is properly provisioned.`
+            }, { status: 404 });
           }
-        });
+
+          console.log(`[SERVICE-ACTION][POST] Step 2: VPS found with ID: ${vpsid}`);
+
+          const pwd = providedPwd || generateSecurePassword();
+          console.log(`[SERVICE-ACTION][POST] Step 3: Starting reinstall operation...`);
+
+          const startTime = Date.now();
+          const apiRes = await virtualizorApi.reinstall(vpsid, chosenTemplateId, pwd);
+          const duration = Date.now() - startTime;
+
+          console.log(`[SERVICE-ACTION][POST] Step 4: Reinstall operation completed in ${duration}ms`);
+          console.log(`[SERVICE-ACTION][POST] API Response keys:`, Object.keys(apiRes || {}));
+
+          // Update order with new password and log
+          await Order.findByIdAndUpdate(orderId, {
+            $set: {
+              password: pwd,
+              lastAction: 'reinstall',
+              lastActionTime: new Date()
+            },
+            $push: {
+              logs: {
+                action: 'reinstall',
+                timestamp: new Date(),
+                details: `Reinstall submitted (osid: ${chosenTemplateId}, duration: ${duration}ms)`,
+                success: true
+              }
+            }
+          });
+
+          console.log(`[SERVICE-ACTION][POST] Reinstall operation successful for VPS ${vpsid}`);
+
+          return NextResponse.json({
+            success: true,
+            result: {
+              accepted: true,
+              vpsId: vpsid,
+              templateId: chosenTemplateId,
+              message: 'Reinstall submitted successfully',
+              newPassword: pwd,
+              duration: `${duration}ms`,
+              raw: apiRes
+            }
+          });
+
+        } catch (error) {
+          console.error(`[SERVICE-ACTION][POST] Reinstall operation failed:`, error);
+          console.error(`[SERVICE-ACTION][POST] Error details:`, {
+            name: error.name,
+            message: error.message,
+            stack: error.stack?.split('\n').slice(0, 5).join('\n') // First 5 lines of stack
+          });
+
+          // Log failed attempt
+          await Order.findByIdAndUpdate(orderId, {
+            $push: {
+              logs: {
+                action: 'reinstall',
+                timestamp: new Date(),
+                details: `Reinstall failed: ${error.message}`,
+                success: false
+              }
+            }
+          });
+
+          return NextResponse.json({
+            success: false,
+            error: `Reinstall failed: ${error.message}`,
+            details: {
+              ip: ipAddress,
+              templateId: chosenTemplateId,
+              errorType: error.name || 'Unknown'
+            }
+          }, { status: 500 });
+        }
       }
 
-
       case 'templates': {
+        console.log(`[SERVICE-ACTION][POST] ========== TEMPLATES OPERATION ==========`);
+
         if (!virtualizorApi) {
+          console.error(`[SERVICE-ACTION][POST] VirtualizorAPI not available for templates`);
           return NextResponse.json({ success: false, error: 'Virtualizor not available for this provider' }, { status: 400 });
         }
 
-        const hostname = guessHostnameFromOrder(order);
-        const vpsid = await virtualizorApi.findVpsId({ ip: ipAddress, hostname });
-        if (!vpsid) {
-          return NextResponse.json({ success: false, error: `No VPS visible for IP ${ipAddress}` }, { status: 404 });
+        try {
+          console.log(`[SERVICE-ACTION][POST] Step 1: Finding VPS by IP...`);
+          const hostname = guessHostnameFromOrder(order);
+          console.log(`[SERVICE-ACTION][POST] Order hostname: ${hostname || 'Not found'}`);
+
+          const vpsid = await virtualizorApi.findVpsId({ ip: ipAddress, hostname });
+
+          if (!vpsid) {
+            console.error(`[SERVICE-ACTION][POST] No VPS found for IP ${ipAddress}`);
+            return NextResponse.json({ success: false, error: `No VPS visible for IP ${ipAddress}` }, { status: 404 });
+          }
+
+          console.log(`[SERVICE-ACTION][POST] Step 2: VPS found with ID: ${vpsid}`);
+          console.log(`[SERVICE-ACTION][POST] Step 3: Fetching available templates...`);
+
+          const startTime = Date.now();
+          const tplRaw = await virtualizorApi.getTemplates(vpsid);
+          const duration = Date.now() - startTime;
+
+          console.log(`[SERVICE-ACTION][POST] Step 4: Templates fetched in ${duration}ms`);
+
+          const flat = flattenOslist(tplRaw?.oslist || tplRaw?.os || tplRaw);
+          console.log(`[SERVICE-ACTION][POST] Step 5: Found ${Object.keys(flat).length} templates`);
+
+          return NextResponse.json({
+            success: true,
+            result: flat,
+            vpsId: vpsid,
+            duration: `${duration}ms`,
+            raw: tplRaw
+          });
+
+        } catch (error) {
+          console.error(`[SERVICE-ACTION][POST] Templates operation failed:`, error);
+          console.error(`[SERVICE-ACTION][POST] Error details:`, {
+            name: error.name,
+            message: error.message,
+            stack: error.stack?.split('\n').slice(0, 5).join('\n')
+          });
+
+          return NextResponse.json({
+            success: false,
+            error: `Failed to fetch templates: ${error.message}`,
+            details: {
+              ip: ipAddress,
+              errorType: error.name || 'Unknown'
+            }
+          }, { status: 500 });
         }
-
-        const tplRaw = await virtualizorApi.getTemplates(vpsid);
-        const flat = flattenOslist(tplRaw?.oslist || tplRaw?.os || tplRaw);
-
-        return NextResponse.json({ success: true, result: flat, vpsId: vpsid, raw: tplRaw });
       }
 
       default:
+        console.error(`[SERVICE-ACTION][POST] Invalid action: ${action}`);
         return NextResponse.json({ success: false, error: 'Invalid action' }, { status: 400 });
     }
 
@@ -287,13 +404,23 @@ export async function POST(request) {
     return NextResponse.json({ success: true, result });
 
   } catch (error) {
-    console.error('[SERVICE-ACTION][POST] Error:', error);
+    console.error('[SERVICE-ACTION][POST] ===========================================');
+    console.error('[SERVICE-ACTION][POST] FATAL ERROR:', error);
+    console.error('[SERVICE-ACTION][POST] Error details:', {
+      name: error.name,
+      message: error.message,
+      stack: error.stack?.split('\n').slice(0, 10).join('\n') // First 10 lines
+    });
+    console.error('[SERVICE-ACTION][POST] ===========================================');
+
     return NextResponse.json({
       success: false,
-      error: error.message || 'Internal server error'
+      error: error.message || 'Internal server error',
+      timestamp: new Date().toISOString()
     }, { status: 500 });
   }
 }
+
 // GET method for fetching templates
 export async function GET(request) {
   try {

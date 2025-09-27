@@ -964,7 +964,7 @@ const OrderDetails = () => {
   const getStatusBadge = (status: string, provisioningStatus?: string, lastAction?: string, order?: Order) => {
     if (actionBusy) {
       const actionLabels = {
-        'reboot': { label: 'Rebooting', icon: RefreshCw, color: 'bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-800' },
+        'restart': { label: 'Restarting', icon: RefreshCw, color: 'bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-800' },
         'start': { label: 'Starting', icon: Loader2, color: 'bg-green-50 text-green-700 border border-green-200 dark:bg-green-950 dark:text-green-300 dark:border-green-800' },
         'stop': { label: 'Stopping', icon: Loader2, color: 'bg-gray-50 text-gray-700 border border-gray-200 dark:bg-gray-950 dark:text-gray-300 dark:border-gray-800' },
         'renew': { label: 'Renewing', icon: Loader2, color: 'bg-green-50 text-green-700 border border-green-200 dark:bg-green-950 dark:text-green-300 dark:border-green-800' },
@@ -1604,7 +1604,7 @@ const OrderDetails = () => {
                         <div className="w-10 h-10 lg:w-12 lg:h-12 bg-blue-500 rounded-full flex items-center justify-center flex-shrink-0">
                           {order.lastAction === 'start' && <Play className="h-5 w-5 lg:h-6 lg:w-6 text-white" />}
                           {order.lastAction === 'stop' && <Square className="h-5 w-5 lg:h-6 lg:w-6 text-white" />}
-                          {order.lastAction === 'reboot' && <RotateCcw className="h-5 w-5 lg:h-6 lg:w-6 text-white" />}
+                          {order.lastAction === 'restart' && <RotateCcw className="h-5 w-5 lg:h-6 lg:w-6 text-white" />}
                           {order.lastAction === 'renew' && <CreditCard className="h-5 w-5 lg:h-6 lg:w-6 text-white" />}
                           {order.lastAction === 'changepassword' && <KeyRound className="h-5 w-5 lg:h-6 lg:w-6 text-white" />}
                           {order.lastAction === 'reinstall' && <HardDriveIcon className="h-5 w-5 lg:h-6 lg:w-6 text-white" />}
@@ -1766,16 +1766,16 @@ const OrderDetails = () => {
                         <Button
                           variant="secondary"
                           size="lg"
-                          onClick={() => runServiceAction('reboot')}
+                          onClick={() => runServiceAction('restart')}
                           disabled={!!actionBusy}
                           className="h-10 lg:h-12 gap-2 text-sm lg:text-base"
                         >
-                          {actionBusy === 'reboot' ? (
+                          {actionBusy === 'restart' ? (
                             <Loader2 className="h-4 w-4 animate-spin" />
                           ) : (
                             <RotateCcw className="h-4 w-4" />
                           )}
-                          Reboot Server
+                        Restart Server
                         </Button>
                       </div>
 
