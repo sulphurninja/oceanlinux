@@ -21,7 +21,7 @@ export class VirtualizorAPI {
     // Add logging for loaded accounts
     console.log(`[VirtualizorAPI] Loaded ${this.accounts.length} accounts:`);
     this.accounts.forEach((acct, i) => {
-      console.log(`[VirtualizorAPI] Account ${i}: ${acct.host}:${acct.port}`);
+      console.log(`[VirtualizorAPI] Account ${i}: ${acct.protocol}://${acct.host}:${acct.port}`);
     });
   }
 
@@ -36,7 +36,8 @@ export class VirtualizorAPI {
       const pass = process.env[`VIRTUALIZOR_API_PASSWORD_${i}`];
       if (host && key && pass) {
         const port = Number(process.env[`VIRTUALIZOR_PORT_${i}`] || 4083);
-        out.push({ host, port, key, pass });
+        const protocol = process.env[`VIRTUALIZOR_PROTOCOL_${i}`] || 'https';
+        out.push({ host, port, key, pass, protocol });
       }
     }
     if (out.length) return out;
@@ -53,6 +54,9 @@ export class VirtualizorAPI {
         .split(",")
         .map(s => s.trim())
         .map(s => Number(s || 4083));
+      const protocols = (process.env.VIRTUALIZOR_PROTOCOLS || "")
+        .split(",")
+        .map(s => s.trim().toLowerCase() || 'https');
 
       const n = Math.min(hosts.length, keys.length, passes.length);
       for (let i = 0; i < n; i++) {
@@ -61,6 +65,7 @@ export class VirtualizorAPI {
           key: keys[i],
           pass: passes[i],
           port: ports[i] || 4083,
+          protocol: protocols[i] || 'https',
         });
       }
     }
@@ -71,8 +76,9 @@ export class VirtualizorAPI {
     const key  = process.env.VIRTUALIZOR_API_KEY;
     const pass = process.env.VIRTUALIZOR_API_PASSWORD;
     const port = Number(process.env.VIRTUALIZOR_PORT || 4083);
+    const protocol = process.env.VIRTUALIZOR_PROTOCOL || 'https';
     if (host && key && pass) {
-      out.push({ host, key, pass, port });
+      out.push({ host, key, pass, port, protocol });
     }
 
     return out;
@@ -84,7 +90,8 @@ export class VirtualizorAPI {
   }
 
   _baseUrl(acct) {
-    return `https://${acct.host}:${acct.port}/index.php?api=json&${this._qsAuth(acct)}`;
+    const protocol = acct.protocol || 'https';
+    return `${protocol}://${acct.host}:${acct.port}/index.php?api=json&${this._qsAuth(acct)}`;
   }
 
   async _call(accountIndex, path, post, retries = 2) {
