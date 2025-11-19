@@ -52,7 +52,7 @@ export default function EcoFriendly() {
         <div className="text-center mb-16 animate-fade-in">
           <h2 className="text-4xl lg:text-5xl font-bold mb-6">
             Eco-Friendly Hosting That's 
-            <span className="text-gradient"> Kind to Your Wallet</span>
+            <span className="text-primary"> Kind to Your Wallet</span>
           </h2>
           <p className="text-xl text-muted-foreground max-w-3xl mx-auto">
             Choose sustainable hosting without paying premium prices. Our green infrastructure 

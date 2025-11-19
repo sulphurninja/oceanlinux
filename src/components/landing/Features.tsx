@@ -74,7 +74,7 @@ export default function Features() {
         <div className="text-center mb-16 animate-fade-in">
           <h2 className="text-4xl lg:text-5xl font-bold mb-6">
             Why Choose the Most Affordable
-            <span className="text-gradient"> Premium Linux VPS?</span>
+            <span className="text-primary"> Premium Linux VPS?</span>
           </h2>
           <p className="text-xl text-muted-foreground max-w-3xl mx-auto">
             Get professional hosting features without the premium price tag.

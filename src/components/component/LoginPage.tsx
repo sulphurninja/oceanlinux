@@ -125,12 +125,14 @@ function LoginPage({ className, ...props }: React.ComponentPropsWithoutRef<"div"
         <div className="hidden lg:flex flex-col justify-center p-12 ">
           <div className="max-w-2xl">
             {/* Brand */}
-            <div className="flex items-center space-x-3 mb-8">
-              <div className="relative">
-                <img src="/oceanlinux.png" className="h-16" alt="OceanLinux" />
-              </div>
+            <div className="flex items-center gap-3 mb-8">
+              <img 
+                src="/ol.png" 
+                className="h-16 w-auto transition-all duration-200 hover:scale-105" 
+                alt="OceanLinux"
+              />
               <div>
-                <h1 className="text-3xl font-bold bg-gradient-to-r from-primary to-foreground bg-clip-text text-transparent">
+                <h1 className="text-3xl font-bold bg-gradient-to-l from-primary to-foreground bg-clip-text text-transparent">
                   OceanLinux
                 </h1>
                 <p className="text-sm text-muted-foreground">The Ocean of Linux</p>
@@ -232,16 +234,18 @@ function LoginPage({ className, ...props }: React.ComponentPropsWithoutRef<"div"
             <Card className="shadow-2xl border dark:border-none-2">
               {/* Logo for mobile */}
               <div className='flex justify-center items-center pt-6 lg:hidden'>
-                <div className='text-center'>
+                <div className='flex items-center gap-3'>
                   <img
-                    src="/oceanlinux.png"
-
-                    className='h-20 ml-6'
+                    src="/ol.png"
+                    className='h-12 w-auto'
+                    alt="OceanLinux"
                   />
-                  {/* <h1 className='text-2xl font-bold bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent'>
-                    OceanLinux
-                  </h1> */}
-                  <p className="text-xs ml-4 text-muted-foreground">The Ocean of Linux</p>
+                  <div>
+                    <h1 className='text-2xl font-bold bg-gradient-to-l from-primary to-foreground bg-clip-text text-transparent'>
+                      OceanLinux
+                    </h1>
+                    <p className="text-xs text-muted-foreground -mt-1">The Ocean of Linux</p>
+                  </div>
                 </div>
               </div>
 

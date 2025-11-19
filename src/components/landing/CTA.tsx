@@ -20,7 +20,7 @@ export default function CTA() {
 
                     <h2 className="text-4xl sm:text-5xl lg:text-6xl font-bold mb-6 leading-tight">
                         Ready to Start Your
-                        <span className="text-gradient block"> Affordable Linux Journey?</span>
+                        <span className="text-primary block"> Affordable Linux Journey?</span>
                     </h2>
 
                     <p className="text-xl text-white/90 mb-8 max-w-3xl mx-auto">

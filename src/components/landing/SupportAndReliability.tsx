@@ -52,7 +52,7 @@ export default function SupportAndReliability() {
         <div className="text-center mb-16 animate-fade-in">
           <h2 className="text-4xl lg:text-5xl font-bold mb-6">
             Premium Support at 
-            <span className="text-gradient"> Affordable Prices</span>
+            <span className="text-primary"> Affordable Prices</span>
           </h2>
           <p className="text-xl text-muted-foreground max-w-3xl mx-auto">
             Get expert help when you need it most. Our professional support team is included 

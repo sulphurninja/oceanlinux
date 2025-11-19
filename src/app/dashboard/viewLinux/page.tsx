@@ -124,7 +124,7 @@ function styleText(content: string) {
     const regex = /(\([^)]*\)|[a-zA-Z]+)/g;
     return content.split(regex).map((part, index) => {
         if (part.match(/\([^)]*\)/) || part.match(/[a-zA-Z]/)) {
-            return <span key={index} className="text-primary font-semibold">{part}</span>;
+            return <span key={index} className="text font-semibold">{part}</span>;
         } else {
             return part;
         }

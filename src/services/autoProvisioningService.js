@@ -156,33 +156,74 @@ class AutoProvisioningService {
 
   async pickSmartVpsPackage(ipStock, order) {
     try {
-      L.line('[SMARTVPS] Calling ipstock() …');
+      // CRITICAL: Use EXACT package ID and name from IPStock configuration
+      // This ensures customer gets EXACTLY what they ordered
+      const smartvpsConfig = ipStock?.defaultConfigurations?.get?.('smartvps') || 
+                            ipStock?.defaultConfigurations?.smartvps;
+      
+      if (!smartvpsConfig) {
+        throw new Error('IPStock missing SmartVPS configuration (defaultConfigurations.smartvps)');
+      }
+
+      const storedPid = String(smartvpsConfig.packagePid || '');
+      const storedName = String(smartvpsConfig.packageName || '');
+
+      if (!storedPid || !storedName) {
+        throw new Error(`IPStock ${ipStock._id} has invalid SmartVPS config: pid="${storedPid}", name="${storedName}"`);
+      }
+
+      L.line(`[SMARTVPS] Using EXACT package from IPStock config:`);
+      L.kv('[SMARTVPS]   → Package ID (PID)', storedPid);
+      L.kv('[SMARTVPS]   → Package Name', storedName);
+      L.kv('[SMARTVPS]   → IPStock ID', ipStock._id);
+      L.kv('[SMARTVPS]   → IPStock Name', ipStock.name);
+
+      // Verify the package still exists in the API (optional safety check)
+      L.line('[SMARTVPS] Verifying package exists in API...');
       const res = await this.smartvpsApi.ipstock();
       const data = this.normalizeSmartVpsResponse(res);
-
       const obj = typeof data === 'string' ? JSON.parse(data) : data;
-      L.kv('[SMARTVPS] ipstock() normalized', JSON.stringify(obj).slice(0, 600));
-
       const packages = Array.isArray(obj?.packages) ? obj.packages : [];
-      if (!packages.length) throw new Error('No packages in ipstock');
 
-      // Try to select package matching the IPStock/product name
-      const want = (ipStock?.name || order?.productName || '').toString();
-      const wantDigits = want.replace(/[^\d.]/g, ''); // "🏅 103.195" -> "103.195"
+      // Find the EXACT package by ID (PID is the primary unique identifier)
+      const exactMatch = packages.find(p => String(p.id) === storedPid);
 
-      // Prefer exact/contains match on name, otherwise first active
-      let selected =
-        packages.find(p => String(p.name).includes(wantDigits)) ||
-        packages.find(p => String(p.name).toLowerCase().includes('103.195')) || // optional extra hint
-        packages.find(p => String(p.status).toLowerCase() === 'active') ||
-        packages[0];
+      if (!exactMatch) {
+        L.line(`[SMARTVPS] ⚠️ WARNING: Package not found in current API response!`);
+        L.kv('[SMARTVPS]   Searched for PID', storedPid);
+        L.kv('[SMARTVPS]   Expected Name', storedName);
+        L.kv('[SMARTVPS]   Available packages', packages.map(p => `${p.id}::${p.name}`));
+        throw new Error(`Package with PID ${storedPid} no longer available in SmartVPS API. Customer ordered product that is now unavailable.`);
+      }
 
-      if (!selected) throw new Error('Could not choose a package from ipstock');
+      // SAFETY CHECK: Warn if package name changed (SmartVPS renamed it)
+      if (String(exactMatch.name) !== storedName) {
+        L.line(`[SMARTVPS] ⚠️ NOTICE: SmartVPS renamed this package!`);
+        L.kv('[SMARTVPS]   PID (matched)', storedPid);
+        L.kv('[SMARTVPS]   Old name (stored)', storedName);
+        L.kv('[SMARTVPS]   New name (current)', exactMatch.name);
+        L.line(`[SMARTVPS]   → Provisioning will continue with PID ${storedPid}`);
+        L.line(`[SMARTVPS]   → Consider updating IPStock to sync new name`);
+      }
 
-      L.kv('[SMARTVPS] Selected package', selected); // {id,name,ipv4,status}
-      return { id: selected.id, name: selected.name };
+      // Verify package is active and has available IPs
+      if (String(exactMatch.status).toLowerCase() !== 'active') {
+        throw new Error(`Package "${storedName}" (PID: ${storedPid}) is not active. Status: ${exactMatch.status}`);
+      }
+
+      if (Number(exactMatch.ipv4 || 0) <= 0) {
+        throw new Error(`Package "${storedName}" (PID: ${storedPid}) has no available IPs. IPv4 count: ${exactMatch.ipv4}`);
+      }
+
+      L.line(`[SMARTVPS] ✅ Exact package verified and available:`);
+      L.kv('[SMARTVPS]   → ID', exactMatch.id);
+      L.kv('[SMARTVPS]   → Name', exactMatch.name);
+      L.kv('[SMARTVPS]   → Status', exactMatch.status);
+      L.kv('[SMARTVPS]   → Available IPv4', exactMatch.ipv4);
+
+      return { id: exactMatch.id, name: exactMatch.name };
     } catch (e) {
-      throw new Error(`SmartVPS ipstock failed: ${e.message}`);
+      throw new Error(`SmartVPS package selection failed: ${e.message}`);
     }
   }
 
@@ -580,6 +621,14 @@ class AutoProvisioningService {
 
       if (!ipAddress) L.line('[HOSTYCARE] IP not present in create response, will appear later.');
 
+      // Format IP address with port if needed (Windows requires :49965)
+      const { formatIpAddress } = await import('../lib/ipAddressHelper.js');
+      const formattedIpAddress = formatIpAddress(
+        ipAddress || 'Pending - Server being provisioned',
+        'hostycare',
+        order.os
+      );
+
       const updateData = {
         status: 'active',
         provisioningStatus: 'active',
@@ -588,7 +637,7 @@ class AutoProvisioningService {
         password: credentials.password,
         autoProvisioned: true,
         provisioningError: '',
-        ipAddress: ipAddress || 'Pending - Server being provisioned',
+        ipAddress: formattedIpAddress,
         expiryDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
       };
 

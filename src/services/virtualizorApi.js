@@ -1,11 +1,12 @@
 import querystring from "querystring";
+import https from "https";
 
 /**
  * Multi-account Virtualizor enduser client.
  * - Searches across multiple panels to resolve a vpsid by IP/hostname.
  * - Caches vpsid -> accountIndex for follow-up calls (getTemplates/reinstall).
  *
- * If your panel uses self-signed certs in DEV, set: NODE_TLS_REJECT_UNAUTHORIZED=0
+ * SSL certificate validation is disabled for servers with self-signed certificates.
  */
 export class VirtualizorAPI {
   constructor() {
@@ -100,65 +101,46 @@ export class VirtualizorAPI {
 
     const url = `${this._baseUrl(acct)}&${path}`;
     console.log(`[VirtualizorAPI][Account ${accountIndex}] Making ${post ? 'POST' : 'GET'} request to: ${acct.host}:${acct.port}`);
+    console.log(`[VirtualizorAPI][Account ${accountIndex}] Full URL: ${url.substring(0, 100)}...`);
     console.log(`[VirtualizorAPI][Account ${accountIndex}] Path: ${path}`);
     if (post) {
       console.log(`[VirtualizorAPI][Account ${accountIndex}] POST data:`, Object.keys(post));
     }
-
-    const init = {
-      method: post ? "POST" : "GET",
-      headers: post ? { "Content-Type": "application/x-www-form-urlencoded" } : undefined,
-      body: post ? querystring.stringify(post) : undefined,
-      cache: "no-store",
-      // Add timeout configurations
-      signal: AbortSignal.timeout(120000), // 2 minutes timeout
-    };
 
     for (let attempt = 1; attempt <= retries + 1; attempt++) {
       try {
         console.log(`[VirtualizorAPI][Account ${accountIndex}] Attempt ${attempt}/${retries + 1} - Starting request...`);
         const startTime = Date.now();
 
-        const res = await fetch(url, init);
+        // Use native Node.js HTTPS with SSL bypass instead of fetch
+        const data = await this._makeHttpsRequest(url, post, accountIndex);
         const duration = Date.now() - startTime;
 
-        console.log(`[VirtualizorAPI][Account ${accountIndex}] Request completed in ${duration}ms with status: ${res.status}`);
-
-        const text = await res.text();
-        console.log(`[VirtualizorAPI][Account ${accountIndex}] Response length: ${text.length} characters`);
-
-        // Log first part of response for debugging
-        const preview = text.substring(0, 500);
-        console.log(`[VirtualizorAPI][Account ${accountIndex}] Response preview:`, preview);
-
-        let data;
-        try {
-          data = JSON.parse(text);
-          console.log(`[VirtualizorAPI][Account ${accountIndex}] Successfully parsed JSON response`);
-        } catch (parseError) {
-          console.error(`[VirtualizorAPI][Account ${accountIndex}] JSON parse error:`, parseError.message);
-          console.error(`[VirtualizorAPI][Account ${accountIndex}] Raw response:`, text.slice(0, 1000));
-          throw new Error(`Virtualizor non-JSON response from ${acct.host}: ${text.slice(0, 300)}`);
-        }
-
-        if (!res.ok || data?.error) {
-          const err = Array.isArray(data?.error) ? data.error.join("; ") : (data?.error || `HTTP ${res.status}`);
-          console.error(`[VirtualizorAPI][Account ${accountIndex}] API Error:`, err);
-          throw new Error(`Virtualizor API error from ${acct.host}: ${err}`);
-        }
-
+        console.log(`[VirtualizorAPI][Account ${accountIndex}] Request completed in ${duration}ms`);
         console.log(`[VirtualizorAPI][Account ${accountIndex}] Request successful`);
         return data;
 
       } catch (error) {
         console.error(`[VirtualizorAPI][Account ${accountIndex}] Attempt ${attempt} failed:`, error.message);
+        console.error(`[VirtualizorAPI][Account ${accountIndex}] Error type:`, error.name);
+        console.error(`[VirtualizorAPI][Account ${accountIndex}] Error stack:`, error.stack?.substring(0, 200));
 
+        // Log specific error types
         if (error.name === 'TimeoutError' || error.message.includes('timeout')) {
           console.error(`[VirtualizorAPI][Account ${accountIndex}] Request timed out after 2 minutes`);
         }
 
         if (error.message.includes('504 Gateway Time-out') || error.message.includes('Gateway Time-out')) {
           console.error(`[VirtualizorAPI][Account ${accountIndex}] 504 Gateway timeout detected - server may be overloaded`);
+        }
+
+        if (error.message.includes('fetch failed') || error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
+          console.error(`[VirtualizorAPI][Account ${accountIndex}] Network error: Server unreachable or DNS resolution failed`);
+          console.error(`[VirtualizorAPI][Account ${accountIndex}] This could be due to:`);
+          console.error(`[VirtualizorAPI][Account ${accountIndex}]   - Server is down`);
+          console.error(`[VirtualizorAPI][Account ${accountIndex}]   - Firewall blocking connection`);
+          console.error(`[VirtualizorAPI][Account ${accountIndex}]   - SSL/TLS certificate issues`);
+          console.error(`[VirtualizorAPI][Account ${accountIndex}]   - DNS resolution failure`);
         }
 
         // If this is the last attempt, throw the error
@@ -173,6 +155,85 @@ export class VirtualizorAPI {
         await new Promise(resolve => setTimeout(resolve, waitTime));
       }
     }
+  }
+
+  /**
+   * Make HTTPS request using native Node.js https module with SSL certificate bypass
+   * This works around Next.js fetch() not supporting custom agents
+   */
+  _makeHttpsRequest(url, postData, accountIndex) {
+    return new Promise((resolve, reject) => {
+      const urlObj = new URL(url);
+      const postBody = postData ? querystring.stringify(postData) : null;
+
+      const options = {
+        hostname: urlObj.hostname,
+        port: urlObj.port || 443,
+        path: urlObj.pathname + urlObj.search,
+        method: postData ? 'POST' : 'GET',
+        headers: {
+          'User-Agent': 'OceanLinux-VirtualizorClient/1.0',
+          ...(postData && {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Content-Length': Buffer.byteLength(postBody)
+          })
+        },
+        rejectUnauthorized: false, // BYPASS SSL CERTIFICATE VALIDATION FOR SELF-SIGNED CERTS
+        timeout: 120000, // 2 minutes
+      };
+
+      console.log(`[VirtualizorAPI][Account ${accountIndex}] Using native HTTPS with SSL bypass (rejectUnauthorized: false)`);
+
+      const req = https.request(options, (res) => {
+        let data = '';
+
+        res.on('data', (chunk) => {
+          data += chunk;
+        });
+
+        res.on('end', () => {
+          try {
+            console.log(`[VirtualizorAPI][Account ${accountIndex}] Response status: ${res.statusCode}`);
+            console.log(`[VirtualizorAPI][Account ${accountIndex}] Response length: ${data.length} characters`);
+            console.log(`[VirtualizorAPI][Account ${accountIndex}] Response preview:`, data.substring(0, 500));
+
+            const jsonData = JSON.parse(data);
+            console.log(`[VirtualizorAPI][Account ${accountIndex}] Successfully parsed JSON response`);
+
+            if (res.statusCode >= 400 || jsonData?.error) {
+              const err = Array.isArray(jsonData?.error) 
+                ? jsonData.error.join("; ") 
+                : (jsonData?.error || `HTTP ${res.statusCode}`);
+              console.error(`[VirtualizorAPI][Account ${accountIndex}] API Error:`, err);
+              reject(new Error(`Virtualizor API error: ${err}`));
+            } else {
+              resolve(jsonData);
+            }
+          } catch (parseError) {
+            console.error(`[VirtualizorAPI][Account ${accountIndex}] JSON parse error:`, parseError.message);
+            console.error(`[VirtualizorAPI][Account ${accountIndex}] Raw response:`, data.slice(0, 1000));
+            reject(new Error(`Virtualizor non-JSON response: ${data.slice(0, 300)}`));
+          }
+        });
+      });
+
+      req.on('error', (error) => {
+        console.error(`[VirtualizorAPI][Account ${accountIndex}] Request error:`, error.message);
+        console.error(`[VirtualizorAPI][Account ${accountIndex}] Error code:`, error.code);
+        reject(error);
+      });
+
+      req.on('timeout', () => {
+        req.destroy();
+        reject(new Error('Request timeout after 2 minutes'));
+      });
+
+      if (postBody) {
+        req.write(postBody);
+      }
+
+      req.end();
+    });
   }
 
   // -------------------- helpers to normalize listvs --------------------

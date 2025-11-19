@@ -28,7 +28,8 @@ import {
     Shield,
     Settings,
     CreditCard,
-    Activity
+    Activity,
+    X
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -216,10 +217,10 @@ const NotificationsPage = () => {
     const getNotificationIcon = (type: string, priority: string) => {
         const iconClass = cn(
             "h-5 w-5",
-            priority === 'urgent' && "text-red-500",
-            priority === 'high' && "text-orange-500",
-            priority === 'medium' && "text-blue-500",
-            priority === 'low' && "text-gray-500"
+            priority === 'urgent' && "text-destructive",
+            priority === 'high' && "text-primary",
+            priority === 'medium' && "text-muted-foreground",
+            priority === 'low' && "text-muted-foreground/70"
         );
 
         switch (type) {
@@ -252,22 +253,15 @@ const NotificationsPage = () => {
     };
 
     const getPriorityBadge = (priority: string) => {
-        const variants = {
-            urgent: 'destructive',
-            high: 'default',
-            medium: 'secondary',
-            low: 'outline'
-        } as const;
-
-        const colors = {
-            urgent: 'bg-red-100 text-red-700 border-red-200',
-            high: 'bg-orange-100 text-orange-700 border-orange-200',
-            medium: 'bg-blue-100 text-blue-700 border-blue-200',
-            low: 'bg-gray-100 text-gray-700 border-gray-200'
+        const styles = {
+            urgent: 'bg-destructive/10 text-destructive border-destructive/20',
+            high: 'bg-primary/10 text-primary border-primary/20',
+            medium: 'bg-muted text-muted-foreground border-border',
+            low: 'bg-muted/50 text-muted-foreground/80 border-border'
         };
 
         return (
-            <Badge variant="outline" className={colors[priority as keyof typeof colors]}>
+            <Badge variant="outline" className={styles[priority as keyof typeof styles]}>
                 {priority.charAt(0).toUpperCase() + priority.slice(1)}
             </Badge>
         );
@@ -309,67 +303,102 @@ const NotificationsPage = () => {
 
     return (
         <div className='min-h-screen bg-background'>
-            {/* Mobile Header */}
-            <div className="lg:hidden h-16" />
-
             {/* Header */}
+            <div className='border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-10'>
+                <div className='container mx-auto px-4 sm:px-6 lg:px-8 py-6'>
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-4">
+                            <div className="w-12 h-12 bg-primary/10 rounded-xl flex items-center justify-center border border-border">
+                                <Bell className="h-6 w-6 text-primary" />
+                            </div>
+                            <div>
+                                <h1 className="text-2xl font-bold tracking-tight">Notifications</h1>
+                                <p className="text-sm text-muted-foreground">Manage and track all your notifications</p>
+                            </div>
+                        </div>
+                        <div className="hidden sm:flex items-center gap-2">
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={fetchNotifications}
+                                disabled={loading}
+                                className="gap-2"
+                            >
+                                <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
+                                Refresh
+                            </Button>
+                            {unreadCount > 0 && (
+                                <Button
+                                    size="sm"
+                                    onClick={() => markAsRead()}
+                                    disabled={updating}
+                                    className="gap-2"
+                                >
+                                    <CheckCheck className="h-4 w-4" />
+                                    Mark All Read
+                                </Button>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            </div>
           
-            <div className='container mx-auto px-3 sm:px-4 md:px-6 lg:px-8 py-4 sm:py-6'>
+            <div className='container mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6'>
                 {/* Stats Cards */}
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-                    <Card>
-                        <CardContent className="p-4">
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex items-center justify-center">
-                                    <Bell className="h-5 w-5 text-blue-600" />
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                    <Card className="border-border hover:shadow-md transition-shadow">
+                        <CardContent className="p-6">
+                            <div className="flex items-center gap-4">
+                                <div className="w-12 h-12 bg-primary/10 rounded-xl flex items-center justify-center border border-border">
+                                    <Bell className="h-5 w-5 text-primary" />
                                 </div>
                                 <div>
-                                    <p className="text-2xl font-bold">{pagination.total}</p>
-                                    <p className="text-xs text-muted-foreground">Total</p>
+                                    <p className="text-3xl font-bold tracking-tight">{pagination.total}</p>
+                                    <p className="text-sm text-muted-foreground">Total</p>
                                 </div>
                             </div>
                         </CardContent>
                     </Card>
 
-                    <Card>
-                        <CardContent className="p-4">
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 bg-orange-100 dark:bg-orange-900/30 rounded-lg flex items-center justify-center">
-                                    <Eye className="h-5 w-5 text-orange-600" />
+                    <Card className="border-border hover:shadow-md transition-shadow">
+                        <CardContent className="p-6">
+                            <div className="flex items-center gap-4">
+                                <div className="w-12 h-12 bg-primary/10 rounded-xl flex items-center justify-center border border-border">
+                                    <Eye className="h-5 w-5 text-primary" />
                                 </div>
                                 <div>
-                                    <p className="text-2xl font-bold">{unreadCount}</p>
-                                    <p className="text-xs text-muted-foreground">Unread</p>
+                                    <p className="text-3xl font-bold tracking-tight">{unreadCount}</p>
+                                    <p className="text-sm text-muted-foreground">Unread</p>
                                 </div>
                             </div>
                         </CardContent>
                     </Card>
 
-                    <Card>
-                        <CardContent className="p-4">
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 bg-green-100 dark:bg-green-900/30 rounded-lg flex items-center justify-center">
-                                    <CheckCheck className="h-5 w-5 text-green-600" />
+                    <Card className="border-border hover:shadow-md transition-shadow">
+                        <CardContent className="p-6">
+                            <div className="flex items-center gap-4">
+                                <div className="w-12 h-12 bg-muted/50 rounded-xl flex items-center justify-center border border-border">
+                                    <CheckCheck className="h-5 w-5 text-foreground" />
                                 </div>
                                 <div>
-                                    <p className="text-2xl font-bold">{pagination.total - unreadCount}</p>
-                                    <p className="text-xs text-muted-foreground">Read</p>
+                                    <p className="text-3xl font-bold tracking-tight">{notifications.filter(n => n.read).length}</p>
+                                    <p className="text-sm text-muted-foreground">Read</p>
                                 </div>
                             </div>
                         </CardContent>
                     </Card>
 
-                    <Card>
-                        <CardContent className="p-4">
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 bg-red-100 dark:bg-red-900/30 rounded-lg flex items-center justify-center">
-                                    <AlertCircle className="h-5 w-5 text-red-600" />
+                    <Card className="border-border hover:shadow-md transition-shadow">
+                        <CardContent className="p-6">
+                            <div className="flex items-center gap-4">
+                                <div className="w-12 h-12 bg-muted/50 rounded-xl flex items-center justify-center border border-border">
+                                    <AlertCircle className="h-5 w-5 text-foreground" />
                                 </div>
                                 <div>
-                                    <p className="text-2xl font-bold">
+                                    <p className="text-3xl font-bold tracking-tight">
                                         {notifications.filter(n => n.priority === 'urgent' || n.priority === 'high').length}
                                     </p>
-                                    <p className="text-xs text-muted-foreground">Priority</p>
+                                    <p className="text-sm text-muted-foreground">Priority</p>
                                 </div>
                             </div>
                         </CardContent>
@@ -377,32 +406,51 @@ const NotificationsPage = () => {
                 </div>
 
                 {/* Filters */}
-                <Card className="mb-6">
-                    <CardHeader>
-                        <CardTitle className="text-lg flex items-center gap-2">
-                            <Filter className="h-5 w-5" />
-                            Filters & Search
-                        </CardTitle>
+                <Card className="border-border">
+                    <CardHeader className="pb-4">
+                        <div className="flex items-center justify-between">
+                            <CardTitle className="text-lg font-semibold flex items-center gap-2">
+                                <Filter className="h-5 w-5 text-primary" />
+                                Filters & Search
+                            </CardTitle>
+                            {(filters.type !== 'all' || filters.priority !== 'all' || filters.read !== 'all' || filters.search) && (
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => setFilters({
+                                        type: 'all',
+                                        priority: 'all',
+                                        read: 'all',
+                                        search: '',
+                                        dateRange: 'all'
+                                    })}
+                                    className="text-xs gap-1"
+                                >
+                                    <X className="h-3 w-3" />
+                                    Clear
+                                </Button>
+                            )}
+                        </div>
                     </CardHeader>
-                    <CardContent>
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+                    <CardContent className="space-y-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                             <div className="space-y-2">
-                                <label className="text-sm font-medium">Search</label>
+                                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Search</label>
                                 <div className="relative">
-                                    <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                                     <Input
                                         placeholder="Search notifications..."
                                         value={filters.search}
                                         onChange={(e) => setFilters({ ...filters, search: e.target.value })}
-                                        className="pl-10"
+                                        className="pl-10 border-border h-10"
                                     />
                                 </div>
                             </div>
 
                             <div className="space-y-2">
-                                <label className="text-sm font-medium">Type</label>
+                                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Type</label>
                                 <Select value={filters.type} onValueChange={(value) => setFilters({ ...filters, type: value })}>
-                                    <SelectTrigger>
+                                    <SelectTrigger className="border-border h-10">
                                         <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent>
@@ -417,9 +465,9 @@ const NotificationsPage = () => {
                             </div>
 
                             <div className="space-y-2">
-                                <label className="text-sm font-medium">Priority</label>
+                                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Priority</label>
                                 <Select value={filters.priority} onValueChange={(value) => setFilters({ ...filters, priority: value })}>
-                                    <SelectTrigger>
+                                    <SelectTrigger className="border-border h-10">
                                         <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent>
@@ -433,9 +481,9 @@ const NotificationsPage = () => {
                             </div>
 
                             <div className="space-y-2">
-                                <label className="text-sm font-medium">Status</label>
+                                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Status</label>
                                 <Select value={filters.read} onValueChange={(value) => setFilters({ ...filters, read: value })}>
-                                    <SelectTrigger>
+                                    <SelectTrigger className="border-border h-10">
                                         <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent>
@@ -449,9 +497,9 @@ const NotificationsPage = () => {
 
                         {/* Bulk Actions */}
                         {selectedNotifications.length > 0 && (
-                            <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg">
+                            <div className="flex items-center justify-between gap-3 p-4 bg-primary/5 rounded-lg border border-primary/20">
                                 <span className="text-sm font-medium">
-                                    {selectedNotifications.length} selected
+                                    <span className="text-primary">{selectedNotifications.length}</span> notification{selectedNotifications.length > 1 ? 's' : ''} selected
                                 </span>
                                 <div className="flex gap-2">
                                     <Button
@@ -459,7 +507,7 @@ const NotificationsPage = () => {
                                         variant="outline"
                                         onClick={() => markAsRead(selectedNotifications)}
                                         disabled={updating}
-                                        className="gap-1"
+                                        className="gap-2 h-9"
                                     >
                                         <Check className="h-4 w-4" />
                                         Mark Read
@@ -470,7 +518,7 @@ const NotificationsPage = () => {
                                                 size="sm"
                                                 variant="outline"
                                                 disabled={updating}
-                                                className="gap-1 text-red-600 hover:text-red-700"
+                                                className="gap-2 h-9 hover:bg-destructive/10"
                                             >
                                                 <Trash2 className="h-4 w-4" />
                                                 Delete
@@ -487,7 +535,7 @@ const NotificationsPage = () => {
                                                 <AlertDialogCancel>Cancel</AlertDialogCancel>
                                                 <AlertDialogAction
                                                     onClick={() => deleteNotifications(selectedNotifications)}
-                                                    className="bg-red-600 hover:bg-red-700"
+                                                    className="bg-destructive hover:bg-destructive/90"
                                                 >
                                                     Delete
                                                 </AlertDialogAction>
@@ -501,33 +549,36 @@ const NotificationsPage = () => {
                 </Card>
 
                 {/* Notifications List */}
-                <Card>
-                    <CardHeader>
+                <Card className="border-border">
+                    <CardHeader className="pb-4">
                         <div className="flex items-center justify-between">
-                            <CardTitle className="flex items-center gap-2">
-                                <Bell className="h-5 w-5" />
+                            <CardTitle className="text-lg font-semibold flex items-center gap-2">
+                                <Bell className="h-5 w-5 text-primary" />
                                 All Notifications
                             </CardTitle>
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-3">
                                 <Checkbox
                                     checked={selectedNotifications.length === notifications.length && notifications.length > 0}
                                     onCheckedChange={toggleSelectAll}
+                                    id="select-all"
                                 />
-                                <span className="text-sm text-muted-foreground">Select all</span>
+                                <label htmlFor="select-all" className="text-sm text-muted-foreground cursor-pointer">Select all</label>
                             </div>
                         </div>
                     </CardHeader>
                     <CardContent>
                         {loading ? (
-                            <div className="flex items-center justify-center py-12">
-                                <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                                <span className="ml-3 text-muted-foreground">Loading notifications...</span>
+                            <div className="flex flex-col items-center justify-center py-16">
+                                <Loader2 className="h-10 w-10 animate-spin text-primary mb-4" />
+                                <span className="text-sm text-muted-foreground">Loading notifications...</span>
                             </div>
                         ) : notifications.length === 0 ? (
-                            <div className="text-center py-12">
-                                <Bell className="h-16 w-16 text-muted-foreground mx-auto mb-4 opacity-50" />
+                            <div className="text-center py-16">
+                                <div className="w-16 h-16 bg-muted/50 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                                    <Bell className="h-8 w-8 text-muted-foreground" />
+                                </div>
                                 <h3 className="text-lg font-semibold mb-2">No notifications found</h3>
-                                <p className="text-muted-foreground mb-4">
+                                <p className="text-sm text-muted-foreground mb-6 max-w-md mx-auto">
                                     {Object.values(filters).some(f => f !== 'all' && f !== '')
                                         ? 'Try adjusting your filters to see more notifications.'
                                         : 'You\'re all caught up! New notifications will appear here.'
@@ -543,19 +594,22 @@ const NotificationsPage = () => {
                                             search: '',
                                             dateRange: 'all'
                                         })}
+                                        className="gap-2"
                                     >
+                                        <X className="h-4 w-4" />
                                         Clear Filters
                                     </Button>
                                 )}
                             </div>
                         ) : (
-                            <div className="space-y-2">
+                            <div className="space-y-3">
                                 {notifications.map((notification) => (
                                     <div
                                         key={notification._id}
                                         className={cn(
-                                            "flex items-start gap-4 p-4 rounded-lg shadow dark:shadow-white transition-all duration-200 hover:bg-muted/50",
-                                            !notification.read && "bg-blue-50/50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800",
+                                            "flex items-start gap-4 p-4 rounded-lg border transition-all duration-200",
+                                            !notification.read && "bg-primary/5 border-primary/20",
+                                            notification.read && "border-border hover:bg-muted/30",
                                             notification.actionUrl && "cursor-pointer"
                                         )}
                                         onClick={() => notification.actionUrl && handleNotificationClick(notification)}
@@ -572,38 +626,38 @@ const NotificationsPage = () => {
 
                                         <div className="flex-1 min-w-0">
                                             <div className="flex items-start justify-between gap-3 mb-2">
-                                                <div className="flex items-center gap-3 min-w-0 flex-1">
+                                                <div className="flex items-center gap-2 min-w-0 flex-1">
                                                     <h3 className={cn(
-                                                        "font-semibold truncate",
+                                                        "font-semibold text-base",
                                                         !notification.read && "text-foreground"
                                                     )}>
                                                         {notification.title}
                                                     </h3>
                                                     {!notification.read && (
-                                                        <div className="w-2 h-2 bg-blue-600 rounded-full flex-shrink-0"></div>
+                                                        <div className="w-2 h-2 bg-primary rounded-full flex-shrink-0"></div>
                                                     )}
                                                 </div>
                                                 <div className="flex items-center gap-2 flex-shrink-0">
                                                     {getPriorityBadge(notification.priority)}
-                                                    <Badge variant="outline" className="text-xs">
+                                                    <Badge variant="outline" className="text-xs border-border bg-muted/50">
                                                         {getTypeLabel(notification.type)}
                                                     </Badge>
                                                 </div>
                                             </div>
 
-                                            <p className="text-sm text-muted-foreground mb-3 line-clamp-2">
+                                            <p className="text-sm text-muted-foreground mb-3 line-clamp-2 leading-relaxed">
                                                 {notification.message}
                                             </p>
 
                                             <div className="flex items-center justify-between">
                                                 <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                                                    <span className="flex items-center gap-1">
-                                                        <Clock className="h-3 w-3" />
+                                                    <span className="flex items-center gap-1.5">
+                                                        <Clock className="h-3.5 w-3.5" />
                                                         {formatDate(notification.createdAt)}
                                                     </span>
                                                     {notification.read && notification.readAt && (
-                                                        <span className="flex items-center gap-1">
-                                                            <Eye className="h-3 w-3" />
+                                                        <span className="flex items-center gap-1.5">
+                                                            <Eye className="h-3.5 w-3.5" />
                                                             Read {formatDate(notification.readAt)}
                                                         </span>
                                                     )}
@@ -611,30 +665,30 @@ const NotificationsPage = () => {
 
                                                 <DropdownMenu>
                                                     <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
-                                                        <Button variant="ghost" size="icon" className="h-8 w-8">
+                                                        <Button variant="ghost" size="icon" className="h-8 w-8 hover:bg-muted">
                                                             <MoreHorizontal className="h-4 w-4" />
                                                         </Button>
                                                     </DropdownMenuTrigger>
-                                                    <DropdownMenuContent align="end">
+                                                    <DropdownMenuContent align="end" className="w-48">
                                                         {!notification.read ? (
-                                                            <DropdownMenuItem onClick={() => markAsRead([notification._id])}>
-                                                                <Check className="h-4 w-4 mr-2" />
+                                                            <DropdownMenuItem onClick={() => markAsRead([notification._id])} className="gap-2">
+                                                                <Check className="h-4 w-4" />
                                                                 Mark as read
                                                             </DropdownMenuItem>
                                                         ) : (
                                                             <DropdownMenuItem onClick={() => {
                                                                 // Mark as unread logic would go here
-                                                            }}>
-                                                                <EyeOff className="h-4 w-4 mr-2" />
+                                                            }} className="gap-2">
+                                                                <EyeOff className="h-4 w-4" />
                                                                 Mark as unread
                                                             </DropdownMenuItem>
                                                         )}
                                                         <DropdownMenuSeparator />
                                                         <DropdownMenuItem
                                                             onClick={() => deleteNotifications([notification._id])}
-                                                            className="text-red-600 hover:text-red-700"
+                                                            className="gap-2 text-destructive focus:text-destructive"
                                                         >
-                                                            <Trash2 className="h-4 w-4 mr-2" />
+                                                            <Trash2 className="h-4 w-4" />
                                                             Delete
                                                         </DropdownMenuItem>
                                                     </DropdownMenuContent>
@@ -648,26 +702,36 @@ const NotificationsPage = () => {
 
                         {/* Pagination */}
                         {pagination.pages > 1 && (
-                            <div className="flex items-center justify-between mt-6 pt-4 border-t">
+                            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-6 pt-6 border-t border-border">
                                 <div className="text-sm text-muted-foreground">
-                                    Showing {((pagination.page - 1) * pagination.limit) + 1} to {Math.min(pagination.page * pagination.limit, pagination.total)} of {pagination.total} notifications
+                                    Showing <span className="font-medium text-foreground">{((pagination.page - 1) * pagination.limit) + 1}</span> to <span className="font-medium text-foreground">{Math.min(pagination.page * pagination.limit, pagination.total)}</span> of <span className="font-medium text-foreground">{pagination.total}</span> notifications
                                 </div>
-                                <div className="flex gap-2">
+                                <div className="flex items-center gap-2">
                                     <Button
                                         variant="outline"
                                         size="sm"
                                         disabled={pagination.page === 1}
                                         onClick={() => setPagination(prev => ({ ...prev, page: prev.page - 1 }))}
+                                        className="h-9 gap-2"
                                     >
+                                        <ArrowLeft className="h-4 w-4" />
                                         Previous
                                     </Button>
+                                    <div className="flex items-center gap-1">
+                                        <span className="text-sm px-3 py-1.5 rounded-md bg-primary text-primary-foreground font-medium">
+                                            {pagination.page}
+                                        </span>
+                                        <span className="text-sm text-muted-foreground">of {pagination.pages}</span>
+                                    </div>
                                     <Button
                                         variant="outline"
                                         size="sm"
                                         disabled={pagination.page === pagination.pages}
                                         onClick={() => setPagination(prev => ({ ...prev, page: prev.page + 1 }))}
+                                        className="h-9 gap-2"
                                     >
                                         Next
+                                        <ArrowLeft className="h-4 w-4 rotate-180" />
                                     </Button>
                                 </div>
                             </div>

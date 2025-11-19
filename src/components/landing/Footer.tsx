@@ -53,14 +53,16 @@ export default function Footer() {
           <div className="grid lg:grid-cols-5 gap-8">
             {/* Brand Section */}
             <div className="lg:col-span-2">
-              <Link href="/" className="flex items-center space-x-3 mb-6">
-                <div className="relative">
-                  <img src='/oceanlinux.png' className="h-20" />
-                </div>
+              <Link href="/" className="flex items-center gap-3 mb-6">
+                <img 
+                  src='/ol.png' 
+                  className="h-16 w-auto transition-all duration-200 hover:scale-105" 
+                  alt="OceanLinux"
+                />
                 <div>
-                  <span className="text-2xl font-bold bg-gradient-to-r from-primary to-foreground bg-clip-text text-transparent">
+                  <h2 className="text-2xl font-bold bg-gradient-to-l from-primary to-foreground bg-clip-text text-transparent whitespace-nowrap">
                     OceanLinux
-                  </span>
+                  </h2>
                   <div className="text-xs text-muted-foreground -mt-1">The Ocean of Linux</div>
                 </div>
               </Link>
@@ -79,7 +81,7 @@ export default function Footer() {
                   <div>
                     <div className="text-sm font-medium">A Product of</div>
                     <Link href='https://backtick.app'>
-                      <div className="text-lg font-bold text-primary">Backtick Labs</div>
+                      <div className="text-lg font-bold text-green-500">Backtick Labs</div>
                     </Link>
                   </div>
                 </div>

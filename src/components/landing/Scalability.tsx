@@ -29,7 +29,7 @@ export default function Scalability() {
         <div className="text-center mb-16 animate-fade-in">
           <h2 className="text-4xl lg:text-5xl font-bold mb-6">
             Scale Without Breaking
-            <span className="text-gradient"> Your Budget</span>
+            <span className="text-primary"> Your Budget</span>
           </h2>
           <p className="text-xl text-muted-foreground max-w-3xl mx-auto">
             Grow your business without worrying about hosting costs.

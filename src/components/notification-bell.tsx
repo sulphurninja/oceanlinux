@@ -90,11 +90,11 @@ const NotificationBell = () => {
 
     const getNotificationIcon = (iconName: string, priority: string) => {
         const iconClass = cn(
-            "h-4 w-4",
-            priority === 'urgent' && "text-red-500",
-            priority === 'high' && "text-orange-500",
-            priority === 'medium' && "text-blue-500",
-            priority === 'low' && "text-gray-500"
+            "h-4 w-4 flex-shrink-0",
+            priority === 'urgent' && "text-destructive",
+            priority === 'high' && "text-primary",
+            priority === 'medium' && "text-muted-foreground",
+            priority === 'low' && "text-muted-foreground/70"
         );
 
         // You can expand this with more icons based on the iconName
@@ -122,97 +122,108 @@ const NotificationBell = () => {
                 <Button
                     variant="ghost"
                     size="icon"
-                    className="relative  border border-primary/30 rounded-full h-10 w-10"
+                    className="relative border border-border hover:border-primary/30 hover:bg-muted rounded-full h-10 w-10 transition-all"
                 >
-                    <Bell className="h-5 w-5  dark:text-white" />
+                    <Bell className="h-5 w-5" />
                     {unreadCount > 0 && (
-                        <Badge
-                            variant="destructive"
-                            className="absolute -top-1 -right-1 h-5 w-5 rounded-full p-0 flex items-center justify-center text-xs"
-                        >
+                        <span className="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-xs font-semibold">
                             {unreadCount > 99 ? '99+' : unreadCount}
-                        </Badge>
+                        </span>
                     )}
                 </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent
                 align="end"
-                className="w-80 md:w-96 max-h-96 overflow-y-scroll"
+                className="w-[380px] p-0 border-border"
+                sideOffset={8}
             >
-                <DropdownMenuLabel className="flex items-center justify-between">
-                    <span>Notifications</span>
+                <div className="flex items-center justify-between p-4 border-b border-border">
+                    <h3 className="font-semibold text-base">Notifications</h3>
                     {unreadCount > 0 && (
                         <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => markAsRead()}
-                            className="text-xs h-6 px-2"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                markAsRead();
+                            }}
+                            className="h-8 text-xs gap-1.5 hover:bg-muted"
                         >
+                            <Check className="h-3.5 w-3.5" />
                             Mark all read
                         </Button>
                     )}
-                </DropdownMenuLabel>
-                <DropdownMenuSeparator />
+                </div>
 
-                <ScrollArea className="h-72">
+                <div className="max-h-[420px] overflow-y-auto">
                     {loading ? (
-                        <div className="flex items-center justify-center py-8">
+                        <div className="flex items-center justify-center py-12">
                             <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
                         </div>
                     ) : notifications.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
-                            <Bell className="h-8 w-8 mb-2 opacity-50" />
-                            <p className="text-sm">No notifications yet</p>
+                        <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+                            <div className="w-12 h-12 bg-muted/50 rounded-xl flex items-center justify-center mb-3">
+                                <Bell className="h-6 w-6 text-muted-foreground" />
+                            </div>
+                            <p className="text-sm font-medium">No notifications yet</p>
+                            <p className="text-xs text-muted-foreground mt-1">We'll notify you when something arrives</p>
                         </div>
                     ) : (
-                        <div className="space-y-1">
+                        <div className="divide-y divide-border">
                             {notifications.map((notification) => (
-                                <DropdownMenuItem
+                                <div
                                     key={notification._id}
                                     className={cn(
-                                        "flex items-start gap-3 p-3 cursor-pointer",
-                                        !notification.read && "bg-blue-50 dark:bg-blue-950/30"
+                                        "flex items-start gap-3 p-4 cursor-pointer transition-colors hover:bg-muted/50",
+                                        !notification.read && "bg-primary/5"
                                     )}
                                     onClick={() => handleNotificationClick(notification)}
                                 >
-                                    <div className="flex-shrink-0 mt-1">
+                                    <div className="flex-shrink-0 mt-0.5">
                                         {getNotificationIcon(notification.icon, notification.priority)}
                                     </div>
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex items-center gap-2">
-                                            <p className="font-semibold text-sm truncate">
+                                    <div className="flex-1 min-w-0 space-y-1">
+                                        <div className="flex items-start justify-between gap-2">
+                                            <p className="font-semibold text-sm leading-tight">
                                                 {notification.title}
                                             </p>
                                             {!notification.read && (
-                                                <div className="w-2 h-2 bg-blue-600 rounded-full flex-shrink-0"></div>
+                                                <div className="w-2 h-2 bg-primary rounded-full flex-shrink-0 mt-1"></div>
                                             )}
                                         </div>
-                                        <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                                        <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">
                                             {notification.message}
                                         </p>
-                                        <p className="text-xs text-muted-foreground mt-1">
-                                            {formatTimeAgo(notification.createdAt)}
-                                        </p>
+                                        <div className="flex items-center gap-2 text-xs text-muted-foreground pt-0.5">
+                                            <span>{formatTimeAgo(notification.createdAt)}</span>
+                                            {notification.actionUrl && (
+                                                <>
+                                                    <span>•</span>
+                                                    <span className="text-primary flex items-center gap-1">
+                                                        View
+                                                        <ExternalLink className="h-3 w-3" />
+                                                    </span>
+                                                </>
+                                            )}
+                                        </div>
                                     </div>
-                                    {notification.actionUrl && (
-                                        <ExternalLink className="h-3 w-3 text-muted-foreground flex-shrink-0 mt-1" />
-                                    )}
-                                </DropdownMenuItem>
+                                </div>
                             ))}
                         </div>
                     )}
-                </ScrollArea>
+                </div>
 
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                    className="text-center justify-center"
-                    onClick={() => {
-                        router.push('/dashboard/notifications');
-                        setIsOpen(false);
-                    }}
-                >
-                    <span className="text-sm text-primary">View all notifications</span>
-                </DropdownMenuItem>
+                <div className="border-t border-border">
+                    <button
+                        className="w-full p-3 text-center text-sm text-primary font-medium hover:bg-muted/50 transition-colors"
+                        onClick={() => {
+                            router.push('/dashboard/notifications');
+                            setIsOpen(false);
+                        }}
+                    >
+                        View all notifications
+                    </button>
+                </div>
             </DropdownMenuContent>
         </DropdownMenu>
     );

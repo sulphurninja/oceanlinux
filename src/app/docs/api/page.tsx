@@ -69,7 +69,7 @@ const APIDocsPage = () => {
       <div className="border border-primary/30 -b bg-card">
         <div className="container mx-auto px-4 py-8">
           <div className='flex justify- mb-12'>
-            <img src='/oceanlinux.png' className='h-20' />
+            <img src='/ol.png' className='h-20' />
             <div className='flex justify-center items-center space-x-1 opacity-80 hover:opacity-100 transition-opacity mt-2'>
               <img src='/backtick.png' className='h-4 w-auto dark:filter-none' alt="Backtick" />
               <p className="text-xs text-background/70 dark:text-muted-foreground">A Product of Backtick Labs</p>

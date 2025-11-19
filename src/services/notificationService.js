@@ -356,8 +356,12 @@ class NotificationService {
       const query = { userId };
 
       // Apply filters
-      if (unreadOnly) query.read = false;
-      if (options.read !== null) query.read = options.read;
+      if (unreadOnly) {
+        query.read = false;
+      } else if (options.read !== undefined) {
+        query.read = options.read;
+      }
+      
       if (options.type) query.type = options.type;
       if (options.priority) query.priority = options.priority;
 

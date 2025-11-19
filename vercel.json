@@ -1,0 +1,17 @@
+{
+  "crons": [
+    {
+      "path": "/api/orders/cleanup-old",
+      "schedule": "0 2 * * *"
+    },
+    {
+      "path": "/api/admin/auto-provision-cron",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/smartvps/sync",
+      "schedule": "*/10 * * * *"
+    }
+  ]
+}
+

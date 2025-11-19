@@ -55,7 +55,8 @@ import {
   Package,
   Search,
   Filter,
-  SlidersHorizontal
+  SlidersHorizontal,
+  Copy
 } from "lucide-react";
 import { z } from "zod";
 import { cn } from "@/lib/utils";
@@ -149,7 +150,13 @@ export default function IPStockPage() {
 
     // Filter by tab
     if (activeTab !== 'all') {
-      filtered = filtered.filter(stock => stock.serverType === activeTab);
+      filtered = filtered.filter(stock => {
+        // Handle "Windows & Linux" - show in both Linux and VPS tabs
+        if (stock.serverType === 'Windows & Linux') {
+          return activeTab === 'Linux' || activeTab === 'VPS';
+        }
+        return stock.serverType === activeTab;
+      });
     }
 
     // Search filter
@@ -213,8 +220,13 @@ export default function IPStockPage() {
   // Get counts for each tab
   const getCounts = () => {
     const all = ipStocks.length;
-    const linux = ipStocks.filter(stock => stock.serverType === 'Linux').length;
-    const vps = ipStocks.filter(stock => stock.serverType === 'VPS').length;
+    // Count "Windows & Linux" in both Linux and VPS tabs
+    const linux = ipStocks.filter(stock => 
+      stock.serverType === 'Linux' || stock.serverType === 'Windows & Linux'
+    ).length;
+    const vps = ipStocks.filter(stock => 
+      stock.serverType === 'VPS' || stock.serverType === 'Windows & Linux'
+    ).length;
     return { all, linux, vps };
   };
 
@@ -426,100 +438,104 @@ export default function IPStockPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Mobile Header */}
-      <div className="lg:hidden h-16" />
-
-      {/* UPDATED Header with Search and Filters */}
-      <div className="morder md:hidden dark:morder-none-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-40">
-        <div className="container mx-auto -mt-14 px-4 sm:px-6 lg:px-8">
-          <div className="flex flex-col gap-4 py-4">
-            {/* Title Section */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div>
-                <div className="flex items-center gap-3">
-                  <div className="flex items-center justify-center w-10 h-10 text-xl rounded-full bg-primary/10">
-                    {/* <ServerIcon className="h-4 w-4 text-primary" /> */}
-                    🌊
-                  </div>
-                  <div>
-                    <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Server Plans</h1>
-                    <p className="text-sm text-muted-foreground mt-0.5">Choose the perfect server configuration</p>
-                  </div>
-                </div>
+      {/* Modern Compact Header */}
+         {/* Promo Banner */}
+         <div className="bg-gradient-to-r from-primary/10 via-primary/5 to-primary/10 border-y border-primary/20">
+        <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-4">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center border border-primary/30">
+                <Percent className="h-5 w-5 text-primary" />
               </div>
-              <div className="flex items-center gap-2">
-                <Badge variant="outline" className="gap-1 text-xs">
-                  <Clock className="h-3 w-3" />
-                  Instant Setup
-                </Badge>
-                <Badge variant="outline" className="gap-1 text-xs">
-                  <Shield className="h-3 w-3" />
-                  Secure
-                </Badge>
+              <div>
+                <p className="text-sm font-semibold">Special Discount Available</p>
+                <p className="text-xs text-muted-foreground">Save on all server plans with our exclusive offer</p>
               </div>
             </div>
-
-            {/* NEW: Search and Filters Section */}
-            <div className="flex flex-col lg:flex-row gap-3 items-stretch lg:items-center">
-              {/* Search Bar */}
-              <div className="relative flex-1 max-w-">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Search servers, configurations, or tags..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10 w-full h-10 ring-1 ring-primary "
-                />
+            <div className="flex items-center gap-2">
+              <div className="px-4 py-2 rounded-lg bg-background border border-border">
+                <div className="flex items-center gap-2">
+                  <Tag className="h-4 w-4 text-primary" />
+                  <code className="text-sm font-bold tracking-wider">OCEAN50</code>
+                </div>
               </div>
-
-              {/* Filters */}
-              <div className="flex gap-2 md:ml-auto flex-wrap">
-                <Select value={priceFilter} onValueChange={setPriceFilter}>
-                  <SelectTrigger className="w-44 h-10">
-                    <Filter className="h-4 w-4 mr-2" />
-                    <SelectValue placeholder="Price Range" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Prices</SelectItem>
-                    <SelectItem value="under-500">Under ₹500</SelectItem>
-                    <SelectItem value="500-1000">₹500 - ₹1,000</SelectItem>
-                    <SelectItem value="1000-2000">₹1,000 - ₹2,000</SelectItem>
-                    <SelectItem value="above-2000">Above ₹2,000</SelectItem>
-                  </SelectContent>
-                </Select>
-
-                <Select value={sortBy} onValueChange={setSortBy}>
-                  <SelectTrigger className="w-40 h-10">
-                    <SlidersHorizontal className="h-4 w-4 mr-2" />
-                    <SelectValue placeholder="Sort By" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="name">Name (A-Z)</SelectItem>
-                    <SelectItem value="price-low">Price (Low to High)</SelectItem>
-                    <SelectItem value="price-high">Price (High to Low)</SelectItem>
-                  </SelectContent>
-                </Select>
-
-                {/* Clear Filters Button */}
-                {(searchTerm || priceFilter !== 'all' || sortBy !== 'name') && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setSearchTerm("");
-                      setPriceFilter("all");
-                      setSortBy("name");
-                    }}
-                    className="h-10 px-3"
-                  >
-                    Clear
-                  </Button>
-                )}
-              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  navigator.clipboard.writeText('OCEAN50');
+                  toast.success('Promo code copied to clipboard!');
+                }}
+                className="h-9 gap-1.5"
+              >
+                <Copy className="h-3.5 w-3.5" />
+                Copy
+              </Button>
             </div>
           </div>
         </div>
       </div>
+      {/* Search & Filters Bar */}
+      <div className="sticky sm:static top-[64px] sm:top-0 z-30 sm:z-0 bg-card/95 sm:bg-transparent backdrop-blur-sm sm:backdrop-blur-none border-b border-border">
+        <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-3">
+          <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
+            {/* Search */}
+            <div className="relative flex-1 max-w-full sm:max-w-md">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search servers..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-9 h-9 bg-background border-border"
+              />
+            </div>
+
+            {/* Filters */}
+            <div className="flex gap-2 flex-wrap sm:items-center">
+              <Select value={priceFilter} onValueChange={setPriceFilter}>
+                <SelectTrigger className="w-[calc(50%-4px)] sm:w-32 h-9 text-xs border-border bg-background">
+                  <SelectValue placeholder="Price" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Prices</SelectItem>
+                  <SelectItem value="under-500">&lt; ₹500</SelectItem>
+                  <SelectItem value="500-1000">₹500-1K</SelectItem>
+                  <SelectItem value="1000-2000">₹1K-2K</SelectItem>
+                  <SelectItem value="above-2000">&gt; ₹2K</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Select value={sortBy} onValueChange={setSortBy}>
+                <SelectTrigger className="w-[calc(50%-4px)] sm:w-28 h-9 text-xs border-border bg-background">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="name">Name</SelectItem>
+                  <SelectItem value="price-low">Low Price</SelectItem>
+                  <SelectItem value="price-high">High Price</SelectItem>
+                </SelectContent>
+              </Select>
+
+              {(searchTerm || priceFilter !== 'all' || sortBy !== 'name') && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setSearchTerm("");
+                    setPriceFilter("all");
+                    setSortBy("name");
+                  }}
+                  className="h-9 px-3 text-xs w-full sm:w-auto"
+                >
+                  Clear All
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+   
 
       {/* Main Content - Keep everything else exactly the same */}
       <div className="container mx-auto px-4 sm:px-6 lg:px-8 md:py-6 ">
@@ -529,49 +545,51 @@ export default function IPStockPage() {
             <p className="text-muted-foreground">Loading server plans...</p>
           </div>
         ) : (
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6 md:mt-0">
-            <TabsList className="grid grid-cols-3 w-full max-w-md mx-auto">
-              <TabsTrigger value="all" className="flex items-center gap-2">
-                <Grid3X3 className="h-4 w-4" />
-                <span className=" sm:inline">All</span>
-                <Badge variant="secondary" className="ml-1 text-xs">
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+            <TabsList className="grid h-9 grid-cols-3 w-full max-w-sm mx-auto bg-muted border border-border">
+              <TabsTrigger value="all" className="flex items-center gap-1.5 text-xs">
+                <Grid3X3 className="h-3.5 w-3.5" />
+                All
+                <Badge variant="secondary" className="ml-1 text-[10px] h-4 px-1.5">
                   {counts.all}
                 </Badge>
               </TabsTrigger>
-              <TabsTrigger value="Linux" className="flex items-center gap-2">
-                <Server className="h-4 w-4" />
-                <span className=" sm:inline">Linux</span>
-                <Badge variant="secondary" className="ml-1 text-xs">
+              <TabsTrigger value="Linux" className="flex items-center gap-1.5 text-xs">
+                <Server className="h-3.5 w-3.5" />
+                Linux
+                <Badge variant="secondary" className="ml-1 text-[10px] h-4 px-1.5">
                   {counts.linux}
                 </Badge>
               </TabsTrigger>
-              <TabsTrigger value="VPS" className="flex items-center gap-2">
-                <Cloud className="h-4 w-4" />
-                <span className=" sm:inline">VPS</span>
-                <Badge variant="secondary" className="ml-1 text-xs">
+              <TabsTrigger value="VPS" className="flex items-center gap-1.5 text-xs">
+                <Cloud className="h-3.5 w-3.5" />
+                VPS
+                <Badge variant="secondary" className="ml-1 text-[10px] h-4 px-1.5">
                   {counts.vps}
                 </Badge>
               </TabsTrigger>
             </TabsList>
 
-            <TabsContent value={activeTab} className="mt-6">
+            <TabsContent value={activeTab} className="mt-4">
               {filteredIpStocks.length === 0 ? (
-                <Card className="text-center py-12">
+                <Card className="text-center py-12 border-border">
                   <CardContent>
-                    <AlertCircle className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                    <div className="w-16 h-16 bg-muted/50 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                      <AlertCircle className="h-8 w-8 text-muted-foreground" />
+                    </div>
                     <h3 className="text-lg font-semibold mb-2">No Plans Available</h3>
-                    <p className="text-muted-foreground max-w-md mx-auto">
+                    <p className="text-sm text-muted-foreground max-w-md mx-auto">
                       {searchTerm
-                        ? `No servers match your search "${searchTerm}". Try adjusting your search or filters.`
+                        ? `No servers match your search "${searchTerm}".`
                         : activeTab === 'all'
-                        ? 'No server plans are currently available. Please check back later.'
-                        : `No ${activeTab} plans are currently available. Try browsing other categories.`
+                        ? 'No server plans are currently available.'
+                        : `No ${activeTab} plans are currently available.`
                       }
                     </p>
-                    {/* Show clear filters button when no results */}
                     {(searchTerm || priceFilter !== 'all') && (
                       <Button
                         variant="outline"
+                        size="sm"
                         onClick={() => {
                           setSearchTerm("");
                           setPriceFilter("all");
@@ -590,19 +608,20 @@ export default function IPStockPage() {
                   const tagKeys = Object.keys(grouped).sort();
 
                   return (
-                    <div className="space-y-8">
+                    <div className="space-y-6">
                       {/* Tagged Groups */}
                       {tagKeys.map(tag => (
-                        <div key={tag} className="space-y-4">
-                          <div className="flex items-center gap-2">
-                            <h2 className="text-lg font-semibold capitalize">{tag} Plans</h2>
-                            <Badge variant="outline" className="text-xs">
-                              {grouped[tag].length} plan{grouped[tag].length !== 1 ? 's' : ''}
+                        <div key={tag} className="space-y-2">
+                          <div className="flex items-center gap-2 px-1">
+                            <div className="w-1 h-6 bg-primary rounded-full"></div>
+                            <h2 className="text-base font-semibold capitalize">{tag} Plans</h2>
+                            <Badge variant="outline" className="text-[10px] border-border h-5 px-2">
+                              {grouped[tag].length}
                             </Badge>
                           </div>
                           <div className="space-y-2">
                             {grouped[tag].map((stock) => (
-                              <CollapsibleServerPlan
+                              <CompactServerPlanRow
                                 key={stock._id}
                                 stock={stock}
                                 onBuyNow={handleBuyNow}
@@ -614,18 +633,19 @@ export default function IPStockPage() {
 
                       {/* Untagged Plans */}
                       {untagged.length > 0 && (
-                        <div className="space-y-4">
+                        <div className="space-y-2">
                           {tagKeys.length > 0 && (
-                            <div className="flex items-center gap-2">
-                              <h2 className="text-lg font-semibold">Other Plans</h2>
-                              <Badge variant="outline" className="text-xs">
-                                {untagged.length} plan{untagged.length !== 1 ? 's' : ''}
+                            <div className="flex items-center gap-2 px-1">
+                              <div className="w-1 h-6 bg-muted rounded-full"></div>
+                              <h2 className="text-base font-semibold">Other Plans</h2>
+                              <Badge variant="outline" className="text-[10px] border-border h-5 px-2">
+                                {untagged.length}
                               </Badge>
                             </div>
                           )}
                           <div className="space-y-2">
                             {untagged.map((stock) => (
-                              <CollapsibleServerPlan
+                              <CompactServerPlanRow
                                 key={stock._id}
                                 stock={stock}
                                 onBuyNow={handleBuyNow}
@@ -744,7 +764,7 @@ export default function IPStockPage() {
             </Card>
 
             {/* Payment Info */}
-            <Card className="morder dark:morder-none-primary/20 bg-primary/5">
+            <Card className="border-primary/20 bg-primary/5">
               <CardContent className="pt-6">
                 <div className="flex gap-3">
                   <Info className="h-5 w-5 text-primary flex-shrink-0 mt-0.5" />
@@ -792,15 +812,15 @@ export default function IPStockPage() {
   );
 }
 
-// Mobile-responsive CollapsibleServerPlan component
-function CollapsibleServerPlan({
+// Modern Compact List Row Component
+function CompactServerPlanRow({
   stock,
   onBuyNow
 }: {
   stock: IPStock;
   onBuyNow: (name: string, memory: string, price: number, id: string) => void;
 }) {
-  const [isOpen, setIsOpen] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
 
   const memoryOptions = Object.entries(stock.memoryOptions || {})
     .filter(([_, details]) => details.price !== null)
@@ -810,126 +830,106 @@ function CollapsibleServerPlan({
   const startingPrice = Math.min(...memoryOptions.map(([_, details]) => details.price || 0));
 
   return (
-    <Card className="overflow-hidden transition-all duration-200 hover:shadow-md">
-      <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-        <CollapsibleTrigger asChild>
-          <div className="flex items-center justify-between p-3 sm:p-4 cursor-pointer hover:bg-muted/30 transition-colors">
-            <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
-              <div className="flex items-center justify-center w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-primary/10 flex-shrink-0">
-                {stock.serverType === 'VPS' ? (
-                  <Cloud className="h-3 w-3 sm:h-4 sm:w-4 text-primary" />
-                ) : (
-                  <Server className="h-3 w-3 sm:h-4 sm:w-4 text-primary" />
-                )}
-              </div>
+    <div className="border border-border rounded-lg bg-card hover:bg-muted/30 transition-colors overflow-hidden">
+      {/* Main Row - Always Visible */}
+      <div 
+        className="flex items-center gap-3 p-3 cursor-pointer"
+        onClick={() => setIsExpanded(!isExpanded)}
+      >
+        {/* Icon */}
+        <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center border border-border flex-shrink-0">
+          {stock.serverType === 'VPS' ? (
+            <Cloud className="h-4 w-4 text-primary" />
+          ) : (
+            <Server className="h-4 w-4 text-primary" />
+          )}
+        </div>
 
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1 sm:gap-2 flex-wrap">
-                  <h3 className="font-semibold text-sm sm:text-base break-words leading-tight">
-                    {stock.name}
-                  </h3>
-                  <Badge variant="outline" className="text-xs px-1.5 py-0.5 bg-foreground text-white dark:text-black flex-shrink-0">
-                    {stock.serverType}
-                  </Badge>
-                  {hasPromoCodes && (
-                    <Badge className="text-xs gap-1 bg-transparent text-green-500 border border-green-500 hidden xs:flex px-1.5 py-0.5 flex-shrink-0">
-                      <Tag className="h-2.5 w-2.5" />
-                      <span className="hidden sm:inline">Promo</span>
-                      <span className="sm:hidden">P</span>
-                    </Badge>
-                  )}
-                </div>
-
-                {/* Show promo indicator on mobile when badges are hidden */}
-                {hasPromoCodes && (
-                  <div className="xs:hidden mt-1">
-                    <span className="text-xs text-green-500 flex items-center gap-1">
-                      <Tag className="h-2.5 w-2.5" />
-                      Promo available
-                    </span>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
-              <div className="text-right">
-                <p className="text-xs text-muted-foreground">From</p>
-                <p className="font-bold dark:text-white text-black text-sm sm:text-base">₹{startingPrice}</p>
-              </div>
-
-              {isOpen ? (
-                <ChevronDown className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground transition-transform" />
-              ) : (
-                <ChevronRight className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground transition-transform" />
-              )}
-            </div>
+        {/* Name & Type */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h3 className="font-semibold text-sm md:text-base">{stock.name}</h3>
+            <Badge variant="outline" className="text-[10px] border-border px-1.5 py-0 h-5">
+              {stock.serverType}
+            </Badge>
+            {hasPromoCodes && (
+              <Badge variant="outline" className="text-[10px] gap-1 bg-primary/10 text-green-500 border-primary/20 px-1.5 py-0 h-5">
+                <Tag className="h-2.5 w-2.5" />
+                Promo
+              </Badge>
+            )}
           </div>
-        </CollapsibleTrigger>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            {memoryOptions.length} configuration{memoryOptions.length !== 1 ? 's' : ''} available
+          </p>
+        </div>
 
-        <CollapsibleContent className="data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down">
-          <div className="px-3 pb-3 pt-0 sm:px-4 sm:pb-4">
-            <Separator className="mb-3 sm:mb-4" />
+        {/* Price & Expand */}
+        <div className="flex items-center gap-3 flex-shrink-0">
+          <div className="text-right">
+            <p className="text-xs text-muted-foreground">From</p>
+            <p className="font-bold text-base md:text-lg">₹{startingPrice}</p>
+          </div>
+          <ChevronDown 
+            className={cn(
+              "h-4 w-4 text-muted-foreground transition-transform",
+              isExpanded && "rotate-180"
+            )}
+          />
+        </div>
+      </div>
 
+      {/* Expanded Section - Configurations */}
+      {isExpanded && (
+        <div className="border-t border-border bg-muted/20">
+          <div className="p-3 space-y-2">
             {memoryOptions.length > 0 ? (
-              <div className="space-y-3">
-                <Label className="text-sm font-medium flex items-center gap-2">
-                  <Package className="h-3 w-3 sm:h-4 sm:w-4" />
-                  <span className="text-xs sm:text-sm">Available Configurations ({memoryOptions.length})</span>
-                </Label>
-
-                <div className="grid gap-2">
+              <>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-3">
+                  Select Configuration
+                </p>
+                <div className="space-y-2">
                   {memoryOptions.map(([memory, details]) => (
                     <div
                       key={memory}
-                      className="flex items-center justify-between p-2 sm:p-3 rounded-lg  bg-card hover:bg-muted/50 transition-colors"
+                      className="flex items-center justify-between gap-3 p-2.5 rounded-md bg-background border border-border hover:border-primary/50 transition-colors"
                     >
-                      {/* Mobile Layout */}
-                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between w-full gap-2 sm:gap-3">
-                        <div className="flex-1 min-w-0">
-                          <p className="font-medium text-sm break-words">{memory}</p>
-                        </div>
-
-                        <div className="flex items-center justify-between sm:justify-end gap-2 sm:gap-3">
-                          <span className="font-bold dark:text-white text-black text-sm sm:text-base">
-                            ₹{details.price}
-                          </span>
-                          <Button
-                            size="sm"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onBuyNow(stock.name, memory, details.price!, stock._id);
-                            }}
-                            className="h-7 px-2 text-xs sm:h-8 sm:px-3 flex-shrink-0"
-                          >
-                            <Zap className="h-2.5 w-2.5 sm:h-3 sm:w-3 mr-1" />
-                            <span className="hidden xs:inline">Buy Now</span>
-                            <span className="xs:hidden">Buy</span>
-                          </Button>
-                        </div>
+                      <span className="text-sm font-medium flex-1">{memory}</span>
+                      <div className="flex items-center gap-3">
+                        <span className="font-bold text-base">₹{details.price}</span>
+                        <Button
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onBuyNow(stock.name, memory, details.price!, stock._id);
+                          }}
+                          className="h-8 px-3 gap-1.5"
+                        >
+                          <Zap className="h-3 w-3" />
+                          Buy Now
+                        </Button>
                       </div>
                     </div>
                   ))}
                 </div>
-
                 {hasPromoCodes && (
-                  <div className="mt-3 p-2 sm:p-3 rounded-lg text-white bg-green-500 dark:bg-green-500/10  dark:border-green-200 dark:border-green-800">
-                    <p className="text-xs text-white dark:text-green-400 flex items-center gap-1 sm:gap-2">
-                      <Tag className="h-2.5 w-2.5 sm:h-3 sm:w-3 flex-shrink-0" />
-                      <span className="leading-relaxed">Promo codes available for additional discounts!</span>
+                  <div className="mt-3 p-2 rounded-md bg-primary/10 border border-primary/20">
+                    <p className="text-xs text-primary flex items-center gap-1.5">
+                      <Tag className="h-3 w-3" />
+                      Promo codes available for additional discounts!
                     </p>
                   </div>
                 )}
-              </div>
+              </>
             ) : (
-              <div className="text-center py-4 sm:py-6">
-                <AlertCircle className="h-6 w-6 sm:h-8 sm:w-8 text-muted-foreground mx-auto mb-2" />
+              <div className="text-center py-4">
+                <AlertCircle className="h-6 w-6 text-muted-foreground mx-auto mb-2" />
                 <p className="text-sm text-muted-foreground">No configurations available</p>
               </div>
             )}
           </div>
-        </CollapsibleContent>
-      </Collapsible>
-    </Card>
+        </div>
+      )}
+    </div>
   );
 }

@@ -41,7 +41,6 @@ const scriptCategories = {
         title: "Ubuntu 22.04 LTS",
         description: "Proxy setup scripts for Ubuntu servers",
         icon: <img src="/ubuntu.png" className="w-8 h-8 rounded-lg" alt="Ubuntu" />,
-        color: "bg-orange-100 dark:bg-orange-900/30 border-orange-200 dark:border-orange-800",
         scripts: [
             {
                 id: "ubuntu-3128",
@@ -105,7 +104,6 @@ squid-add-user`,
         title: "CentOS 7",
         description: "Proxy setup scripts for CentOS/RHEL servers",
         icon: <img src="/centos.png" className="w-8 h-8 rounded-lg" alt="CentOS" />,
-        color: "bg-purple-100 dark:bg-purple-900/30 border-purple-200 dark:border-purple-800",
         scripts: [
             {
                 id: "centos-3128",
@@ -161,101 +159,102 @@ const ScriptsPage = () => {
             {/* Mobile Header */}
             <div className="lg:hidden h-16" />
 
-            {/* Responsive Header */}
-            <div className='sticky md:hidden lg:top-0 z-40 bg-background/95 backdrop-blur-sm shadow-sm border-b border-border'>
-                <div className='container mx-auto -mt-14 md:mt-0 px-3 sm:px-4 md:px-6 lg:px-8'>
-                    <div className='flex h-14 sm:h-16 items-center justify-between gap-2 sm:gap-4'>
-                        <div className='flex items-center gap-2 sm:gap-3 min-w-0 flex-1'>
-                            <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => router.back()}
-                                className="hover:bg-muted rounded-full flex-shrink-0 h-8 w-8 sm:h-10 sm:w-10"
-                            >
-                                <ArrowLeft className="h-4 w-4 sm:h-5 sm:w-5" />
-                            </Button>
-                            <div className='flex items-center gap-2 sm:gap-3 min-w-0 flex-1'>
-                                <div className="w-7 h-7 sm:w-8 sm:h-8 bg-primary rounded-lg flex items-center justify-center flex-shrink-0">
-                                    <Code className="h-3 w-3 sm:h-4 sm:w-4 text-white" />
+            {/* Modern Header */}
+            <div className='container mx-auto px-4 sm:px-6 lg:px-8 py-6 -mt-16 md:mt-0'>
+                <div className='flex flex-col gap-6'>
+                    {/* Header Content */}
+                    <div className='flex items-start justify-between gap-4'>
+                        <div className='flex-1'>
+                            <div className='flex items-center gap-3 mb-3'>
+                                <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center">
+                                    <Terminal className="h-6 w-6 text-primary" />
                                 </div>
-                                <div className="min-w-0 flex-1">
-                                    <h1 className='text-base sm:text-lg lg:text-xl font-bold'>Proxy Setup Scripts</h1>
-                                    <p className="text-xs sm:text-sm text-muted-foreground hidden xs:block">Installation guides and tools</p>
+                                <div>
+                                    <h1 className='text-2xl sm:text-3xl font-bold'>Setup Scripts</h1>
+                                    <p className="text-sm text-muted-foreground mt-1">
+                                        One-click installation scripts for your proxy server
+                                    </p>
                                 </div>
                             </div>
                         </div>
+                    </div>
 
-                        <div className="flex gap-2">
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => setShowTerminal(!showTerminal)}
-                                className={cn(
-                                    "gap-1 sm:gap-2 h-8 sm:h-9 px-2 sm:px-3 flex-shrink-0",
-                                    showTerminal && "bg-primary text-primary-foreground"
-                                )}
-                            >
-                                <Terminal className="h-3 w-3 sm:h-4 sm:w-4" />
-                                <span className="hidden sm:inline text-xs sm:text-sm">Terminal</span>
-                            </Button>
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => setShowTutorial(!showTutorial)}
-                                className={cn(
-                                    "gap-1 sm:gap-2 h-8 sm:h-9 px-2 sm:px-3 flex-shrink-0",
-                                    showTutorial && "bg-primary text-primary-foreground"
-                                )}
-                            >
-                                <Video className="h-3 w-3 sm:h-4 sm:w-4" />
-                                <span className="hidden sm:inline text-xs sm:text-sm">Tutorial</span>
-                            </Button>
-                        </div>
+                    {/* Quick Actions */}
+                    <div className="flex flex-wrap gap-3">
+                        <Button
+                            variant={showTerminal ? "default" : "outline"}
+                            size="sm"
+                            onClick={() => setShowTerminal(!showTerminal)}
+                            className="gap-2"
+                        >
+                            <Terminal className="h-4 w-4" />
+                            Web Terminal
+                        </Button>
+                        <Button
+                            variant={showTutorial ? "default" : "outline"}
+                            size="sm"
+                            onClick={() => setShowTutorial(!showTutorial)}
+                            className="gap-2"
+                        >
+                            <Video className="h-4 w-4" />
+                            Video Guide
+                        </Button>
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => router.push('/support/tickets')}
+                            className="gap-2"
+                        >
+                            <BookOpen className="h-4 w-4" />
+                            Get Help
+                        </Button>
                     </div>
                 </div>
             </div>
 
             {/* Main Content */}
-            <div className='container mx-auto px-3 sm:px-4 md:px-6 lg:px-8 py-4 sm:py-6'>
+            <div className='container mx-auto px-4 sm:px-6 lg:px-8 py-6'>
                 {/* Terminal Section */}
                 {showTerminal && (
-                    <Card className="mb-6 border-blue-200 bg-blue-50/50 dark:border-blue-800 dark:bg-blue-950/30">
-                        <CardHeader className="pb-3">
+                    <Card className="mb-6 border-border">
+                        <CardHeader className="pb-4">
                             <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-3">
-                                    <div className="w-10 h-10 bg-blue-100 dark:bg-blue-900/50 rounded-lg flex items-center justify-center">
-                                        <Terminal className="h-5 w-5 text-blue-600" />
+                                    <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                                        <Terminal className="h-5 w-5 text-primary" />
                                     </div>
                                     <div>
-                                        <CardTitle className="text-lg">Web Terminal</CardTitle>
+                                        <CardTitle className="text-lg font-semibold">Web Terminal</CardTitle>
                                         <CardDescription>Access your server directly from the browser</CardDescription>
                                     </div>
                                 </div>
                                 <Button
                                     variant="ghost"
-                                    size="sm"
+                                    size="icon"
                                     onClick={() => setShowTerminal(false)}
-                                    className="text-blue-600"
+                                    className="h-8 w-8 rounded-lg"
                                 >
-                                    ×
+                                    <span className="text-xl">×</span>
                                 </Button>
                             </div>
                         </CardHeader>
-                        <CardContent>
-                            <div className="h-96 sm:h-[500px] rounded-lg overflow-hidden border border-blue-200 dark:border-blue-800">
+                        <CardContent className="space-y-4">
+                            <div className="rounded-lg overflow-hidden border border-border shadow-sm" style={{ height: '500px' }}>
                                 <iframe
                                     src="https://sshterminal.advps.store/"
                                     className="w-full h-full"
                                     title="SSH Terminal"
                                 />
                             </div>
-                            <div className="mt-4 flex items-start gap-3 p-3 bg-blue-100 dark:bg-blue-900/50 rounded-lg">
-                                <Info className="h-4 w-4 text-blue-600 flex-shrink-0 mt-0.5" />
-                                <div className="text-sm text-blue-700 dark:text-blue-300">
-                                    <p className="font-semibold mb-1">How to connect:</p>
-                                    <ol className="list-decimal list-inside space-y-1 text-xs">
+                            <div className="flex items-start gap-3 p-4 bg-muted/50 rounded-lg border border-border">
+                                <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                                    <Info className="h-4 w-4 text-primary" />
+                                </div>
+                                <div className="text-sm">
+                                    <p className="font-semibold mb-2 text-foreground">Quick Start Guide:</p>
+                                    <ol className="list-decimal list-inside space-y-1.5 text-muted-foreground">
                                         <li>Enter your server's IP address</li>
-                                        <li>Use username: <code className="bg-blue-200 dark:bg-blue-800 px-1 rounded">root</code></li>
+                                        <li>Use username: <code className="bg-muted px-1.5 py-0.5 rounded text-foreground font-mono text-xs">root</code></li>
                                         <li>Enter your server password</li>
                                         <li>Copy and paste the scripts below</li>
                                     </ol>
@@ -267,47 +266,47 @@ const ScriptsPage = () => {
 
                 {/* Tutorial Section */}
                 {showTutorial && (
-                    <Card className="mb-6 border-green-200 bg-green-50/50 dark:border-green-800 dark:bg-green-950/30">
-                        <CardHeader className="pb-3">
+                    <Card className="mb-6 border-border">
+                        <CardHeader className="pb-4">
                             <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-3">
-                                    <div className="w-10 h-10 bg-green-100 dark:bg-green-900/50 rounded-lg flex items-center justify-center">
-                                        <Video className="h-5 w-5 text-green-600" />
+                                    <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                                        <Video className="h-5 w-5 text-primary" />
                                     </div>
                                     <div>
-                                        <CardTitle className="text-lg">Video Tutorial</CardTitle>
+                                        <CardTitle className="text-lg font-semibold">Video Tutorial</CardTitle>
                                         <CardDescription>Step-by-step guide for proxy setup</CardDescription>
                                     </div>
                                 </div>
                                 <Button
                                     variant="ghost"
-                                    size="sm"
+                                    size="icon"
                                     onClick={() => setShowTutorial(false)}
-                                    className="text-green-600"
+                                    className="h-8 w-8 rounded-lg"
                                 >
-                                    ×
+                                    <span className="text-xl">×</span>
                                 </Button>
                             </div>
                         </CardHeader>
-                        <CardContent className="space-y-4">
+                        <CardContent className="space-y-6">
                             {/* Tutorial Steps */}
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                                <div className="flex items-center gap-3 p-3 bg-green-100 dark:bg-green-900/50 rounded-lg">
-                                    <div className="w-8 h-8 bg-green-600 text-white rounded-full flex items-center justify-center font-bold text-sm">1</div>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div className="flex items-center gap-3 p-4 bg-muted/50 rounded-lg border border-border">
+                                    <div className="w-10 h-10 bg-primary text-primary-foreground rounded-full flex items-center justify-center font-bold">1</div>
                                     <div>
                                         <p className="font-semibold text-sm">Download PuTTY</p>
                                         <p className="text-xs text-muted-foreground">Install SSH client</p>
                                     </div>
                                 </div>
-                                <div className="flex items-center gap-3 p-3 bg-green-100 dark:bg-green-900/50 rounded-lg">
-                                    <div className="w-8 h-8 bg-green-600 text-white rounded-full flex items-center justify-center font-bold text-sm">2</div>
+                                <div className="flex items-center gap-3 p-4 bg-muted/50 rounded-lg border border-border">
+                                    <div className="w-10 h-10 bg-primary text-primary-foreground rounded-full flex items-center justify-center font-bold">2</div>
                                     <div>
                                         <p className="font-semibold text-sm">Connect to Server</p>
                                         <p className="text-xs text-muted-foreground">Use root credentials</p>
                                     </div>
                                 </div>
-                                <div className="flex items-center gap-3 p-3 bg-green-100 dark:bg-green-900/50 rounded-lg">
-                                    <div className="w-8 h-8 bg-green-600 text-white rounded-full flex items-center justify-center font-bold text-sm">3</div>
+                                <div className="flex items-center gap-3 p-4 bg-muted/50 rounded-lg border border-border">
+                                    <div className="w-10 h-10 bg-primary text-primary-foreground rounded-full flex items-center justify-center font-bold">3</div>
                                     <div>
                                         <p className="font-semibold text-sm">Run Scripts</p>
                                         <p className="text-xs text-muted-foreground">Execute proxy setup</p>
@@ -316,7 +315,7 @@ const ScriptsPage = () => {
                             </div>
 
                             {/* Video Player */}
-                            <div className="h-64 sm:h-96 rounded-lg overflow-hidden border border-green-200 dark:border-green-800">
+                            <div className="rounded-lg overflow-hidden border border-border shadow-sm" style={{ height: '400px' }}>
                                 <video
                                     src='/tutorial.mp4'
                                     controls
@@ -327,15 +326,15 @@ const ScriptsPage = () => {
                             </div>
 
                             {/* Tutorial Text */}
-                            <div className="p-4 bg-green-100 dark:bg-green-900/50 rounded-lg">
-                                <h4 className="font-semibold mb-2 text-green-800 dark:text-green-200">Setup Instructions:</h4>
-                                <div className="text-sm text-green-700 dark:text-green-300 space-y-2">
-                                    <p>Follow these simple steps to set up your proxy server:</p>
-                                    <ol className="list-decimal list-inside space-y-1 ml-4">
+                            <div className="p-4 bg-muted/50 rounded-lg border border-border">
+                                <h4 className="font-semibold mb-3 text-foreground">Detailed Setup Instructions:</h4>
+                                <div className="text-sm space-y-2">
+                                    <p className="text-muted-foreground">Follow these simple steps to set up your proxy server:</p>
+                                    <ol className="list-decimal list-inside space-y-2 text-muted-foreground">
                                         <li>Download and install PuTTY SSH client software</li>
                                         <li>Open PuTTY and enter your server's IP address</li>
                                         <li>Click "Open" to connect</li>
-                                        <li>Login with username: <code className="bg-green-200 dark:bg-green-800 px-1 rounded font-mono">root</code></li>
+                                        <li>Login with username: <code className="bg-muted px-1.5 py-0.5 rounded text-foreground font-mono text-xs">root</code></li>
                                         <li>Enter the password provided with your Linux server</li>
                                         <li>Copy and paste the setup script from below</li>
                                         <li>Wait for the installation to complete</li>
@@ -347,74 +346,76 @@ const ScriptsPage = () => {
                     </Card>
                 )}
 
-                {/* Scripts Overview */}
-
-
                 {/* Script Categories */}
-                <div className="space-y-8">
+                <div className="space-y-10">
                     {Object.entries(scriptCategories).map(([categoryKey, category]) => (
                         <div key={categoryKey}>
                             {/* Category Header */}
-                            <div className="flex items-center gap-4 mb-4">
-                                <div className="flex items-center gap-3">
-                                    {category.icon}
+                            <div className="flex items-center gap-4 mb-6">
+                                <div className="flex items-center gap-4">
+                                    <div className="w-12 h-12 rounded-xl bg-muted/50 flex items-center justify-center border border-border">
+                                        {category.icon}
+                                    </div>
                                     <div>
-                                        <h3 className="text-xl font-bold">{category.title}</h3>
-                                        <p className="text-sm text-muted-foreground">{category.description}</p>
+                                        <h2 className="text-2xl font-bold">{category.title}</h2>
+                                        <p className="text-sm text-muted-foreground mt-0.5">{category.description}</p>
                                     </div>
                                 </div>
                             </div>
 
                             {/* Scripts Grid */}
-                            <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                                 {category.scripts.map((script) => (
                                     <Card
                                         key={script.id}
                                         className={cn(
-                                            "hover:shadow-lg transition-all duration-200 cursor-pointer",
-                                            selectedScript === script.id ? "ring-2 ring-primary scale-[1.02]" : "hover:scale-[1.01]",
-                                            category.color
+                                            "border-border hover:shadow-md transition-all duration-200 cursor-pointer",
+                                            selectedScript === script.id && "ring-2 ring-primary"
                                         )}
                                         onClick={() => setSelectedScript(selectedScript === script.id ? null : script.id)}
                                     >
-                                        <CardHeader className="pb-3">
-                                            <div className="flex items-start justify-between">
-                                                <div className="flex-1">
-                                                    <CardTitle className="text-lg flex items-center gap-2">
-                                                        {script.title}
-                                                        <Badge variant="outline" className="text-xs">
-                                                            Port {script.port}
+                                        <CardHeader className="pb-4">
+                                            <div className="flex items-start justify-between gap-4">
+                                                <div className="flex-1 space-y-3">
+                                                    <div>
+                                                        <div className="flex items-center gap-2 mb-2">
+                                                            <h3 className="text-lg font-semibold">{script.title}</h3>
+                                                            <Badge variant="outline" className="text-xs bg-primary/10 text-primary border-primary/20">
+                                                                Port {script.port}
+                                                            </Badge>
+                                                        </div>
+                                                        <p className="text-sm text-muted-foreground">
+                                                            {script.description}
+                                                        </p>
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        <Badge variant="outline" className="text-xs bg-muted">
+                                                            {script.difficulty}
                                                         </Badge>
-                                                    </CardTitle>
-                                                    <CardDescription className="text-sm mt-1">
-                                                        {script.description}
-                                                    </CardDescription>
+                                                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                                            <Clock className="h-3.5 w-3.5" />
+                                                            {script.estimatedTime}
+                                                        </div>
+                                                    </div>
                                                 </div>
                                                 <ChevronRight
                                                     className={cn(
-                                                        "h-5 w-5 transition-transform",
+                                                        "h-5 w-5 text-muted-foreground transition-transform flex-shrink-0 mt-1",
                                                         selectedScript === script.id && "rotate-90"
                                                     )}
                                                 />
                                             </div>
-
-                                            <div className="flex items-center gap-2 mt-3">
-                                                <Badge className={getDifficultyColor(script.difficulty)}>
-                                                    {script.difficulty}
-                                                </Badge>
-                                                <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                                                    <Clock className="h-3 w-3" />
-                                                    {script.estimatedTime}
-                                                </div>
-                                            </div>
                                         </CardHeader>
 
                                         {selectedScript === script.id && (
-                                            <CardContent className="pt-0">
+                                            <CardContent className="pt-0 space-y-5">
                                                 {/* Steps */}
-                                                <div className="mb-4">
-                                                    <h4 className="font-semibold mb-2 text-sm">What this script does:</h4>
-                                                    <ol className="list-decimal list-inside space-y-1 text-xs text-muted-foreground">
+                                                <div className="p-4 bg-muted/50 rounded-lg border border-border">
+                                                    <h4 className="font-semibold mb-3 text-sm flex items-center gap-2">
+                                                        <CheckCircle className="h-4 w-4 text-primary" />
+                                                        What this script does:
+                                                    </h4>
+                                                    <ol className="list-decimal list-inside space-y-2 text-sm text-muted-foreground">
                                                         {script.steps.map((step, index) => (
                                                             <li key={index}>{step}</li>
                                                         ))}
@@ -422,9 +423,12 @@ const ScriptsPage = () => {
                                                 </div>
 
                                                 {/* Code Block */}
-                                                <div className="relative">
-                                                    <div className="flex items-center justify-between mb-2">
-                                                        <Label className="text-sm font-semibold">Installation Script:</Label>
+                                                <div className="space-y-3">
+                                                    <div className="flex items-center justify-between">
+                                                        <Label className="text-sm font-semibold flex items-center gap-2">
+                                                            <Command className="h-4 w-4 text-primary" />
+                                                            Installation Script
+                                                        </Label>
                                                         <Button
                                                             variant="outline"
                                                             size="sm"
@@ -432,32 +436,40 @@ const ScriptsPage = () => {
                                                                 e.stopPropagation();
                                                                 copyToClipboard(script.code, script.title);
                                                             }}
-                                                            className="gap-2 h-8"
+                                                            className="gap-2 h-9"
                                                         >
-                                                            <Copy className="h-3 w-3" />
-                                                            Copy
+                                                            <Copy className="h-4 w-4" />
+                                                            Copy Script
                                                         </Button>
                                                     </div>
-                                                    <pre className="bg-gray-900 dark:bg-gray-950 text-green-400 p-4 rounded-lg overflow-x-auto text-sm border">
-                                                        <code className="whitespace-pre-wrap font-mono">
-                                                            {script.code}
-                                                        </code>
-                                                    </pre>
+                                                    <div className="relative rounded-lg overflow-hidden border border-border bg-slate-950 dark:bg-slate-950">
+                                                        <div className="absolute top-0 left-0 right-0 h-8 bg-slate-900 dark:bg-slate-900 border-b border-slate-800 flex items-center px-4 gap-2">
+                                                            <div className="w-3 h-3 rounded-full bg-red-500"></div>
+                                                            <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
+                                                            <div className="w-3 h-3 rounded-full bg-green-500"></div>
+                                                            <span className="ml-2 text-xs text-slate-400 font-mono">terminal</span>
+                                                        </div>
+                                                        <pre className="p-4 pt-12 overflow-x-auto text-sm font-mono text-green-400">
+                                                            <code className="whitespace-pre-wrap">
+                                                                {script.code}
+                                                            </code>
+                                                        </pre>
+                                                    </div>
                                                 </div>
 
                                                 {/* Usage Instructions */}
-                                                <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-950/50 rounded-lg border border-blue-200 dark:border-blue-800">
-                                                    <div className="flex items-start gap-2">
-                                                        <Info className="h-4 w-4 text-blue-600 flex-shrink-0 mt-0.5" />
-                                                        <div className="text-sm">
-                                                            <p className="font-semibold text-blue-800 dark:text-blue-200 mb-1">
-                                                                How to use:
-                                                            </p>
-                                                            <p className="text-blue-700 dark:text-blue-300">
-                                                                Connect to your server via SSH and paste this script.
-                                                                After installation, you can use your server's IP and port {script.port} as a proxy.
-                                                            </p>
-                                                        </div>
+                                                <div className="flex items-start gap-3 p-4 bg-primary/5 rounded-lg border border-primary/20">
+                                                    <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                                                        <Info className="h-4 w-4 text-primary" />
+                                                    </div>
+                                                    <div className="text-sm">
+                                                        <p className="font-semibold text-foreground mb-1.5">
+                                                            How to use:
+                                                        </p>
+                                                        <p className="text-muted-foreground">
+                                                            Connect to your server via SSH and paste this script.
+                                                            After installation, you can use your server's IP and port {script.port} as a proxy.
+                                                        </p>
                                                     </div>
                                                 </div>
                                             </CardContent>
@@ -470,35 +482,33 @@ const ScriptsPage = () => {
                 </div>
 
                 {/* Need Help Section */}
-                <Card className="mt-8 border-amber-200 bg-amber-50/50 dark:border-amber-800 dark:bg-amber-950/30">
+                <Card className="mt-10 border-border">
                     <CardContent className="p-6">
-                        <div className="flex items-start gap-4">
-                            <div className="w-12 h-12 bg-amber-100 dark:bg-amber-900/50 rounded-lg flex items-center justify-center flex-shrink-0">
-                                <BookOpen className="h-6 w-6 text-amber-600" />
+                        <div className="flex flex-col md:flex-row items-start gap-6">
+                            <div className="w-14 h-14 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
+                                <BookOpen className="h-7 w-7 text-primary" />
                             </div>
                             <div className="flex-1">
-                                <h3 className="font-semibold text-amber-800 dark:text-amber-200 mb-2">
-                                    Need Help?
+                                <h3 className="text-xl font-semibold mb-2">
+                                    Need Assistance?
                                 </h3>
-                                <p className="text-amber-700 dark:text-amber-300 mb-4 text-sm">
-                                    If you're having trouble with the installation or need assistance setting up your proxy server,
-                                    we're here to help! Watch the tutorial video above or contact our support team.
+                                <p className="text-muted-foreground mb-5">
+                                    If you're having trouble with the installation or need help setting up your proxy server,
+                                    our support team is ready to assist you. Watch the tutorial video or open a support ticket.
                                 </p>
-                                <div className="flex flex-col sm:flex-row gap-2">
+                                <div className="flex flex-col sm:flex-row gap-3">
                                     <Button
                                         variant="outline"
-                                        size="sm"
                                         onClick={() => setShowTutorial(true)}
-                                        className="gap-2 border-amber-200 text-amber-700 hover:bg-amber-100 dark:border-amber-800 dark:text-amber-300"
+                                        className="gap-2"
                                     >
                                         <Video className="h-4 w-4" />
                                         Watch Tutorial
                                     </Button>
                                     <Button
                                         variant="outline"
-                                        size="sm"
                                         onClick={() => router.push('/support/tickets')}
-                                        className="gap-2 border-amber-200 text-amber-700 hover:bg-amber-100 dark:border-amber-800 dark:text-amber-300"
+                                        className="gap-2"
                                     >
                                         <ExternalLink className="h-4 w-4" />
                                         Contact Support

@@ -92,19 +92,31 @@ export default function DashboardLayout({
 
     const handleLogout = async () => {
         try {
-            const response = await fetch('/api/users/logout', {
+            const response = await fetch('/api/auth/logout', {
                 method: 'POST',
+                credentials: 'include',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
             });
 
             if (response.ok) {
+                // Clear local storage
+                const itemsToClear = ['lastClientTxnId', 'user', 'preferences'];
+                itemsToClear.forEach(item => {
+                    localStorage.removeItem(item);
+                    sessionStorage.removeItem(item);
+                });
+
                 toast.success('Logged out successfully');
-                router.push('/auth/login');
+                window.location.href = '/login';
             } else {
                 toast.error('Failed to logout');
             }
         } catch (error) {
             console.error('Logout error:', error);
-            toast.error('Logout failed');
+            toast.error('Logout failed. Redirecting anyway...');
+            window.location.href = '/login';
         }
     };
 

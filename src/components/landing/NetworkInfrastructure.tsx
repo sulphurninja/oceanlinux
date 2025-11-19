@@ -36,7 +36,7 @@ export default function NetworkInfrastructure() {
         <div className="text-center mb-16 animate-fade-in">
           <h2 className="text-4xl lg:text-5xl font-bold mb-6">
             Global Network Infrastructure at 
-            <span className="text-gradient"> Local Prices</span>
+            <span className="text-primary"> Local Prices</span>
           </h2>
           <p className="text-xl text-muted-foreground max-w-3xl mx-auto">
             Access our worldwide network of premium data centers without paying premium prices. 

@@ -36,8 +36,8 @@ export default function Layout({ children }: Props) {
       {role === 'Admin' ? (
         <div className="flex min-h-screen">
           <AdminSidebar />
-          <main className="flex-1 lg:pl-80">
-            <div className="lg:hidden pt-16"> {/* Add padding top for mobile header */}
+          <main className="flex-1 lg:pl-72">
+            <div className="lg:hidden pt-16">
               {children}
             </div>
             <div className="hidden lg:block">

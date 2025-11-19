@@ -51,7 +51,21 @@ async function runSync(req: Request) {
 
   await connectDB();
 
-  // ... existing default configuration code ...
+  // Default configuration for SmartVPS packages
+  const defaultOS = {
+    '4GB': 'ubuntu-22.04',
+    '8GB': 'ubuntu-22.04',
+    '16GB': 'ubuntu-22.04',
+  };
+
+  const defaultPricing = {
+    '4GB': 699,
+    '8GB': 999,
+    '16GB': 1499,
+  };
+
+  const defaultTag = 'Premium';
+  const defaultServerType = 'Linux';
 
   // --- Fetch SmartVPS packages (string often double-encoded) ---
   const api = new SmartVpsAPI();
@@ -85,7 +99,7 @@ async function runSync(req: Request) {
     activePackagesMap.set(key, pkg);
   }
 
-  let created = 0, updated = 0, disabled = 0;
+  let created = 0, updated = 0, disabled = 0, reEnabled = 0;
   const results: any[] = [];
 
   // Process active packages from SmartVPS API
@@ -94,10 +108,10 @@ async function runSync(req: Request) {
     const name = String(pkg.name);
     const qty = Number(pkg.ipv4 || 0);
 
-    // IMPORTANT: match by BOTH pid & packageName to handle duplicate IDs with different names
+    // IMPORTANT: match by PID (primary unique identifier)
+    // Note: We keep packageName in storage for reference, but PID is the source of truth
     const existing = await IPStock.findOne({
       'defaultConfigurations.smartvps.packagePid': pid,
-      'defaultConfigurations.smartvps.packageName': name,
     });
 
     const smartvpsBlock = {
@@ -136,14 +150,23 @@ async function runSync(req: Request) {
 
       const updatedDoc = await IPStock.findByIdAndUpdate(existing._id, updatePayload, { new: true });
       updated++;
+      
+      // Track if we're re-enabling a previously disabled package
+      if (!existing.available && isAvailable) {
+        reEnabled++;
+        console.log(`[SVPS-SYNC] Package re-enabled (was disabled, now available): ${pid}::${name}`);
+      }
+      
       results.push({
-        action: 'updated',
+        action: existing.available === isAvailable ? 'updated' : (isAvailable ? 're-enabled' : 'status-changed'),
         id: updatedDoc._id.toString(),
         pid, name, qty,
         available: isAvailable,
         status: pkg.status,
         keptName: true,
         keptPricing: true,
+        wasAvailable: existing.available,
+        nowAvailable: isAvailable,
       });
     } else {
       // NEW DOC: we can safely build a default name and default pricing
@@ -226,11 +249,19 @@ async function runSync(req: Request) {
   }
 
   const tookMs = Date.now() - started;
-  console.log('[SVPS-SYNC] ✅ done', { created, updated, disabled, tookMs });
+  console.log('[SVPS-SYNC] ✅ done', { created, updated, disabled, reEnabled, tookMs });
 
   return NextResponse.json({
     success: true,
-    summary: { created, updated, disabled, tookMs },
+    summary: { 
+      created, 
+      updated, 
+      disabled, 
+      reEnabled, 
+      tookMs,
+      totalPackagesInAPI: deduped.length,
+      totalIPStockEntries: allExistingSmartVPS.length
+    },
     results
   });
 }

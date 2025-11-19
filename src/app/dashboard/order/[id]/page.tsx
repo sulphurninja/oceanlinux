@@ -127,7 +127,7 @@ function styleText(content: string) {
   const regex = /(\([^)]*\)|[a-zA-Z]+)/g;
   return content.split(regex).map((part, index) => {
     if (part.match(/\([^)]*\)/) || part.match(/[a-zA-Z]/)) {
-      return <span key={index} className="text-primary font-semibold">{part}</span>;
+      return <span key={index} className="text- font-semibold">{part}</span>;
     } else {
       return part;
     }
@@ -964,13 +964,13 @@ const OrderDetails = () => {
   const getStatusBadge = (status: string, provisioningStatus?: string, lastAction?: string, order?: Order) => {
     if (actionBusy) {
       const actionLabels = {
-        'restart': { label: 'Restarting', icon: RefreshCw, color: 'bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-800' },
-        'start': { label: 'Starting', icon: Loader2, color: 'bg-green-50 text-green-700 border border-green-200 dark:bg-green-950 dark:text-green-300 dark:border-green-800' },
-        'stop': { label: 'Stopping', icon: Loader2, color: 'bg-gray-50 text-gray-700 border border-gray-200 dark:bg-gray-950 dark:text-gray-300 dark:border-gray-800' },
-        'renew': { label: 'Renewing', icon: Loader2, color: 'bg-green-50 text-green-700 border border-green-200 dark:bg-green-950 dark:text-green-300 dark:border-green-800' },
-        'reinstall': { label: 'Reinstalling', icon: Loader2, color: 'bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800' },
-        'format': { label: 'Formatting', icon: Loader2, color: 'bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800' },
-        'changepassword': { label: 'Changing Password', icon: Loader2, color: 'bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-800' }
+        'restart': { label: 'Restarting', icon: RefreshCw, color: 'bg-primary/10 text-primary border-primary/20' },
+        'start': { label: 'Starting', icon: Loader2, color: 'bg-primary/10 text-primary border-primary/20' },
+        'stop': { label: 'Stopping', icon: Loader2, color: 'bg-muted text-muted-foreground border-border' },
+        'renew': { label: 'Renewing', icon: Loader2, color: 'bg-primary/10 text-primary border-primary/20' },
+        'reinstall': { label: 'Reinstalling', icon: Loader2, color: 'bg-muted text-muted-foreground border-border' },
+        'format': { label: 'Formatting', icon: Loader2, color: 'bg-muted text-muted-foreground border-border' },
+        'changepassword': { label: 'Changing Password', icon: Loader2, color: 'bg-primary/10 text-primary border-primary/20' }
       };
 
       const actionConfig = actionLabels[actionBusy as keyof typeof actionLabels];
@@ -987,8 +987,8 @@ const OrderDetails = () => {
 
     if (status.toLowerCase() === 'completed') {
       return (
-        <Badge className="bg-green-50 text-green-700 border border-green-200 dark:bg-green-950 dark:text-green-300 dark:border-green-800">
-          <div className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></div>
+        <Badge className="bg-primary/10 text-green-500 border-primary/20">
+          <div className="w-2 h-2 bg-primary rounded-full mr-2 animate-pulse"></div>
           Active
         </Badge>
       );
@@ -996,14 +996,14 @@ const OrderDetails = () => {
 
     const currentStatus = provisioningStatus || status;
 
-    // 🆕 Check for configuration errors first
+    // Check for configuration errors first
     if (order?.provisioningError &&
       (order.provisioningError.includes('Missing hostycareProductId') ||
         order.provisioningError.includes('CONFIG:') ||
         order.provisioningError.includes('Memory configuration not found') ||
         order.provisioningError.includes('lacks hostycareProductId'))) {
       return (
-        <Badge className="bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800">
+        <Badge className="bg-muted text-muted-foreground border-border">
           <Settings2 className="w-3 h-3 mr-1" />
           Pending
         </Badge>
@@ -1013,29 +1013,29 @@ const OrderDetails = () => {
     switch (currentStatus.toLowerCase()) {
       case 'active':
         return (
-          <Badge className="bg-green-50 text-green-700 border border-green-200 dark:bg-green-950 dark:text-green-300 dark:border-green-800">
-            <div className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></div>
+          <Badge className="bg-primary/10 text-green-500 border-primary/20">
+            <div className="w-2 h-2 bg-primary rounded-full mr-2 animate-pulse"></div>
             Active
           </Badge>
         );
       case 'pending':
       case 'confirmed':
         return (
-          <Badge className="bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800">
+          <Badge className="bg-muted text-muted-foreground border-border">
             <Clock className="w-3 h-3 mr-1" />
             Pending Setup
           </Badge>
         );
       case 'provisioning':
         return (
-          <Badge className="bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800">
+          <Badge className="bg-muted text-muted-foreground border-border">
             <Loader2 className="w-3 h-3 mr-1 animate-spin" />
             Provisioning
           </Badge>
         );
       case 'suspended':
         return (
-          <Badge className="bg-orange-50 text-orange-700 border border-orange-200 dark:bg-orange-950 dark:text-orange-300 dark:border-orange-800">
+          <Badge className="bg-destructive/10 text-destructive border-destructive/20">
             <AlertTriangle className="w-3 h-3 mr-1" />
             Suspended
           </Badge>
@@ -1044,21 +1044,21 @@ const OrderDetails = () => {
         // Double-check for config errors even in failed status
         if (order?.provisioningError && order.provisioningError.includes('CONFIG:')) {
           return (
-            <Badge className="bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800">
+            <Badge className="bg-muted text-muted-foreground border-border">
               <Settings2 className="w-3 h-3 mr-1" />
               Awaiting Config
             </Badge>
           );
         }
         return (
-          <Badge className="bg-red-50 text-red-700 border border-red-200 dark:bg-red-950 dark:text-red-300 dark:border-red-800">
+          <Badge className="bg-destructive/10 text-destructive border-destructive/20">
             <XCircle className="w-3 h-3 mr-1" />
             Failed
           </Badge>
         );
       case 'terminated':
         return (
-          <Badge className="bg-red-50 text-red-700 border border-red-200 dark:bg-red-950 dark:text-red-300 dark:border-red-800">
+          <Badge className="bg-destructive/10 text-destructive border-destructive/20">
             <XCircle className="w-3 h-3 mr-1" />
             Terminated
           </Badge>
@@ -1068,7 +1068,7 @@ const OrderDetails = () => {
         const isManualOrder = !lastAction || lastAction.includes('manual');
         if (isManualOrder || currentStatus.toLowerCase() === 'confirmed') {
           return (
-            <Badge className="bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800">
+            <Badge className="bg-muted text-muted-foreground border-border">
               <Clock className="w-3 h-3 mr-1" />
               Awaiting Setup
             </Badge>
@@ -1076,7 +1076,7 @@ const OrderDetails = () => {
         }
 
         return (
-          <Badge variant="secondary" className="bg-gray-50 text-gray-700 dark:bg-gray-950 dark:text-gray-300">
+          <Badge variant="secondary" className="bg-muted text-muted-foreground border-border">
             <Shield className="w-3 h-3 mr-1" />
             {currentStatus}
           </Badge>
@@ -1138,57 +1138,41 @@ const OrderDetails = () => {
     <div className='min-h-screen bg-background'>
       {/* Add proper mobile top spacing */}
       <div className="pt-16 lg:pt-0">
-        {/* Mobile-optimized Header */}
-        <div className='sticky top-16 lg:top-0 z-40 bg-background/95 backdrop-blur-sm shadow-sm border-b border-border'>
-          <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-4 max-w-7xl mx-auto'>
-            <div className='flex items-start sm:items-center gap-3'>
+        {/* Modern Header */}
+        <div className='sticky top-16 lg:top-0 z-40 bg-card/95 backdrop-blur-md border-b border-border'>
+          <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-4 lg:p-5 max-w-7xl mx-auto'>
+            <div className='flex items-start sm:items-center gap-3 min-w-0 flex-1'>
               <Button
                 variant="ghost"
                 size="icon"
                 onClick={() => router.push('/dashboard/viewLinux')}
-                className="hover:bg-muted rounded-full flex-shrink-0"
+                className="hover:bg-muted rounded-lg flex-shrink-0 h-10 w-10"
               >
                 <ArrowLeft className="h-5 w-5" />
               </Button>
-              <div className='flex items-start sm:items-center gap-3 min-w-0 flex-1'>
-                <OSIcon os={order.os} className="h-10 w-10 sm:h-12 sm:w-12 flex-shrink-0" />
-                <div className="min-w-0 flex-1">
-                  <h1 className='text-lg sm:text-xl font-bold break-words'>
-                    {styleText(order.productName)}
-                  </h1>
-                  <div className="flex flex-wrap items-center gap-2 mt-1">
-                    <Badge variant="secondary" className="text-xs">
-                      {getProviderDisplayName(provider)}
-                    </Badge>
-                    {getStatusBadge(order.status, order.provisioningStatus, order.lastAction, order)}
-                  </div>
+              <OSIcon os={order.os} className="h-10 w-10 sm:h-12 sm:w-12 flex-shrink-0" />
+              <div className="min-w-0 flex-1">
+                <h1 className='text-base sm:text-lg font-semibold break-words mb-1.5'>
+                  {styleText(order.productName)}
+                </h1>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="secondary" className="text-xs h-5">
+                    {getProviderDisplayName(provider)}
+                  </Badge>
+                  {getStatusBadge(order.status, order.provisioningStatus, order.lastAction, order)}
                 </div>
               </div>
             </div>
-            <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
-              {/* {isRenewalEligible(order) && (
-                <Button
-                  onClick={handleRenewService}
-                  disabled={actionBusy === 'renew'}
-                  size="sm"
-                  className="gap-2 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 shadow-lg"
-                >
-                  {actionBusy === 'renew' ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <CreditCard className="h-4 w-4" />
-                  )}
-                  <span className="hidden sm:inline">Renew</span>
-                </Button>
-              )} */}
+            <div className="flex items-center gap-2 flex-shrink-0 sm:ml-auto">
               <Button
                 variant="outline"
                 size="sm"
-                className="gap-2"
                 onClick={fetchOrder}
                 disabled={loading}
+                className="h-9 gap-2"
               >
                 <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                <span className="hidden sm:inline">Sync</span>
               </Button>
             </div>
           </div>
@@ -1361,66 +1345,69 @@ const OrderDetails = () => {
               {/* Left Column - Server Info & Connection */}
               <div className="xl:col-span-2 space-y-4 lg:space-y-6">
                 {/* Server Overview */}
-                <Card className="shadow-lg border-0 bg-card">
-                  <CardHeader className="pb-4">
+                <Card className="border-border hover:shadow-md transition-shadow">
+                  <CardHeader className="pb-3">
                     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                      <CardTitle className="flex items-center gap-2 text-lg lg:text-xl">
-                        <Server className="h-5 w-5 lg:h-6 lg:w-6 text-primary flex-shrink-0" />
+                      <CardTitle className="flex items-center gap-2 text-base lg:text-lg">
+                        <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                          <Server className="h-4 w-4 text-primary" />
+                        </div>
                         Server Overview
                       </CardTitle>
-                      <Badge variant="outline" className="text-xs self-start sm:self-auto">
-                        Created {order.createdAt ? formatDate(order.createdAt) : 'Unknown'}
+                      <Badge variant="outline" className="text-xs h-6 self-start sm:self-auto">
+                        <Clock className="h-3 w-3 mr-1" />
+                        {order.createdAt ? formatDate(order.createdAt) : 'Unknown'}
                       </Badge>
                     </div>
                   </CardHeader>
                   <CardContent>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 lg:gap-4">
-                      <div className="p-3 lg:p-4 bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-950 dark:to-blue-900 rounded-xl border border-blue-200 dark:border-blue-800">
-                        <div className="flex items-center gap-2 lg:gap-3">
-                          <div className="p-1.5 lg:p-2 bg-blue-500 rounded-lg flex-shrink-0">
-                            <Terminal className="h-4 w-4 lg:h-5 lg:w-5 text-white" />
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="p-3 bg-primary/10 rounded-lg border border-primary/30 shadow-sm">
+                        <div className="flex items-center gap-3">
+                          <div className="h-10 w-10 rounded-lg bg-primary/20 flex items-center justify-center flex-shrink-0 shadow-sm">
+                            <Terminal className="h-5 w-5 text-" />
                           </div>
                           <div className="min-w-0 flex-1">
-                            <p className="text-xs font-medium text-blue-600 dark:text-blue-400 uppercase tracking-wide">Operating System</p>
-                            <p className="font-semibold text-blue-900 dark:text-blue-100 text-sm lg:text-base break-words">{order.os}</p>
+                            <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Operating System</p>
+                            <p className="font-semibold text-foreground text-sm break-words mt-0.5">{order.os}</p>
                           </div>
                         </div>
                       </div>
 
-                      <div className="p-3 lg:p-4 bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-950 dark:to-purple-900 rounded-xl border border-purple-200 dark:border-purple-800">
-                        <div className="flex items-center gap-2 lg:gap-3">
-                          <div className="p-1.5 lg:p-2 bg-purple-500 rounded-lg flex-shrink-0">
-                            <MemoryStick className="h-4 w-4 lg:h-5 lg:w-5 text-white" />
+                      <div className="p-3 bg-primary/10 rounded-lg border border-primary/30 shadow-sm">
+                        <div className="flex items-center gap-3">
+                          <div className="h-10 w-10 rounded-lg bg-primary/20 flex items-center justify-center flex-shrink-0 shadow-sm">
+                            <MemoryStick className="h-5 w-5 text-" />
                           </div>
                           <div className="min-w-0 flex-1">
-                            <p className="text-xs font-medium text-purple-600 dark:text-purple-400 uppercase tracking-wide">Memory</p>
-                            <p className="font-semibold text-purple-900 dark:text-purple-100 text-sm lg:text-base break-words">{order.memory}</p>
+                            <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Memory</p>
+                            <p className="font-semibold text-foreground text-sm break-words mt-0.5">{order.memory}</p>
                           </div>
                         </div>
                       </div>
 
-                      <div className="p-3 lg:p-4 bg-gradient-to-br from-green-50 to-green-100 dark:from-green-950 dark:to-green-900 rounded-xl border border-green-200 dark:border-green-800">
-                        <div className="flex items-center gap-2 lg:gap-3">
-                          <div className="p-1.5 lg:p-2 bg-green-500 rounded-lg flex-shrink-0">
-                            <Activity className="h-4 w-4 lg:h-5 lg:w-5 text-white" />
+                      <div className="p-3 bg-primary/10 rounded-lg border border-primary/30 shadow-sm">
+                        <div className="flex items-center gap-3">
+                          <div className="h-10 w-10 rounded-lg bg-primary/20 flex items-center justify-center flex-shrink-0 shadow-sm">
+                            <Activity className="h-5 w-5 text-" />
                           </div>
                           <div className="min-w-0 flex-1">
-                            <p className="text-xs font-medium text-green-600 dark:text-green-400 uppercase tracking-wide">Status</p>
-                            <p className="font-semibold text-green-900 dark:text-green-100 text-sm lg:text-base capitalize break-words">
+                            <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Status</p>
+                            <div className="mt-1">
                               {getStatusBadge(order.status, order.provisioningStatus, order.lastAction, order)}
-                            </p>
+                            </div>
                           </div>
                         </div>
                       </div>
 
-                      <div className="p-3 lg:p-4 bg-gradient-to-br from-orange-50 to-orange-100 dark:from-orange-950 dark:to-orange-900 rounded-xl border border-orange-200 dark:border-orange-800">
-                        <div className="flex items-center gap-2 lg:gap-3">
-                          <div className="p-1.5 lg:p-2 bg-orange-500 rounded-lg flex-shrink-0">
-                            <Database className="h-4 w-4 lg:h-5 lg:w-5 text-white" />
+                      <div className="p-3 bg-primary/10 rounded-lg border border-primary/30 shadow-sm">
+                        <div className="flex items-center gap-3">
+                          <div className="h-10 w-10 rounded-lg bg-primary/20 flex items-center justify-center flex-shrink-0 shadow-sm">
+                            <Database className="h-5 w-5 text-" />
                           </div>
                           <div className="min-w-0 flex-1">
-                            <p className="text-xs font-medium text-orange-600 dark:text-orange-400 uppercase tracking-wide">Provider</p>
-                            <p className="font-semibold text-orange-900 dark:text-orange-100 text-sm lg:text-base capitalize">
+                            <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Provider</p>
+                            <p className="font-semibold text-foreground text-sm capitalize mt-0.5">
                               {getProviderDisplayName(provider)}
                             </p>
                           </div>
@@ -1432,140 +1419,182 @@ const OrderDetails = () => {
 
                 {/* Connection Details */}
                 {order.ipAddress && order.username ? (
-                  <Card className="shadow-lg border-0 bg-card">
-                    <CardHeader className="pb-4">
-                      <CardTitle className="flex items-center gap-2 text-lg lg:text-xl">
-                        <Network className="h-5 w-5 lg:h-6 lg:w-6 text-primary flex-shrink-0" />
+                  <Card className="border-border hover:shadow-md transition-shadow">
+                    <CardHeader className="pb-3">
+                      <CardTitle className="flex items-center gap-2 text-base lg:text-lg">
+                        <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                          <Network className="h-4 w-4 text-primary" />
+                        </div>
                         Connection Details
                       </CardTitle>
-                      <CardDescription className="text-sm">
+                      <CardDescription className="text-xs lg:text-sm">
                         Use these credentials to connect to your server
                       </CardDescription>
                     </CardHeader>
-                    <CardContent className="space-y-4">
+                    <CardContent className="space-y-3">
                       {/* IP Address */}
                       <div className="space-y-2">
-                        <Label className="flex items-center gap-2 text-sm font-medium">
-                          <Globe className="h-4 w-4 text-blue-600 flex-shrink-0" />
-                          Server IP Address
-                        </Label>
-                        <div className="flex gap-2">
-                          <Input
-                            readOnly
-                            value={order.ipAddress}
-                            className="font-mono bg-muted border-border text-sm min-w-0"
-                          />
-                          <Button
-                            variant="outline"
-                            size="icon"
-                            onClick={() => copyToClipboard(order.ipAddress!, 'IP Address')}
-                            className="shrink-0"
-                          >
-                            {copied === 'IP Address' ? (
-                              <Check className="h-4 w-4 text-green-600" />
-                            ) : (
-                              <Copy className="h-4 w-4" />
-                            )}
-                          </Button>
+                        <div className="p-3 bg-primary/5 rounded-lg border border-primary/20">
+                          <Label className="flex items-center gap-2 text-xs font-medium mb-2">
+                            <div className="h-6 w-6 rounded-md bg-primary/15 flex items-center justify-center">
+                              <Globe className="h-3.5 w-3.5 text-primary" />
+                            </div>
+                            <span className="text-muted-foreground">Server IP Address</span>
+                          </Label>
+                          <div className="flex gap-2">
+                            <Input
+                              readOnly
+                              value={order.ipAddress}
+                              className="font-mono bg-background/50 border-border text-sm min-w-0 h-9"
+                            />
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              onClick={() => copyToClipboard(order.ipAddress!, 'IP Address')}
+                              className="shrink-0 h-9 w-9 hover:bg-primary/10 hover:border-primary/30"
+                            >
+                              {copied === 'IP Address' ? (
+                                <Check className="h-4 w-4 text-primary" />
+                              ) : (
+                                <Copy className="h-4 w-4" />
+                              )}
+                            </Button>
+                          </div>
                         </div>
                       </div>
 
                       {/* Username */}
                       <div className="space-y-2">
-                        <Label className="flex items-center gap-2 text-sm font-medium">
-                          <User className="h-4 w-4 text-green-600 flex-shrink-0" />
-                          Username
-                        </Label>
-                        <div className="flex gap-2">
-                          <Input
-                            readOnly
-                            value={order.username}
-                            className="font-mono bg-muted border-border text-sm min-w-0"
-                          />
-                          <Button
-                            variant="outline"
-                            size="icon"
-                            onClick={() => copyToClipboard(order.username!, 'Username')}
-                            className="shrink-0"
-                          >
-                            {copied === 'Username' ? (
-                              <Check className="h-4 w-4 text-green-600" />
-                            ) : (
-                              <Copy className="h-4 w-4" />
-                            )}
-                          </Button>
+                        <div className="p-3 bg-primary/5 rounded-lg border border-primary/20">
+                          <Label className="flex items-center gap-2 text-xs font-medium mb-2">
+                            <div className="h-6 w-6 rounded-md bg-primary/15 flex items-center justify-center">
+                              <User className="h-3.5 w-3.5 text-primary" />
+                            </div>
+                            <span className="text-muted-foreground">Username</span>
+                          </Label>
+                          <div className="flex gap-2">
+                            <Input
+                              readOnly
+                              value={order.username}
+                              className="font-mono bg-background/50 border-border text-sm min-w-0 h-9"
+                            />
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              onClick={() => copyToClipboard(order.username!, 'Username')}
+                              className="shrink-0 h-9 w-9 hover:bg-primary/10 hover:border-primary/30"
+                            >
+                              {copied === 'Username' ? (
+                                <Check className="h-4 w-4 text-primary" />
+                              ) : (
+                                <Copy className="h-4 w-4" />
+                              )}
+                            </Button>
+                          </div>
                         </div>
                       </div>
 
                       {/* Password */}
                       <div className="space-y-2">
-                        <Label className="flex items-center gap-2 text-sm font-medium">
-                          <Lock className="h-4 w-4 text-red-600 flex-shrink-0" />
-                          Password
-                        </Label>
-                        <div className="flex gap-2">
-                          <Input
-                            readOnly
-                            type={showPassword ? "text" : "password"}
-                            value={order.password || ''}
-                            className="font-mono bg-muted border-border text-sm min-w-0"
-                          />
-                          <Button
-                            variant="outline"
-                            size="icon"
-                            onClick={() => setShowPassword(!showPassword)}
-                            className="shrink-0"
-                          >
-                            {showPassword ? (
-                              <EyeOff className="h-4 w-4" />
-                            ) : (
-                              <Eye className="h-4 w-4" />
-                            )}
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="icon"
-                            onClick={() => copyToClipboard(order.password || '', 'Password')}
-                            className="shrink-0"
-                          >
-                            {copied === 'Password' ? (
-                              <Check className="h-4 w-4 text-green-600" />
-                            ) : (
-                              <Copy className="h-4 w-4" />
-                            )}
-                          </Button>
+                        <div className="p-3 bg-primary/5 rounded-lg border border-primary/20">
+                          <Label className="flex items-center gap-2 text-xs font-medium mb-2">
+                            <div className="h-6 w-6 rounded-md bg-primary/15 flex items-center justify-center">
+                              <Lock className="h-3.5 w-3.5 text-primary" />
+                            </div>
+                            <span className="text-muted-foreground">Password</span>
+                          </Label>
+                          <div className="flex gap-2">
+                            <Input
+                              readOnly
+                              type={showPassword ? "text" : "password"}
+                              value={order.password || ''}
+                              className="font-mono bg-background/50 border-border text-sm min-w-0 h-9"
+                            />
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              onClick={() => setShowPassword(!showPassword)}
+                              className="shrink-0 h-9 w-9 hover:bg-primary/10 hover:border-primary/30"
+                            >
+                              {showPassword ? (
+                                <EyeOff className="h-4 w-4" />
+                              ) : (
+                                <Eye className="h-4 w-4" />
+                              )}
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              onClick={() => copyToClipboard(order.password || '', 'Password')}
+                              className="shrink-0 h-9 w-9 hover:bg-primary/10 hover:border-primary/30"
+                            >
+                              {copied === 'Password' ? (
+                                <Check className="h-4 w-4 text-primary" />
+                              ) : (
+                                <Copy className="h-4 w-4" />
+                              )}
+                            </Button>
+                          </div>
                         </div>
                       </div>
 
-                      {/* SSH Command */}
-                      <div className="mt-6">
-                        <Label className="text-sm font-medium mb-2 block">SSH Connection Command</Label>
-                        <div className="relative">
-                          <div className="p-3 lg:p-4 bg-gray-900 dark:bg-gray-950 rounded-xl border">
-                            <div className="flex items-center justify-between mb-2">
-                              <div className="flex items-center gap-2">
-                                <div className="w-2.5 h-2.5 lg:w-3 lg:h-3 bg-red-500 rounded-full"></div>
-                                <div className="w-2.5 h-2.5 lg:w-3 lg:h-3 bg-yellow-500 rounded-full"></div>
-                                <div className="w-2.5 h-2.5 lg:w-3 lg:h-3 bg-green-500 rounded-full"></div>
-                                <span className="text-gray-400 text-xs lg:text-sm ml-2">Terminal</span>
-                              </div>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => copyToClipboard(`ssh ${order.username}@${order.ipAddress}`, 'SSH Command')}
-                                className="text-green-400 hover:bg-green-400/20 h-6"
-                              >
-                                {copied === 'SSH Command' ? (
-                                  <Check className="h-3 w-3" />
-                                ) : (
-                                  <Copy className="h-3 w-3" />
-                                )}
-                              </Button>
+                      {/* SSH/RDP Command */}
+                      <div className="pt-1">
+                        <div className="p-3 bg-primary/5 rounded-lg border border-primary/20">
+                          <Label className="flex items-center gap-2 text-xs font-medium mb-2">
+                            <div className="h-6 w-6 rounded-md bg-primary/15 flex items-center justify-center">
+                              <Terminal className="h-3.5 w-3.5 text-primary" />
                             </div>
-                            <div className="overflow-x-auto">
-                              <code className="text-green-300 font-mono text-xs lg:text-sm whitespace-nowrap">
-                                ssh {order.username}@{order.ipAddress}
-                              </code>
+                            <span className="text-muted-foreground">
+                              {order.os.toLowerCase().includes('windows') ? 'RDP Connection' : 'SSH Connection Command'}
+                            </span>
+                          </Label>
+                          <div className="relative">
+                            <div className="p-3 bg-slate-950 rounded-lg border border-slate-800">
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="flex items-center gap-1.5">
+                                  <div className="w-2.5 h-2.5 bg-red-500 rounded-full"></div>
+                                  <div className="w-2.5 h-2.5 bg-yellow-500 rounded-full"></div>
+                                  <div className="w-2.5 h-2.5 bg-green-500 rounded-full"></div>
+                                  <span className="text-gray-400 text-xs ml-2">
+                                    {order.os.toLowerCase().includes('windows') ? 'Remote Desktop' : 'Terminal'}
+                                  </span>
+                                </div>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => {
+                                    if (order.os.toLowerCase().includes('windows')) {
+                                      copyToClipboard(order.ipAddress, 'RDP Address');
+                                    } else {
+                                      copyToClipboard(`ssh ${order.username}@${order.ipAddress}`, 'SSH Command');
+                                    }
+                                  }}
+                                  className="text-green-400 hover:bg-green-400/20 h-6 px-2"
+                                >
+                                  {copied === 'SSH Command' || copied === 'RDP Address' ? (
+                                    <Check className="h-3 w-3" />
+                                  ) : (
+                                    <Copy className="h-3 w-3" />
+                                  )}
+                                </Button>
+                              </div>
+                              <div className="overflow-x-auto">
+                                {order.os.toLowerCase().includes('windows') ? (
+                                  <div className="space-y-1">
+                                    <code className="text-green-400 font-mono text-xs whitespace-nowrap block">
+                                      Address: {order.ipAddress}
+                                    </code>
+                                    <code className="text-gray-400 font-mono text-xs whitespace-nowrap block">
+                                      Use Remote Desktop Connection (mstsc)
+                                    </code>
+                                  </div>
+                                ) : (
+                                  <code className="text-green-400 font-mono text-xs whitespace-nowrap">
+                                    ssh {order.username}@{order.ipAddress}
+                                  </code>
+                                )}
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -1573,53 +1602,55 @@ const OrderDetails = () => {
                     </CardContent>
                   </Card>
                 ) : (
-                  <Card className="shadow-lg border-0 bg-card">
-                    <CardContent className="text-center py-8 lg:py-12">
-                      <div className="w-12 h-12 lg:w-16 lg:h-16 bg-amber-100 dark:bg-amber-900/20 rounded-full flex items-center justify-center mx-auto mb-4">
-                        <Clock className="h-6 w-6 lg:h-8 lg:w-8 text-amber-600" />
+                  <Card className="border-border">
+                    <CardContent className="text-center py-10 lg:py-12">
+                      <div className="w-14 h-14 lg:w-16 lg:h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <Clock className="h-7 w-7 lg:h-8 lg:w-8 text-primary" />
                       </div>
-                      <h3 className="text-lg lg:text-xl font-semibold mb-2">Server Setup in Progress</h3>
-                      <p className="text-muted-foreground mb-4 text-sm lg:text-base px-4">
+                      <h3 className="text-base lg:text-lg font-semibold mb-2">Server Setup in Progress</h3>
+                      <p className="text-muted-foreground mb-4 text-sm px-4">
                         Your server is being configured. Connection details will appear here once ready.
                       </p>
-                      <div className="inline-flex items-center gap-2 text-xs lg:text-sm text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 px-3 py-1 rounded-full">
-                        <Clock className="h-4 w-4" />
-                        Estimated setup time: 5-10 minutes
-                      </div>
+                      <Badge variant="outline" className="text-xs px-3 py-1.5">
+                        <Clock className="h-3 w-3 mr-1.5" />
+                        Est. setup time: 5-10 minutes
+                      </Badge>
                     </CardContent>
                   </Card>
                 )}
 
                 {/* Recent Activity */}
                 {(order.lastAction || order.lastActionTime) && (
-                  <Card className="shadow-lg border-0 bg-card">
-                    <CardHeader className="pb-4">
-                      <CardTitle className="flex items-center gap-2 text-lg lg:text-xl">
-                        <Activity className="h-5 w-5 lg:h-6 lg:w-6 text-primary flex-shrink-0" />
+                  <Card className="border-border hover:shadow-md transition-shadow">
+                    <CardHeader className="pb-3">
+                      <CardTitle className="flex items-center gap-2 text-base lg:text-lg">
+                        <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                          <Activity className="h-4 w-4 text-primary" />
+                        </div>
                         Recent Activity
                       </CardTitle>
                     </CardHeader>
                     <CardContent>
-                      <div className="flex items-center gap-3 lg:gap-4 p-3 lg:p-4 bg-gradient-to-r from-blue-50 to-blue-100 dark:from-blue-950 dark:to-blue-900 rounded-xl border border-blue-200 dark:border-blue-800">
-                        <div className="w-10 h-10 lg:w-12 lg:h-12 bg-blue-500 rounded-full flex items-center justify-center flex-shrink-0">
-                          {order.lastAction === 'start' && <Play className="h-5 w-5 lg:h-6 lg:w-6 text-white" />}
-                          {order.lastAction === 'stop' && <Square className="h-5 w-5 lg:h-6 lg:w-6 text-white" />}
-                          {order.lastAction === 'restart' && <RotateCcw className="h-5 w-5 lg:h-6 lg:w-6 text-white" />}
-                          {order.lastAction === 'renew' && <CreditCard className="h-5 w-5 lg:h-6 lg:w-6 text-white" />}
-                          {order.lastAction === 'changepassword' && <KeyRound className="h-5 w-5 lg:h-6 lg:w-6 text-white" />}
-                          {order.lastAction === 'reinstall' && <HardDriveIcon className="h-5 w-5 lg:h-6 lg:w-6 text-white" />}
-                          {order.lastAction === 'format' && <HardDriveIcon className="h-5 w-5 lg:h-6 lg:w-6 text-white" />}
-                          {!order.lastAction && <Activity className="h-5 w-5 lg:h-6 lg:w-6 text-white" />}
+                      <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg border border-border">
+                        <div className="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center flex-shrink-0">
+                          {order.lastAction === 'start' && <Play className="h-5 w-5 text-primary" />}
+                          {order.lastAction === 'stop' && <Square className="h-5 w-5 text-primary" />}
+                          {order.lastAction === 'restart' && <RotateCcw className="h-5 w-5 text-primary" />}
+                          {order.lastAction === 'renew' && <CreditCard className="h-5 w-5 text-primary" />}
+                          {order.lastAction === 'changepassword' && <KeyRound className="h-5 w-5 text-primary" />}
+                          {order.lastAction === 'reinstall' && <HardDriveIcon className="h-5 w-5 text-primary" />}
+                          {order.lastAction === 'format' && <HardDriveIcon className="h-5 w-5 text-primary" />}
+                          {!order.lastAction && <Activity className="h-5 w-5 text-primary" />}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="font-semibold text-blue-900 dark:text-blue-100 text-sm lg:text-lg break-words">
+                          <p className="font-semibold text-foreground text-sm break-words">
                             {order.lastAction ?
                               `Last action: ${order.lastAction.charAt(0).toUpperCase() + order.lastAction.slice(1)}`
                               : 'Server Activity'
                             }
                           </p>
                           {order.lastActionTime && (
-                            <p className="text-blue-600 dark:text-blue-400 text-xs lg:text-sm">
+                            <p className="text-muted-foreground text-xs mt-0.5">
                               {formatDate(order.lastActionTime)}
                             </p>
                           )}
@@ -1720,25 +1751,26 @@ const OrderDetails = () => {
               <div className="space-y-4 lg:space-y-6">
                 {/* Server Management - Only show if provider supports management */}
                 {canManageServer ? (
-                  <Card className="shadow-lg border-0 bg-card">
-                    <CardHeader className="pb-4">
-                      <CardTitle className="flex items-center gap-2 text-lg lg:text-xl">
-                        <Settings2 className="h-5 w-5 lg:h-6 lg:w-6 text-primary flex-shrink-0" />
+                  <Card className="border-border hover:shadow-md transition-shadow">
+                    <CardHeader className="pb-3">
+                      <CardTitle className="flex items-center gap-2 text-base lg:text-lg">
+                        <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                          <Settings2 className="h-4 w-4 text-primary" />
+                        </div>
                         Server Control
                       </CardTitle>
-                      <CardDescription className="text-sm">
+                      <CardDescription className="text-xs lg:text-sm">
                         Manage your server's power state and configuration
                       </CardDescription>
                     </CardHeader>
-                    <CardContent className="space-y-4">
+                    <CardContent className="space-y-3">
                       {/* Power Controls */}
-                      <div className="grid grid-cols-1 gap-3">
+                      <div className="grid grid-cols-1 gap-2">
                         <Button
                           variant="default"
-                          size="lg"
                           onClick={() => runServiceAction('start')}
                           disabled={!!actionBusy}
-                          className="h-10 lg:h-12 gap-2 bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-sm lg:text-base"
+                          className="h-10 gap-2 bg-primary hover:bg-primary/90 text-sm"
                         >
                           {actionBusy === 'start' ? (
                             <Loader2 className="h-4 w-4 animate-spin" />
@@ -1750,10 +1782,9 @@ const OrderDetails = () => {
 
                         <Button
                           variant="outline"
-                          size="lg"
                           onClick={() => runServiceAction('stop')}
                           disabled={!!actionBusy}
-                          className="h-10 lg:h-12 gap-2 hover:bg-red-50 dark:hover:bg-red-950 hover:border-red-200 dark:hover:border-red-800 hover:text-red-700 dark:hover:text-red-300 text-sm lg:text-base"
+                          className="h-10 gap-2 text-sm"
                         >
                           {actionBusy === 'stop' ? (
                             <Loader2 className="h-4 w-4 animate-spin" />
@@ -1765,56 +1796,30 @@ const OrderDetails = () => {
 
                         <Button
                           variant="secondary"
-                          size="lg"
                           onClick={() => runServiceAction('restart')}
                           disabled={!!actionBusy}
-                          className="h-10 lg:h-12 gap-2 text-sm lg:text-base"
+                          className="h-10 gap-2 text-sm"
                         >
                           {actionBusy === 'restart' ? (
                             <Loader2 className="h-4 w-4 animate-spin" />
                           ) : (
                             <RotateCcw className="h-4 w-4" />
                           )}
-                        Restart Server
+                          Restart Server
                         </Button>
                       </div>
 
-                      <Separator />
+                      <Separator className="my-3" />
 
                       {/* Advanced Actions */}
-                      <div className="space-y-3">
-                        <h4 className="font-semibold text-sm text-muted-foreground">Advanced Actions</h4>
-
-                        {/* <Button
-                        variant="outline"
-                        size="lg"
-                        onClick={async () => {
-                          const newPassword = prompt('Enter new password (minimum 6 characters):');
-                          if (newPassword && newPassword.length >= 6) {
-                            await runServiceAction('changepassword', {
-                              password: newPassword
-                            });
-                          } else if (newPassword !== null) {
-                            toast.error('Password must be at least 6 characters long');
-                          }
-                        }}
-                        disabled={!!actionBusy}
-                        className="w-full h-10 lg:h-12 gap-2 hover:bg-blue-50 dark:hover:bg-blue-950 hover:border-blue-200 dark:hover:border-blue-800 hover:text-blue-700 dark:hover:text-blue-300 text-sm lg:text-base"
-                      >
-                        {actionBusy === 'changepassword' ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <KeyRound className="h-4 w-4" />
-                        )}
-                        Change Password
-                      </Button> */}
+                      <div className="space-y-2">
+                        <h4 className="font-medium text-xs text-muted-foreground uppercase tracking-wide">Advanced Actions</h4>
 
                         <Button
                           variant="destructive"
-                          size="lg"
                           onClick={() => handleAdvancedAction(provider === 'smartvps' ? 'format' : 'reinstall')}
                           disabled={!!actionBusy}
-                          className="w-full h-10 lg:h-12 gap-2 text-sm lg:text-base"
+                          className="w-full h-10 gap-2 text-sm"
                         >
                           {(actionBusy === 'reinstall' || actionBusy === 'format') ? (
                             <Loader2 className="h-4 w-4 animate-spin" />
@@ -1826,16 +1831,16 @@ const OrderDetails = () => {
                       </div>
 
                       {/* Service Status */}
-                      <Separator />
-                      <div className="space-y-3">
+                      <Separator className="my-3" />
+                      <div className="space-y-2">
                         <div className="flex items-center justify-between">
-                          <h4 className="font-semibold text-sm text-muted-foreground">Service Status</h4>
+                          <h4 className="font-medium text-xs text-muted-foreground uppercase tracking-wide">Service Status</h4>
                           <Button
                             variant="ghost"
                             size="sm"
                             onClick={loadServiceDetails}
                             disabled={serviceLoading}
-                            className="gap-2 h-8 px-2"
+                            className="gap-1.5 h-7 px-2 text-xs"
                           >
                             <RefreshCw className={`h-3 w-3 ${serviceLoading ? 'animate-spin' : ''}`} />
                             {serviceLoading ? 'Syncing...' : 'Sync'}
@@ -1843,19 +1848,21 @@ const OrderDetails = () => {
                         </div>
 
                         {serviceLoading ? (
-                          <div className="flex items-center gap-2 text-muted-foreground text-sm p-3 bg-muted rounded-lg">
-                            <Loader2 className="h-4 w-4 animate-spin flex-shrink-0" />
+                          <div className="flex items-center gap-2 text-muted-foreground text-xs p-2.5 bg-muted/50 rounded-lg">
+                            <Loader2 className="h-3.5 w-3.5 animate-spin flex-shrink-0" />
                             <span>Syncing server status...</span>
                           </div>
                         ) : serviceDetails ? (
-                          <Alert>
-                            <Info className="h-4 w-4" />
-                            <AlertDescription className="text-xs">
-                              Last synced: {order.lastSyncTime ? formatDate(order.lastSyncTime) : 'Never'}
-                            </AlertDescription>
-                          </Alert>
+                          <div className="p-2.5 bg-primary/5 rounded-lg border border-primary/20">
+                            <div className="flex items-start gap-2">
+                              <Info className="h-3.5 w-3.5 text-primary mt-0.5 flex-shrink-0" />
+                              <p className="text-xs text-muted-foreground">
+                                Last synced: {order.lastSyncTime ? formatDate(order.lastSyncTime) : 'Never'}
+                              </p>
+                            </div>
+                          </div>
                         ) : (
-                          <p className="text-muted-foreground text-sm p-3 bg-muted rounded-lg">
+                          <p className="text-muted-foreground text-xs p-2.5 bg-muted/50 rounded-lg">
                             Click Sync to refresh server status
                           </p>
                         )}
@@ -1864,30 +1871,32 @@ const OrderDetails = () => {
                   </Card>
                 ) : (
                   /* Show info card when management is not available */
-                  <Card className="shadow-lg border-0 bg-card">
-                    <CardHeader className="pb-4">
-                      <CardTitle className="flex items-center gap-2 text-lg lg:text-xl">
-                        <Info className="h-5 w-5 lg:h-6 lg:w-6 text-primary flex-shrink-0" />
+                  <Card className="border-border">
+                    <CardHeader className="pb-3">
+                      <CardTitle className="flex items-center gap-2 text-base lg:text-lg">
+                        <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                          <Info className="h-4 w-4 text-primary" />
+                        </div>
                         Service Information
                       </CardTitle>
                     </CardHeader>
                     <CardContent>
-                      <div className="p-3 lg:p-4 bg-blue-50 dark:bg-blue-950/30 rounded-xl border border-blue-200 dark:border-blue-800">
+                      <div className="p-3 bg-muted/50 rounded-lg border border-border">
                         <div className="flex items-start gap-3">
-                          <div className="w-8 h-8 lg:w-10 lg:h-10 bg-blue-500 rounded-full flex items-center justify-center flex-shrink-0">
-                            <Database className="h-4 w-4 lg:h-5 lg:w-5 text-white" />
+                          <div className="w-9 h-9 bg-primary/10 rounded-lg flex items-center justify-center flex-shrink-0">
+                            <Database className="h-4 w-4 text-" />
                           </div>
                           <div className="min-w-0 flex-1">
-                            <h4 className="font-semibold text-blue-900 dark:text-blue-100 mb-1 text-sm lg:text-base">
+                            <h4 className="font-semibold text-foreground mb-1 text-sm">
                               {getProviderDisplayName(provider)} Service
                             </h4>
-                            <p className="text-xs lg:text-sm text-blue-700 dark:text-blue-300 mb-2">
+                            <p className="text-xs text-muted-foreground mb-2">
                               {provider === 'oceanlinux'
                                 ? 'This service is directly managed by OceanLinux. Server management tools are not available through this interface.'
                                 : 'This service is offered with a partner provider.'}
                             </p>
                             {order.ipAddress && (
-                              <p className="text-xs text-blue-600 dark:text-blue-400">
+                              <p className="text-xs text-muted-foreground">
                                 You can still connect to your server using the connection details above.
                               </p>
                             )}
@@ -1900,63 +1909,83 @@ const OrderDetails = () => {
 
                 {/* Billing & Renewal */}
                 {order.expiryDate && (
-                  <Card className="shadow-lg border-0 bg-card">
-                    <CardHeader className="pb-4">
-                      <CardTitle className="flex items-center gap-2 text-lg lg:text-xl">
-                        <Wallet className="h-5 w-5 lg:h-6 lg:w-6 text-primary flex-shrink-0" />
+                  <Card className="border-border hover:shadow-md transition-shadow">
+                    <CardHeader className="pb-3">
+                      <CardTitle className="flex items-center gap-2 text-base lg:text-lg">
+                        <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                          <Wallet className="h-4 w-4 text-primary" />
+                        </div>
                         Billing Information
                       </CardTitle>
                     </CardHeader>
                     <CardContent>
                       <div className={cn(
-                        "p-3 lg:p-4 rounded-xl border",
+                        "p-4 rounded-lg border shadow-sm",
                         isExpired(order)
-                          ? "bg-gradient-to-r from-red-50 to-red-100 dark:from-red-950 dark:to-red-900 border-red-200 dark:border-red-800"
+                          ? "bg-destructive/10 border-destructive/30"
                           : getDaysUntilExpiry(order.expiryDate) <= 7
-                            ? "bg-gradient-to-r from-amber-50 to-amber-100 dark:from-amber-950 dark:to-amber-900 border-amber-200 dark:border-amber-800"
-                            : "bg-gradient-to-r from-blue-50 to-blue-100 dark:from-blue-950 dark:to-blue-900 border-blue-200 dark:border-blue-800"
+                            ? "bg-muted/70 border-border"
+                            : "bg-primary/10 border-primary/30"
                       )}>
-                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
-                          <div>
-                            <p className={cn(
-                              "font-semibold text-base lg:text-lg",
+                        {/* Expiry Status with Icon */}
+                        <div className="flex items-start gap-3 mb-4">
+                          <div className={cn(
+                            "h-12 w-12 rounded-lg flex items-center justify-center flex-shrink-0",
+                            isExpired(order)
+                              ? "bg-destructive/15"
+                              : getDaysUntilExpiry(order.expiryDate) <= 7
+                                ? "bg-muted"
+                                : "bg-primary/15"
+                          )}>
+                            <Calendar className={cn(
+                              "h-6 w-6",
                               isExpired(order)
-                                ? "text-red-700 dark:text-red-300"
+                                ? "text-destructive"
                                 : getDaysUntilExpiry(order.expiryDate) <= 7
-                                  ? "text-amber-700 dark:text-amber-300"
-                                  : "text-blue-700 dark:text-blue-300"
+                                  ? "text-muted-foreground"
+                                  : "text-primary"
+                            )} />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className={cn(
+                              "font-semibold text-sm mb-0.5",
+                              isExpired(order)
+                                ? "text-destructive"
+                                : getDaysUntilExpiry(order.expiryDate) <= 7
+                                  ? "text-muted-foreground"
+                                  : "text- "
                             )}>
                               {isExpired(order) ? 'Service Expired' : 'Service Expires'}
                             </p>
                             <p className={cn(
-                              "text-xs lg:text-sm",
+                              "text-xs",
                               isExpired(order)
-                                ? "text-red-600 dark:text-red-400"
+                                ? "text-destructive/80"
                                 : getDaysUntilExpiry(order.expiryDate) <= 7
-                                  ? "text-amber-600 dark:text-amber-400"
-                                  : "text-blue-600 dark:text-blue-400"
+                                  ? "text-muted-foreground/80"
+                                  : "text-muted-foreground /80"
                             )}>
                               {formatDate(order.expiryDate)}
                             </p>
                           </div>
-                          <div className="text-center sm:text-right">
+                          <div className="text-right">
                             <p className={cn(
-                              "text-2xl lg:text-3xl font-bold",
+                              "text-3xl font-bold leading-none",
                               isExpired(order)
-                                ? "text-red-700 dark:text-red-300"
+                                ? "text-destructive"
                                 : getDaysUntilExpiry(order.expiryDate) <= 7
-                                  ? "text-amber-700 dark:text-amber-300"
-                                  : "text-blue-700 dark:text-blue-300"
+                                  ? "text-muted-foreground"
+                                  : "text-"
                             )}>
                               {Math.abs(getDaysUntilExpiry(order.expiryDate))}
                             </p>
                             <p className={cn(
-                              "text-xs lg:text-sm font-medium",
+                              "text-xs font-medium mt-1",
                               isExpired(order)
-                                ? "text-red-600 dark:text-red-400"
+                                ? "text-destructive/80"
                                 : getDaysUntilExpiry(order.expiryDate) <= 7
-                                  ? "text-amber-600 dark:text-amber-400"
-                                  : "text-blue-600 dark:text-blue-400"
+                                  ? "text-muted-foreground/80"
+                                  : "text-muted-foreground /80"
                             )}>
                               {isExpired(order) ? 'days ago' : 'days left'}
                             </p>
@@ -1972,16 +2001,22 @@ const OrderDetails = () => {
                           </div>
                         )}
 
+                        {/* Service Price */}
+                        <div className="flex items-center justify-between p-2.5 bg-background/50 rounded-md border border-border mb-3">
+                          <span className="text-xs text-muted-foreground">Service Price</span>
+                          <span className="font-semibold text-sm">₹{order.price}/month</span>
+                        </div>
+
                         {/* Renewal Button */}
                         {isRenewalEligible(order) && (
                           <Button
                             onClick={handleRenewService}
                             disabled={actionBusy === 'renew'}
                             className={cn(
-                              "w-full gap-2 h-10 lg:h-12 text-sm lg:text-base",
+                              "w-full gap-2 h-10 text-sm shadow-sm",
                               isExpired(order)
-                                ? "bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800"
-                                : "bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800"
+                                ? "bg-destructive hover:bg-destructive/90"
+                                : "dark:bg-green-700 bg-green-500 text-white  hover:bg-primary/90"
                             )}
                           >
                             {actionBusy === 'renew' ? (
@@ -2000,26 +2035,29 @@ const OrderDetails = () => {
                         )}
 
                         {isExpired(order) && isRenewalEligible(order) && (
-                          <p className="text-xs text-red-600 dark:text-red-400 mt-2 text-center">
-                            ⚠️ Service renewal available for up to 7 days after expiry
-                          </p>
+                          <div className="flex items-start gap-2 mt-3 p-2 bg-destructive/10 border border-destructive/20 rounded-md">
+                            <AlertTriangle className="h-3.5 w-3.5 text-destructive mt-0.5 flex-shrink-0" />
+                            <p className="text-xs text-destructive/90">
+                              Service renewal available for up to 7 days after expiry
+                            </p>
+                          </div>
                         )}
                       </div>
 
                       {/* Renewal History */}
                       {order.renewalPayments && order.renewalPayments.length > 0 && (
-                        <div className="mt-4 pt-4 border-t">
-                          <h4 className="font-semibold text-sm mb-3">Renewal History</h4>
-                          <div className="space-y-2 max-h-32 overflow-y-auto">
+                        <div className="mt-4 pt-4 border-t border-border">
+                          <h4 className="font-medium text-xs text-muted-foreground uppercase tracking-wide mb-3">Renewal History</h4>
+                          <div className="space-y-2 max-h-40 overflow-y-auto">
                             {order.renewalPayments.map((renewal, index) => (
-                              <div key={index} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs p-3 bg-muted rounded-lg">
+                              <div key={index} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs p-3 bg-primary/5 rounded-lg border border-primary/20">
                                 <div>
-                                  <p className="font-semibold">₹{renewal.amount} paid</p>
-                                  <p className="text-muted-foreground">{formatDate(renewal.paidAt)}</p>
+                                  <p className="font-semibold text-foreground">₹{renewal.amount} paid</p>
+                                  <p className="text-muted-foreground mt-0.5">{formatDate(renewal.paidAt)}</p>
                                 </div>
                                 <div className="text-left sm:text-right">
                                   <p className="text-muted-foreground">Extended to</p>
-                                  <p className="font-medium">{formatDate(renewal.newExpiry)}</p>
+                                  <p className="font-medium text-foreground mt-0.5">{formatDate(renewal.newExpiry)}</p>
                                 </div>
                               </div>
                             ))}
@@ -2031,45 +2069,47 @@ const OrderDetails = () => {
                 )}
 
                 {/* Service Details */}
-                <Card className="shadow-lg border-0 bg-card">
-                  <CardHeader className="pb-4">
-                    <CardTitle className="flex items-center gap-2 text-lg lg:text-xl">
-                      <Server className="h-5 w-5 lg:h-6 lg:w-6 text-primary flex-shrink-0" />
+                <Card className="border-border hover:shadow-md transition-shadow">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="flex items-center gap-2 text-base lg:text-lg">
+                      <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                        <Server className="h-4 w-4 text-primary" />
+                      </div>
                       Service Details
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="space-y-3 lg:space-y-4 text-sm">
+                    <div className="space-y-2 text-sm">
                       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1 sm:gap-2 py-2 border-b border-border">
-                        <span className="text-muted-foreground">Service ID</span>
-                        <span className="font-mono text-xs bg-muted px-2 py-1 rounded break-all">{order._id}</span>
+                        <span className="text-xs text-muted-foreground">Service ID</span>
+                        <span className="font-mono text-xs bg-muted/50 px-2 py-0.5 rounded break-all">{order._id}</span>
                       </div>
                       <div className="flex justify-between items-center py-2 border-b border-border">
-                        <span className="text-muted-foreground">Price</span>
-                        <span className="font-semibold">₹{order.price}</span>
+                        <span className="text-xs text-muted-foreground">Price</span>
+                        <span className="font-semibold text-sm">₹{order.price}</span>
                       </div>
                       {order.ipStockId && (
                         <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1 sm:gap-2 py-2 border-b border-border">
-                          <span className="text-muted-foreground">IP Stock ID</span>
-                          <span className="font-mono text-xs bg-muted px-2 py-1 rounded break-all">{order.ipStockId}</span>
+                          <span className="text-xs text-muted-foreground">IP Stock ID</span>
+                          <span className="font-mono text-xs bg-muted/50 px-2 py-0.5 rounded break-all">{order.ipStockId}</span>
                         </div>
                       )}
                       {order.lastSyncTime && (
                         <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1 sm:gap-2 py-2 border-b border-border">
-                          <span className="text-muted-foreground">Last Sync</span>
+                          <span className="text-xs text-muted-foreground">Last Sync</span>
                           <span className="text-xs">{formatDate(order.lastSyncTime)}</span>
                         </div>
                       )}
                       {provider === 'hostycare' && order.hostycareServiceId && (
                         <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1 sm:gap-2 py-2">
-                          <span className="text-muted-foreground">Hostycare ID</span>
-                          <span className="font-mono text-xs bg-muted px-2 py-1 rounded break-all">{order.hostycareServiceId}</span>
+                          <span className="text-xs text-muted-foreground">Hostycare ID</span>
+                          <span className="font-mono text-xs bg-muted/50 px-2 py-0.5 rounded break-all">{order.hostycareServiceId}</span>
                         </div>
                       )}
                       {provider === 'smartvps' && order.smartvpsServiceId && (
                         <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1 sm:gap-2 py-2">
-                          <span className="text-muted-foreground">SmartVPS ID</span>
-                          <span className="font-mono text-xs bg-muted px-2 py-1 rounded break-all">{order.smartvpsServiceId}</span>
+                          <span className="text-xs text-muted-foreground">SmartVPS ID</span>
+                          <span className="font-mono text-xs bg-muted/50 px-2 py-0.5 rounded break-all">{order.smartvpsServiceId}</span>
                         </div>
                       )}
                     </div>

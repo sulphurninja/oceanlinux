@@ -14,7 +14,34 @@ export async function GET(request) {
     const limit = parseInt(searchParams.get('limit')) || 20;
     const unreadOnly = searchParams.get('unreadOnly') === 'true';
 
-    const result = await NotificationService.getUserNotifications(userId, page, limit, unreadOnly);
+    // Build options object for filtering
+    const options = {};
+    
+    // Handle read filter
+    const readParam = searchParams.get('read');
+    if (readParam === 'true') {
+      options.read = true;
+    } else if (readParam === 'false') {
+      options.read = false;
+    }
+    
+    // Handle other filters
+    const type = searchParams.get('type');
+    if (type && type !== 'all') {
+      options.type = type;
+    }
+    
+    const priority = searchParams.get('priority');
+    if (priority && priority !== 'all') {
+      options.priority = priority;
+    }
+    
+    const search = searchParams.get('search');
+    if (search) {
+      options.search = search;
+    }
+
+    const result = await NotificationService.getUserNotifications(userId, page, limit, unreadOnly, options);
 
     return NextResponse.json(result);
   } catch (error) {

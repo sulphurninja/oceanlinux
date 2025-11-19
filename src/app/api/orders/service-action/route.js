@@ -607,7 +607,18 @@ async function syncServerState(orderId, details, info) {
 
       // Update IP address if available and not already set
       if (details.ip && details.ip !== 'pending') {
-        updateData.ipAddress = details.ip;
+        // Get the order to check provider and OS
+        const order = await Order.findById(orderId);
+        
+        // Format IP address with port if needed (Windows Hostycare requires :49965)
+        const { formatIpAddress } = await import('@/lib/ipAddressHelper.js');
+        const formattedIpAddress = formatIpAddress(
+          details.ip,
+          order.provider,
+          order.os
+        );
+        
+        updateData.ipAddress = formattedIpAddress;
       }
 
       // Update username if available

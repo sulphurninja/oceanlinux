@@ -17,7 +17,7 @@ export default function Header() {
                 <div className="hidden lg:flex justify-between items-center py-2 text-sm border-b border-background/20 dark:border-border/40">
                     <div className="flex items-center space-x-6">
                         <span className="text-background/70 dark:text-muted-foreground">
-                            📧 Email: <a href="mailto:hello@oceanlinux.com" className="text-primary hover:underline">hello@oceanlinux.com</a>
+                            📧 Email: <a href="mailto:hello@oceanlinux.com" className="text-green-500 hover:underline">hello@oceanlinux.com</a>
                         </span>
                     </div>
                     <div className="flex items-center space-x-4">
@@ -28,7 +28,7 @@ export default function Header() {
                             </div>
                             <span className="text-background/70 dark:text-muted-foreground">A Product of
                                 <Link href='https://backtick.app'>
-                                    <span className="text-primary ml-1 font-medium">Backtick Labs</span>
+                                    <span className="text-green-500  ml-1 font-medium">Backtick Labs</span>
                                 </Link></span>
                         </div>
                         <Link href="/contact-us" className="text-background/70 dark:text-muted-foreground hover:text-primary transition-colors">
@@ -39,14 +39,16 @@ export default function Header() {
 
                 {/* Main header */}
                 <div className="flex justify-between items-center py-4">
-                    <Link href="/" className="flex items-center space-x-3">
-                        <div className="relative">
-                            <img src="/oceanlinux.png" className="h-16   dark:filter-none" />
-                        </div>
+                    <Link href="/" className="flex items-center gap-3">
+                        <img 
+                            src="/ol.png" 
+                            className="h-12 w-auto transition-all duration-200 hover:scale-105" 
+                            alt="OceanLinux"
+                        />
                         <div>
-                            <span className="text-2xl font-bold bg-gradient-to-r from-primary to-foreground bg-clip-text text-transparent">
+                            <h1 className="text-2xl font-bold bg-gradient-to-l from-primary to-foreground bg-clip-text text-transparent whitespace-nowrap">
                                 OceanLinux
-                            </span>
+                            </h1>
                             <div className="text-xs text-background/70 dark:text-muted-foreground -mt-1">The Ocean of Linux</div>
                         </div>
                     </Link>
@@ -87,11 +89,11 @@ export default function Header() {
 
                     {/* Mobile Menu Button & Theme Toggle */}
                     <div className="lg:hidden flex items-center space-x-2">
-                        <ThemeToggle
+                        {/* <ThemeToggle
                             variant="ghost"
                             size="sm"
                             className="text-background dark:text-foreground hover:text-primary hover:bg-background/10 dark:hover:bg-accent"
-                        />
+                        /> */}
                         <button
                             onClick={() => setIsMenuOpen(!isMenuOpen)}
                             className="p-2 rounded-lg hover:bg-background/10 dark:hover:bg-muted transition-colors text-background dark:text-foreground"

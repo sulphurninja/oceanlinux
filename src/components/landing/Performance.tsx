@@ -29,7 +29,7 @@ export default function Performance() {
         <div className="text-center mb-16 animate-fade-in">
           <h2 className="text-4xl lg:text-5xl font-bold mb-6">
             Unmatched Performance at 
-            <span className="text-gradient"> Most Affordable Prices</span>
+            <span className="text-primary"> Most Affordable Prices</span>
           </h2>
           <p className="text-xl text-muted-foreground max-w-3xl mx-auto">
             Don't compromise on performance because of budget constraints. 

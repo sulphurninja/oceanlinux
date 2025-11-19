@@ -52,7 +52,7 @@ export default function Security() {
         <div className="text-center mb-16 animate-fade-in">
           <h2 className="text-4xl lg:text-5xl font-bold mb-6">
             Enterprise-Grade Security at 
-            <span className="text-gradient"> Most Affordable Prices</span>
+            <span className="text-primary"> Most Affordable Prices</span>
           </h2>
           <p className="text-xl text-muted-foreground max-w-3xl mx-auto">
             Don't pay premium prices for basic security. Get professional-grade protection 

@@ -303,48 +303,49 @@ export default function Dashboard() {
       {/* Mobile Header */}
       <div className="lg:hidden h-16" />
 
-
-
-      <div className="w-full md:max-w-7xl mt- mx-auto px-3 md:mt-0 -mt-12  sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-6">
-        {/* Welcome Banner - Mobile Optimized */}
-        <Card className="relative  bg-gradient-to-br from-purple-500/10 to-purple-600/5 overflow-hidden">
-          <CardContent className="relative p-3 sm:p-6">
-            <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3 lg:gap-4">
-              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 flex-1 min-w-0">
+      <div className="w-full md:max-w-7xl mt- mx-auto px-3 md:mt-0 -mt-12 sm:px-6 py-4 sm:py-6 space-y-6">
+        {/* Welcome Banner - Modern Clean Design */}
+        <Card className="relative border-border overflow-hidden">
+          <CardContent className="relative p-5 sm:p-6">
+            <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 flex-1 min-w-0">
                 <div className="hidden sm:block flex-shrink-0">
-                  <DotLottieReact
-                    src="/welcome.lottie"
-                    loop
-                    autoplay
-                    className="h-12 w-12 sm:h-16 sm:w-16 lg:h-20 lg:w-20"
-                  />
+                  <div className="h-14 w-14 rounded-xl bg-primary/10 flex items-center justify-center">
+                    <DotLottieReact
+                      src="/welcome.lottie"
+                      loop
+                      autoplay
+                      className="h-10 w-10"
+                    />
+                  </div>
                 </div>
                 <div className="min-w-0 flex-1">
-                  <h2 className="text-lg sm:text-xl lg:text-2xl xl:text-3xl font-bold break-words">
-                    Welcome back, {user?.name?.split(' ')[0] || user?.name}!
-                  </h2>
-                  <p className="text-muted-foreground mt-1 text-sm lg:text-base">
-                    Here's what's happening with your services
+                  <h1 className="text-xl sm:text-2xl font-bold text-foreground">
+                    Welcome back, {user?.name?.split(' ')[0] || user?.name}
+                  </h1>
+                  <p className="text-muted-foreground mt-1.5 text-sm">
+                    Here's an overview of your services and recent activity
                   </p>
-                  <div className="flex items-center gap-2 mt-2 text-xs lg:text-sm text-muted-foreground">
-                    <CalendarIcon className="h-3 w-3 lg:h-4 lg:w-4 flex-shrink-0" />
+                  <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
+                    <CalendarIcon className="h-3.5 w-3.5 flex-shrink-0" />
                     <span className="truncate">
                       {new Date().toLocaleDateString('en-IN', {
-                        weekday: 'short',
-                        month: 'short',
-                        day: 'numeric'
+                        weekday: 'long',
+                        month: 'long',
+                        day: 'numeric',
+                        year: 'numeric'
                       })}
                     </span>
                   </div>
                 </div>
               </div>
               <div className="flex flex-row gap-2 w-full sm:w-auto">
-                <Button size="sm" className="flex items-center gap-1 h-8 px-3 text-xs flex-1 sm:flex-initial" onClick={handleBrowsePlans}>
-                  <ServerIcon className="h-3 w-3" />
-                  <span>Buy Now</span>
+                <Button size="sm" className="h-9 px-4 text-sm flex-1 sm:flex-initial" onClick={handleBrowsePlans}>
+                  <ServerIcon className="h-4 w-4 mr-2" />
+                  <span>New Order</span>
                 </Button>
-                <Button variant="outline" size="sm" className="flex items-center gap-1 h-8 px-3 text-xs flex-1 sm:flex-initial" onClick={handleDownloadInvoice}>
-                  <Download className="h-3 w-3" />
+                <Button variant="outline" size="sm" className="h-9 px-4 text-sm flex-1 sm:flex-initial" onClick={handleDownloadInvoice}>
+                  <Download className="h-4 w-4 mr-2" />
                   <span>Export</span>
                 </Button>
               </div>
@@ -352,177 +353,183 @@ export default function Dashboard() {
           </CardContent>
         </Card>
 
-        {/* Stats Grid - Responsive */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <Card className="p-3">
-            <CardContent className="p-0">
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-medium text-muted-foreground line-clamp-2">Total Orders</p>
-                  <p className="text-lg sm:text-xl font-bold">{stats?.totalOrders || 0}</p>
+        {/* Stats Grid - Modern Clean Cards */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <Card className="border-border hover:shadow-md transition-shadow">
+            <CardContent className="p-5">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1">
+                  <p className="text-xs font-medium text-muted-foreground mb-2">Total Orders</p>
+                  <p className="text-2xl font-bold text-foreground">{stats?.totalOrders || 0}</p>
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-2">
+                    <TrendingUpIcon className="h-3 w-3" />
+                    <span>All time</span>
+                  </div>
                 </div>
-                <div className="h-6 w-6 sm:h-8 sm:w-8 bg-blue-100 dark:bg-blue-900/20 rounded-lg flex items-center justify-center flex-shrink-0">
-                  <ShoppingCartIcon className="h-3 w-3 sm:h-4 sm:w-4 text-blue-600 dark:text-blue-400" />
+                <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                  <ShoppingCartIcon className="h-5 w-5 text-primary" />
                 </div>
-              </div>
-              <div className="flex items-center gap-1 text-xs text-muted-foreground mt-1">
-                <TrendingUpIcon className="h-2.5 w-2.5" />
-                <span>All time</span>
               </div>
             </CardContent>
           </Card>
 
-          <Card className="p-3">
-            <CardContent className="p-0">
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-medium text-muted-foreground line-clamp-2">Active Services</p>
-                  <p className="text-lg sm:text-xl font-bold">{stats?.activeServices || 0}</p>
+          <Card className="border-border hover:shadow-md transition-shadow">
+            <CardContent className="p-5">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1">
+                  <p className="text-xs font-medium text-muted-foreground mb-2">Active Services</p>
+                  <p className="text-2xl font-bold text-foreground">{stats?.activeServices || 0}</p>
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-2">
+                    <ActivityIcon className="h-3 w-3" />
+                    <span>Running</span>
+                  </div>
                 </div>
-                <div className="h-6 w-6 sm:h-8 sm:w-8 bg-green-100 dark:bg-green-900/20 rounded-lg flex items-center justify-center flex-shrink-0">
-                  <ServerIcon className="h-3 w-3 sm:h-4 sm:w-4 text-green-600 dark:text-green-400" />
+                <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                  <ServerIcon className="h-5 w-5 text-primary" />
                 </div>
-              </div>
-              <div className="flex items-center gap-1 text-xs text-muted-foreground mt-1">
-                <ActivityIcon className="h-2.5 w-2.5" />
-                <span>Running</span>
               </div>
             </CardContent>
           </Card>
 
-          <Card className="p-3">
-            <CardContent className="p-0">
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-medium text-muted-foreground line-clamp-2">Total Spent</p>
-                  <p className="text-sm sm:text-lg font-bold break-words">{formatCurrency(stats?.totalSpent || 0)}</p>
+          <Card className="border-border hover:shadow-md transition-shadow">
+            <CardContent className="p-5">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1">
+                  <p className="text-xs font-medium text-muted-foreground mb-2">Total Spent</p>
+                  <p className="text-2xl font-bold text-foreground">{formatCurrency(stats?.totalSpent || 0)}</p>
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-2">
+                    <IndianRupee className="h-3 w-3" />
+                    <span>Lifetime</span>
+                  </div>
                 </div>
-                <div className="h-6 w-6 sm:h-8 sm:w-8 bg-purple-100 dark:bg-purple-900/20 rounded-lg flex items-center justify-center flex-shrink-0">
-                  <CreditCardIcon className="h-3 w-3 sm:h-4 sm:w-4 text-purple-600 dark:text-purple-400" />
+                <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                  <CreditCardIcon className="h-5 w-5 text-primary" />
                 </div>
-              </div>
-              <div className="flex items-center gap-1 text-xs text-muted-foreground mt-1">
-                <IndianRupee className="h-2.5 w-2.5" />
-                <span>Lifetime</span>
               </div>
             </CardContent>
           </Card>
 
-          <Card className="p-3">
-            <CardContent className="p-0">
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-medium text-muted-foreground line-clamp-2">Pending</p>
-                  <p className="text-lg sm:text-xl font-bold">{stats?.pendingOrders || 0}</p>
+          <Card className="border-border hover:shadow-md transition-shadow">
+            <CardContent className="p-5">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1">
+                  <p className="text-xs font-medium text-muted-foreground mb-2">Pending Orders</p>
+                  <p className="text-2xl font-bold text-foreground">{stats?.pendingOrders || 0}</p>
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-2">
+                    <AlertCircleIcon className="h-3 w-3" />
+                    <span>In queue</span>
+                  </div>
                 </div>
-                <div className="h-6 w-6 sm:h-8 sm:w-8 bg-orange-100 dark:bg-orange-900/20 rounded-lg flex items-center justify-center flex-shrink-0">
-                  <ClockIcon className="h-3 w-3 sm:h-4 sm:w-4 text-orange-600 dark:text-orange-400" />
+                <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                  <ClockIcon className="h-5 w-5 text-primary" />
                 </div>
-              </div>
-              <div className="flex items-center gap-1 text-xs text-muted-foreground mt-1">
-                <AlertCircleIcon className="h-2.5 w-2.5" />
-                <span>Attention</span>
               </div>
             </CardContent>
           </Card>
         </div>
 
-        {/* Responsive Tabs */}
-        <Tabs defaultValue="overview" className="space-y-4 sm:space-y-6">
-          <div className="flex justify-center">
-            <TabsList className="grid w-full max-w-sm grid-cols-3">
-              <TabsTrigger value="overview" className="text-xs sm:text-sm px-2">Overview</TabsTrigger>
-              <TabsTrigger value="orders" className="text-xs sm:text-sm px-2">Orders</TabsTrigger>
-              <TabsTrigger value="analytics" className="text-xs sm:text-sm px-2">Analytics</TabsTrigger>
-            </TabsList>
-          </div>
+        {/* Clean Tabs */}
+        <Tabs defaultValue="overview" className="space-y-6">
+          <TabsList className="grid w-full max-w-md grid-cols-3 h-11">
+            <TabsTrigger value="overview" className="text-sm font-medium">Overview</TabsTrigger>
+            <TabsTrigger value="orders" className="text-sm font-medium">Orders</TabsTrigger>
+            <TabsTrigger value="analytics" className="text-sm font-medium">Analytics</TabsTrigger>
+          </TabsList>
 
           {/* Overview Tab */}
-          <TabsContent value="overview" className="space-y-4 sm:space-y-6">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
+          <TabsContent value="overview" className="space-y-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {/* Order Status Breakdown */}
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
-                    <Package className="h-4 w-4" />
-                    Order Status
-                  </CardTitle>
-                  <CardDescription className="text-xs sm:text-sm">
-                    Current status of your orders
-                  </CardDescription>
+              <Card className="border-border">
+                <CardHeader className="pb-4">
+                  <div className="flex items-center gap-2">
+                    <div className="h-9 w-9 rounded-lg bg-primary/10 flex items-center justify-center">
+                      <Package className="h-5 w-5 text-primary" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-lg font-semibold">Order Status</CardTitle>
+                      <CardDescription className="text-sm">
+                        Distribution of your orders
+                      </CardDescription>
+                    </div>
+                  </div>
                 </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="space-y-2">
+                <CardContent className="space-y-4">
+                  <div className="space-y-3">
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <div className="h-2.5 w-2.5 bg-green-500 rounded-full"></div>
-                        <span className="text-xs sm:text-sm">Completed</span>
+                      <div className="flex items-center gap-2.5">
+                        <div className="h-2 w-2 bg-primary rounded-full"></div>
+                        <span className="text-sm font-medium text-foreground">Completed</span>
                       </div>
-                      <span className="font-semibold text-xs sm:text-sm">{stats?.orderStatusBreakdown?.completed || 0}</span>
+                      <span className="font-semibold text-sm">{stats?.orderStatusBreakdown?.completed || 0}</span>
                     </div>
-                    <Progress value={((stats?.orderStatusBreakdown?.completed || 0) / Math.max(stats?.totalOrders || 1, 1)) * 100} className="h-1.5" />
+                    <Progress value={((stats?.orderStatusBreakdown?.completed || 0) / Math.max(stats?.totalOrders || 1, 1)) * 100} className="h-2" />
                   </div>
 
-                  <div className="space-y-2">
+                  <div className="space-y-3">
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <div className="h-2.5 w-2.5 bg-yellow-500 rounded-full"></div>
-                        <span className="text-xs sm:text-sm">Pending</span>
+                      <div className="flex items-center gap-2.5">
+                        <div className="h-2 w-2 bg-primary/60 rounded-full"></div>
+                        <span className="text-sm font-medium text-foreground">Pending</span>
                       </div>
-                      <span className="font-semibold text-xs sm:text-sm">{stats?.orderStatusBreakdown?.pending || 0}</span>
+                      <span className="font-semibold text-sm">{stats?.orderStatusBreakdown?.pending || 0}</span>
                     </div>
-                    <Progress value={((stats?.orderStatusBreakdown?.pending || 0) / Math.max(stats?.totalOrders || 1, 1)) * 100} className="h-1.5" />
+                    <Progress value={((stats?.orderStatusBreakdown?.pending || 0) / Math.max(stats?.totalOrders || 1, 1)) * 100} className="h-2" />
                   </div>
 
-                  <div className="space-y-2">
+                  <div className="space-y-3">
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <div className="h-2.5 w-2.5 bg-red-500 rounded-full"></div>
-                        <span className="text-xs sm:text-sm">Failed</span>
+                      <div className="flex items-center gap-2.5">
+                        <div className="h-2 w-2 bg-destructive rounded-full"></div>
+                        <span className="text-sm font-medium text-foreground">Failed</span>
                       </div>
-                      <span className="font-semibold text-xs sm:text-sm">{stats?.orderStatusBreakdown?.failed || 0}</span>
+                      <span className="font-semibold text-sm">{stats?.orderStatusBreakdown?.failed || 0}</span>
                     </div>
-                    <Progress value={((stats?.orderStatusBreakdown?.failed || 0) / Math.max(stats?.totalOrders || 1, 1)) * 100} className="h-1.5" />
+                    <Progress value={((stats?.orderStatusBreakdown?.failed || 0) / Math.max(stats?.totalOrders || 1, 1)) * 100} className="h-2" />
                   </div>
                 </CardContent>
               </Card>
 
               {/* Account Information */}
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
-                    <Users className="h-4 w-4" />
-                    Account Information
-                  </CardTitle>
-                  <CardDescription className="text-xs sm:text-sm">
-                    Your account details and preferences
-                  </CardDescription>
+              <Card className="border-border">
+                <CardHeader className="pb-4">
+                  <div className="flex items-center gap-2">
+                    <div className="h-9 w-9 rounded-lg bg-primary/10 flex items-center justify-center">
+                      <Users className="h-5 w-5 text-primary" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-lg font-semibold">Account Information</CardTitle>
+                      <CardDescription className="text-sm">
+                        Your profile details
+                      </CardDescription>
+                    </div>
+                  </div>
                 </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="space-y-2">
-                    <div className="flex justify-between items-start gap-2">
-                      <span className="text-xs sm:text-sm text-muted-foreground">Name</span>
-                      <span className="font-medium text-xs sm:text-sm break-words text-right max-w-[60%]">{user?.name}</span>
+                <CardContent className="space-y-4">
+                  <div className="space-y-3.5">
+                    <div className="flex justify-between items-start gap-3">
+                      <span className="text-sm text-muted-foreground">Name</span>
+                      <span className="font-medium text-sm break-words text-right max-w-[60%]">{user?.name}</span>
                     </div>
                     <Separator />
-                    <div className="flex justify-between items-start gap-2">
-                      <span className="text-xs sm:text-sm text-muted-foreground">Email</span>
-                      <span className="font-medium text-xs sm:text-sm break-all text-right max-w-[60%]">{user?.email}</span>
+                    <div className="flex justify-between items-start gap-3">
+                      <span className="text-sm text-muted-foreground">Email</span>
+                      <span className="font-medium text-sm break-all text-right max-w-[60%]">{user?.email}</span>
                     </div>
                     <Separator />
-                    <div className="flex justify-between items-start gap-2">
-                      <span className="text-xs sm:text-sm text-muted-foreground">Member Since</span>
-                      <span className="font-medium text-xs sm:text-sm text-right">
+                    <div className="flex justify-between items-start gap-3">
+                      <span className="text-sm text-muted-foreground">Member Since</span>
+                      <span className="font-medium text-sm text-right">
                         {user?.createdAt ? new Date(user.createdAt).toLocaleDateString('en-IN', {
                           year: 'numeric',
-                          month: 'short'
+                          month: 'long'
                         }) : 'N/A'}
                       </span>
                     </div>
                     <Separator />
-                    <div className="flex justify-between items-center gap-2">
-                      <span className="text-xs sm:text-sm text-muted-foreground">Account Status</span>
-                      <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 text-xs">
+                    <div className="flex justify-between items-center gap-3">
+                      <span className="text-sm text-muted-foreground">Status</span>
+                      <Badge className="bg-primary/10 text-primary border-primary/20 hover:bg-primary/20">
                         Active
                       </Badge>
                     </div>
@@ -532,27 +539,32 @@ export default function Dashboard() {
             </div>
 
             {/* Recent Activity */}
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
-                  <ActivityIcon className="h-4 w-4" />
-                  Recent Orders
-                </CardTitle>
-                <CardDescription className="text-xs sm:text-sm">
-                  Your latest order activity
-                </CardDescription>
+            <Card className="border-border">
+              <CardHeader className="pb-4">
+                <div className="flex items-center gap-2">
+                  <div className="h-9 w-9 rounded-lg bg-primary/10 flex items-center justify-center">
+                    <ActivityIcon className="h-5 w-5 text-primary" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-lg font-semibold">Recent Orders</CardTitle>
+                    <CardDescription className="text-sm">
+                      Your latest transactions
+                    </CardDescription>
+                  </div>
+                </div>
               </CardHeader>
               <CardContent>
                 {stats?.recentOrders?.length ? (
-                  <div className="space-y-2">
+                  <div className="space-y-3">
                     {stats.recentOrders.slice(0, 5).map((order) => (
-                      <div key={order._id} className="flex items-center justify-between p-2 rounded-lg  border border-primary/30  bg-card hover:bg-muted/50 transition-colors gap-2">
-                        <div className="flex items-center gap-2 min-w-0 flex-1">
-                          <div className={cn("h-2 w-2 rounded-full flex-shrink-0", getStatusColor(order.status))} />
+                      <div key={order._id} className="flex items-center justify-between p-3.5 rounded-lg border border-border bg-card hover:bg-muted/30 transition-colors gap-3">
+                        <div className="flex items-center gap-3 min-w-0 flex-1">
+                          <div className={cn("h-2.5 w-2.5 rounded-full flex-shrink-0", getStatusColor(order.status))} />
                           <div className="min-w-0 flex-1">
-                            <p className="font-medium text-xs sm:text-sm line-clamp-1">{order.productName}</p>
-                            <div className="flex flex-col text-xs text-muted-foreground">
+                            <p className="font-medium text-sm line-clamp-1 text-foreground">{order.productName}</p>
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
                               <span className="line-clamp-1">{order.memory}</span>
+                              <span>•</span>
                               <span className="line-clamp-1">
                                 {new Date(order.createdAt).toLocaleDateString('en-IN', {
                                   month: 'short',
@@ -563,8 +575,8 @@ export default function Dashboard() {
                           </div>
                         </div>
                         <div className="text-right flex-shrink-0">
-                          <p className="font-semibold text-xs">{formatCurrency(order.price)}</p>
-                          <Badge variant="outline" className="text-xs mt-1 hidden sm:inline-flex">
+                          <p className="font-semibold text-sm">{formatCurrency(order.price)}</p>
+                          <Badge variant="outline" className="text-xs mt-1.5 hidden sm:inline-flex">
                             {order.status}
                           </Badge>
                         </div>
@@ -572,8 +584,10 @@ export default function Dashboard() {
                     ))}
                   </div>
                 ) : (
-                  <div className="text-center py-6">
-                    <Package className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
+                  <div className="text-center py-12">
+                    <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center mx-auto mb-3">
+                      <Package className="h-6 w-6 text-muted-foreground" />
+                    </div>
                     <p className="text-muted-foreground text-sm">No recent orders found</p>
                   </div>
                 )}
