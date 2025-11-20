@@ -111,7 +111,7 @@ const AdminSidebar = () => {
       icon: ServerIcon,
     },
     {
-      href: '/admin/orders',
+      href: '/admin/manageOrders',
       label: 'Orders',
       icon: BarChart3,
     },

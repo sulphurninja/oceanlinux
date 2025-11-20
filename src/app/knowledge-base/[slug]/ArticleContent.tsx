@@ -2,9 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 import {
   ArrowLeft,
   Clock,
@@ -17,10 +15,11 @@ import {
   Copy,
   Check,
   ChevronUp,
-  MessageCircle,
   Twitter,
   Facebook,
-  Linkedin
+  Linkedin,
+  Menu,
+  X
 } from "lucide-react";
 import Link from "next/link";
 import { toast } from 'sonner';
@@ -65,12 +64,12 @@ interface Props {
 }
 
 const categoryConfig = {
-  'Getting Started': { color: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300', icon: '🚀' },
-  'VPS Management': { color: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300', icon: '⚙️' },
-  'Security': { color: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300', icon: '🛡️' },
-  'Troubleshooting': { color: 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-300', icon: '🔧' },
-  'Billing': { color: 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300', icon: '💰' },
-  'General': { color: 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-300', icon: '📚' }
+  'Getting Started': { color: 'bg-green-500/20 text-green-400 border-green-500/30', icon: '🚀' },
+  'VPS Management': { color: 'bg-blue-500/20 text-blue-400 border-blue-500/30', icon: '⚙️' },
+  'Security': { color: 'bg-red-500/20 text-red-400 border-red-500/30', icon: '🛡️' },
+  'Troubleshooting': { color: 'bg-orange-500/20 text-orange-400 border-orange-500/30', icon: '🔧' },
+  'Billing': { color: 'bg-purple-500/20 text-purple-400 border-purple-500/30', icon: '💰' },
+  'General': { color: 'bg-gray-500/20 text-gray-400 border-gray-500/30', icon: '📚' }
 };
 
 // Comprehensive custom markdown parser
@@ -117,13 +116,13 @@ function parseMarkdown(content: string): string {
   html = html.replace(/^\d+\.\s+(.*$)/gim, '<li>$1</li>');
 
   // Wrap consecutive list items in ol tags
-  html = html.replace(/(<li>.*<\/li>\s*)+/gs, '<ol>$&</ol>');
+  html = html.replace(/(<li>.*<\/li>\s*)+/g, '<ol>$&</ol>');
 
   // Convert bullet points
   html = html.replace(/^[\*\-]\s+(.*$)/gim, '<li>$1</li>');
 
   // Wrap consecutive bullet points in ul tags (if not already in ol)
-  html = html.replace(/(<li>.*<\/li>)(?![^<]*<\/ol>)/gs, '<ul>$1</ul>');
+  html = html.replace(/(<li>.*<\/li>)(?![^<]*<\/ol>)/g, '<ul>$1</ul>');
 
   // Convert line breaks to paragraphs
   html = html.split('\n\n').map(paragraph => {
@@ -140,9 +139,9 @@ function parseMarkdown(content: string): string {
 
   // Clean up any double wrapping
   html = html.replace(/<p>(<h[1-6][^>]*>.*?<\/h[1-6]>)<\/p>/g, '$1');
-  html = html.replace(/<p>(<ul>.*?<\/ul>)<\/p>/gs, '$1');
-  html = html.replace(/<p>(<ol>.*?<\/ol>)<\/p>/gs, '$1');
-  html = html.replace(/<p>(<pre>.*?<\/pre>)<\/p>/gs, '$1');
+  html = html.replace(/<p>(<ul>.*?<\/ul>)<\/p>/g, '$1');
+  html = html.replace(/<p>(<ol>.*?<\/ol>)<\/p>/g, '$1');
+  html = html.replace(/<p>(<pre>.*?<\/pre>)<\/p>/g, '$1');
 
   return html;
 }
@@ -154,13 +153,15 @@ export default function ArticleContent({ article, relatedArticles }: Props) {
   const [showScrollTop, setShowScrollTop] = useState(false);
   const [readingProgress, setReadingProgress] = useState(0);
   const [formattedContent, setFormattedContent] = useState('');
+  const [tocOpen, setTocOpen] = useState(false);
 
   useEffect(() => {
+    // Force dark mode
+    document.documentElement.classList.add('dark');
+    
     // Parse the markdown content
     const htmlContent = parseMarkdown(article.content);
     setFormattedContent(htmlContent);
-    console.log('Original content:', article.content.substring(0, 200));
-    console.log('Formatted content:', htmlContent.substring(0, 200));
   }, [article.content]);
 
   useEffect(() => {
@@ -235,58 +236,69 @@ export default function ArticleContent({ article, relatedArticles }: Props) {
   const categoryInfo = categoryConfig[article.category as keyof typeof categoryConfig] || categoryConfig['General'];
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-[#0a0a0a] dark">
       <Header />
 
       {/* Reading Progress Bar */}
-      <div className="fixed top-0 left-0 w-full h-1 bg-muted z-50">
+      <div className="fixed top-0 left-0 w-full h-1 bg-white/5 z-50">
         <div
           className="h-full bg-primary transition-all duration-150"
           style={{ width: `${readingProgress}%` }}
         />
       </div>
 
-      <div className="container mx-auto px-4 py-8 max-w-6xl">
-        {/* Breadcrumb */}
-        <nav className="flex items-center space-x-2 text-sm text-muted-foreground mb-6">
-          <Link href="/" className="hover:text-foreground transition-colors">Home</Link>
-          <span>/</span>
-          <Link href="/knowledge-base" className="hover:text-foreground transition-colors">Knowledge Base</Link>
-          <span>/</span>
-          <Link href={`/knowledge-base?category=${article.category}`} className="hover:text-foreground transition-colors">
-            {article.category}
-          </Link>
-          <span>/</span>
-          <span className="text-foreground truncate">{article.title}</span>
-        </nav>
+      {/* Mobile TOC Toggle */}
+      <button
+        onClick={() => setTocOpen(!tocOpen)}
+        className="lg:hidden fixed bottom-20 right-4 z-40 bg-primary text-white rounded-full p-3 shadow-lg hover:bg-primary/90 transition-colors"
+      >
+        {tocOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+      </button>
 
-        <div className="grid lg:grid-cols-4 gap-8">
-          {/* Main Content */}
-          <div className="lg:col-span-3">
-            <article className="max-w-none">
+      <div className="w-full px-4 sm:px-6 lg:px-8 py-8 lg:py-12">
+        {/* Breadcrumb */}
+        <div className="max-w-7xl mx-auto mb-6">
+          <nav className="flex items-center space-x-2 text-sm text-white/50">
+            <Link href="/" className="hover:text-white transition-colors">Home</Link>
+            <span>/</span>
+            <Link href="/knowledge-base" className="hover:text-white transition-colors">Knowledge Base</Link>
+            <span>/</span>
+            <Link href={`/knowledge-base?category=${article.category}`} className="hover:text-white transition-colors">
+              {article.category}
+            </Link>
+            <span>/</span>
+            <span className="text-white truncate max-w-[150px] sm:max-w-[300px] lg:max-w-none">{article.title}</span>
+          </nav>
+        </div>
+
+        {/* Full Width Layout */}
+        <div className="max-w-7xl mx-auto">
+          <div className="grid lg:grid-cols-[1fr_300px] gap-8 lg:gap-12">
+            {/* Main Content - Full Width */}
+            <article className="min-w-0">
               {/* Article Header */}
               <header className="mb-10">
-                <div className="flex items-center gap-2 mb-6">
-                  <Badge className={categoryInfo.color}>
+                <div className="flex flex-wrap items-center gap-2 mb-6">
+                  <Badge className={`${categoryInfo.color} border`}>
                     <span className="mr-1">{categoryInfo.icon}</span>
                     {article.category}
                   </Badge>
                   {article.aiGenerated && (
-                    <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-900/20 dark:text-purple-300">
+                    <Badge className="bg-purple-500/20 text-purple-400 border border-purple-500/30">
                       🤖 AI Generated
                     </Badge>
                   )}
                 </div>
 
-                <h1 className="text-4xl lg:text-5xl font-bold leading-tight mb-6 text-foreground">
+                <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold leading-tight mb-6 text-white">
                   {article.title}
                 </h1>
 
-                <p className="text-xl text-muted-foreground mb-8 leading-relaxed">
+                <p className="text-lg sm:text-xl text-white/70 mb-8 leading-relaxed">
                   {article.excerpt}
                 </p>
 
-                <div className="flex flex-wrap items-center gap-6 text-sm text-muted-foreground mb-6">
+                <div className="flex flex-wrap items-center gap-4 sm:gap-6 text-sm text-white/60 mb-6">
                   {article.author && (
                     <div className="flex items-center">
                       <User className="w-4 h-4 mr-2" />
@@ -315,30 +327,30 @@ export default function ArticleContent({ article, relatedArticles }: Props) {
                 {article.tags && article.tags.length > 0 && (
                   <div className="flex flex-wrap gap-2 mb-6">
                     {article.tags.map((tag) => (
-                      <Badge key={tag} variant="secondary" className="text-xs">
+                      <Badge key={tag} className="bg-white/5 text-white/70 border border-white/10 text-xs">
                         #{tag}
                       </Badge>
                     ))}
                   </div>
                 )}
 
-                <Separator />
+                <div className="h-px bg-white/10 mb-8"></div>
               </header>
 
               {/* Article Content */}
-              <div className="article-content prose prose-lg max-w-none">
+              <div className="article-content prose prose-lg prose-invert max-w-none">
                 <div dangerouslySetInnerHTML={{ __html: formattedContent }} />
               </div>
 
               {/* Article Footer */}
-              <footer className="mt-16 pt-8 border-t">
-                <div className="flex flex-wrap items-center justify-between gap-4">
-                  <div className="flex items-center space-x-4">
+              <footer className="mt-16 pt-8 border-t border-white/10">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                  <div className="flex items-center gap-3">
                     <Button
                       variant={liked ? "default" : "outline"}
                       size="sm"
                       onClick={handleLike}
-                      className="flex items-center"
+                      className={`flex items-center ${liked ? 'bg-primary text-white' : 'bg-white/5 text-white/70 border-white/20 hover:bg-white/10'}`}
                     >
                       <ThumbsUp className="w-4 h-4 mr-2" />
                       {liked ? 'Liked' : 'Like'} ({article.likes})
@@ -347,32 +359,32 @@ export default function ArticleContent({ article, relatedArticles }: Props) {
                       variant={bookmarked ? "default" : "outline"}
                       size="sm"
                       onClick={handleBookmark}
-                      className="flex items-center"
+                      className={`flex items-center ${bookmarked ? 'bg-primary text-white' : 'bg-white/5 text-white/70 border-white/20 hover:bg-white/10'}`}
                     >
                       <Bookmark className="w-4 h-4 mr-2" />
                       {bookmarked ? 'Saved' : 'Save'}
                     </Button>
                   </div>
 
-                  <div className="flex items-center space-x-2">
-                    <span className="text-sm text-muted-foreground mr-2">Share:</span>
-                    <Button variant="outline" size="sm" onClick={shareOnTwitter}>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-white/50 mr-2">Share:</span>
+                    <Button variant="outline" size="sm" onClick={shareOnTwitter} className="bg-white/5 text-white/70 border-white/20 hover:bg-white/10">
                       <Twitter className="w-4 h-4" />
                     </Button>
-                    <Button variant="outline" size="sm" onClick={shareOnFacebook}>
+                    <Button variant="outline" size="sm" onClick={shareOnFacebook} className="bg-white/5 text-white/70 border-white/20 hover:bg-white/10">
                       <Facebook className="w-4 h-4" />
                     </Button>
-                    <Button variant="outline" size="sm" onClick={shareOnLinkedIn}>
+                    <Button variant="outline" size="sm" onClick={shareOnLinkedIn} className="bg-white/5 text-white/70 border-white/20 hover:bg-white/10">
                       <Linkedin className="w-4 h-4" />
                     </Button>
-                    <Button variant="outline" size="sm" onClick={copyToClipboard}>
+                    <Button variant="outline" size="sm" onClick={copyToClipboard} className="bg-white/5 text-white/70 border-white/20 hover:bg-white/10">
                       {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
                     </Button>
                   </div>
                 </div>
 
                 {article.lastModified && (
-                  <p className="text-xs text-muted-foreground mt-6">
+                  <p className="text-xs text-white/40 mt-6">
                     Last updated: {new Date(article.lastModified).toLocaleDateString('en-US', {
                       year: 'numeric',
                       month: 'long',
@@ -381,57 +393,94 @@ export default function ArticleContent({ article, relatedArticles }: Props) {
                   </p>
                 )}
               </footer>
-            </article>
-          </div>
 
-          {/* Sidebar */}
-          <div className="lg:col-span-1">
-            <div className="sticky top-8 space-y-6">
-              {/* Table of Contents */}
-              <Card>
-                <CardContent className="p-4">
-                  <h3 className="font-semibold mb-3">Table of Contents</h3>
-                  <TableOfContents content={formattedContent} />
-                </CardContent>
-              </Card>
-
-              {/* Quick Actions */}
-              <Card>
-                <CardContent className="p-4">
-                  <h3 className="font-semibold mb-3">Quick Actions</h3>
-                  <div className="space-y-2">
-                    <Button variant="outline" size="sm" className="w-full justify-start" onClick={handleLike}>
-                      <ThumbsUp className="w-4 h-4 mr-2" />
-                      {liked ? 'Unlike' : 'Like this article'}
-                    </Button>
-                    <Button variant="outline" size="sm" className="w-full justify-start" onClick={handleBookmark}>
-                      <Bookmark className="w-4 h-4 mr-2" />
-                      {bookmarked ? 'Remove bookmark' : 'Bookmark'}
-                    </Button>
-                    <Button variant="outline" size="sm" className="w-full justify-start" onClick={copyToClipboard}>
-                      <Share2 className="w-4 h-4 mr-2" />
-                      Share article
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Related Articles */}
+              {/* Related Articles - Mobile */}
               {relatedArticles.length > 0 && (
-                <Card>
-                  <CardContent className="p-4">
-                    <h3 className="font-semibold mb-3">Related Articles</h3>
+                <div className="lg:hidden mt-12 pt-8 border-t border-white/10">
+                  <h3 className="text-xl font-semibold text-white mb-4">Related Articles</h3>
+                  <div className="space-y-4">
+                    {relatedArticles.map((related) => (
+                      <Link key={related._id} href={`/knowledge-base/${related.slug}`}>
+                        <div className="p-4 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 transition-colors">
+                          <h4 className="font-medium text-white line-clamp-2 mb-2">
+                            {related.title}
+                          </h4>
+                          <p className="text-sm text-white/60 line-clamp-2 mb-3">
+                            {related.excerpt}
+                          </p>
+                          <div className="flex items-center text-xs text-white/50">
+                            <Clock className="w-3 h-3 mr-1" />
+                            {related.readTime} min
+                            <Eye className="w-3 h-3 mr-1 ml-3" />
+                            {related.views}
+                          </div>
+                        </div>
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Navigation */}
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-12 pt-8 border-t border-white/10">
+                <Link href="/knowledge-base">
+                  <Button variant="outline" className="bg-white/5 text-white/70 border-white/20 hover:bg-white/10 w-full sm:w-auto">
+                    <ArrowLeft className="w-4 h-4 mr-2" />
+                    Back to Knowledge Base
+                  </Button>
+                </Link>
+
+                {relatedArticles.length > 0 && (
+                  <Link href={`/knowledge-base/${relatedArticles[0].slug}`}>
+                    <Button variant="outline" className="bg-white/5 text-white/70 border-white/20 hover:bg-white/10 w-full sm:w-auto">
+                      Next Article
+                      <ArrowLeft className="w-4 h-4 ml-2 rotate-180" />
+                    </Button>
+                  </Link>
+                )}
+              </div>
+            </article>
+
+            {/* Sidebar - Desktop & Mobile Overlay */}
+            <aside className={`
+              lg:block lg:sticky lg:top-24 lg:h-fit
+              ${tocOpen ? 'fixed' : 'hidden'}
+              lg:relative inset-0 lg:inset-auto
+              z-50 lg:z-auto
+              bg-[#0a0a0a] lg:bg-transparent
+              p-6 lg:p-0
+              overflow-y-auto lg:overflow-visible
+            `}>
+              {/* Mobile Close Button */}
+              <button
+                onClick={() => setTocOpen(false)}
+                className="lg:hidden absolute top-4 right-4 text-white/70 hover:text-white"
+              >
+                <X className="w-6 h-6" />
+              </button>
+
+              <div className="space-y-6">
+                {/* Table of Contents */}
+                <div className="bg-white/5 border border-white/10 rounded-lg p-4">
+                  <h3 className="font-semibold text-white mb-4 text-lg">Table of Contents</h3>
+                  <TableOfContents content={formattedContent} onItemClick={() => setTocOpen(false)} />
+                </div>
+
+                {/* Related Articles - Desktop */}
+                {relatedArticles.length > 0 && (
+                  <div className="hidden lg:block bg-white/5 border border-white/10 rounded-lg p-4">
+                    <h3 className="font-semibold text-white mb-4">Related Articles</h3>
                     <div className="space-y-3">
                       {relatedArticles.map((related) => (
                         <Link key={related._id} href={`/knowledge-base/${related.slug}`}>
-                          <div className="p-3 rounded-lg hover:bg-muted transition-colors">
-                            <h4 className="font-medium text-sm line-clamp-2 mb-1">
+                          <div className="p-3 rounded-lg hover:bg-white/10 transition-colors">
+                            <h4 className="font-medium text-white text-sm line-clamp-2 mb-1">
                               {related.title}
                             </h4>
-                            <p className="text-xs text-muted-foreground line-clamp-2 mb-2">
+                            <p className="text-xs text-white/60 line-clamp-2 mb-2">
                               {related.excerpt}
                             </p>
-                            <div className="flex items-center text-xs text-muted-foreground">
+                            <div className="flex items-center text-xs text-white/50">
                               <Clock className="w-3 h-3 mr-1" />
                               {related.readTime} min
                               <Eye className="w-3 h-3 mr-1 ml-2" />
@@ -441,53 +490,18 @@ export default function ArticleContent({ article, relatedArticles }: Props) {
                         </Link>
                       ))}
                     </div>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Help Section */}
-              <Card>
-                <CardContent className="p-4">
-                  <h3 className="font-semibold mb-3">Need Help?</h3>
-                  <p className="text-sm text-muted-foreground mb-3">
-                    Can't find what you're looking for? Our support team is here to help.
-                  </p>
-                  <Link href="/contact">
-                    <Button size="sm" className="w-full">
-                      <MessageCircle className="w-4 h-4 mr-2" />
-                      Contact Support
-                    </Button>
-                  </Link>
-                </CardContent>
-              </Card>
-            </div>
+                  </div>
+                )}
+              </div>
+            </aside>
           </div>
-        </div>
-
-        {/* Navigation */}
-        <div className="flex items-center justify-between mt-16 pt-8 border-t">
-          <Link href="/knowledge-base">
-            <Button variant="outline">
-              <ArrowLeft className="w-4 h-4 mr-2" />
-              Back to Knowledge Base
-            </Button>
-          </Link>
-
-          {relatedArticles.length > 0 && (
-            <Link href={`/knowledge-base/${relatedArticles[0].slug}`}>
-              <Button variant="outline">
-                Next Article
-                <ArrowLeft className="w-4 h-4 ml-2 rotate-180" />
-              </Button>
-            </Link>
-          )}
         </div>
       </div>
 
       {/* Scroll to Top Button */}
       {showScrollTop && (
         <Button
-          className="fixed bottom-6 right-6 rounded-full w-12 h-12 p-0 shadow-lg z-40"
+          className="fixed bottom-6 right-6 rounded-full w-12 h-12 p-0 shadow-lg z-40 bg-primary text-white hover:bg-primary/90"
           onClick={scrollToTop}
         >
           <ChevronUp className="w-5 h-5" />
@@ -500,7 +514,7 @@ export default function ArticleContent({ article, relatedArticles }: Props) {
 }
 
 // Enhanced Table of Contents Component
-function TableOfContents({ content }: { content: string }) {
+function TableOfContents({ content, onItemClick }: { content: string; onItemClick?: () => void }) {
   const [toc, setToc] = useState<Array<{ id: string; text: string; level: number }>>([]);
   const [activeId, setActiveId] = useState<string>('');
 
@@ -553,20 +567,21 @@ function TableOfContents({ content }: { content: string }) {
   const scrollToHeading = (id: string) => {
     const element = document.getElementById(id);
     if (element) {
-      const offset = 120; // Account for fixed header and padding
+      const offset = 120;
       const top = element.offsetTop - offset;
       window.scrollTo({ top, behavior: 'smooth' });
+      onItemClick?.();
     }
   };
 
   if (toc.length === 0) {
     return (
-      <p className="text-sm text-muted-foreground">No headings found in this article.</p>
+      <p className="text-sm text-white/50">No headings found in this article.</p>
     );
   }
 
   return (
-    <nav className="space-y-1 max-h-96 overflow-y-auto">
+    <nav className="space-y-1 max-h-[60vh] lg:max-h-96 overflow-y-auto">
       {toc.map((item) => (
         <button
           key={item.id}
@@ -575,11 +590,11 @@ function TableOfContents({ content }: { content: string }) {
             block w-full text-left text-sm transition-colors py-2 px-3 rounded-md
             ${activeId === item.id
               ? 'text-primary bg-primary/10 font-medium border-l-2 border-primary'
-              : 'hover:text-primary hover:bg-muted'
+              : 'text-white/70 hover:text-white hover:bg-white/5'
             }
-            ${item.level === 1 ? 'font-medium text-base' : ''}
+            ${item.level === 1 ? 'font-medium' : ''}
             ${item.level === 2 ? 'font-medium' : ''}
-            ${item.level > 2 ? 'text-muted-foreground text-xs' : ''}
+            ${item.level > 2 ? 'text-white/60 text-xs' : ''}
           `}
           style={{
             paddingLeft: `${(item.level - 1) * 16 + 12}px`,

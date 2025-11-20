@@ -2,13 +2,20 @@
 
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
-import { LucideWaves, Menu, X } from "lucide-react"
+import { LucideWaves, Menu, X, ChevronDown } from "lucide-react"
 import { useState } from "react"
 import { ThemeToggle } from "@/components/ui/theme-toggle"
 import EmailSupportDialog from "@/components/EmailSupportDialog"
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 
 export default function Header() {
     const [isMenuOpen, setIsMenuOpen] = useState(false)
+    const [resourcesOpen, setResourcesOpen] = useState(false)
 
     return (
         <header className="sticky top-0 z-50 bg-foreground dark:bg-background border-b border-background/20 dark:border-border/20">
@@ -54,18 +61,39 @@ export default function Header() {
                     </Link>
 
                     {/* Desktop Navigation */}
-                    <nav className="hidden lg:flex items-center space-x-8">
+                    <nav className="hidden lg:flex items-center space-x-6">
                         <Link href="/hosting" className="text-background dark:text-foreground hover:text-primary transition-colors font-medium">
-                            Affordable Hosting
+                            Hosting Plans
                         </Link>
                         <Link href="/vps" className="text-background dark:text-foreground hover:text-primary transition-colors font-medium">
-                            Linux VPS & Servers
+                            VPS Servers
                         </Link>
                         <Link href="/series" className="text-background dark:text-foreground hover:text-primary transition-colors font-medium">
                             Server Series
                         </Link>
+                        
+                        {/* Resources Dropdown */}
+                        <DropdownMenu>
+                            <DropdownMenuTrigger className="flex items-center gap-1 text-background dark:text-foreground hover:text-primary transition-colors font-medium focus:outline-none">
+                                Resources
+                                <ChevronDown className="h-3.5 w-3.5" />
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="start" className="w-48">
+                                <DropdownMenuItem asChild>
+                                    <Link href="/knowledge-base" className="flex items-center gap-2 cursor-pointer">
+                                        📚 Knowledge Base
+                                    </Link>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem asChild>
+                                    <Link href="/docs/api" className="flex items-center gap-2 cursor-pointer">
+                                        🔌 API Docs
+                                    </Link>
+                                </DropdownMenuItem>
+                            </DropdownMenuContent>
+                        </DropdownMenu>
+
                         <Link href="/live-chat" className="text-background dark:text-foreground hover:text-primary transition-colors font-medium">
-                            💬 24/7 Support
+                            24/7 Support
                         </Link>
                     </nav>
 
@@ -112,14 +140,14 @@ export default function Header() {
                                 className="text-background dark:text-foreground hover:text-primary transition-colors font-medium"
                                 onClick={() => setIsMenuOpen(false)}
                             >
-                                💰 Affordable Hosting
+                                💰 Hosting Plans
                             </Link>
                             <Link
                                 href="/vps"
                                 className="text-background dark:text-foreground hover:text-primary transition-colors font-medium"
                                 onClick={() => setIsMenuOpen(false)}
                             >
-                                🚀 Linux VPS & Servers
+                                🚀 VPS Servers
                             </Link>
                             <Link
                                 href="/series"
@@ -128,8 +156,38 @@ export default function Header() {
                             >
                                 🔄 Server Series
                             </Link>
+                            
+                            {/* Resources Submenu */}
+                            <div className="space-y-2">
+                                <button
+                                    onClick={() => setResourcesOpen(!resourcesOpen)}
+                                    className="flex items-center justify-between w-full text-background dark:text-foreground hover:text-primary transition-colors font-medium"
+                                >
+                                    📚 Resources
+                                    <ChevronDown className={`h-4 w-4 transition-transform ${resourcesOpen ? 'rotate-180' : ''}`} />
+                                </button>
+                                {resourcesOpen && (
+                                    <div className="pl-6 space-y-2 animate-fade-in">
+                                        <Link
+                                            href="/knowledge-base"
+                                            className="block text-background/80 dark:text-foreground/80 hover:text-primary transition-colors text-sm"
+                                            onClick={() => setIsMenuOpen(false)}
+                                        >
+                                            📚 Knowledge Base
+                                        </Link>
+                                        <Link
+                                            href="/docs/api"
+                                            className="block text-background/80 dark:text-foreground/80 hover:text-primary transition-colors text-sm"
+                                            onClick={() => setIsMenuOpen(false)}
+                                        >
+                                            🔌 API Docs
+                                        </Link>
+                                    </div>
+                                )}
+                            </div>
+
                             <Link
-                                href="/support"
+                                href="/live-chat"
                                 className="text-background dark:text-foreground hover:text-primary transition-colors font-medium"
                                 onClick={() => setIsMenuOpen(false)}
                             >
@@ -145,8 +203,8 @@ export default function Header() {
                                     </Button>
                                 </Link>
                                 <Link href="/get-started" onClick={() => setIsMenuOpen(false)}>
-                                    <Button className="btn-primary w-full">
-                                        🚀 Get Most Affordable VPS
+                                    <Button className="btn-primary w-full mt-2">
+                                        🚀 Get Started
                                     </Button>
                                 </Link>
                             </div>

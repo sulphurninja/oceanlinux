@@ -16,11 +16,58 @@ const L = {
   line: (msg = '') => console.log(`[AUTO-PROVISION] ${msg}`),
 };
 
+// CRITICAL: In-memory lock to prevent race conditions when provisioning from the same package
+// This ensures only ONE order can provision from a specific SmartVPS package at a time
+const provisioningLocks = new Map(); // Key: packageName, Value: { locked: true, orderId: "..." }
+
 class AutoProvisioningService {
   constructor() {
     this.hostycareApi = new HostycareAPI();
     this.smartvpsApi = new SmartVpsAPI();
     console.log('[AUTO-PROVISION-SERVICE] 🏗️ AutoProvisioningService instance created');
+  }
+
+  // Acquire a lock for a specific SmartVPS package
+  async acquirePackageLock(packageName, orderId, maxWaitMs = 30000) {
+    const startTime = Date.now();
+    
+    while (Date.now() - startTime < maxWaitMs) {
+      const existingLock = provisioningLocks.get(packageName);
+      
+      if (!existingLock) {
+        // No lock exists, acquire it
+        provisioningLocks.set(packageName, { locked: true, orderId, acquiredAt: new Date() });
+        L.line(`[LOCK] 🔒 Acquired lock for package "${packageName}" (order: ${orderId})`);
+        return true;
+      }
+      
+      // Lock exists, check if it's stale (older than 2 minutes = likely crashed)
+      const lockAge = Date.now() - new Date(existingLock.acquiredAt).getTime();
+      if (lockAge > 120000) {
+        L.line(`[LOCK] ⚠️ Stale lock detected for "${packageName}" (age: ${lockAge}ms), releasing...`);
+        provisioningLocks.delete(packageName);
+        continue;
+      }
+      
+      // Lock is held by another order, wait
+      L.line(`[LOCK] ⏳ Package "${packageName}" is locked by order ${existingLock.orderId}, waiting...`);
+      await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
+    }
+    
+    // Timeout
+    throw new Error(`Failed to acquire lock for package "${packageName}" after ${maxWaitMs}ms. Another order is currently provisioning from this package.`);
+  }
+
+  // Release a lock for a specific SmartVPS package
+  releasePackageLock(packageName, orderId) {
+    const existingLock = provisioningLocks.get(packageName);
+    
+    if (existingLock && existingLock.orderId === orderId) {
+      provisioningLocks.delete(packageName);
+      L.line(`[LOCK] 🔓 Released lock for package "${packageName}" (order: ${orderId})`);
+    } else {
+      L.line(`[LOCK] ⚠️ Attempted to release lock for "${packageName}" but it's not held by order ${orderId}`);
+    }
   }
 
   // ULTRA-SIMPLE password generator (kept)
@@ -215,6 +262,14 @@ class AutoProvisioningService {
         throw new Error(`Package "${storedName}" (PID: ${storedPid}) has no available IPs. IPv4 count: ${exactMatch.ipv4}`);
       }
 
+      // SAFETY: Warn if running low on IPs (potential race condition risk)
+      const ipCount = Number(exactMatch.ipv4 || 0);
+      if (ipCount <= 5) {
+        L.line(`[SMARTVPS] ⚠️ WARNING: Package running low on IPs!`);
+        L.kv('[SMARTVPS]   → Available IPv4', ipCount);
+        L.line(`[SMARTVPS]   → Risk: Concurrent orders may cause SmartVPS to assign from different package`);
+      }
+
       L.line(`[SMARTVPS] ✅ Exact package verified and available:`);
       L.kv('[SMARTVPS]   → ID', exactMatch.id);
       L.kv('[SMARTVPS]   → Name', exactMatch.name);
@@ -337,10 +392,23 @@ class AutoProvisioningService {
     const pkg = await this.pickSmartVpsPackage(ipStock, order);
     L.kv('[SMARTVPS] Using package for buy', pkg);
 
-    // Buy VPS with timeout and retry logic
-    let buyRes, boughtIp;
-    const maxRetries = 3;
-    let lastError;
+    // CRITICAL: Acquire lock to prevent race conditions
+    // This ensures only ONE order provisions from this package at a time
+    let lockAcquired = false;
+    try {
+      await this.acquirePackageLock(pkg.name, order._id.toString());
+      lockAcquired = true;
+    } catch (lockError) {
+      L.line(`[SMARTVPS] ❌ Failed to acquire lock: ${lockError.message}`);
+      throw new Error(`Cannot provision: ${lockError.message}. Please try again in a moment.`);
+    }
+
+    // Wrap entire provisioning in try-finally to ensure lock is released
+    try {
+      // Buy VPS with timeout and retry logic
+      let buyRes, boughtIp;
+      const maxRetries = 3;
+      let lastError;
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
@@ -364,8 +432,40 @@ class AutoProvisioningService {
           throw new Error('SmartVPS buyVps did not return an assigned IP');
         }
 
+        // CRITICAL SAFETY CHECK: Verify the IP belongs to the requested package
+        // Extract the base IP network (e.g., "103.181.91" from "103.181.91.50")
+        const requestedPackage = pkg.name; // e.g., "103.181.91"
+        const assignedIpBase = boughtIp.split('.').slice(0, 3).join('.'); // e.g., "103.181.91"
+        
+        if (!boughtIp.startsWith(requestedPackage)) {
+          L.line(`[SMARTVPS] ❌ CRITICAL: SmartVPS assigned IP from WRONG package!`);
+          L.kv('[SMARTVPS]   → Requested package', requestedPackage);
+          L.kv('[SMARTVPS]   → Assigned IP', boughtIp);
+          L.kv('[SMARTVPS]   → IP base network', assignedIpBase);
+          L.line(`[SMARTVPS]   → This indicates the requested package ran out of IPs`);
+          L.line(`[SMARTVPS]   → SmartVPS API fallback behavior detected!`);
+          L.line(`[SMARTVPS]   → ORDER WILL BE MARKED AS FAILED (not provisioned)`);
+          
+          // Mark order as failed immediately (will be caught by outer try-catch)
+          await Order.findByIdAndUpdate(order._id, {
+            provisioningStatus: 'failed',
+            provisioningError: `WRONG PACKAGE ASSIGNED: Customer ordered "${requestedPackage}" but SmartVPS assigned "${boughtIp}". Package likely ran out of IPs. DO NOT provision this order.`,
+            status: 'failed',
+            autoProvisioned: true,
+            failedAt: new Date(),
+          });
+          
+          throw new Error(
+            `❌ PROVISIONING BLOCKED: SmartVPS assigned IP from wrong package! ` +
+            `Customer ordered "${requestedPackage}" but received "${boughtIp}". ` +
+            `This order has been marked as FAILED and will NOT be provisioned. ` +
+            `Reason: Package ran out of IPs or SmartVPS API bug. Admin must manually resolve.`
+          );
+        }
+
         // Success - break out of retry loop
         L.line(`[SMARTVPS] ✅ buyVps succeeded on attempt ${attempt}`);
+        L.line(`[SMARTVPS] ✅ IP verification passed: ${boughtIp} matches package ${requestedPackage}`);
         break;
 
       } catch (error) {
@@ -444,6 +544,7 @@ class AutoProvisioningService {
     const updateData = {
       status: 'active',
       provisioningStatus: 'active',
+      provider: 'smartvps',  // Explicitly set provider
       hostycareServiceId: undefined,
       username,
       password,
@@ -455,25 +556,32 @@ class AutoProvisioningService {
     };
     await Order.findByIdAndUpdate(order._id, updateData);
 
-    const totalTime = Date.now() - startTime;
-    console.log("\n" + "✅".repeat(80));
-    console.log(`[SMARTVPS] ✅ PROVISIONING COMPLETED`);
-    console.log(`   - Order ID: ${order._id}`);
-    console.log(`   - IP: ${ipAddress}`);
-    console.log(`   - Username: ${username}`);
-    console.log(`   - OS: ${os}`);
-    console.log(`   - Total Time: ${totalTime}ms`);
-    console.log("✅".repeat(80));
+      const totalTime = Date.now() - startTime;
+      console.log("\n" + "✅".repeat(80));
+      console.log(`[SMARTVPS] ✅ PROVISIONING COMPLETED`);
+      console.log(`   - Order ID: ${order._id}`);
+      console.log(`   - IP: ${ipAddress}`);
+      console.log(`   - Username: ${username}`);
+      console.log(`   - OS: ${os}`);
+      console.log(`   - Total Time: ${totalTime}ms`);
+      console.log("✅".repeat(80));
 
-    return {
-      success: true,
-      serviceId: null,
-      ipAddress,
-      credentials: { username, password },
-      hostname: null,
-      productId: null,
-      totalTime
-    };
+      return {
+        success: true,
+        serviceId: null,
+        ipAddress,
+        credentials: { username, password },
+        hostname: null,
+        productId: null,
+        totalTime
+      };
+
+    } finally {
+      // ALWAYS release the lock, even if provisioning failed
+      if (lockAcquired) {
+        this.releasePackageLock(pkg.name, order._id.toString());
+      }
+    }
   }
 
   // --- UTILITY METHODS -----------------------------------------------------
@@ -626,13 +734,14 @@ class AutoProvisioningService {
       const formattedIpAddress = formatIpAddress(
         ipAddress || 'Pending - Server being provisioned',
         'hostycare',
-        order.os
+        targetOS  // Use targetOS (the newly set OS) instead of order.os (old value)
       );
 
       const updateData = {
         status: 'active',
         provisioningStatus: 'active',
         hostycareServiceId: serviceId,
+        provider: 'hostycare',  // Explicitly set provider
         username: credentials.username,
         password: credentials.password,
         autoProvisioned: true,

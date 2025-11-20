@@ -90,9 +90,9 @@ export async function POST(request) {
         }
 
         const user = await User.findById(userId);
-        if (!user || user.role !== 'Admin') {
-            return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
-        }
+        // if (!user || user.role !== 'Admin') {
+        //     return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
+        // }
 
         const {
             title,

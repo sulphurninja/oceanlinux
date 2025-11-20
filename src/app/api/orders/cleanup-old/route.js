@@ -5,8 +5,9 @@ import Order from '@/models/orderModel';
 /**
  * DELETE old orders that are stuck or abandoned:
  * 1. Expired orders (3+ days past expiry)
- * 2. Failed orders (7+ days old)
- * 3. Pending/unconfirmed orders (3+ days old)
+ * 2. Pending/unconfirmed orders (3+ days old)
+ * 
+ * NOTE: Failed orders are NEVER deleted (kept for audit/debugging purposes)
  * 
  * This endpoint should be called by a cron job regularly
  */
@@ -24,7 +25,6 @@ export async function POST(request) {
 
     const results = {
       expired: { count: 0, orders: [] },
-      failed: { count: 0, orders: [] },
       pending: { count: 0, orders: [] }
     };
 
@@ -58,36 +58,16 @@ export async function POST(request) {
       console.log(`[CLEANUP-ALL]   ✨ No expired orders found`);
     }
 
-    // 2. DELETE FAILED ORDERS (7+ days old)
-    console.log('\n[CLEANUP-ALL] 🗑️  Phase 2: Deleting old failed orders...');
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-
-    const failedOrders = await Order.find({
+    // 2. SKIP FAILED ORDERS (NEVER DELETE - kept for audit/debugging)
+    console.log('\n[CLEANUP-ALL] 🔒 Phase 2: Checking failed orders...');
+    const failedOrdersCount = await Order.countDocuments({
       $or: [
         { status: 'failed' },
         { provisioningStatus: 'failed' }
-      ],
-      createdAt: { $lt: sevenDaysAgo }
-    }).select('_id productName status provisioningStatus createdAt');
-
-    if (failedOrders.length > 0) {
-      console.log(`[CLEANUP-ALL]   Found ${failedOrders.length} old failed orders`);
-      const deleteFailed = await Order.deleteMany({
-        _id: { $in: failedOrders.map(o => o._id) }
-      });
-      results.failed.count = deleteFailed.deletedCount;
-      results.failed.orders = failedOrders.map(o => ({
-        id: o._id.toString(),
-        productName: o.productName,
-        status: o.status,
-        createdAt: o.createdAt,
-        daysOld: Math.floor((new Date() - new Date(o.createdAt)) / (1000 * 60 * 60 * 24))
-      }));
-      console.log(`[CLEANUP-ALL]   ✅ Deleted ${deleteFailed.deletedCount} failed orders`);
-    } else {
-      console.log(`[CLEANUP-ALL]   ✨ No old failed orders found`);
-    }
+      ]
+    });
+    console.log(`[CLEANUP-ALL]   ℹ️  Found ${failedOrdersCount} failed orders (PRESERVED - never deleted)`);
+    console.log(`[CLEANUP-ALL]   ℹ️  Failed orders are kept for debugging and audit purposes`);
 
     // 3. DELETE PENDING/UNCONFIRMED ORDERS (3+ days old)
     console.log('\n[CLEANUP-ALL] 🗑️  Phase 3: Deleting old pending orders...');
@@ -115,23 +95,23 @@ export async function POST(request) {
       console.log(`[CLEANUP-ALL]   ✨ No old pending orders found`);
     }
 
-    const totalDeleted = results.expired.count + results.failed.count + results.pending.count;
+    const totalDeleted = results.expired.count + results.pending.count;
     
     console.log('\n[CLEANUP-ALL] 📊 CLEANUP SUMMARY:');
-    console.log(`[CLEANUP-ALL]   Expired orders: ${results.expired.count}`);
-    console.log(`[CLEANUP-ALL]   Failed orders: ${results.failed.count}`);
-    console.log(`[CLEANUP-ALL]   Pending orders: ${results.pending.count}`);
+    console.log(`[CLEANUP-ALL]   Expired orders deleted: ${results.expired.count}`);
+    console.log(`[CLEANUP-ALL]   Failed orders preserved: ${failedOrdersCount} (never deleted)`);
+    console.log(`[CLEANUP-ALL]   Pending orders deleted: ${results.pending.count}`);
     console.log(`[CLEANUP-ALL]   Total deleted: ${totalDeleted}`);
     console.log(`[CLEANUP-ALL] ⏱️  Execution time: ${Date.now() - startTime}ms`);
     console.log("🧹".repeat(40) + "\n");
 
     return NextResponse.json({
       success: true,
-      message: `Successfully cleaned up ${totalDeleted} orders`,
+      message: `Successfully cleaned up ${totalDeleted} orders (failed orders preserved)`,
       totalDeleted,
       breakdown: {
         expired: results.expired.count,
-        failed: results.failed.count,
+        failedPreserved: failedOrdersCount,
         pending: results.pending.count
       },
       details: results,

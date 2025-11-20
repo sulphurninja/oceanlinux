@@ -261,10 +261,20 @@ export async function POST(request) {
           console.log(`[SERVICE-ACTION][POST] Step 4: Reinstall operation completed in ${duration}ms`);
           console.log(`[SERVICE-ACTION][POST] API Response keys:`, Object.keys(apiRes || {}));
 
-          // Update order with new password and log
+          // Format IP address with port if needed (Windows Hostycare requires :49965)
+          const { formatIpAddress } = await import('@/lib/ipAddressHelper.js');
+          const currentIp = order.ipAddress || ipAddress;
+          const formattedIpAddress = formatIpAddress(
+            currentIp,
+            order.provider || 'hostycare',
+            order.os
+          );
+
+          // Update order with new password, formatted IP, and log
           await Order.findByIdAndUpdate(orderId, {
             $set: {
               password: pwd,
+              ipAddress: formattedIpAddress,  // Ensure port is added if missing
               lastAction: 'reinstall',
               lastActionTime: new Date()
             },

@@ -36,6 +36,7 @@ interface ArticleForm {
   featured: boolean;
   seoTitle: string;
   seoDescription: string;
+  useMarkdown: boolean;
 }
 
 export default function NewArticlePage() {
@@ -50,7 +51,8 @@ export default function NewArticlePage() {
     published: false,
     featured: false,
     seoTitle: '',
-    seoDescription: ''
+    seoDescription: '',
+    useMarkdown: true
   });
 
   const quillModules = {
@@ -188,16 +190,51 @@ export default function NewArticlePage() {
                 </div>
 
                 <div>
-                  <label className="text-sm font-medium">Content *</label>
-                  <div className="mt-1">
-                    <ReactQuill
-                      theme="snow"
-                      value={form.content}
-                      onChange={(value) => setForm({ ...form, content: value })}
-                      modules={quillModules}
-                      style={{ height: '400px', marginBottom: '50px' }}
-                    />
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-sm font-medium">Content *</label>
+                    <div className="flex items-center space-x-2">
+                      <span className="text-xs text-muted-foreground">Use Markdown</span>
+                      <Switch
+                        checked={form.useMarkdown}
+                        onCheckedChange={(checked) => setForm({ ...form, useMarkdown: checked })}
+                      />
+                    </div>
                   </div>
+                  <div className="mt-1">
+                    {form.useMarkdown ? (
+                      <Textarea
+                        value={form.content}
+                        onChange={(e) => setForm({ ...form, content: e.target.value })}
+                        placeholder="Write your content in Markdown format...&#10;&#10;# Heading 1&#10;## Heading 2&#10;### Heading 3&#10;&#10;**Bold text**&#10;*Italic text*&#10;&#10;- Bullet point 1&#10;- Bullet point 2&#10;&#10;1. Numbered item 1&#10;2. Numbered item 2&#10;&#10;```bash&#10;# Code block&#10;sudo apt update&#10;```&#10;&#10;`inline code`"
+                        rows={20}
+                        className="font-mono text-sm"
+                        required
+                      />
+                    ) : (
+                      <ReactQuill
+                        theme="snow"
+                        value={form.content}
+                        onChange={(value) => setForm({ ...form, content: value })}
+                        modules={quillModules}
+                        style={{ height: '400px', marginBottom: '50px' }}
+                      />
+                    )}
+                  </div>
+                  {form.useMarkdown && (
+                    <div className="mt-2 p-3 bg-muted/50 rounded-lg border border-border">
+                      <p className="text-xs text-muted-foreground font-medium mb-2">📝 Markdown Quick Reference:</p>
+                      <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+                        <div><code className="bg-background px-1 py-0.5 rounded"># H1</code> → Heading 1</div>
+                        <div><code className="bg-background px-1 py-0.5 rounded">## H2</code> → Heading 2</div>
+                        <div><code className="bg-background px-1 py-0.5 rounded">**bold**</code> → <strong>bold</strong></div>
+                        <div><code className="bg-background px-1 py-0.5 rounded">*italic*</code> → <em>italic</em></div>
+                        <div><code className="bg-background px-1 py-0.5 rounded">- item</code> → Bullet list</div>
+                        <div><code className="bg-background px-1 py-0.5 rounded">1. item</code> → Numbered list</div>
+                        <div><code className="bg-background px-1 py-0.5 rounded">`code`</code> → Inline code</div>
+                        <div><code className="bg-background px-1 py-0.5 rounded">```lang```</code> → Code block</div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>
