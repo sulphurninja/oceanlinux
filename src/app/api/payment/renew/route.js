@@ -166,13 +166,14 @@ export async function POST(request) {
         notify_url: `${process.env.NEXT_PUBLIC_BASE_URL}/api/payment/webhook`
       },
       order_note: `Renewal: ${order.productName} - ${order.memory}`,
+      // Cashfree requires order_tags values to be strings
       order_tags: {
-        order_id: order._id.toString(),
-        renewal_for: order.productName,
-        memory: order.memory,
+        order_id: String(order._id),
+        renewal_for: String(order.productName),
+        memory: String(order.memory),
         renewal_type: 'service_renewal',
-        provider: provider,
-        service_identifier: provider === 'smartvps' ? (order.smartvpsServiceId || order.ipAddress) : ''
+        provider: String(provider),
+        service_identifier: String(provider === 'smartvps' ? (order.smartvpsServiceId || order.ipAddress) : '')
       }
     };
 

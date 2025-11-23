@@ -76,12 +76,13 @@ export async function POST(request) {
         notify_url: `${process.env.NEXT_PUBLIC_BASE_URL}/api/payment/webhook`
       },
       order_note: `${productName} - ${memory}`,
+      // Cashfree requires order_tags values to be strings
       order_tags: {
-        product_name: productName,
-        memory: memory,
-        promo_code: promoCode || '',
-        original_price: originalPrice || price,
-        discount: promoDiscount || 0
+        product_name: String(productName),
+        memory: String(memory),
+        promo_code: String(promoCode || ''),
+        original_price: String(originalPrice || price),
+        discount: String(promoDiscount || 0)
       }
     };
 
