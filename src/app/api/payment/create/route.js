@@ -8,7 +8,13 @@ import { Cashfree } from 'cashfree-pg';
 // Initialize Cashfree with your credentials
 Cashfree.XClientId = process.env.CASHFREE_APP_ID;
 Cashfree.XClientSecret = process.env.CASHFREE_SECRET_KEY;
-Cashfree.XEnvironment = process.env.CASHFREE_ENVIRONMENT || 'PRODUCTION'; // SANDBOX or PRODUCTION
+// Use Cashfree.Environment enum instead of string
+Cashfree.XEnvironment = process.env.CASHFREE_ENVIRONMENT === 'SANDBOX' 
+  ? Cashfree.Environment.SANDBOX 
+  : Cashfree.Environment.PRODUCTION;
+
+console.log('[Cashfree Init] Environment:', process.env.CASHFREE_ENVIRONMENT);
+console.log('[Cashfree Init] Using:', Cashfree.XEnvironment === Cashfree.Environment.PRODUCTION ? 'PRODUCTION' : 'SANDBOX');
 
 export async function POST(request) {
   await connectDB();

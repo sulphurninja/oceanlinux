@@ -6,7 +6,9 @@ import { Cashfree } from 'cashfree-pg';
 // Initialize Cashfree
 Cashfree.XClientId = process.env.CASHFREE_APP_ID;
 Cashfree.XClientSecret = process.env.CASHFREE_SECRET_KEY;
-Cashfree.XEnvironment = process.env.CASHFREE_ENVIRONMENT || 'PRODUCTION';
+Cashfree.XEnvironment = process.env.CASHFREE_ENVIRONMENT === 'SANDBOX' 
+  ? Cashfree.Environment.SANDBOX 
+  : Cashfree.Environment.PRODUCTION;
 
 export async function POST(request) {
   await connectDB();
