@@ -60,6 +60,13 @@ export async function POST(request) {
     const expiryDate = new Date();
     expiryDate.setDate(expiryDate.getDate() + 30);
 
+    // Helper function to sanitize strings for Cashfree (remove emojis and special chars)
+    const sanitizeForCashfree = (str) => {
+      if (!str) return '';
+      // Remove emojis and keep only alphanumeric, spaces, and basic punctuation
+      return String(str).replace(/[^\w\s\-\.,:]/g, '').trim();
+    };
+
     // 7. Create Cashfree order
     const cashfreeRequest = {
       order_id: clientTxnId,
@@ -75,12 +82,12 @@ export async function POST(request) {
         return_url: `${process.env.NEXT_PUBLIC_BASE_URL}/payment/callback?client_txn_id=${clientTxnId}`,
         notify_url: `${process.env.NEXT_PUBLIC_BASE_URL}/api/payment/webhook`
       },
-      order_note: `${productName} - ${memory}`,
-      // Cashfree requires order_tags values to be strings
+      order_note: sanitizeForCashfree(`${productName} - ${memory}`),
+      // Cashfree requires order_tags values to be strings without emojis/special chars
       order_tags: {
-        product_name: String(productName),
-        memory: String(memory),
-        promo_code: String(promoCode || ''),
+        product_name: sanitizeForCashfree(productName),
+        memory: sanitizeForCashfree(memory),
+        promo_code: sanitizeForCashfree(promoCode || ''),
         original_price: String(originalPrice || price),
         discount: String(promoDiscount || 0)
       }

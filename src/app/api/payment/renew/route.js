@@ -150,6 +150,13 @@ export async function POST(request) {
     // 9. Use the original order price for renewal
     const renewalPrice = order.price;
 
+    // Helper function to sanitize strings for Cashfree (remove emojis and special chars)
+    const sanitizeForCashfree = (str) => {
+      if (!str) return '';
+      // Remove emojis and keep only alphanumeric, spaces, and basic punctuation
+      return String(str).replace(/[^\w\s\-\.,:]/g, '').trim();
+    };
+
     // 10. Create Cashfree order for renewal
     const cashfreeRequest = {
       order_id: renewalTxnId,
@@ -165,12 +172,12 @@ export async function POST(request) {
         return_url: `${process.env.NEXT_PUBLIC_BASE_URL}/payment/callback?client_txn_id=${renewalTxnId}&order_id=${order._id}`,
         notify_url: `${process.env.NEXT_PUBLIC_BASE_URL}/api/payment/webhook`
       },
-      order_note: `Renewal: ${order.productName} - ${order.memory}`,
-      // Cashfree requires order_tags values to be strings
+      order_note: sanitizeForCashfree(`Renewal: ${order.productName} - ${order.memory}`),
+      // Cashfree requires order_tags values to be strings without emojis/special chars
       order_tags: {
         order_id: String(order._id),
-        renewal_for: String(order.productName),
-        memory: String(order.memory),
+        renewal_for: sanitizeForCashfree(order.productName),
+        memory: sanitizeForCashfree(order.memory),
         renewal_type: 'service_renewal',
         provider: String(provider),
         service_identifier: String(provider === 'smartvps' ? (order.smartvpsServiceId || order.ipAddress) : '')
