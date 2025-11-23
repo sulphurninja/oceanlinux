@@ -239,7 +239,13 @@ export class VirtualizorAPI {
   // -------------------- helpers to normalize listvs --------------------
   static _valToIps(val) {
     const out = [];
-    const push = (x) => { if (x && typeof x === "string") out.push(x.trim()); };
+    // Strip port from IP address if present (e.g., "192.168.1.1:49965" -> "192.168.1.1")
+    const push = (x) => { 
+      if (x && typeof x === "string") {
+        const cleanIp = x.trim().split(':')[0]; // Remove port if present
+        out.push(cleanIp);
+      }
+    };
 
     if (!val) return out;
     if (typeof val === "string") { push(val); return out; }
@@ -315,10 +321,12 @@ export class VirtualizorAPI {
    * Returns null ONLY if nothing matched across all accounts.
    */
   async findVpsId(by = {}) {
-    const ipIn   = by.ip?.trim();
+    // Strip port from IP address if present (e.g., "192.168.1.1:49965" -> "192.168.1.1")
+    const ipRaw  = by.ip?.trim();
+    const ipIn   = ipRaw ? ipRaw.split(':')[0] : null;
     const hostIn = by.hostname?.trim()?.toLowerCase();
 
-    console.log(`[VirtualizorAPI][findVpsId] Searching for VPS with IP: ${ipIn}, hostname: ${hostIn}`);
+    console.log(`[VirtualizorAPI][findVpsId] Searching for VPS with IP: ${ipIn}${ipRaw !== ipIn ? ` (stripped from ${ipRaw})` : ''}, hostname: ${hostIn}`);
 
     for (let i = 0; i < this.accounts.length; i++) {
       console.log(`[VirtualizorAPI][findVpsId] Checking account ${i}: ${this.accounts[i].host}`);

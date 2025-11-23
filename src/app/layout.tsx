@@ -92,8 +92,8 @@ export default function RootLayout({
             __html: JSON.stringify(structuredData)
           }}
         />
-        {/* Add Razorpay script */}
-        <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+        {/* Add Cashfree script */}
+        <script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
       </head>

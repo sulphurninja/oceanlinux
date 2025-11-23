@@ -3,13 +3,12 @@ import connectDB from '@/lib/db';
 import { getDataFromToken } from '@/helper/getDataFromToken';
 import Order from '@/models/orderModel';
 import User from '@/models/userModel';
-import Razorpay from 'razorpay';
+import { Cashfree } from 'cashfree-pg';
 
-// Initialize Razorpay with your credentials
-const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID,
-  key_secret: process.env.RAZORPAY_KEY_SECRET,
-});
+// Initialize Cashfree with your credentials
+Cashfree.XClientId = process.env.CASHFREE_APP_ID;
+Cashfree.XClientSecret = process.env.CASHFREE_SECRET_KEY;
+Cashfree.XEnvironment = process.env.CASHFREE_ENVIRONMENT || 'PRODUCTION'; // SANDBOX or PRODUCTION
 
 export async function POST(request) {
   await connectDB();
@@ -55,26 +54,35 @@ export async function POST(request) {
     const expiryDate = new Date();
     expiryDate.setDate(expiryDate.getDate() + 30);
 
-    // 7. Create Razorpay order
-    const razorpayOrderOptions = {
-      amount: Math.round(price * 100), // Razorpay expects amount in paise
-      currency: 'INR',
-      receipt: clientTxnId,
-      notes: {
+    // 7. Create Cashfree order
+    const cashfreeRequest = {
+      order_id: clientTxnId,
+      order_amount: Math.round(price * 100) / 100, // Cashfree expects amount in rupees (decimal)
+      order_currency: 'INR',
+      customer_details: {
+        customer_id: userId,
+        customer_name: user.name,
+        customer_email: user.email,
+        customer_phone: user.phone || '9999999999' // Cashfree requires phone
+      },
+      order_meta: {
+        return_url: `${process.env.NEXT_PUBLIC_BASE_URL}/payment/callback?client_txn_id=${clientTxnId}`,
+        notify_url: `${process.env.NEXT_PUBLIC_BASE_URL}/api/payment/webhook`
+      },
+      order_note: `${productName} - ${memory}`,
+      order_tags: {
         product_name: productName,
         memory: memory,
-        customer_email: user.email,
-        customer_name: user.name,
         promo_code: promoCode || '',
         original_price: originalPrice || price,
         discount: promoDiscount || 0
       }
     };
 
-    console.log("Creating Razorpay order:", razorpayOrderOptions);
+    console.log("Creating Cashfree order:", cashfreeRequest);
 
-    const razorpayOrder = await razorpay.orders.create(razorpayOrderOptions);
-    console.log("Razorpay order created:", razorpayOrder);
+    const cashfreeOrder = await Cashfree.PGCreateOrder('2023-08-01', cashfreeRequest);
+    console.log("Cashfree order created:", cashfreeOrder.data);
 
     // 8. Create a pending order in our database with promo code info
     const newOrder = await Order.create({
@@ -87,7 +95,7 @@ export async function POST(request) {
       promoDiscount: promoDiscount || 0,
       ipStockId: ipStockId || null,
       clientTxnId,
-      gatewayOrderId: razorpayOrder.id,
+      gatewayOrderId: clientTxnId, // Cashfree uses our order_id
       status: 'pending',
       customerName: user.name,
       customerEmail: user.email,
@@ -96,20 +104,22 @@ export async function POST(request) {
 
     console.log("Order created in database:", newOrder._id);
 
-    // 9. Return Razorpay order details for frontend
+    // 9. Return Cashfree order details for frontend
     return NextResponse.json({
       message: 'Payment initiated',
       orderId: newOrder._id,
       clientTxnId: clientTxnId,
-      razorpay: {
-        order_id: razorpayOrder.id,
-        amount: razorpayOrder.amount,
-        currency: razorpayOrder.currency,
-        key: process.env.RAZORPAY_KEY_ID
+      cashfree: {
+        order_id: clientTxnId,
+        payment_session_id: cashfreeOrder.data.payment_session_id,
+        order_token: cashfreeOrder.data.payment_session_id, // For SDK compatibility
+        amount: Math.round(price * 100) / 100,
+        currency: 'INR'
       },
       customer: {
         name: user.name,
-        email: user.email
+        email: user.email,
+        phone: user.phone || '9999999999'
       }
     });
 

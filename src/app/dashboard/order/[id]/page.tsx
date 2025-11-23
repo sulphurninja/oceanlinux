@@ -51,7 +51,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 
 declare global {
   interface Window {
-    Razorpay: any;
+    Cashfree: any;
   }
 }
 
@@ -895,24 +895,35 @@ const OrderDetails = () => {
         localStorage.setItem('renewalOrderId', order._id);
       }
 
-      const sanitizedDescription = `Renewal: ${order.productName} - ${order.memory}`.replace(/[^\w\s\-\.]/g, '').trim();
-      const sanitizedCustomerName = data.customer.name.replace(/[^\w\s\-\.]/g, '').trim();
+      console.log("Renewal payment data received:", data);
 
-      const options = {
-        key: data.razorpay.key,
-        amount: data.razorpay.amount,
-        currency: data.razorpay.currency,
-        name: 'OceanLinux',
-        description: sanitizedDescription,
-        order_id: data.razorpay.order_id,
-        prefill: {
-          name: sanitizedCustomerName,
-          email: data.customer.email,
-        },
-        theme: {
-          color: '#3b82f6'
-        },
-        handler: async function (response: any) {
+      // Initialize Cashfree SDK
+      const cashfree = await window.Cashfree({
+        mode: process.env.NEXT_PUBLIC_CASHFREE_ENVIRONMENT || "production"
+      });
+
+      // Create checkout options
+      const checkoutOptions = {
+        paymentSessionId: data.cashfree.payment_session_id,
+        returnUrl: `${window.location.origin}/payment/callback?client_txn_id=${data.renewalTxnId}&order_id=${order._id}`,
+        notifyUrl: `${window.location.origin}/api/payment/webhook`
+      };
+
+      console.log("Opening Cashfree checkout for renewal:", checkoutOptions);
+
+      // Open Cashfree checkout
+      cashfree.checkout(checkoutOptions).then(async (result: any) => {
+        console.log("Cashfree renewal checkout result:", result);
+        
+        if (result.error) {
+          console.error("Cashfree renewal checkout error:", result.error);
+          toast.error(result.error.message || "Payment failed");
+          setActionBusy(null);
+          return;
+        }
+
+        if (result.paymentDetails) {
+          console.log("Renewal payment successful:", result.paymentDetails);
           toast.success("Payment successful! Processing renewal...");
 
           try {
@@ -921,10 +932,7 @@ const OrderDetails = () => {
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 renewalTxnId: data.renewalTxnId,
-                orderId: order._id,
-                razorpay_payment_id: response.razorpay_payment_id,
-                razorpay_order_id: response.razorpay_order_id,
-                razorpay_signature: response.razorpay_signature
+                orderId: order._id
               })
             });
 
@@ -941,16 +949,12 @@ const OrderDetails = () => {
           } finally {
             setActionBusy(null);
           }
-        },
-        modal: {
-          ondismiss: function () {
-            setActionBusy(null);
-          }
         }
-      };
-
-      const razorpay = new window.Razorpay(options);
-      razorpay.open();
+      }).catch((error: any) => {
+        console.error("Cashfree renewal checkout error:", error);
+        toast.error("Payment initialization failed. Please try again.");
+        setActionBusy(null);
+      });
 
     } catch (error) {
       console.error("Error initiating renewal payment:", error);

@@ -67,7 +67,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 declare global {
   interface Window {
-    Razorpay: any;
+    Cashfree: any;
   }
 }
 
@@ -364,30 +364,37 @@ export default function IPStockPage() {
         console.log("Stored clientTxnId in localStorage:", data.clientTxnId);
       }
 
-      // Sanitize all text fields for Razorpay
-      const sanitizedDescription = sanitizeForRazorpay(`${selectedProduct.name} - ${selectedProduct.memory}`);
-      const sanitizedCustomerName = sanitizeForRazorpay(data.customer.name);
+      console.log("Payment data received:", data);
 
-      console.log("Original description:", `${selectedProduct.name} - ${selectedProduct.memory}`);
-      console.log("Sanitized description:", sanitizedDescription);
+      // Initialize Cashfree SDK
+      const cashfree = await window.Cashfree({
+        mode: process.env.NEXT_PUBLIC_CASHFREE_ENVIRONMENT || "production" // "sandbox" or "production"
+      });
 
-      // Initialize Razorpay
-      const options = {
-        key: data.razorpay.key,
-        amount: data.razorpay.amount,
-        currency: data.razorpay.currency,
-        name: 'OceanLinux',
-        description: sanitizedDescription, // Use sanitized description
-        order_id: data.razorpay.order_id,
-        prefill: {
-          name: sanitizedCustomerName, // Use sanitized customer name
-          email: data.customer.email, // Email is usually safe but we can sanitize if needed
-        },
-        theme: {
-          color: '#3b82f6'
-        },
-        handler: async function (response: any) {
-          console.log('Payment successful:', response);
+      setShowDialog(false);
+
+      // Create checkout options
+      const checkoutOptions = {
+        paymentSessionId: data.cashfree.payment_session_id,
+        returnUrl: `${window.location.origin}/payment/callback?client_txn_id=${data.clientTxnId}`,
+        notifyUrl: `${window.location.origin}/api/payment/webhook`
+      };
+
+      console.log("Opening Cashfree checkout with options:", checkoutOptions);
+
+      // Open Cashfree checkout
+      cashfree.checkout(checkoutOptions).then(async (result: any) => {
+        console.log("Cashfree checkout result:", result);
+        
+        if (result.error) {
+          console.error("Cashfree checkout error:", result.error);
+          toast.error(result.error.message || "Payment failed");
+          setPaymentInitiating(false);
+          return;
+        }
+
+        if (result.paymentDetails) {
+          console.log("Payment successful:", result.paymentDetails);
           toast.success("Payment successful! Processing order...");
 
           try {
@@ -397,15 +404,13 @@ export default function IPStockPage() {
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 clientTxnId: data.clientTxnId,
-                razorpay_payment_id: response.razorpay_payment_id,
-                razorpay_order_id: response.razorpay_order_id,
-                razorpay_signature: response.razorpay_signature
+                orderId: data.cashfree.order_id
               })
             });
 
             if (confirmRes.ok) {
               toast.success("Order confirmed! Redirecting...");
-              router.push(`/payment/callback?client_txn_id=${data.clientTxnId}&payment_id=${response.razorpay_payment_id}`);
+              router.push(`/payment/callback?client_txn_id=${data.clientTxnId}&order_id=${data.cashfree.order_id}`);
             } else {
               toast.error("Payment confirmed but order processing failed. Please contact support.");
               router.push(`/payment/callback?client_txn_id=${data.clientTxnId}&status=processing_failed`);
@@ -415,19 +420,12 @@ export default function IPStockPage() {
             toast.error("Payment successful but order confirmation failed. Please contact support.");
             router.push(`/payment/callback?client_txn_id=${data.clientTxnId}&status=confirmation_failed`);
           }
-        },
-        modal: {
-          ondismiss: function () {
-            console.log('Payment modal dismissed');
-            setPaymentInitiating(false);
-          }
         }
-      };
-
-      setShowDialog(false);
-
-      const razorpay = new window.Razorpay(options);
-      razorpay.open();
+      }).catch((error: any) => {
+        console.error("Cashfree checkout error:", error);
+        toast.error("Payment initialization failed. Please try again.");
+        setPaymentInitiating(false);
+      });
 
     } catch (error) {
       console.error("Error initiating payment:", error);

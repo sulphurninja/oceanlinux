@@ -1,15 +1,14 @@
 import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
-import crypto from 'crypto';
-import Razorpay from 'razorpay';
-import NotificationService from '@/services/notificationService'; //
+import { Cashfree } from 'cashfree-pg';
+import NotificationService from '@/services/notificationService';
 const AutoProvisioningService = require('@/services/autoProvisioningService');
 
-const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID,
-  key_secret: process.env.RAZORPAY_KEY_SECRET,
-});
+// Initialize Cashfree
+Cashfree.XClientId = process.env.CASHFREE_APP_ID;
+Cashfree.XClientSecret = process.env.CASHFREE_SECRET_KEY;
+Cashfree.XEnvironment = process.env.CASHFREE_ENVIRONMENT || 'PRODUCTION';
 
 export async function POST(request) {
   await connectDB();
@@ -17,39 +16,58 @@ export async function POST(request) {
   console.log("========== PAYMENT CONFIRMATION API ==========");
 
   try {
-    const { clientTxnId, razorpay_payment_id, razorpay_order_id, razorpay_signature } = await request.json();
+    const { clientTxnId, orderId } = await request.json();
 
-    // Verify payment signature
-    const body = razorpay_order_id + "|" + razorpay_payment_id;
-    const expectedSignature = crypto
-      .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
-      .update(body)
-      .digest('hex');
-
-    if (expectedSignature !== razorpay_signature) {
-      console.error("Invalid payment signature");
+    // Use clientTxnId or orderId to find the order
+    const orderIdentifier = clientTxnId || orderId;
+    
+    if (!orderIdentifier) {
       return NextResponse.json(
-        { success: false, message: 'Invalid payment signature' },
+        { success: false, message: 'Order ID is required' },
         { status: 400 }
       );
     }
 
-    // Find and update order
-    const order = await Order.findOne({ clientTxnId });
+    // Find the order in our database
+    const order = await Order.findOne({ clientTxnId: orderIdentifier });
     if (!order) {
-      console.error(`Order not found: ${clientTxnId}`);
+      console.error(`Order not found: ${orderIdentifier}`);
       return NextResponse.json(
         { success: false, message: 'Order not found' },
         { status: 404 }
       );
     }
 
-    // Update order status
-    order.status = 'confirmed';
-    order.transactionId = razorpay_payment_id;
-    await order.save();
+    // Verify payment status with Cashfree
+    console.log(`Verifying payment with Cashfree for order: ${orderIdentifier}`);
+    
+    try {
+      const cashfreeResponse = await Cashfree.PGOrderFetchPayments('2023-08-01', orderIdentifier);
+      console.log('Cashfree payment verification response:', cashfreeResponse.data);
 
-    console.log(`Order ${order._id} confirmed with payment ${razorpay_payment_id}`);
+      // Check if payment is successful
+      if (!cashfreeResponse.data || cashfreeResponse.data.length === 0) {
+        return NextResponse.json(
+          { success: false, message: 'No payment found for this order' },
+          { status: 400 }
+        );
+      }
+
+      const payment = cashfreeResponse.data[0];
+      
+      if (payment.payment_status !== 'SUCCESS') {
+        return NextResponse.json(
+          { success: false, message: 'Payment not successful' },
+          { status: 400 }
+        );
+      }
+
+      // Update order status
+      order.status = 'confirmed';
+      order.transactionId = payment.cf_payment_id;
+      await order.save();
+
+      console.log(`Order ${order._id} confirmed with payment ${payment.cf_payment_id}`);
 
     try {
       await NotificationService.notifyOrderConfirmed(order.user, order);
@@ -92,11 +110,19 @@ export async function POST(request) {
       // Don't fail the response - provisioning can be retried
     }
 
-    return NextResponse.json({
-      success: true,
-      message: 'Payment confirmed and order processed',
-      orderId: order._id
-    });
+      return NextResponse.json({
+        success: true,
+        message: 'Payment confirmed and order processed',
+        orderId: order._id
+      });
+
+    } catch (cashfreeError) {
+      console.error('Cashfree verification error:', cashfreeError);
+      return NextResponse.json(
+        { success: false, message: 'Payment verification failed', error: cashfreeError.message },
+        { status: 500 }
+      );
+    }
 
   } catch (error) {
     console.error('Payment confirmation error:', error);

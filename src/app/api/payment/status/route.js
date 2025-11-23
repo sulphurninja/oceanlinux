@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
-import Razorpay from 'razorpay';
+import { Cashfree } from 'cashfree-pg';
 
-const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID,
-  key_secret: process.env.RAZORPAY_KEY_SECRET,
-});
+// Initialize Cashfree
+Cashfree.XClientId = process.env.CASHFREE_APP_ID;
+Cashfree.XClientSecret = process.env.CASHFREE_SECRET_KEY;
+Cashfree.XEnvironment = process.env.CASHFREE_ENVIRONMENT || 'PRODUCTION';
 
 export async function POST(request) {
   await connectDB();
@@ -57,45 +57,41 @@ export async function POST(request) {
       });
     }
 
-    // Check with Razorpay API
+    // Check with Cashfree API
     try {
-      console.log(`Checking Razorpay order status: ${order.gatewayOrderId}`);
+      console.log(`Checking Cashfree order status: ${order.clientTxnId}`);
       
-      const razorpayOrder = await razorpay.orders.fetch(order.gatewayOrderId);
-      console.log(`Razorpay order status: ${razorpayOrder.status}`);
+      const cashfreeResponse = await Cashfree.PGOrderFetchPayments('2023-08-01', order.clientTxnId);
+      console.log(`Cashfree order response:`, cashfreeResponse.data);
 
-      // If order is paid, get payment details
-      if (razorpayOrder.status === 'paid') {
-        const payments = await razorpay.orders.fetchPayments(order.gatewayOrderId);
+      // If payment is successful
+      if (cashfreeResponse.data && cashfreeResponse.data.length > 0) {
+        const payment = cashfreeResponse.data[0];
         
-        if (payments.items.length > 0) {
-          const payment = payments.items[0];
+        if (payment.payment_status === 'SUCCESS') {
+          console.log(`Payment confirmed for order ${order._id}`);
           
-          if (payment.status === 'captured') {
-            console.log(`Payment confirmed for order ${order._id}`);
-            
-            // Update order status
-            order.status = 'confirmed';
-            order.transactionId = payment.id;
-            await order.save();
-            
-            return NextResponse.json({
-              order: {
-                id: order._id.toString(),
-                status: 'confirmed',
-                productName: order.productName,
-                memory: order.memory,
-                price: order.price,
-                clientTxnId: order.clientTxnId,
-                createdAt: order.createdAt
-              },
-              message: "Payment confirmed"
-            });
-          }
+          // Update order status
+          order.status = 'confirmed';
+          order.transactionId = payment.cf_payment_id;
+          await order.save();
+          
+          return NextResponse.json({
+            order: {
+              id: order._id.toString(),
+              status: 'confirmed',
+              productName: order.productName,
+              memory: order.memory,
+              price: order.price,
+              clientTxnId: order.clientTxnId,
+              createdAt: order.createdAt
+            },
+            message: "Payment confirmed"
+          });
         }
       }
-    } catch (razorpayError) {
-      console.error('Razorpay API error:', razorpayError);
+    } catch (cashfreeError) {
+      console.error('Cashfree API error:', cashfreeError);
     }
 
     // Payment not confirmed

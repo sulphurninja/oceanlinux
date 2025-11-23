@@ -36,7 +36,7 @@ export async function POST(request) {
             price: amount,
             type: 'wallet_recharge',
             status: 'pending',
-            paymentMethod: paymentMethod || 'razorpay',
+            paymentMethod: paymentMethod || 'cashfree',
             metadata: {
                 walletRecharge: true,
                 originalAmount: amount
@@ -45,7 +45,7 @@ export async function POST(request) {
 
         await rechargeOrder.save();
 
-        // Here you would integrate with payment gateway (Razorpay, Stripe, etc.)
+        // Here you would integrate with payment gateway (Cashfree)
         // For now, we'll simulate the payment process
 
         const paymentResponse = {
@@ -53,8 +53,8 @@ export async function POST(request) {
             amount: amount,
             currency: 'INR',
             // In real implementation, you'd get these from payment gateway
-            razorpayOrderId: `order_${Date.now()}`,
-            keyId: process.env.RAZORPAY_KEY_ID
+            cashfreeOrderId: `order_${Date.now()}`,
+            appId: process.env.CASHFREE_APP_ID
         };
 
         return NextResponse.json({

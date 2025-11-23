@@ -7,7 +7,7 @@ const AutoProvisioningService = require('@/services/autoProvisioningService');
 export async function POST(request) {
   const webhookStartTime = Date.now();
   console.log("\n" + "=".repeat(80));
-  console.log(`[WEBHOOK] 🚀 RAZORPAY WEBHOOK RECEIVED AT ${new Date().toISOString()}`);
+  console.log(`[WEBHOOK] 🚀 CASHFREE WEBHOOK RECEIVED AT ${new Date().toISOString()}`);
   console.log("=".repeat(80));
 
   await connectDB();
@@ -16,10 +16,11 @@ export async function POST(request) {
   try {
     // Get the raw body and signature
     const body = await request.text();
-    const signature = request.headers.get('x-razorpay-signature');
+    const signature = request.headers.get('x-cashfree-signature');
+    const timestamp = request.headers.get('x-cashfree-timestamp');
 
     if (!signature) {
-      console.error("[WEBHOOK] ❌ Missing Razorpay signature");
+      console.error("[WEBHOOK] ❌ Missing Cashfree signature");
       return NextResponse.json(
         { success: false, message: 'Missing signature' },
         { status: 400 }
@@ -27,10 +28,11 @@ export async function POST(request) {
     }
 
     // Verify webhook signature
+    const signatureData = timestamp + body;
     const expectedSignature = crypto
-      .createHmac('sha256', process.env.RAZORPAY_WEBHOOK_SECRET)
-      .update(body)
-      .digest('hex');
+      .createHmac('sha256', process.env.CASHFREE_SECRET_KEY)
+      .update(signatureData)
+      .digest('base64');
 
     if (signature !== expectedSignature) {
       console.error("[WEBHOOK] ❌ Invalid signature");
@@ -44,18 +46,18 @@ export async function POST(request) {
     console.log("[WEBHOOK] 📦 RECEIVED PAYLOAD:");
     console.log(JSON.stringify(data, null, 2));
 
-    // Handle payment.captured event
-    if (data.event === 'payment.captured') {
-      const payment = data.payload.payment.entity;
-      const orderId = payment.order_id;
+    // Handle payment success event
+    if (data.type === 'PAYMENT_SUCCESS_WEBHOOK') {
+      const payment = data.data;
+      const orderId = payment.order.order_id;
 
-      console.log(`[WEBHOOK] 💳 Payment captured for order: ${orderId}`);
+      console.log(`[WEBHOOK] 💳 Payment successful for order: ${orderId}`);
 
       // Find the order in our database
-      const order = await Order.findOne({ gatewayOrderId: orderId });
+      const order = await Order.findOne({ clientTxnId: orderId });
 
       if (!order) {
-        console.error(`[WEBHOOK] ❌ Order not found for Razorpay order ID: ${orderId}`);
+        console.error(`[WEBHOOK] ❌ Order not found for Cashfree order ID: ${orderId}`);
         return NextResponse.json(
           { success: false, message: 'Order not found' },
           { status: 404 }
@@ -73,11 +75,11 @@ export async function POST(request) {
       console.log(`[WEBHOOK] 📝 UPDATING ORDER STATUS...`);
 
       order.status = 'confirmed';
-      order.transactionId = payment.id;
+      order.transactionId = payment.payment.cf_payment_id;
       
       // Store additional payment info
-      order.webhookAmount = (payment.amount / 100).toString(); // Convert paise to rupees
-      order.webhookCustomerEmail = payment.email;
+      order.webhookAmount = payment.payment.payment_amount.toString();
+      order.webhookCustomerEmail = payment.customer_details.customer_email;
 
       await order.save();
       const orderUpdateTime = Date.now() - orderUpdateStart;

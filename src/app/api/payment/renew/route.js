@@ -3,14 +3,13 @@ import connectDB from '@/lib/db';
 import { getDataFromToken } from '@/helper/getDataFromToken';
 import Order from '@/models/orderModel';
 import User from '@/models/userModel';
-import IPStock from '@/models/ipStockModel'; // Add IPStock import
-import Razorpay from 'razorpay';
+import IPStock from '@/models/ipStockModel';
+import { Cashfree } from 'cashfree-pg';
 
-// Initialize Razorpay with your credentials
-const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID,
-  key_secret: process.env.RAZORPAY_KEY_SECRET,
-});
+// Initialize Cashfree with your credentials
+Cashfree.XClientId = process.env.CASHFREE_APP_ID;
+Cashfree.XClientSecret = process.env.CASHFREE_SECRET_KEY;
+Cashfree.XEnvironment = process.env.CASHFREE_ENVIRONMENT || 'PRODUCTION';
 
 // Enhanced helper function to determine provider from order with IPStock data
 async function getProviderFromOrder(order) {
@@ -149,49 +148,60 @@ export async function POST(request) {
     // 9. Use the original order price for renewal
     const renewalPrice = order.price;
 
-    // 10. Create Razorpay order for renewal
-    const razorpayOrderOptions = {
-      amount: Math.round(renewalPrice * 100), // Razorpay expects amount in paise
-      currency: 'INR',
-      receipt: renewalTxnId,
-      notes: {
+    // 10. Create Cashfree order for renewal
+    const cashfreeRequest = {
+      order_id: renewalTxnId,
+      order_amount: Math.round(renewalPrice * 100) / 100,
+      order_currency: 'INR',
+      customer_details: {
+        customer_id: userId,
+        customer_name: user.name,
+        customer_email: user.email,
+        customer_phone: user.phone || '9999999999'
+      },
+      order_meta: {
+        return_url: `${process.env.NEXT_PUBLIC_BASE_URL}/payment/callback?client_txn_id=${renewalTxnId}&order_id=${order._id}`,
+        notify_url: `${process.env.NEXT_PUBLIC_BASE_URL}/api/payment/webhook`
+      },
+      order_note: `Renewal: ${order.productName} - ${order.memory}`,
+      order_tags: {
         order_id: order._id.toString(),
         renewal_for: order.productName,
         memory: order.memory,
-        customer_email: user.email,
-        customer_name: user.name,
         renewal_type: 'service_renewal',
-        provider: provider, // Store provider info
-        service_identifier: provider === 'smartvps' ? (order.smartvpsServiceId || order.ipAddress) : null
+        provider: provider,
+        service_identifier: provider === 'smartvps' ? (order.smartvpsServiceId || order.ipAddress) : ''
       }
     };
 
-    console.log("Creating Razorpay renewal order:", {
-      ...razorpayOrderOptions,
-      notes: {
-        ...razorpayOrderOptions.notes,
-        service_identifier: razorpayOrderOptions.notes.service_identifier ? '[SERVICE_ID_PRESENT]' : null
+    console.log("Creating Cashfree renewal order:", {
+      ...cashfreeRequest,
+      order_tags: {
+        ...cashfreeRequest.order_tags,
+        service_identifier: cashfreeRequest.order_tags.service_identifier ? '[SERVICE_ID_PRESENT]' : null
       }
     });
 
-    const razorpayOrder = await razorpay.orders.create(razorpayOrderOptions);
-    console.log("Razorpay renewal order created:", razorpayOrder.id);
+    const cashfreeOrder = await Cashfree.PGCreateOrder('2023-08-01', cashfreeRequest);
+    console.log("Cashfree renewal order created:", cashfreeOrder.data);
 
-    // 11. Return Razorpay order details for frontend
+    // 11. Return Cashfree order details for frontend
     return NextResponse.json({
       message: 'Renewal payment initiated',
       orderId: order._id,
       renewalTxnId: renewalTxnId,
       provider: provider,
-      razorpay: {
-        order_id: razorpayOrder.id,
-        amount: razorpayOrder.amount,
-        currency: razorpayOrder.currency,
-        key: process.env.RAZORPAY_KEY_ID
+      cashfree: {
+        order_id: renewalTxnId,
+        payment_session_id: cashfreeOrder.data.payment_session_id,
+        order_token: cashfreeOrder.data.payment_session_id,
+        amount: Math.round(renewalPrice * 100) / 100,
+        currency: 'INR'
       },
       customer: {
         name: user.name,
-        email: user.email
+        email: user.email,
+        phone: user.phone || '9999999999'
       },
       renewalDetails: {
         serviceName: order.productName,
