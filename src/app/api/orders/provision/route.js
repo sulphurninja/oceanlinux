@@ -5,13 +5,87 @@ const AutoProvisioningService = require('@/services/autoProvisioningService');
 
 export async function POST(request) {
   await connectDB();
+  
+  console.log('\n' + '='.repeat(80));
+  console.log('[PROVISION API] Manual provision request received');
+  console.log('='.repeat(80));
+  
   try {
     const { orderId, orderIds } = await request.json();
     const provisioningService = new AutoProvisioningService();
 
     if (orderId) {
+      console.log(`[PROVISION API] Single order provision requested: ${orderId}`);
+      
+      // === CRITICAL: Check if order is already being provisioned ===
+      const order = await Order.findById(orderId);
+      
+      if (!order) {
+        console.error(`[PROVISION API] ❌ Order not found: ${orderId}`);
+        return NextResponse.json({
+          success: false,
+          message: 'Order not found'
+        }, { status: 404 });
+      }
+
+      console.log(`[PROVISION API] Order status: ${order.status}`);
+      console.log(`[PROVISION API] Provisioning status: ${order.provisioningStatus || 'none'}`);
+      console.log(`[PROVISION API] Auto-provisioned: ${order.autoProvisioned}`);
+      console.log(`[PROVISION API] Provider: ${order.provider || 'not set'}`);
+      console.log(`[PROVISION API] IP Address: ${order.ipAddress || 'none'}`);
+
+      // Check if already provisioned successfully
+      if (order.provisioningStatus === 'active' && order.ipAddress) {
+        console.log(`[PROVISION API] ✅ Order already provisioned successfully`);
+        return NextResponse.json({
+          success: true,
+          message: 'Order already provisioned',
+          alreadyProvisioned: true,
+          details: {
+            ipAddress: order.ipAddress,
+            username: order.username,
+            provider: order.provider
+          }
+        });
+      }
+
+      // Check if currently being provisioned
+      if (order.provisioningStatus === 'provisioning') {
+        console.log(`[PROVISION API] ⏳ Order is currently being provisioned`);
+        return NextResponse.json({
+          success: false,
+          message: 'Order is currently being provisioned. Please wait...',
+          inProgress: true
+        }, { status: 409 }); // 409 Conflict
+      }
+
+      // Check if order has failed and needs retry
+      const canRetry = order.provisioningStatus === 'failed' || !order.provisioningStatus;
+      
+      if (!canRetry && order.provisioningStatus !== 'pending') {
+        console.log(`[PROVISION API] ❌ Order cannot be provisioned (status: ${order.provisioningStatus})`);
+        return NextResponse.json({
+          success: false,
+          message: `Order cannot be provisioned (current status: ${order.provisioningStatus})`
+        }, { status: 400 });
+      }
+
+      console.log(`[PROVISION API] ✅ Order can be provisioned, starting...`);
+      
+      // Mark as provisioning BEFORE starting
+      await Order.findByIdAndUpdate(orderId, {
+        provisioningStatus: 'provisioning',
+        provisioningError: '',
+        lastProvisionAttempt: new Date()
+      });
+
       // Provision single order
       const result = await provisioningService.provisionServer(orderId);
+
+      console.log(`[PROVISION API] Provisioning result:`, {
+        success: result.success,
+        error: result.error || 'none'
+      });
 
       return NextResponse.json({
         success: result.success,

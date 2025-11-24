@@ -153,7 +153,7 @@ const ManageOrders = () => {
                 if (filters.provisioningStatus === 'not_provisioned') {
                     matchesProvisioningStatus = !order.autoProvisioned && (!order.ipAddress || !order.username);
                 } else if (filters.provisioningStatus === 'manual_setup') {
-                    matchesProvisioningStatus = !order.autoProvisioned && order.ipAddress && order.username;
+                    matchesProvisioningStatus = !order.autoProvisioned && Boolean(order.ipAddress) && Boolean(order.username);
                 } else {
                     matchesProvisioningStatus = order.provisioningStatus === filters.provisioningStatus;
                 }
@@ -443,7 +443,7 @@ const ManageOrders = () => {
                                 <Download className="w-4 h-4" />
                                 Export CSV
                             </Button>
-                            {/* <Button
+                            <Button
                                 variant="default"
                                 onClick={handleBatchAutoProvision}
                                 disabled={batchProvisioning}
@@ -461,7 +461,7 @@ const ManageOrders = () => {
                                         Auto-Provision All
                                     </>
                                 )}
-                            </Button> */}
+                            </Button>
                             <Button 
                                 variant="outline" 
                                 onClick={fetchOrders} 
@@ -874,7 +874,12 @@ const ManageOrders = () => {
                                                             Edit
                                                         </Button>
 
-                                                        {(order.status === 'paid' || order.status === 'confirmed') && !order.autoProvisioned && (
+                                                        {/* Show provision button for: 1) Non-provisioned orders 2) Failed SmartVPS orders that need retry */}
+                                                        {(
+                                                            ((order.status === 'paid' || order.status === 'confirmed') && !order.autoProvisioned) ||
+                                                            (order.provider === 'smartvps' && order.provisioningStatus === 'failed') ||
+                                                            (order.provider === 'smartvps' && order.status === 'confirmed' && !order.ipAddress)
+                                                        ) && (
                                                             <Button
                                                                 size="sm"
                                                                 onClick={() => handleProvision(order)}
@@ -887,7 +892,7 @@ const ManageOrders = () => {
                                                                 ) : (
                                                                     <Play className="w-3.5 h-3.5" />
                                                                 )}
-                                                                Provision
+                                                                {order.provisioningStatus === 'failed' ? 'Retry' : 'Provision'}
                                                             </Button>
                                                         )}
                                                     </div>

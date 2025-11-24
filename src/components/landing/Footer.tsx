@@ -155,9 +155,12 @@ export default function Footer() {
       {/* Bottom Bar */}
       <div className="border dark:border-none-t border dark:border-none-border dark:border-none bg-muted/30">
         <div className="container mx-auto container-padding">
-          <div className="py-6 flex flex-col sm:flex-row justify-between items-center">
-            <div className="text-sm text-muted-foreground mb-4 sm:mb-0">
-              © 2024 OceanLinux. All rights reserved. • A Product of Backtick Labs
+          <div className="py-6 flex flex-col sm:flex-row justify-between items-center gap-4">
+            <div className="text-sm text-muted-foreground text-center sm:text-left">
+              <div>© 2024 OceanLinux. All rights reserved. • A Product of Backtick Labs</div>
+              <div className="text-xs mt-1">
+                Operated by: <span className="font-medium">UMESH KUMAR MADANLAL SOLANKI</span>
+              </div>
             </div>
             <div className="flex items-center space-x-6">
               <Link href="/privacy-policy" className="text-sm text-muted-foreground hover:text-primary transition-colors">

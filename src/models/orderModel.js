@@ -54,6 +54,9 @@ const orderSchema = new mongoose.Schema({
     },
     provisioningError: { type: String, default: '' },
     autoProvisioned: { type: Boolean, default: false },
+    lastProvisionAttempt: { type: Date }, // Track when last provisioning was attempted
+    paymentMethod: { type: String }, // upi, cashfree, razorpay
+    paymentDetails: { type: mongoose.Schema.Types.Mixed }, // Store payment-specific details
 
     // VPS Management tracking fields
     lastAction: { type: String }, // 'start', 'stop', 'reboot', 'changepassword', 'reinstall', 'format', 'renew'

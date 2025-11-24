@@ -297,16 +297,54 @@ class AutoProvisioningService {
 
     try {
       // STEP 1: Find the order
-      L.head('STEP 1: LOAD ORDER');
+      L.head('STEP 1: LOAD ORDER & DUPLICATE CHECK');
       const order = await Order.findById(orderId);
       if (!order) throw new Error(`Order ${orderId} not found in database`);
+      
       L.kv('Order._id', order._id.toString());
       L.kv('Order.productName', order.productName);
       L.kv('Order.memory', order.memory);
       L.kv('Order.price', order.price);
       L.kv('Order.status', order.status);
+      L.kv('Order.provisioningStatus', order.provisioningStatus || 'none');
+      L.kv('Order.ipAddress', order.ipAddress || 'none');
+      L.kv('Order.provider', order.provider || 'none');
       L.kv('Order.os', order.os || '(Default)');
       L.kv('Order.ipStockId', order.ipStockId || '(NOT SET)');
+
+      // === CRITICAL: Prevent duplicate provisioning ===
+      if (order.provisioningStatus === 'active' && order.ipAddress) {
+        L.line(`\n⚠️⚠️⚠️ ORDER ALREADY PROVISIONED ⚠️⚠️⚠️`);
+        L.kv('  → IP Address', order.ipAddress);
+        L.kv('  → Provider', order.provider);
+        L.kv('  → Username', order.username);
+        L.line(`⚠️⚠️⚠️ SKIPPING PROVISIONING ⚠️⚠️⚠️\n`);
+        
+        return {
+          success: true,
+          alreadyProvisioned: true,
+          ipAddress: order.ipAddress,
+          credentials: { username: order.username, password: order.password },
+          message: 'Order was already provisioned successfully',
+          totalTime: Date.now() - startTime
+        };
+      }
+
+      // Check if currently being provisioned (within last 10 minutes)
+      if (order.provisioningStatus === 'provisioning' && order.lastProvisionAttempt) {
+        const timeSinceAttempt = Date.now() - new Date(order.lastProvisionAttempt).getTime();
+        if (timeSinceAttempt < 10 * 60 * 1000) { // 10 minutes
+          L.line(`\n⏳⏳⏳ ORDER CURRENTLY BEING PROVISIONED ⏳⏳⏳`);
+          L.kv('  → Time since attempt', `${Math.round(timeSinceAttempt / 1000)}s ago`);
+          L.line(`⏳⏳⏳ ABORTING TO PREVENT DUPLICATE ⏳⏳⏳\n`);
+          
+          throw new Error(`Order is currently being provisioned by another process (started ${Math.round(timeSinceAttempt / 1000)}s ago). Please wait.`);
+        } else {
+          L.line(`⚠️ Order stuck in 'provisioning' state for ${Math.round(timeSinceAttempt / 60000)} minutes, allowing retry...`);
+        }
+      }
+
+      L.line(`✅ Duplicate check passed, proceeding with provisioning...`);
 
       // STEP 2: Find IP Stock configuration (to decide provider)
       L.head('STEP 2: LOAD IPSTOCK & DETECT PROVIDER');
@@ -381,7 +419,9 @@ class AutoProvisioningService {
       provisioningStatus: 'provisioning',
       provisioningError: '',
       autoProvisioned: true,
-      os: targetOS
+      lastProvisionAttempt: new Date(),
+      os: targetOS,
+      provider: 'smartvps'  // Set provider at the start
     });
 
     const ram = this.extractRam(order.memory);
@@ -415,9 +455,10 @@ class AutoProvisioningService {
         L.line(`[SMARTVPS] Calling buyVps(${pkg.name}, ${ram}) - attempt ${attempt}/${maxRetries} …`);
 
         // Add timeout wrapper around the API call
+        // Longer timeout for SmartVPS to fully process
         buyRes = await this.withTimeout(
           this.smartvpsApi.buyVps(pkg.name, ram),
-          45000, // 45 second timeout
+          120000, // 2 minute timeout (was 45s)
           `SmartVPS buyVps timeout (attempt ${attempt})`
         );
 
@@ -433,15 +474,29 @@ class AutoProvisioningService {
         }
 
         // CRITICAL SAFETY CHECK: Verify the IP belongs to the requested package
-        // Extract the base IP network (e.g., "103.181.91" from "103.181.91.50")
-        const requestedPackage = pkg.name; // e.g., "103.181.91"
-        const assignedIpBase = boughtIp.split('.').slice(0, 3).join('.'); // e.g., "103.181.91"
+        // We only check the FIRST 2 OCTETS (e.g., "103.83")
+        // Package "103.83.x" or "103.83.249" → Accept any IP starting with "103.83"
+        // Package "103.181.91" → Accept any IP starting with "103.181" (e.g., 103.181.90, 103.181.91, etc.)
+        const requestedPackage = pkg.name; // e.g., "103.83.x" or "103.181.91"
+        const ipParts = boughtIp.split('.'); // e.g., ["103", "83", "249", "120"]
         
-        if (!boughtIp.startsWith(requestedPackage)) {
+        // Extract first 2 octets from package name (remove 'x', 'X', trailing dots, etc.)
+        const packageParts = requestedPackage.split('.');
+        const packageFirstTwo = packageParts.slice(0, 2).join('.'); // e.g., "103.83" or "103.181"
+        
+        // Extract first 2 octets from assigned IP
+        const ipFirstTwo = ipParts.slice(0, 2).join('.'); // e.g., "103.83"
+        
+        const ipMatches = (ipFirstTwo === packageFirstTwo);
+        
+        L.kv('[SMARTVPS]   → Requested package', requestedPackage);
+        L.kv('[SMARTVPS]   → Package first 2 octets', packageFirstTwo);
+        L.kv('[SMARTVPS]   → Assigned IP', boughtIp);
+        L.kv('[SMARTVPS]   → IP first 2 octets', ipFirstTwo);
+        L.kv('[SMARTVPS]   → Match', ipMatches ? '✅ MATCH' : '❌ NO MATCH');
+        
+        if (!ipMatches) {
           L.line(`[SMARTVPS] ❌ CRITICAL: SmartVPS assigned IP from WRONG package!`);
-          L.kv('[SMARTVPS]   → Requested package', requestedPackage);
-          L.kv('[SMARTVPS]   → Assigned IP', boughtIp);
-          L.kv('[SMARTVPS]   → IP base network', assignedIpBase);
           L.line(`[SMARTVPS]   → This indicates the requested package ran out of IPs`);
           L.line(`[SMARTVPS]   → SmartVPS API fallback behavior detected!`);
           L.line(`[SMARTVPS]   → ORDER WILL BE MARKED AS FAILED (not provisioned)`);
@@ -449,7 +504,7 @@ class AutoProvisioningService {
           // Mark order as failed immediately (will be caught by outer try-catch)
           await Order.findByIdAndUpdate(order._id, {
             provisioningStatus: 'failed',
-            provisioningError: `WRONG PACKAGE ASSIGNED: Customer ordered "${requestedPackage}" but SmartVPS assigned "${boughtIp}". Package likely ran out of IPs. DO NOT provision this order.`,
+            provisioningError: `WRONG PACKAGE ASSIGNED: Customer ordered "${requestedPackage}" (${packageFirstTwo}.*) but SmartVPS assigned "${boughtIp}" (${ipFirstTwo}.*). Package likely ran out of IPs. DO NOT provision this order.`,
             status: 'failed',
             autoProvisioned: true,
             failedAt: new Date(),
@@ -457,7 +512,7 @@ class AutoProvisioningService {
           
           throw new Error(
             `❌ PROVISIONING BLOCKED: SmartVPS assigned IP from wrong package! ` +
-            `Customer ordered "${requestedPackage}" but received "${boughtIp}". ` +
+            `Customer ordered "${requestedPackage}" (${packageFirstTwo}.*) but received "${boughtIp}" (${ipFirstTwo}.*). ` +
             `This order has been marked as FAILED and will NOT be provisioned. ` +
             `Reason: Package ran out of IPs or SmartVPS API bug. Admin must manually resolve.`
           );
@@ -473,8 +528,14 @@ class AutoProvisioningService {
         L.line(`[SMARTVPS] ❌ buyVps attempt ${attempt} failed: ${error.message}`);
 
         if (attempt < maxRetries) {
-          const delay = attempt * 5000; // 5s, 10s delay between retries
-          L.line(`[SMARTVPS] Waiting ${delay}ms before retry...`);
+          // STRATEGIC DELAYS: Give SmartVPS API time to fully process and prevent race conditions
+          // Attempt 1 → Wait 2 minutes before retry 2
+          // Attempt 2 → Wait 3 minutes before retry 3
+          const delayMinutes = attempt + 1; // 2 min, 3 min
+          const delay = delayMinutes * 60 * 1000;
+          
+          L.line(`[SMARTVPS] ⏳ Strategic delay: Waiting ${delayMinutes} minute(s) (${delay}ms) before retry...`);
+          L.line(`[SMARTVPS] 💡 This allows SmartVPS API to fully process and prevents race conditions`);
           await new Promise(resolve => setTimeout(resolve, delay));
         }
       }
@@ -486,6 +547,7 @@ class AutoProvisioningService {
     }
 
     // Get credentials with retry logic
+    // SmartVPS needs time to provision and make credentials available
     let statusObj = {};
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
@@ -493,7 +555,7 @@ class AutoProvisioningService {
 
         const statusRaw = await this.withTimeout(
           this.smartvpsApi.status(boughtIp),
-          30000, // 30 second timeout for status
+          90000, // 90 second timeout for status (was 30s)
           `SmartVPS status timeout (attempt ${attempt})`
         );
 
@@ -522,8 +584,14 @@ class AutoProvisioningService {
         L.line(`[SMARTVPS] ❌ status attempt ${attempt} failed: ${error.message}`);
 
         if (attempt < maxRetries) {
-          const delay = attempt * 3000; // 3s, 6s delay between retries
-          L.line(`[SMARTVPS] Waiting ${delay}ms before retry...`);
+          // STRATEGIC DELAYS: Server may still be provisioning
+          // Attempt 1 → Wait 1 minute before retry 2
+          // Attempt 2 → Wait 2 minutes before retry 3
+          const delayMinutes = attempt; // 1 min, 2 min
+          const delay = delayMinutes * 60 * 1000;
+          
+          L.line(`[SMARTVPS] ⏳ Strategic delay: Waiting ${delayMinutes} minute(s) (${delay}ms) before retry...`);
+          L.line(`[SMARTVPS] 💡 Server may still be provisioning, giving it time to complete`);
           await new Promise(resolve => setTimeout(resolve, delay));
         }
       }
@@ -626,7 +694,9 @@ class AutoProvisioningService {
       provisioningStatus: 'provisioning',
       provisioningError: '',
       autoProvisioned: true,
-      os: targetOS
+      lastProvisionAttempt: new Date(),
+      os: targetOS,
+      provider: 'hostycare'  // Set provider at the start
     });
 
     L.line('[HOSTYCARE] Resolve memoryOptions …');

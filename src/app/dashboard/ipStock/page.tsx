@@ -68,6 +68,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 declare global {
   interface Window {
     Cashfree: any;
+    Razorpay: any;
   }
 }
 
@@ -118,6 +119,9 @@ export default function IPStockPage() {
   const [promoMessage, setPromoMessage] = useState("");
   const [promoValidating, setPromoValidating] = useState(false);
   const [promoApplied, setPromoApplied] = useState(false);
+
+  // Payment method selection
+  const [paymentMethod, setPaymentMethod] = useState<'cashfree' | 'razorpay' | 'upi'>('razorpay');
 
   // Tab filter state
   const [activeTab, setActiveTab] = useState<string>('all');
@@ -327,8 +331,6 @@ export default function IPStockPage() {
       .substring(0, 255); // Limit length to 255 characters (Razorpay limit)
   };
 
-  // Update the handleProceedToPayment function
-  // Update the handleProceedToPayment function
   const handleProceedToPayment = async () => {
     if (!selectedProduct) return;
 
@@ -346,7 +348,8 @@ export default function IPStockPage() {
           originalPrice: selectedProduct.price,
           promoCode: promoApplied ? promoCode : null,
           promoDiscount: promoApplied ? promoDiscount : 0,
-          ipStockId: selectedProduct.ipStockId
+          ipStockId: selectedProduct.ipStockId,
+          paymentMethod: paymentMethod // Send selected payment method
         })
       });
 
@@ -366,51 +369,249 @@ export default function IPStockPage() {
 
       console.log("Payment data received:", data);
 
-      // Initialize Cashfree SDK
-      const cashfree = await window.Cashfree({
-        mode: process.env.NEXT_PUBLIC_CASHFREE_ENVIRONMENT || "production" // "sandbox" or "production"
-      });
+      // Check if backend used fallback
+      if (data.fallbackUsed) {
+        toast.info(`${data.originalMethod === 'cashfree' ? 'Cashfree' : 'Razorpay'} unavailable, using ${data.actualPaymentMethod === 'cashfree' ? 'Cashfree' : 'Razorpay'}`);
+      }
 
       setShowDialog(false);
 
-      // Create checkout options
-      const checkoutOptions = {
-        paymentSessionId: data.cashfree.payment_session_id,
-        returnUrl: `${window.location.origin}/payment/callback?client_txn_id=${data.clientTxnId}`,
-        notifyUrl: `${window.location.origin}/api/payment/webhook`
+      // Use the actual payment method from backend (which may have used fallback)
+      const actualMethod = data.actualPaymentMethod || paymentMethod;
+      
+      console.log(`[Payment] Using method: ${actualMethod}`);
+
+      let primarySuccess = false;
+      
+      try {
+        if (actualMethod === 'upi') {
+          await handleUPIPayment(data);
+          primarySuccess = true;
+        } else if (actualMethod === 'cashfree') {
+          await handleCashfreePayment(data);
+          primarySuccess = true;
+        } else {
+          await handleRazorpayPayment(data);
+          primarySuccess = true;
+        }
+      } catch (primaryError) {
+        console.error(`[Payment] ${actualMethod} failed:`, primaryError);
+        
+        // Determine fallback method
+        const fallbackMethods = ['upi', 'cashfree', 'razorpay'].filter(m => m !== actualMethod);
+        const fallbackMethod = fallbackMethods[0];
+        
+        // Try fallback method
+        const fallbackLabel = fallbackMethod === 'upi' ? 'UPI' : fallbackMethod === 'cashfree' ? 'Cashfree' : 'Razorpay';
+        toast.info(`Switching to ${fallbackLabel}...`);
+        
+        try {
+          // Create new order with fallback method
+          const fallbackRes = await fetch("/api/payment/create", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              productName: selectedProduct.name,
+              memory: selectedProduct.memory,
+              price: finalPrice,
+              originalPrice: selectedProduct.price,
+              promoCode: promoApplied ? promoCode : null,
+              promoDiscount: promoApplied ? promoDiscount : 0,
+              ipStockId: selectedProduct.ipStockId,
+              paymentMethod: fallbackMethod
+            })
+          });
+
+          const fallbackData = await fallbackRes.json();
+
+          if (fallbackRes.ok) {
+            if (fallbackData.clientTxnId) {
+              localStorage.setItem('lastClientTxnId', fallbackData.clientTxnId);
+            }
+
+            if (fallbackMethod === 'upi') {
+              await handleUPIPayment(fallbackData);
+            } else if (fallbackMethod === 'cashfree') {
+              await handleCashfreePayment(fallbackData);
+            } else {
+              await handleRazorpayPayment(fallbackData);
+            }
+          } else {
+            throw new Error(fallbackData.message || "Fallback payment failed");
+          }
+        } catch (fallbackError) {
+          console.error(`[Payment] Fallback ${fallbackMethod} also failed:`, fallbackError);
+          toast.error("Both payment methods failed. Please try again later.");
+          setPaymentInitiating(false);
+        }
+      }
+
+    } catch (error) {
+      console.error("Error initiating payment:", error);
+      toast.error("Something went wrong. Please try again");
+      setPaymentInitiating(false);
+    }
+  };
+
+  const handleCashfreePayment = async (data: any) => {
+    // Check if Cashfree data exists
+    if (!data.cashfree || !data.cashfree.payment_session_id) {
+      console.error('[Cashfree] Missing cashfree data in response');
+      throw new Error('Cashfree payment data missing');
+    }
+
+    // Check if Cashfree SDK is loaded
+    if (typeof window.Cashfree === 'undefined') {
+      console.error('[Cashfree] SDK not loaded');
+      throw new Error('Cashfree SDK not available');
+    }
+
+    // Initialize Cashfree SDK
+    const cashfree = await window.Cashfree({
+      mode: process.env.NEXT_PUBLIC_CASHFREE_ENVIRONMENT || "production"
+    });
+
+    // Create checkout options
+    const checkoutOptions = {
+      paymentSessionId: data.cashfree.payment_session_id,
+      returnUrl: `${window.location.origin}/payment/callback?client_txn_id=${data.clientTxnId}`,
+    };
+
+    console.log("[Cashfree] Opening checkout");
+
+    // Open Cashfree checkout and AWAIT the result
+    const result = await cashfree.checkout(checkoutOptions);
+    
+    if (result.error) {
+      console.error("[Cashfree] Checkout error:", result.error);
+      throw new Error('Cashfree checkout failed: ' + (result.error.message || 'Unknown error'));
+    }
+
+    if (result.paymentDetails) {
+      toast.success("Payment successful! Processing order...");
+
+      try {
+        const confirmRes = await fetch("/api/payment/confirm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            clientTxnId: data.clientTxnId,
+            orderId: data.cashfree.order_id
+          })
+        });
+
+        if (confirmRes.ok) {
+          toast.success("Order confirmed! Redirecting...");
+          router.push(`/payment/callback?client_txn_id=${data.clientTxnId}&order_id=${data.cashfree.order_id}`);
+        } else {
+          toast.error("Payment confirmed but order processing failed. Please contact support.");
+          router.push(`/payment/callback?client_txn_id=${data.clientTxnId}&status=processing_failed`);
+        }
+      } catch (error) {
+        console.error('[Cashfree] Error confirming payment:', error);
+        toast.error("Payment successful but order confirmation failed. Please contact support.");
+        router.push(`/payment/callback?client_txn_id=${data.clientTxnId}&status=confirmation_failed`);
+      }
+    }
+  };
+
+  const handleUPIPayment = async (data: any) => {
+    console.log('[UPI] Starting payment initialization');
+    console.log('[UPI] Payment data:', data);
+
+    // Check if UPI data exists
+    if (!data.upi) {
+      console.error('[UPI] Missing upi object in response');
+      throw new Error('UPI payment data missing');
+    }
+
+    if (!data.upi.payment_url) {
+      console.error('[UPI] Missing payment_url in upi data');
+      throw new Error('UPI payment URL missing');
+    }
+
+    console.log('[UPI] Redirecting to payment URL:', data.upi.payment_url);
+
+    // Redirect to UPI Gateway payment page
+    window.location.href = data.upi.payment_url;
+  };
+
+  const handleRazorpayPayment = async (data: any) => {
+    console.log('[Razorpay] Starting payment initialization');
+    console.log('[Razorpay] Payment data:', data);
+
+    // Wait for Razorpay SDK to be loaded (with timeout)
+    let attempts = 0;
+    const maxAttempts = 20; // 2 seconds total
+    while (typeof window.Razorpay === 'undefined' && attempts < maxAttempts) {
+      console.log(`[Razorpay] Waiting for SDK to load... (attempt ${attempts + 1}/${maxAttempts})`);
+      await new Promise(resolve => setTimeout(resolve, 100));
+      attempts++;
+    }
+
+    // Check if Razorpay SDK is loaded
+    if (typeof window.Razorpay === 'undefined') {
+      console.error('[Razorpay] SDK not loaded after waiting');
+      throw new Error('Razorpay SDK not available');
+    }
+
+    console.log('[Razorpay] SDK loaded successfully');
+
+    // Check if razorpay data exists in response
+    if (!data.razorpay) {
+      console.error('[Razorpay] Missing razorpay object in response');
+      throw new Error('Razorpay payment data missing');
+    }
+
+    if (!data.razorpay.order_id) {
+      console.error('[Razorpay] Missing order_id in razorpay data');
+      throw new Error('Razorpay order ID missing');
+    }
+
+    console.log('[Razorpay] All checks passed, order_id:', data.razorpay.order_id);
+
+    try {
+
+      // Sanitize text for Razorpay
+      const sanitizeForRazorpay = (text: string) => {
+        if (!text) return '';
+        return text.replace(/[^\w\s\-\.]/g, '').trim().substring(0, 255);
       };
 
-      console.log("Opening Cashfree checkout with options:", checkoutOptions);
-
-      // Open Cashfree checkout
-      cashfree.checkout(checkoutOptions).then(async (result: any) => {
-        console.log("Cashfree checkout result:", result);
-        
-        if (result.error) {
-          console.error("Cashfree checkout error:", result.error);
-          toast.error(result.error.message || "Payment failed");
-          setPaymentInitiating(false);
-          return;
-        }
-
-        if (result.paymentDetails) {
-          console.log("Payment successful:", result.paymentDetails);
+      const options = {
+        key: data.razorpay.key,
+        amount: data.razorpay.amount,
+        currency: data.razorpay.currency,
+        name: 'OceanLinux',
+        description: sanitizeForRazorpay(`${selectedProduct?.name} - ${selectedProduct?.memory}`),
+        order_id: data.razorpay.order_id,
+        prefill: {
+          name: sanitizeForRazorpay(data.customer.name),
+          email: data.customer.email,
+        },
+        theme: {
+          color: '#3b82f6'
+        },
+        handler: async function (response: any) {
+          console.log('Razorpay payment successful:', response);
           toast.success("Payment successful! Processing order...");
 
           try {
-            // Call your API to confirm payment and trigger provisioning
             const confirmRes = await fetch("/api/payment/confirm", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 clientTxnId: data.clientTxnId,
-                orderId: data.cashfree.order_id
+                paymentMethod: 'razorpay',
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_signature: response.razorpay_signature
               })
             });
 
             if (confirmRes.ok) {
               toast.success("Order confirmed! Redirecting...");
-              router.push(`/payment/callback?client_txn_id=${data.clientTxnId}&order_id=${data.cashfree.order_id}`);
+              router.push(`/payment/callback?client_txn_id=${data.clientTxnId}&payment_id=${response.razorpay_payment_id}`);
             } else {
               toast.error("Payment confirmed but order processing failed. Please contact support.");
               router.push(`/payment/callback?client_txn_id=${data.clientTxnId}&status=processing_failed`);
@@ -420,17 +621,29 @@ export default function IPStockPage() {
             toast.error("Payment successful but order confirmation failed. Please contact support.");
             router.push(`/payment/callback?client_txn_id=${data.clientTxnId}&status=confirmation_failed`);
           }
+        },
+        modal: {
+          ondismiss: function () {
+            console.log('Razorpay payment modal dismissed');
+            setPaymentInitiating(false);
+          }
         }
-      }).catch((error: any) => {
-        console.error("Cashfree checkout error:", error);
-        toast.error("Payment initialization failed. Please try again.");
-        setPaymentInitiating(false);
+      };
+
+      console.log('[Razorpay] Creating Razorpay instance with options:', { 
+        ...options, 
+        key: options.key ? '***' + options.key.slice(-4) : 'MISSING',
+        amount: options.amount,
+        order_id: options.order_id
       });
 
-    } catch (error) {
-      console.error("Error initiating payment:", error);
-      toast.error("Something went wrong. Please try again");
-      setPaymentInitiating(false);
+      const razorpay = new window.Razorpay(options);
+      console.log('[Razorpay] Instance created successfully, opening modal');
+      razorpay.open();
+
+    } catch (error: any) {
+      console.error("[Razorpay] Error:", error);
+      throw new Error('Razorpay initialization failed: ' + (error?.message || 'Unknown error'));
     }
   };
 
@@ -761,16 +974,56 @@ export default function IPStockPage() {
               </CardContent>
             </Card>
 
+            {/* Payment Method Selection - Inline & Minimal */}
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Payment via:</span>
+              <div className="flex gap-1.5">
+                <button
+                  onClick={() => setPaymentMethod('razorpay')}
+                  className={cn(
+                    "px-3 py-1.5 rounded-md border transition-all text-xs font-medium",
+                    paymentMethod === 'razorpay'
+                      ? "border-primary bg-primary text-primary-foreground"
+                      : "border-border hover:border-primary/50"
+                  )}
+                >
+                  Razorpay
+                </button>
+                <button
+                  onClick={() => setPaymentMethod('upi')}
+                  className={cn(
+                    "px-3 py-1.5 rounded-md border transition-all text-xs font-medium",
+                    paymentMethod === 'upi'
+                      ? "border-primary bg-primary text-primary-foreground"
+                      : "border-border hover:border-primary/50"
+                  )}
+                >
+                  UPI
+                </button>
+                <button
+                  onClick={() => setPaymentMethod('cashfree')}
+                  className={cn(
+                    "px-3 py-1.5 rounded-md border transition-all text-xs font-medium",
+                    paymentMethod === 'cashfree'
+                      ? "border-primary bg-primary text-primary-foreground"
+                      : "border-border hover:border-primary/50"
+                  )}
+                >
+                  Cashfree
+                </button>
+              </div>
+            </div>
+
             {/* Payment Info */}
             <Card className="border-primary/20 bg-primary/5">
               <CardContent className="pt-6">
                 <div className="flex gap-3">
                   <Info className="h-5 w-5 text-primary flex-shrink-0 mt-0.5" />
                   <div className="space-y-2 text-sm">
-                    <p className="font-medium">Secure UPI Payment</p>
+                    <p className="font-medium">Secure Payment</p>
                     <p className="text-muted-foreground">
-                      You'll be redirected to a secure payment gateway. Complete your payment using any UPI app
-                      like PhonePe, Google Pay, Paytm, or your banking app.
+                      You'll be redirected to a secure payment gateway. Complete your payment using UPI, 
+                      Cards, Net Banking, or Wallets.
                     </p>
                   </div>
                 </div>

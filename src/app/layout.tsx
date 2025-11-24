@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
+import Script from "next/script";
 import "./globals.css";
 import { Toaster } from "sonner";
 import { ThemeProvider } from "@/components/theme-provider";
@@ -92,12 +93,20 @@ export default function RootLayout({
             __html: JSON.stringify(structuredData)
           }}
         />
-        {/* Add Cashfree script */}
-        <script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
       </head>
       <body className={inter.className}>
+        {/* Payment Gateway Scripts - Load before app */}
+        <Script 
+          src="https://sdk.cashfree.com/js/v3/cashfree.js" 
+          strategy="beforeInteractive"
+        />
+        <Script 
+          src="https://checkout.razorpay.com/v1/checkout.js" 
+          strategy="beforeInteractive"
+        />
+        
         <ThemeProvider
           attribute="class"
           defaultTheme="light"
