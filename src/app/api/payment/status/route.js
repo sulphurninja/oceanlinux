@@ -19,9 +19,12 @@ export async function POST(request) {
   try {
     const reqBody = await request.json();
     console.log(`Request body: ${JSON.stringify(reqBody)}`);
-    const { clientTxnId } = reqBody;
+    const { clientTxnId, renewalTxnId } = reqBody;
 
-    if (!clientTxnId) {
+    const txnId = renewalTxnId || clientTxnId;
+    const isRenewal = !!renewalTxnId;
+
+    if (!txnId) {
       console.log("ERROR: Missing transaction ID");
       return NextResponse.json(
         { message: 'Missing transaction ID' },
@@ -29,11 +32,64 @@ export async function POST(request) {
       );
     }
 
-    // Find the order
-    const order = await Order.findOne({ clientTxnId });
+    console.log(`[PAYMENT-STATUS] Transaction type: ${isRenewal ? 'RENEWAL' : 'NEW ORDER'}`);
+    console.log(`[PAYMENT-STATUS] Transaction ID: ${txnId}`);
+
+    // Handle RENEWAL transactions
+    if (isRenewal) {
+      console.log(`[PAYMENT-STATUS] Processing renewal transaction: ${txnId}`);
+      
+      // Check with Cashfree API for renewal payment status
+      try {
+        console.log(`[PAYMENT-STATUS] Checking Cashfree renewal order status: ${txnId}`);
+        
+        const cashfreeResponse = await Cashfree.PGOrderFetchPayments('2023-08-01', txnId);
+        console.log(`[PAYMENT-STATUS] Cashfree renewal response:`, cashfreeResponse.data);
+
+        if (cashfreeResponse.data && cashfreeResponse.data.length > 0) {
+          const payment = cashfreeResponse.data[0];
+          
+          if (payment.payment_status === 'SUCCESS') {
+            console.log(`[PAYMENT-STATUS] ✅ Renewal payment confirmed: ${txnId}`);
+            
+            return NextResponse.json({
+              isRenewal: true,
+              renewalTxnId: txnId,
+              paymentStatus: 'SUCCESS',
+              message: "Renewal payment confirmed"
+            });
+          } else {
+            console.log(`[PAYMENT-STATUS] ❌ Renewal payment not successful: ${payment.payment_status}`);
+            return NextResponse.json({
+              isRenewal: true,
+              renewalTxnId: txnId,
+              paymentStatus: payment.payment_status,
+              message: "Renewal payment pending or failed"
+            });
+          }
+        } else {
+          console.log(`[PAYMENT-STATUS] No payment data found for renewal: ${txnId}`);
+          return NextResponse.json({
+            isRenewal: true,
+            renewalTxnId: txnId,
+            paymentStatus: 'PENDING',
+            message: "Renewal payment not found"
+          }, { status: 404 });
+        }
+      } catch (cashfreeError) {
+        console.error('[PAYMENT-STATUS] Cashfree API error for renewal:', cashfreeError);
+        return NextResponse.json(
+          { message: 'Failed to check renewal payment status', error: cashfreeError.message },
+          { status: 500 }
+        );
+      }
+    }
+
+    // Handle NEW ORDER transactions (existing logic)
+    const order = await Order.findOne({ clientTxnId: txnId });
     
     if (!order) {
-      console.log(`Order not found for clientTxnId: ${clientTxnId}`);
+      console.log(`Order not found for clientTxnId: ${txnId}`);
       return NextResponse.json(
         { message: 'Order not found' },
         { status: 404 }
@@ -73,9 +129,22 @@ export async function POST(request) {
         if (payment.payment_status === 'SUCCESS') {
           console.log(`Payment confirmed for order ${order._id}`);
           
-          // Update order status
+          // Update order status and store payment details
           order.status = 'confirmed';
           order.transactionId = payment.cf_payment_id;
+          order.gatewayOrderId = order.clientTxnId; // Cashfree uses clientTxnId as order_id
+          order.paymentMethod = 'cashfree';
+          order.paymentDetails = {
+            cf_payment_id: payment.cf_payment_id,
+            cf_order_id: order.clientTxnId,
+            payment_status: payment.payment_status,
+            payment_amount: payment.payment_amount,
+            payment_currency: payment.payment_currency,
+            payment_time: payment.payment_time,
+            payment_method: payment.payment_method,
+            bank_reference: payment.bank_reference,
+            confirmedAt: new Date()
+          };
           await order.save();
           
           return NextResponse.json({

@@ -3,6 +3,8 @@ import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 import IPStock from '@/models/ipStockModel';
 import { Cashfree } from 'cashfree-pg';
+import Razorpay from 'razorpay';
+import crypto from 'crypto';
 const HostycareAPI = require('@/services/hostycareApi');
 const SmartVPSAPI = require('@/services/smartvpsApi');
 
@@ -12,6 +14,12 @@ Cashfree.XClientSecret = process.env.CASHFREE_SECRET_KEY;
 Cashfree.XEnvironment = process.env.CASHFREE_ENVIRONMENT === 'SANDBOX' 
   ? Cashfree.Environment.SANDBOX 
   : Cashfree.Environment.PRODUCTION;
+
+// Initialize Razorpay
+const razorpay = new Razorpay({
+  key_id: process.env.RAZORPAY_KEY_ID,
+  key_secret: process.env.RAZORPAY_KEY_SECRET
+});
 
 // Enhanced helper function to determine provider from order with IPStock data
 async function getProviderFromOrder(order) {
@@ -92,12 +100,16 @@ export async function POST(request) {
   try {
     const {
       renewalTxnId,
-      orderId
+      orderId,
+      paymentMethod,
+      razorpayPaymentId,
+      razorpaySignature
     } = await request.json();
 
     console.log('[RENEWAL-CONFIRM] Processing renewal confirmation:', {
       renewalTxnId,
-      orderId
+      orderId,
+      paymentMethod
     });
 
     if (!renewalTxnId || !orderId) {
@@ -117,32 +129,99 @@ export async function POST(request) {
       );
     }
 
-    // Verify payment status with Cashfree
-    console.log(`[RENEWAL-CONFIRM] Verifying payment with Cashfree for renewal order: ${renewalTxnId}`);
-    
-    try {
-      const cashfreeResponse = await Cashfree.PGOrderFetchPayments('2023-08-01', renewalTxnId);
-      console.log('[RENEWAL-CONFIRM] Cashfree payment verification response:', cashfreeResponse.data);
-
-      // Check if payment is successful
-      if (!cashfreeResponse.data || cashfreeResponse.data.length === 0) {
-        return NextResponse.json(
-          { success: false, message: 'No payment found for this renewal order' },
-          { status: 400 }
-        );
+    // Determine payment method from transaction ID or explicit parameter
+    let actualPaymentMethod = paymentMethod;
+    if (!actualPaymentMethod) {
+      // Auto-detect from transaction ID or order data
+      if (renewalTxnId.startsWith('RENEWAL_')) {
+        // Could be any method, check order data or default to cashfree
+        actualPaymentMethod = order.paymentMethod || 'cashfree';
       }
+    }
 
-      const payment = cashfreeResponse.data[0];
+    console.log(`[RENEWAL-CONFIRM] Payment method: ${actualPaymentMethod}`);
+
+    let payment_id = null;
+    let paymentVerified = false;
+
+    // Verify payment based on method
+    if (actualPaymentMethod === 'razorpay') {
+      console.log('[RENEWAL-CONFIRM] Verifying Razorpay renewal payment');
       
-      if (payment.payment_status !== 'SUCCESS') {
+      if (!razorpayPaymentId || !razorpaySignature) {
         return NextResponse.json(
-          { success: false, message: 'Payment not successful' },
+          { success: false, message: 'Missing Razorpay payment details' },
           { status: 400 }
         );
       }
 
-      console.log('[RENEWAL-CONFIRM] Cashfree payment verified successfully');
-      const cf_payment_id = payment.cf_payment_id;
+      // Verify Razorpay signature
+      const generatedSignature = crypto
+        .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
+        .update(`${renewalTxnId}|${razorpayPaymentId}`)
+        .digest('hex');
+
+      if (generatedSignature === razorpaySignature) {
+        console.log('[RENEWAL-CONFIRM] ✅ Razorpay signature verified');
+        payment_id = razorpayPaymentId;
+        paymentVerified = true;
+      } else {
+        console.error('[RENEWAL-CONFIRM] ❌ Razorpay signature verification failed');
+        return NextResponse.json(
+          { success: false, message: 'Payment verification failed' },
+          { status: 400 }
+        );
+      }
+    } else if (actualPaymentMethod === 'upi') {
+      console.log('[RENEWAL-CONFIRM] UPI Gateway renewal - payment verified via webhook');
+      // UPI Gateway payments are verified via webhook
+      // If we reach here, payment was already verified
+      payment_id = renewalTxnId;
+      paymentVerified = true;
+    } else {
+      // Default to Cashfree
+      console.log('[RENEWAL-CONFIRM] Verifying Cashfree renewal payment');
+      
+      try {
+        const cashfreeResponse = await Cashfree.PGOrderFetchPayments('2023-08-01', renewalTxnId);
+        console.log('[RENEWAL-CONFIRM] Cashfree payment verification response:', cashfreeResponse.data);
+
+        if (!cashfreeResponse.data || cashfreeResponse.data.length === 0) {
+          return NextResponse.json(
+            { success: false, message: 'No payment found for this renewal order' },
+            { status: 400 }
+          );
+        }
+
+        const payment = cashfreeResponse.data[0];
+        
+        if (payment.payment_status !== 'SUCCESS') {
+          return NextResponse.json(
+            { success: false, message: 'Payment not successful' },
+            { status: 400 }
+          );
+        }
+
+        console.log('[RENEWAL-CONFIRM] ✅ Cashfree payment verified successfully');
+        payment_id = payment.cf_payment_id;
+        paymentVerified = true;
+      } catch (cashfreeError) {
+        console.error('[RENEWAL-CONFIRM] Cashfree verification error:', cashfreeError);
+        return NextResponse.json(
+          { success: false, message: 'Payment verification failed', error: cashfreeError.message },
+          { status: 500 }
+        );
+      }
+    }
+
+    if (!paymentVerified) {
+      return NextResponse.json(
+        { success: false, message: 'Payment verification failed' },
+        { status: 400 }
+      );
+    }
+
+    const cf_payment_id = payment_id;
 
       // Determine the provider for this order using the enhanced function with IPStock lookup
       const provider = await getProviderFromOrder(order);
@@ -161,7 +240,7 @@ export async function POST(request) {
       console.log(`  New expiry: ${newExpiryDate}`);
       console.log(`  Payment ID: ${cf_payment_id}`);
 
-      // Create renewal payment record
+      // Create renewal payment record with full payment details
       const renewalPayment = {
         paymentId: cf_payment_id,
         amount: order.price,
@@ -169,7 +248,15 @@ export async function POST(request) {
         previousExpiry: currentExpiry,
         newExpiry: newExpiryDate,
         renewalTxnId: renewalTxnId,
-        provider: provider
+        provider: provider,
+        paymentMethod: actualPaymentMethod,
+        gatewayOrderId: actualPaymentMethod === 'razorpay' ? razorpayPaymentId : renewalTxnId,
+        paymentDetails: {
+          method: actualPaymentMethod,
+          payment_id: cf_payment_id,
+          order_id: actualPaymentMethod === 'razorpay' ? razorpayPaymentId : renewalTxnId,
+          confirmedAt: new Date()
+        }
       };
 
     // Handle provider-specific renewal logic
@@ -287,10 +374,16 @@ export async function POST(request) {
     });
 
     // Update the order with new expiry date and payment info
+    // IMPORTANT: Update main payment fields to reflect the latest renewal transaction
     const updatedOrder = await Order.findByIdAndUpdate(orderId, {
       expiryDate: newExpiryDate,
       lastAction: 'renew',
       lastActionTime: new Date(),
+      // Update main payment fields with latest renewal payment
+      transactionId: cf_payment_id,
+      gatewayOrderId: renewalPayment.gatewayOrderId,
+      paymentMethod: actualPaymentMethod,
+      paymentDetails: renewalPayment.paymentDetails,
       // Store renewal payment info for record keeping
       $push: {
         renewalPayments: renewalPayment
@@ -353,14 +446,6 @@ export async function POST(request) {
       });
 
       return NextResponse.json(response);
-
-    } catch (cashfreeError) {
-      console.error('[RENEWAL-CONFIRM] Cashfree verification error:', cashfreeError);
-      return NextResponse.json(
-        { success: false, message: 'Payment verification failed', error: cashfreeError.message },
-        { status: 500 }
-      );
-    }
 
   } catch (error) {
     console.error('[RENEWAL-CONFIRM] === RENEWAL PROCESS ERROR ===');

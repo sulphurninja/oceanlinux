@@ -99,12 +99,20 @@ export async function POST(request) {
         );
       }
 
-      // Update order status
+      // Update order status and store payment details
       order.status = 'confirmed';
       order.transactionId = razorpay_payment_id;
+      order.gatewayOrderId = razorpay_order_id; // Store Razorpay order ID
+      order.paymentMethod = 'razorpay';
+      order.paymentDetails = {
+        razorpay_payment_id: razorpay_payment_id,
+        razorpay_order_id: razorpay_order_id,
+        razorpay_signature: razorpay_signature,
+        confirmedAt: new Date()
+      };
       await order.save();
 
-      console.log(`Order ${order._id} confirmed with Razorpay payment ${razorpay_payment_id}`);
+      console.log(`Order ${order._id} confirmed with Razorpay payment ${razorpay_payment_id} (order: ${razorpay_order_id})`);
 
     } else {
       // Cashfree verification
@@ -131,12 +139,25 @@ export async function POST(request) {
           );
         }
 
-        // Update order status
+        // Update order status and store payment details
         order.status = 'confirmed';
         order.transactionId = payment.cf_payment_id;
+        order.gatewayOrderId = order.clientTxnId; // Cashfree uses clientTxnId as order_id
+        order.paymentMethod = 'cashfree';
+        order.paymentDetails = {
+          cf_payment_id: payment.cf_payment_id,
+          cf_order_id: order.clientTxnId,
+          payment_status: payment.payment_status,
+          payment_amount: payment.payment_amount,
+          payment_currency: payment.payment_currency,
+          payment_time: payment.payment_time,
+          payment_method: payment.payment_method,
+          bank_reference: payment.bank_reference,
+          confirmedAt: new Date()
+        };
         await order.save();
 
-        console.log(`Order ${order._id} confirmed with Cashfree payment ${payment.cf_payment_id}`);
+        console.log(`Order ${order._id} confirmed with Cashfree payment ${payment.cf_payment_id} (order: ${order.clientTxnId})`);
 
       } catch (cashfreeError) {
         console.error('Cashfree verification error:', cashfreeError);

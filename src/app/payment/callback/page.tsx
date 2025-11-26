@@ -16,12 +16,14 @@ function PaymentCallbackContent() {
   useEffect(() => {
     const verifyPayment = async () => {
       try {
-        // Get transaction ID from URL params (Razorpay uses different param names)
+        // Get transaction ID from URL params
         const clientTxnId = searchParams.get("client_txn_id");
+        const orderId = searchParams.get("order_id");
         const paymentId = searchParams.get("payment_id");
         const statusParam = searchParams.get("status");
 
         console.log(`Payment callback received with transaction ID: ${clientTxnId}`);
+        console.log(`Order ID: ${orderId}`);
         console.log(`Payment ID: ${paymentId}`);
         console.log(`Status param: ${statusParam}`);
 
@@ -46,7 +48,70 @@ function PaymentCallbackContent() {
           return;
         }
 
-        // Verify payment with our backend
+        // Detect if this is a renewal transaction
+        const isRenewal = clientTxnId.startsWith("RENEWAL_");
+        console.log(`Transaction type: ${isRenewal ? 'RENEWAL' : 'NEW ORDER'}`);
+
+        // HANDLE RENEWAL TRANSACTIONS
+        if (isRenewal) {
+          console.log(`[RENEWAL-CALLBACK] Processing renewal transaction: ${clientTxnId}`);
+          
+          // First, verify payment status
+          const statusResponse = await fetch("/api/payment/status", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              renewalTxnId: clientTxnId
+            })
+          });
+
+          if (!statusResponse.ok) {
+            throw new Error(`Failed to verify renewal payment status`);
+          }
+
+          const statusData = await statusResponse.json();
+          console.log(`[RENEWAL-CALLBACK] Payment status response:`, statusData);
+
+          if (statusData.paymentStatus === 'SUCCESS') {
+            console.log(`[RENEWAL-CALLBACK] Payment successful, confirming renewal...`);
+            
+            // Confirm the renewal
+            const confirmResponse = await fetch("/api/payment/renew-confirm", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                renewalTxnId: clientTxnId,
+                orderId: orderId
+              })
+            });
+
+            const confirmData = await confirmResponse.json();
+            console.log(`[RENEWAL-CALLBACK] Renewal confirmation response:`, confirmData);
+
+            if (confirmResponse.ok && confirmData.success) {
+              console.log(`[RENEWAL-CALLBACK] ✅ Renewal successful!`);
+              setStatus("success");
+              setMessage("Renewal successful! Your service has been extended for 30 days.");
+              toast.success("Service renewed successfully!");
+
+              setTimeout(() => {
+                router.push(`/dashboard/order/${orderId}`);
+              }, 3000);
+            } else {
+              console.error(`[RENEWAL-CALLBACK] ❌ Renewal confirmation failed:`, confirmData);
+              setStatus("failed");
+              setMessage(confirmData.message || "Payment successful but renewal processing failed. Please contact support.");
+            }
+          } else {
+            console.log(`[RENEWAL-CALLBACK] Payment not successful: ${statusData.paymentStatus}`);
+            setStatus("failed");
+            setMessage("Renewal payment verification failed. Please check your orders or contact support.");
+          }
+          
+          return;
+        }
+
+        // HANDLE NEW ORDER TRANSACTIONS (existing logic)
         console.log(`Calling payment status API with transaction ID: ${clientTxnId}`);
 
         const response = await fetch("/api/payment/status", {
@@ -54,7 +119,7 @@ function PaymentCallbackContent() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             clientTxnId: clientTxnId,
-            razorpayPaymentId: paymentId, // Include Razorpay payment ID
+            razorpayPaymentId: paymentId,
             returnedFromPayment: true,
             allParams: paramsObject
           })
@@ -75,10 +140,8 @@ function PaymentCallbackContent() {
           setStatus("success");
           setMessage("Payment successful! Your server is being provisioned and will be ready shortly.");
 
-          // Show success toast
           toast.success("Payment confirmed! Check your orders for server details.");
 
-          // Redirect after a short delay
           setTimeout(() => {
             router.push("/dashboard/viewLinux");
           }, 3000);

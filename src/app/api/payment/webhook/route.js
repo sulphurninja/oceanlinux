@@ -76,10 +76,27 @@ export async function POST(request) {
 
       order.status = 'confirmed';
       order.transactionId = payment.payment.cf_payment_id;
+      order.gatewayOrderId = payment.order.order_id; // Store Cashfree order ID
+      order.paymentMethod = 'cashfree';
       
       // Store additional payment info
       order.webhookAmount = payment.payment.payment_amount.toString();
       order.webhookCustomerEmail = payment.customer_details.customer_email;
+      
+      // Store comprehensive payment details
+      order.paymentDetails = {
+        cf_payment_id: payment.payment.cf_payment_id,
+        cf_order_id: payment.order.order_id,
+        payment_status: payment.payment.payment_status,
+        payment_amount: payment.payment.payment_amount,
+        payment_currency: payment.payment.payment_currency,
+        payment_time: payment.payment.payment_time,
+        payment_method: payment.payment.payment_method,
+        bank_reference: payment.payment.bank_reference,
+        customer_email: payment.customer_details.customer_email,
+        customer_phone: payment.customer_details.customer_phone,
+        webhookReceivedAt: new Date()
+      };
 
       await order.save();
       const orderUpdateTime = Date.now() - orderUpdateStart;

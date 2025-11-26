@@ -72,12 +72,9 @@ export async function POST(request) {
 
       console.log(`[PROVISION API] ✅ Order can be provisioned, starting...`);
       
-      // Mark as provisioning BEFORE starting
-      await Order.findByIdAndUpdate(orderId, {
-        provisioningStatus: 'provisioning',
-        provisioningError: '',
-        lastProvisionAttempt: new Date()
-      });
+      // DON'T set order to 'provisioning' here - let the provisioning service handle it
+      // This prevents race conditions where the duplicate check blocks manual retries
+      // The provisioning service will set the status after acquiring locks
 
       // Provision single order
       const result = await provisioningService.provisionServer(orderId);

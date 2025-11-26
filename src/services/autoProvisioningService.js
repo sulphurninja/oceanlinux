@@ -331,6 +331,8 @@ class AutoProvisioningService {
       }
 
       // Check if currently being provisioned (within last 10 minutes)
+      // IMPORTANT: Only block if status is 'provisioning' (not 'failed')
+      // This allows manual retries for failed orders
       if (order.provisioningStatus === 'provisioning' && order.lastProvisionAttempt) {
         const timeSinceAttempt = Date.now() - new Date(order.lastProvisionAttempt).getTime();
         if (timeSinceAttempt < 10 * 60 * 1000) { // 10 minutes
@@ -342,6 +344,8 @@ class AutoProvisioningService {
         } else {
           L.line(`⚠️ Order stuck in 'provisioning' state for ${Math.round(timeSinceAttempt / 60000)} minutes, allowing retry...`);
         }
+      } else if (order.provisioningStatus === 'failed') {
+        L.line(`✅ Order has 'failed' status, allowing manual retry...`);
       }
 
       L.line(`✅ Duplicate check passed, proceeding with provisioning...`);
@@ -415,15 +419,6 @@ class AutoProvisioningService {
     L.kv('[SMARTVPS] isWindowsProduct', isWindowsProduct);
     L.kv('[SMARTVPS] targetOS', targetOS);
 
-    await Order.findByIdAndUpdate(order._id, {
-      provisioningStatus: 'provisioning',
-      provisioningError: '',
-      autoProvisioned: true,
-      lastProvisionAttempt: new Date(),
-      os: targetOS,
-      provider: 'smartvps'  // Set provider at the start
-    });
-
     const ram = this.extractRam(order.memory);
     L.kv('[SMARTVPS] parsed RAM (GB)', ram);
     if (!ram) throw new Error(`Unable to parse RAM from memory "${order.memory}" for SmartVPS`);
@@ -440,8 +435,28 @@ class AutoProvisioningService {
       lockAcquired = true;
     } catch (lockError) {
       L.line(`[SMARTVPS] ❌ Failed to acquire lock: ${lockError.message}`);
+      
+      // Mark order as failed since we can't acquire lock
+      await Order.findByIdAndUpdate(order._id, {
+        provisioningStatus: 'failed',
+        provisioningError: `Lock acquisition failed: ${lockError.message}`,
+        autoProvisioned: true,
+        provider: 'smartvps'
+      });
+      
       throw new Error(`Cannot provision: ${lockError.message}. Please try again in a moment.`);
     }
+
+    // NOW set order to provisioning status AFTER acquiring lock
+    // This prevents orders from getting stuck in 'provisioning' if lock fails
+    await Order.findByIdAndUpdate(order._id, {
+      provisioningStatus: 'provisioning',
+      provisioningError: '',
+      autoProvisioned: true,
+      lastProvisionAttempt: new Date(),
+      os: targetOS,
+      provider: 'smartvps'  // Set provider at the start
+    });
 
     // Wrap entire provisioning in try-finally to ensure lock is released
     try {

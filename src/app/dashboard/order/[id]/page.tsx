@@ -149,6 +149,9 @@ const OrderDetails = () => {
   const [serviceDetails, setServiceDetails] = useState<any | null>(null);
   const [serviceLoading, setServiceLoading] = useState(false);
   const [actionBusy, setActionBusy] = useState<string | null>(null);
+  
+  // Payment method for renewals
+  const [renewalPaymentMethod, setRenewalPaymentMethod] = useState<'cashfree' | 'razorpay' | 'upi'>('cashfree');
 
   // Format dialog state
   const [formatDialogOpen, setFormatDialogOpen] = useState(false);
@@ -850,7 +853,7 @@ const OrderDetails = () => {
     return getDaysUntilExpiry(order.expiryDate) < 0;
   };
 
-  const handleRenewService = async () => {
+  const handleRenewService = async (selectedMethod?: 'cashfree' | 'razorpay' | 'upi') => {
     if (!order || !order.expiryDate) {
       toast.error('Order has no expiry date');
       return;
@@ -873,12 +876,16 @@ const OrderDetails = () => {
 
     setActionBusy('renew');
 
+    const paymentMethod = selectedMethod || renewalPaymentMethod;
+    console.log(`[RENEWAL] Initiating renewal with payment method: ${paymentMethod}`);
+
     try {
       const res = await fetch("/api/payment/renew", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          orderId: order._id
+          orderId: order._id,
+          paymentMethod: paymentMethod
         })
       });
 
@@ -896,34 +903,74 @@ const OrderDetails = () => {
       }
 
       console.log("Renewal payment data received:", data);
+      const actualMethod = data.paymentMethod || paymentMethod;
+      console.log(`[RENEWAL] Backend returned payment method: ${actualMethod}`);
 
-      // Initialize Cashfree SDK
+      // Handle payment based on method
+      if (actualMethod === 'razorpay') {
+        await handleRazorpayRenewal(data);
+      } else if (actualMethod === 'upi') {
+        await handleUpiRenewal(data);
+      } else {
+        await handleCashfreeRenewal(data);
+      }
+
+    } catch (error: any) {
+      console.error("[RENEWAL] Error initiating renewal payment:", error);
+      toast.error("Something went wrong. Please try again");
+      setActionBusy(null);
+    }
+  };
+
+  const handleCashfreeRenewal = async (data: any) => {
+    try {
+      console.log("[RENEWAL] Initializing Cashfree renewal checkout");
+      
+      if (!window.Cashfree) {
+        throw new Error("Cashfree SDK not loaded");
+      }
+
       const cashfree = await window.Cashfree({
         mode: process.env.NEXT_PUBLIC_CASHFREE_ENVIRONMENT || "production"
       });
 
-      // Create checkout options
+      const returnUrl = `${window.location.origin}/payment/callback?client_txn_id=${data.renewalTxnId}&order_id=${order?._id}`;
+      
       const checkoutOptions = {
         paymentSessionId: data.cashfree.payment_session_id,
-        returnUrl: `${window.location.origin}/payment/callback?client_txn_id=${data.renewalTxnId}&order_id=${order._id}`,
+        returnUrl: returnUrl,
         notifyUrl: `${window.location.origin}/api/payment/webhook`
       };
 
-      console.log("Opening Cashfree checkout for renewal:", checkoutOptions);
+      console.log("[RENEWAL] Opening Cashfree checkout");
+      await cashfree.checkout(checkoutOptions);
+      
+    } catch (error: any) {
+      console.error("[RENEWAL] Cashfree renewal error:", error);
+      toast.error("Cashfree payment failed. Trying Razorpay...");
+      
+      // Fallback to Razorpay
+      await handleRenewService('razorpay');
+    }
+  };
 
-      // Open Cashfree checkout
-      cashfree.checkout(checkoutOptions).then(async (result: any) => {
-        console.log("Cashfree renewal checkout result:", result);
-        
-        if (result.error) {
-          console.error("Cashfree renewal checkout error:", result.error);
-          toast.error(result.error.message || "Payment failed");
-          setActionBusy(null);
-          return;
-        }
+  const handleRazorpayRenewal = async (data: any) => {
+    try {
+      console.log("[RENEWAL] Initializing Razorpay renewal checkout");
+      
+      if (!window.Razorpay) {
+        throw new Error("Razorpay SDK not loaded");
+      }
 
-        if (result.paymentDetails) {
-          console.log("Renewal payment successful:", result.paymentDetails);
+      const options = {
+        key: data.razorpay.key,
+        amount: data.razorpay.amount,
+        currency: data.razorpay.currency,
+        name: "OceanLinux",
+        description: `Renewal: ${order?.productName}`,
+        order_id: data.razorpay.order_id,
+        handler: async function (response: any) {
+          console.log("[RENEWAL] Razorpay payment successful:", response);
           toast.success("Payment successful! Processing renewal...");
 
           try {
@@ -932,14 +979,17 @@ const OrderDetails = () => {
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 renewalTxnId: data.renewalTxnId,
-                orderId: order._id
+                orderId: order?._id,
+                paymentMethod: 'razorpay',
+                razorpayPaymentId: response.razorpay_payment_id,
+                razorpaySignature: response.razorpay_signature
               })
             });
 
             const confirmData = await confirmRes.json();
 
             if (confirmRes.ok && confirmData.success) {
-              toast.success("Service renewed successfully! New expiry date updated.");
+              toast.success("Service renewed successfully!");
               await fetchOrder();
             } else {
               toast.error("Payment successful but renewal processing failed. Please contact support.");
@@ -949,17 +999,56 @@ const OrderDetails = () => {
           } finally {
             setActionBusy(null);
           }
+        },
+        prefill: {
+          name: data.customer.name,
+          email: data.customer.email,
+          contact: data.customer.phone
+        },
+        theme: {
+          color: "#3399cc"
         }
-      }).catch((error: any) => {
-        console.error("Cashfree renewal checkout error:", error);
-        toast.error("Payment initialization failed. Please try again.");
+      };
+
+      const rzp = new window.Razorpay(options);
+      
+      rzp.on('payment.failed', function (response: any) {
+        console.error("[RENEWAL] Razorpay payment failed:", response);
+        toast.error("Razorpay payment failed. Trying UPI Gateway...");
         setActionBusy(null);
+        
+        // Fallback to UPI Gateway
+        handleRenewService('upi');
       });
 
-    } catch (error) {
-      console.error("Error initiating renewal payment:", error);
-      toast.error("Something went wrong. Please try again");
-      setActionBusy(null);
+      rzp.open();
+      
+    } catch (error: any) {
+      console.error("[RENEWAL] Razorpay renewal error:", error);
+      toast.error("Razorpay payment failed. Trying UPI Gateway...");
+      
+      // Fallback to UPI Gateway
+      await handleRenewService('upi');
+    }
+  };
+
+  const handleUpiRenewal = async (data: any) => {
+    try {
+      console.log("[RENEWAL] Redirecting to UPI Gateway");
+      
+      if (!data.upi || !data.upi.payment_url) {
+        throw new Error("UPI Gateway payment URL not available");
+      }
+
+      // Redirect to UPI Gateway payment page
+      window.location.href = data.upi.payment_url;
+      
+    } catch (error: any) {
+      console.error("[RENEWAL] UPI Gateway renewal error:", error);
+      toast.error("UPI Gateway payment failed. Trying Cashfree...");
+      
+      // Fallback to Cashfree
+      await handleRenewService('cashfree');
     }
   };
 
@@ -2011,31 +2100,72 @@ const OrderDetails = () => {
                           <span className="font-semibold text-sm">₹{order.price}/month</span>
                         </div>
 
-                        {/* Renewal Button */}
+                        {/* Renewal Payment Method Selection */}
                         {isRenewalEligible(order) && (
-                          <Button
-                            onClick={handleRenewService}
-                            disabled={actionBusy === 'renew'}
-                            className={cn(
-                              "w-full gap-2 h-10 text-sm shadow-sm",
-                              isExpired(order)
-                                ? "bg-destructive hover:bg-destructive/90"
-                                : "dark:bg-green-700 bg-green-500 text-white  hover:bg-primary/90"
-                            )}
-                          >
-                            {actionBusy === 'renew' ? (
-                              <>
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                                <span className="hidden sm:inline">Processing Payment...</span>
-                                <span className="sm:hidden">Processing...</span>
-                              </>
-                            ) : (
-                              <>
-                                <CreditCard className="h-4 w-4" />
-                                Renew for ₹{order.price}
-                              </>
-                            )}
-                          </Button>
+                          <>
+                            <div className="flex items-center gap-2 mb-2">
+                              <button
+                                onClick={() => setRenewalPaymentMethod('cashfree')}
+                                disabled={actionBusy === 'renew'}
+                                className={cn(
+                                  "flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-all",
+                                  renewalPaymentMethod === 'cashfree'
+                                    ? "bg-primary text-primary-foreground shadow-sm"
+                                    : "bg-muted text-muted-foreground hover:bg-muted/80"
+                                )}
+                              >
+                                Cashfree
+                              </button>
+                              <button
+                                onClick={() => setRenewalPaymentMethod('razorpay')}
+                                disabled={actionBusy === 'renew'}
+                                className={cn(
+                                  "flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-all",
+                                  renewalPaymentMethod === 'razorpay'
+                                    ? "bg-primary text-primary-foreground shadow-sm"
+                                    : "bg-muted text-muted-foreground hover:bg-muted/80"
+                                )}
+                              >
+                                Razorpay
+                              </button>
+                              <button
+                                onClick={() => setRenewalPaymentMethod('upi')}
+                                disabled={actionBusy === 'renew'}
+                                className={cn(
+                                  "flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-all",
+                                  renewalPaymentMethod === 'upi'
+                                    ? "bg-primary text-primary-foreground shadow-sm"
+                                    : "bg-muted text-muted-foreground hover:bg-muted/80"
+                                )}
+                              >
+                                UPI
+                              </button>
+                            </div>
+                            
+                            <Button
+                              onClick={() => handleRenewService()}
+                              disabled={actionBusy === 'renew'}
+                              className={cn(
+                                "w-full gap-2 h-10 text-sm shadow-sm",
+                                isExpired(order)
+                                  ? "bg-destructive hover:bg-destructive/90"
+                                  : "dark:bg-green-700 bg-green-500 text-white  hover:bg-primary/90"
+                              )}
+                            >
+                              {actionBusy === 'renew' ? (
+                                <>
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                  <span className="hidden sm:inline">Processing Payment...</span>
+                                  <span className="sm:hidden">Processing...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <CreditCard className="h-4 w-4" />
+                                  Renew for ₹{order.price}
+                                </>
+                              )}
+                            </Button>
+                          </>
                         )}
 
                         {isExpired(order) && isRenewalEligible(order) && (

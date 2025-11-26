@@ -5,13 +5,21 @@ import Order from '@/models/orderModel';
 import User from '@/models/userModel';
 import IPStock from '@/models/ipStockModel';
 import { Cashfree } from 'cashfree-pg';
+import Razorpay from 'razorpay';
+import axios from 'axios';
 
-// Initialize Cashfree with your credentials
+// Initialize Cashfree
 Cashfree.XClientId = process.env.CASHFREE_APP_ID;
 Cashfree.XClientSecret = process.env.CASHFREE_SECRET_KEY;
 Cashfree.XEnvironment = process.env.CASHFREE_ENVIRONMENT === 'SANDBOX' 
   ? Cashfree.Environment.SANDBOX 
   : Cashfree.Environment.PRODUCTION;
+
+// Initialize Razorpay
+const razorpay = new Razorpay({
+  key_id: process.env.RAZORPAY_KEY_ID,
+  key_secret: process.env.RAZORPAY_KEY_SECRET
+});
 
 // Enhanced helper function to determine provider from order with IPStock data
 async function getProviderFromOrder(order) {
@@ -103,7 +111,9 @@ export async function POST(request) {
 
     // 3. Read request data
     const reqBody = await request.json();
-    const { orderId } = reqBody;
+    const { orderId, paymentMethod = 'cashfree' } = reqBody;
+    
+    console.log(`[RENEWAL-INIT] Payment method requested: ${paymentMethod}`);
 
     // 4. Find the order to renew
     const order = await Order.findOne({ _id: orderId, user: userId });
@@ -157,57 +167,195 @@ export async function POST(request) {
       return String(str).replace(/[^\w\s\-\.,:]/g, '').trim();
     };
 
-    // 10. Create Cashfree order for renewal
-    const cashfreeRequest = {
-      order_id: renewalTxnId,
-      order_amount: Math.round(renewalPrice * 100) / 100,
-      order_currency: 'INR',
-      customer_details: {
-        customer_id: userId,
-        customer_name: user.name,
-        customer_email: user.email,
-        customer_phone: user.phone || '9999999999'
-      },
-      order_meta: {
-        return_url: `${process.env.NEXT_PUBLIC_BASE_URL}/payment/callback?client_txn_id=${renewalTxnId}&order_id=${order._id}`,
-        notify_url: `${process.env.NEXT_PUBLIC_BASE_URL}/api/payment/webhook`
-      },
-      order_note: sanitizeForCashfree(`Renewal: ${order.productName} - ${order.memory}`),
-      // Cashfree requires order_tags values to be strings without emojis/special chars
-      order_tags: {
-        order_id: String(order._id),
-        renewal_for: sanitizeForCashfree(order.productName),
-        memory: sanitizeForCashfree(order.memory),
-        renewal_type: 'service_renewal',
-        provider: String(provider),
-        service_identifier: String(provider === 'smartvps' ? (order.smartvpsServiceId || order.ipAddress) : '')
+    // 10. Create payment order based on selected method with backend fallback
+    const returnUrl = `${process.env.NEXT_PUBLIC_BASE_URL}/payment/callback?client_txn_id=${renewalTxnId}&order_id=${order._id}`;
+    let actualPaymentMethod = paymentMethod;
+    let orderCreationError = null;
+    const responseData = {};
+
+    // Try Cashfree first if selected
+    if (actualPaymentMethod === 'cashfree') {
+      try {
+        console.log('[RENEWAL-INIT] Creating Cashfree renewal order');
+        const cashfreeRequest = {
+          order_id: renewalTxnId,
+          order_amount: Math.round(renewalPrice * 100) / 100,
+          order_currency: 'INR',
+          customer_details: {
+            customer_id: userId,
+            customer_name: user.name,
+            customer_email: user.email,
+            customer_phone: user.phone || '9999999999'
+          },
+          order_meta: {
+            return_url: returnUrl,
+            notify_url: `${process.env.NEXT_PUBLIC_BASE_URL}/api/payment/webhook`
+          },
+          order_note: sanitizeForCashfree(`Renewal: ${order.productName} - ${order.memory}`),
+          order_tags: {
+            order_id: String(order._id),
+            renewal_for: sanitizeForCashfree(order.productName),
+            memory: sanitizeForCashfree(order.memory),
+            renewal_type: 'service_renewal',
+            provider: String(provider),
+            service_identifier: String(provider === 'smartvps' ? (order.smartvpsServiceId || order.ipAddress) : '')
+          }
+        };
+
+        const cashfreeOrder = await Cashfree.PGCreateOrder('2023-08-01', cashfreeRequest);
+        console.log('[RENEWAL-INIT] ✅ Cashfree renewal order created successfully');
+        
+        responseData.cashfree = {
+          order_id: renewalTxnId,
+          payment_session_id: cashfreeOrder.data.payment_session_id,
+          order_token: cashfreeOrder.data.payment_session_id,
+          amount: Math.round(renewalPrice * 100) / 100,
+          currency: 'INR'
+        };
+      } catch (error) {
+        console.error('[RENEWAL-INIT] ❌ Cashfree renewal order creation failed:', error.message);
+        orderCreationError = error;
+        actualPaymentMethod = 'razorpay'; // Fallback to Razorpay
       }
-    };
+    }
 
-    console.log("Creating Cashfree renewal order:", {
-      ...cashfreeRequest,
-      order_tags: {
-        ...cashfreeRequest.order_tags,
-        service_identifier: cashfreeRequest.order_tags.service_identifier ? '[SERVICE_ID_PRESENT]' : null
+    // Try Razorpay if selected or if Cashfree failed
+    if (actualPaymentMethod === 'razorpay') {
+      try {
+        console.log('[RENEWAL-INIT] Creating Razorpay renewal order');
+        const razorpayOrder = await razorpay.orders.create({
+          amount: Math.round(renewalPrice * 100),
+          currency: 'INR',
+          receipt: renewalTxnId,
+          notes: {
+            orderId: String(order._id),
+            renewal_for: order.productName,
+            memory: order.memory,
+            renewal_type: 'service_renewal',
+            provider: provider
+          }
+        });
+
+        console.log('[RENEWAL-INIT] ✅ Razorpay renewal order created successfully');
+        
+        responseData.razorpay = {
+          order_id: razorpayOrder.id,
+          amount: razorpayOrder.amount,
+          currency: razorpayOrder.currency,
+          key: process.env.RAZORPAY_KEY_ID
+        };
+      } catch (error) {
+        console.error('[RENEWAL-INIT] ❌ Razorpay renewal order creation failed:', error.message);
+        orderCreationError = error;
+        actualPaymentMethod = 'upi'; // Fallback to UPI Gateway
       }
-    });
+    }
 
-    const cashfreeOrder = await Cashfree.PGCreateOrder('2023-08-01', cashfreeRequest);
-    console.log("Cashfree renewal order created:", cashfreeOrder.data);
+    // Try UPI Gateway if selected or if previous methods failed
+    if (actualPaymentMethod === 'upi') {
+      const UPI_GATEWAY_KEY = process.env.UPI_GATEWAY_API_KEY;
+      if (!UPI_GATEWAY_KEY) {
+        console.error('[RENEWAL-INIT] UPI Gateway API key not configured');
+        orderCreationError = new Error('UPI Gateway API key not configured');
+        actualPaymentMethod = 'cashfree'; // Fallback to Cashfree as last resort
+        
+        // Try Cashfree again if we haven't tried it yet
+        if (!responseData.cashfree) {
+          try {
+            console.log('[RENEWAL-INIT] Falling back to Cashfree after UPI failure');
+            const cashfreeRequest = {
+              order_id: renewalTxnId,
+              order_amount: Math.round(renewalPrice * 100) / 100,
+              order_currency: 'INR',
+              customer_details: {
+                customer_id: userId,
+                customer_name: user.name,
+                customer_email: user.email,
+                customer_phone: user.phone || '9999999999'
+              },
+              order_meta: {
+                return_url: returnUrl,
+                notify_url: `${process.env.NEXT_PUBLIC_BASE_URL}/api/payment/webhook`
+              },
+              order_note: sanitizeForCashfree(`Renewal: ${order.productName} - ${order.memory}`),
+              order_tags: {
+                order_id: String(order._id),
+                renewal_for: sanitizeForCashfree(order.productName),
+                memory: sanitizeForCashfree(order.memory),
+                renewal_type: 'service_renewal',
+                provider: String(provider)
+              }
+            };
 
-    // 11. Return Cashfree order details for frontend
+            const cashfreeOrder = await Cashfree.PGCreateOrder('2023-08-01', cashfreeRequest);
+            console.log('[RENEWAL-INIT] ✅ Cashfree renewal order created (fallback)');
+            
+            responseData.cashfree = {
+              order_id: renewalTxnId,
+              payment_session_id: cashfreeOrder.data.payment_session_id,
+              order_token: cashfreeOrder.data.payment_session_id,
+              amount: Math.round(renewalPrice * 100) / 100,
+              currency: 'INR'
+            };
+          } catch (cashfreeError) {
+            console.error('[RENEWAL-INIT] ❌ All payment methods failed');
+            return NextResponse.json(
+              { message: 'All payment gateways failed. Please try again later.' },
+              { status: 500 }
+            );
+          }
+        }
+      } else {
+        try {
+          console.log('[RENEWAL-INIT] Creating UPI Gateway renewal order');
+          const upiRequest = {
+            key: UPI_GATEWAY_KEY,
+            client_txn_id: renewalTxnId,
+            amount: Math.round(renewalPrice * 100) / 100,
+            p_info: sanitizeForCashfree(`Renewal: ${order.productName} - ${order.memory}`),
+            customer_name: user.name,
+            customer_email: user.email,
+            customer_mobile: user.phone || '9999999999',
+            redirect_url: returnUrl,
+            udf1: String(order._id),
+            udf2: 'renewal',
+            udf3: String(provider)
+          };
+
+          const upiResponse = await axios.post('https://merchant.upigateway.com/api/create_order', upiRequest);
+          
+          if (upiResponse.data && upiResponse.data.status === 'success') {
+            console.log('[RENEWAL-INIT] ✅ UPI Gateway renewal order created successfully');
+            
+            responseData.upi = {
+              order_id: upiResponse.data.id,
+              payment_url: upiResponse.data.payment_url,
+              amount: upiRequest.amount,
+              currency: 'INR'
+            };
+          } else {
+            throw new Error(upiResponse.data.message || 'UPI Gateway order creation failed');
+          }
+        } catch (error) {
+          console.error('[RENEWAL-INIT] ❌ UPI Gateway renewal order creation failed:', error.message);
+          return NextResponse.json(
+            { message: 'All payment gateways failed. Please try again later.' },
+            { status: 500 }
+          );
+        }
+      }
+    }
+
+    console.log(`[RENEWAL-INIT] ✅ Final payment method: ${actualPaymentMethod}`);
+
+    // 11. Return payment order details for frontend
     return NextResponse.json({
       message: 'Renewal payment initiated',
       orderId: order._id,
       renewalTxnId: renewalTxnId,
       provider: provider,
-      cashfree: {
-        order_id: renewalTxnId,
-        payment_session_id: cashfreeOrder.data.payment_session_id,
-        order_token: cashfreeOrder.data.payment_session_id,
-        amount: Math.round(renewalPrice * 100) / 100,
-        currency: 'INR'
-      },
+      paymentMethod: actualPaymentMethod,
+      ...responseData,
       customer: {
         name: user.name,
         email: user.email,
