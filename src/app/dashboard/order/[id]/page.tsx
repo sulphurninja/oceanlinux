@@ -46,6 +46,7 @@ import { Progress } from '@/components/ui/progress';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { useSessionAlert } from '@/components/session-alert';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
@@ -138,6 +139,7 @@ const OrderDetails = () => {
   const params = useParams();
   const router = useRouter();
   const orderId = params.id as string;
+  const { showAlert } = useSessionAlert();
 
   const [order, setOrder] = useState<Order | null>(null);
   const [ipStock, setIpStock] = useState<IPStock | null>(null);
@@ -149,6 +151,7 @@ const OrderDetails = () => {
   const [serviceDetails, setServiceDetails] = useState<any | null>(null);
   const [serviceLoading, setServiceLoading] = useState(false);
   const [actionBusy, setActionBusy] = useState<string | null>(null);
+  const [serverPowerState, setServerPowerState] = useState<'running' | 'stopped' | 'suspended' | 'busy' | 'unknown'>('unknown');
   
   // Payment method for renewals
   const [renewalPaymentMethod, setRenewalPaymentMethod] = useState<'cashfree' | 'razorpay' | 'upi'>('cashfree');
@@ -179,6 +182,13 @@ const OrderDetails = () => {
       fetchOrderAndIPStock();
     }
   }, [orderId]);
+
+  // Fetch server power state when order is loaded (for Hostycare orders)
+  useEffect(() => {
+    if (order && order.hostycareServiceId && !loading) {
+      fetchServerPowerState();
+    }
+  }, [order?.hostycareServiceId, loading]);
 
   const fetchOrderAndIPStock = async () => {
     setLoading(true);
@@ -441,6 +451,38 @@ const OrderDetails = () => {
     return false;
   };
 
+  const fetchServerPowerState = async () => {
+    if (!order) return;
+
+    const provider = getProviderFromOrder(order, ipStock);
+    
+    // Only fetch for Hostycare provider with service ID
+    if (provider !== 'hostycare' || !order.hostycareServiceId) {
+      return;
+    }
+
+    try {
+      console.log('[ORDER-DETAILS] Fetching server power state...');
+      const res = await fetch(`/api/orders/service-action`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderId: order._id, action: 'status' })
+      });
+      const data = await res.json();
+
+      if (data.success && data.powerState) {
+        console.log('[ORDER-DETAILS] Server power state:', data.powerState);
+        setServerPowerState(data.powerState);
+      } else {
+        console.log('[ORDER-DETAILS] Could not determine power state:', data);
+        setServerPowerState('unknown');
+      }
+    } catch (error) {
+      console.error('[ORDER-DETAILS] Failed to fetch power state:', error);
+      setServerPowerState('unknown');
+    }
+  };
+
   const loadServiceDetails = async () => {
     if (!order) return;
 
@@ -471,6 +513,11 @@ const OrderDetails = () => {
         // Refresh order data to get latest synced information
         await fetchOrder();
 
+        // Also fetch power state for Hostycare
+        if (provider === 'hostycare') {
+          await fetchServerPowerState();
+        }
+
         // Show success message if credentials were updated during sync
         if (data.syncResult?.credentialsUpdated) {
           toast.success('Server information updated from provider');
@@ -488,6 +535,12 @@ const OrderDetails = () => {
     if (!order || !isServerManagementAvailable(order, ipStock)) return;
 
     setActionBusy(action);
+    
+    // Set power state to busy during action
+    if (['start', 'stop', 'restart'].includes(action)) {
+      setServerPowerState('busy');
+    }
+
     try {
       const provider = getProviderFromOrder(order, ipStock);
       const endpoint = provider === 'smartvps' ? 'smartvps-action' : 'service-action';
@@ -501,6 +554,14 @@ const OrderDetails = () => {
 
       if (data.success) {
         toast.success(`Action "${action}" executed successfully`);
+        
+        // For power actions, wait a bit then refresh state
+        if (['start', 'stop', 'restart'].includes(action)) {
+          // Give the server a moment to change state
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          await fetchServerPowerState();
+        }
+        
         await Promise.all([
           loadServiceDetails(),
           fetchOrder()
@@ -511,9 +572,18 @@ const OrderDetails = () => {
         }
       } else {
         toast.error(data.error || `Failed to execute "${action}"`);
+        // Refresh power state on error too
+        if (['start', 'stop', 'restart'].includes(action) && provider === 'hostycare') {
+          await fetchServerPowerState();
+        }
       }
     } catch (e: any) {
       toast.error(e.message || `Failed to execute "${action}"`);
+      // Refresh power state on error
+      const provider = getProviderFromOrder(order, ipStock);
+      if (['start', 'stop', 'restart'].includes(action) && provider === 'hostycare') {
+        await fetchServerPowerState();
+      }
     } finally {
       setActionBusy(null);
     }
@@ -892,7 +962,17 @@ const OrderDetails = () => {
       const data = await res.json();
 
       if (!res.ok) {
-        toast.error(data.message || "Failed to initiate renewal payment");
+        // Handle auth errors with proper session alerts
+        if (res.status === 401) {
+          const errorCode = data.code || '';
+          if (errorCode === 'SESSION_EXPIRED' || data.message?.toLowerCase().includes('expired')) {
+            showAlert('session_expired', 'Your session expired. Please log in again to renew your service.');
+          } else {
+            showAlert('action_requires_login', 'Please log in to renew your service.');
+          }
+        } else {
+          toast.error(data.message || "Failed to initiate renewal payment");
+        }
         setActionBusy(null);
         return;
       }
@@ -1857,48 +1937,106 @@ const OrderDetails = () => {
                       </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-3">
+                      {/* Server Power State Indicator */}
+                      {provider === 'hostycare' && (
+                        <div className={cn(
+                          "flex items-center gap-3 p-3 rounded-lg border",
+                          serverPowerState === 'running' && "bg-green-50 border-green-200 dark:bg-green-950/30 dark:border-green-800",
+                          serverPowerState === 'stopped' && "bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-800",
+                          serverPowerState === 'suspended' && "bg-amber-50 border-amber-200 dark:bg-amber-950/30 dark:border-amber-800",
+                          serverPowerState === 'busy' && "bg-blue-50 border-blue-200 dark:bg-blue-950/30 dark:border-blue-800",
+                          serverPowerState === 'unknown' && "bg-muted/50 border-border"
+                        )}>
+                          <div className={cn(
+                            "w-3 h-3 rounded-full",
+                            serverPowerState === 'running' && "bg-green-500 animate-pulse",
+                            serverPowerState === 'stopped' && "bg-red-500",
+                            serverPowerState === 'suspended' && "bg-amber-500",
+                            serverPowerState === 'busy' && "bg-blue-500 animate-pulse",
+                            serverPowerState === 'unknown' && "bg-gray-400"
+                          )} />
+                          <div className="flex-1">
+                            <p className={cn(
+                              "text-sm font-medium",
+                              serverPowerState === 'running' && "text-green-700 dark:text-green-300",
+                              serverPowerState === 'stopped' && "text-red-700 dark:text-red-300",
+                              serverPowerState === 'suspended' && "text-amber-700 dark:text-amber-300",
+                              serverPowerState === 'busy' && "text-blue-700 dark:text-blue-300",
+                              serverPowerState === 'unknown' && "text-muted-foreground"
+                            )}>
+                              {serverPowerState === 'running' && 'Server is Running'}
+                              {serverPowerState === 'stopped' && 'Server is Stopped'}
+                              {serverPowerState === 'suspended' && 'Server is Suspended'}
+                              {serverPowerState === 'busy' && 'Processing...'}
+                              {serverPowerState === 'unknown' && 'Status Unknown'}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {serverPowerState === 'running' && 'Your server is online and responding'}
+                              {serverPowerState === 'stopped' && 'Your server is powered off'}
+                              {serverPowerState === 'suspended' && 'Your server is paused'}
+                              {serverPowerState === 'busy' && 'Please wait while the action completes'}
+                              {serverPowerState === 'unknown' && 'Click Sync to check server status'}
+                            </p>
+                          </div>
+                          {serverPowerState === 'busy' && (
+                            <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+                          )}
+                        </div>
+                      )}
+
                       {/* Power Controls */}
                       <div className="grid grid-cols-1 gap-2">
                         <Button
                           variant="default"
                           onClick={() => runServiceAction('start')}
-                          disabled={!!actionBusy}
-                          className="h-10 gap-2 bg-primary hover:bg-primary/90 text-sm"
+                          disabled={!!actionBusy || serverPowerState === 'running' || serverPowerState === 'busy'}
+                          className={cn(
+                            "h-10 gap-2 text-sm",
+                            serverPowerState === 'running' 
+                              ? "bg-muted text-muted-foreground cursor-not-allowed" 
+                              : "bg-primary hover:bg-primary/90"
+                          )}
                         >
                           {actionBusy === 'start' ? (
                             <Loader2 className="h-4 w-4 animate-spin" />
                           ) : (
                             <Play className="h-4 w-4" />
                           )}
-                          Start Server
+                          {serverPowerState === 'running' ? 'Server Already Running' : 'Start Server'}
                         </Button>
 
                         <Button
                           variant="outline"
                           onClick={() => runServiceAction('stop')}
-                          disabled={!!actionBusy}
-                          className="h-10 gap-2 text-sm"
+                          disabled={!!actionBusy || serverPowerState === 'stopped' || serverPowerState === 'busy'}
+                          className={cn(
+                            "h-10 gap-2 text-sm",
+                            serverPowerState === 'stopped' && "opacity-50 cursor-not-allowed"
+                          )}
                         >
                           {actionBusy === 'stop' ? (
                             <Loader2 className="h-4 w-4 animate-spin" />
                           ) : (
                             <Square className="h-4 w-4" />
                           )}
-                          Stop Server
+                          {serverPowerState === 'stopped' ? 'Server Already Stopped' : 'Stop Server'}
                         </Button>
 
                         <Button
                           variant="secondary"
                           onClick={() => runServiceAction('restart')}
-                          disabled={!!actionBusy}
-                          className="h-10 gap-2 text-sm"
+                          disabled={!!actionBusy || serverPowerState === 'stopped' || serverPowerState === 'busy'}
+                          className={cn(
+                            "h-10 gap-2 text-sm",
+                            serverPowerState === 'stopped' && "opacity-50 cursor-not-allowed"
+                          )}
                         >
                           {actionBusy === 'restart' ? (
                             <Loader2 className="h-4 w-4 animate-spin" />
                           ) : (
                             <RotateCcw className="h-4 w-4" />
                           )}
-                          Restart Server
+                          {serverPowerState === 'stopped' ? 'Cannot Restart (Stopped)' : 'Restart Server'}
                         </Button>
                       </div>
 

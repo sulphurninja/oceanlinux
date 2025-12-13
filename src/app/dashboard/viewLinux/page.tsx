@@ -69,6 +69,7 @@ interface Order {
     hostycareServiceId?: string;
     smartvpsServiceId?: string;
     provisioningStatus?: string;
+    provisioningError?: string;
     lastAction?: string;
     lastActionTime?: Date;
     lastSyncTime?: Date;
@@ -205,10 +206,7 @@ const ViewLinux = () => {
 
 
 
-    // Get server status for filtering
-
-    // Get server status for filtering
-    // Get server status for filtering
+    // Get server status for filtering - Customer-friendly status logic
     const getServerStatus = (order: Order): 'active' | 'expired' | 'pending' | 'failed' => {
         const currentStatus = order.provisioningStatus || order.status;
 
@@ -222,7 +220,16 @@ const ViewLinux = () => {
             return 'active';
         }
 
-        // 🆕 NEW: Check if this is a non-auto-provisioned service first
+        // 🆕 NEW: Check if order is fresh (created within last 10 minutes)
+        // Fresh orders should NEVER show as failed - they're still being processed
+        const orderAge = order.createdAt ? Date.now() - new Date(order.createdAt).getTime() : 0;
+        const isFreshOrder = orderAge < 10 * 60 * 1000; // 10 minutes
+
+        if (isFreshOrder && currentStatus.toLowerCase() !== 'active' && currentStatus.toLowerCase() !== 'completed') {
+            return 'pending'; // Always show fresh orders as pending
+        }
+
+        // Check if this is a non-auto-provisioned service
         const provider = getProviderDisplayName(order);
         const isAutoProvisionedProvider = provider === 'Hostycare' || provider === 'SmartVPS';
 
@@ -235,7 +242,9 @@ const ViewLinux = () => {
                     !order.provisioningError.includes('CONFIG:') &&
                     !order.provisioningError.includes('Missing hostycareProductId') &&
                     !order.provisioningError.includes('Memory configuration not found') &&
-                    !order.provisioningError.includes('lacks hostycareProductId'))) {
+                    !order.provisioningError.includes('lacks hostycareProductId') &&
+                    !order.provisioningError.includes('not found') &&
+                    !order.provisioningError.includes('Lock acquisition'))) {
                 return 'failed';
             }
             // All other non-auto-provisioned services should be pending (awaiting manual setup)
@@ -244,12 +253,16 @@ const ViewLinux = () => {
 
         // For auto-provisioned services, continue with existing logic
 
-        // 🆕 Special handling for configuration errors - these should be pending, not failed
+        // Special handling for configuration/temporary errors - these should be pending, not failed
         if (order.provisioningError &&
             (order.provisioningError.includes('Missing hostycareProductId') ||
                 order.provisioningError.includes('CONFIG:') ||
                 order.provisioningError.includes('Memory configuration not found') ||
-                order.provisioningError.includes('lacks hostycareProductId'))) {
+                order.provisioningError.includes('lacks hostycareProductId') ||
+                order.provisioningError.includes('not found') ||
+                order.provisioningError.includes('Lock acquisition') ||
+                order.provisioningError.includes('IPStock') ||
+                order.provisioningError.includes('timeout'))) {
             return 'pending';
         }
 
@@ -351,7 +364,31 @@ const getStatusBadge = (status: string, provisioningStatus?: string, lastAction?
 
     const currentStatus = provisioningStatus || status;
 
-    // 🆕 NEW: Check if this is a non-auto-provisioned service
+    // 🆕 NEW: Check if order is fresh (created within last 10 minutes)
+    // Fresh orders should show a friendly "Setting Up" message
+    const orderAge = order?.createdAt ? Date.now() - new Date(order.createdAt).getTime() : 0;
+    const isFreshOrder = orderAge < 10 * 60 * 1000; // 10 minutes
+
+    if (isFreshOrder && currentStatus.toLowerCase() !== 'active' && currentStatus.toLowerCase() !== 'completed') {
+        // For very fresh orders (< 2 mins), show "Processing Payment"
+        if (orderAge < 2 * 60 * 1000) {
+            return (
+                <Badge className="bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-800">
+                    <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                    Processing
+                </Badge>
+            );
+        }
+        // For orders 2-10 mins old, show "Setting Up"
+        return (
+            <Badge className="bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800">
+                <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                Setting Up
+            </Badge>
+        );
+    }
+
+    // Check if this is a non-auto-provisioned service
     const provider = order ? getProviderDisplayName(order) : 'Unknown';
     const isAutoProvisionedProvider = provider === 'Hostycare' || provider === 'SmartVPS';
 
@@ -374,18 +411,20 @@ const getStatusBadge = (status: string, provisioningStatus?: string, lastAction?
         );
     }
 
-    // Rest of the existing logic for auto-provisioned services...
-
-    // 🆕 Check for configuration errors first
+    // Check for configuration/temporary errors - show as pending, not failed
     if (order?.provisioningError &&
         (order.provisioningError.includes('Missing hostycareProductId') ||
             order.provisioningError.includes('CONFIG:') ||
             order.provisioningError.includes('Memory configuration not found') ||
-            order.provisioningError.includes('lacks hostycareProductId'))) {
+            order.provisioningError.includes('lacks hostycareProductId') ||
+            order.provisioningError.includes('not found') ||
+            order.provisioningError.includes('Lock acquisition') ||
+            order.provisioningError.includes('IPStock') ||
+            order.provisioningError.includes('timeout'))) {
         return (
             <Badge className="bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800">
-                <Settings className="w-3 h-3 mr-1" />
-                Awaiting Config
+                <Clock className="w-3 h-3 mr-1" />
+                In Queue
             </Badge>
         );
     }
@@ -408,7 +447,7 @@ const getStatusBadge = (status: string, provisioningStatus?: string, lastAction?
             );
         case 'provisioning':
             return (
-                <Badge className="bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800">
+                <Badge className="bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-800">
                     <Loader2 className="w-3 h-3 mr-1 animate-spin" />
                     Provisioning
                 </Badge>
@@ -421,19 +460,23 @@ const getStatusBadge = (status: string, provisioningStatus?: string, lastAction?
                 </Badge>
             );
         case 'failed':
-            // Double-check for config errors even in failed status
-            if (order?.provisioningError && order.provisioningError.includes('CONFIG:')) {
+            // Double-check for config/temporary errors even in failed status
+            if (order?.provisioningError && 
+                (order.provisioningError.includes('CONFIG:') ||
+                 order.provisioningError.includes('not found') ||
+                 order.provisioningError.includes('Lock') ||
+                 order.provisioningError.includes('timeout'))) {
                 return (
                     <Badge className="bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800">
-                        <Settings className="w-3 h-3 mr-1" />
-                        Awaiting Config
+                        <Clock className="w-3 h-3 mr-1" />
+                        In Queue
                     </Badge>
                 );
             }
             return (
                 <Badge className="bg-red-50 text-red-700 border border-red-200 dark:bg-red-950 dark:text-red-300 dark:border-red-800">
                     <XCircle className="w-3 h-3 mr-1" />
-                    Failed
+                    Needs Attention
                 </Badge>
             );
         case 'terminated':

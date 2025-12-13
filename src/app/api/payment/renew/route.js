@@ -348,6 +348,20 @@ export async function POST(request) {
 
     console.log(`[RENEWAL-INIT] ✅ Final payment method: ${actualPaymentMethod}`);
 
+    // 10.5 Store pending renewal info on the order for webhook/recovery
+    const pendingRenewalData = {
+      renewalTxnId: renewalTxnId,
+      initiatedAt: new Date(),
+      paymentMethod: actualPaymentMethod,
+      amount: renewalPrice,
+      gatewayOrderId: actualPaymentMethod === 'razorpay' ? responseData.razorpay?.order_id : renewalTxnId
+    };
+
+    await Order.findByIdAndUpdate(orderId, {
+      pendingRenewal: pendingRenewalData
+    });
+    console.log(`[RENEWAL-INIT] ✅ Stored pending renewal info on order:`, pendingRenewalData);
+
     // 11. Return payment order details for frontend
     return NextResponse.json({
       message: 'Renewal payment initiated',

@@ -76,7 +76,16 @@ const orderSchema = new mongoose.Schema({
         previousExpiry: { type: Date, required: true },
         newExpiry: { type: Date, required: true },
         renewalTxnId: { type: String, required: true }
-    }]
+    }],
+
+    // Pending renewal tracking - stores the current renewal transaction awaiting payment
+    pendingRenewal: {
+        renewalTxnId: { type: String },
+        initiatedAt: { type: Date },
+        paymentMethod: { type: String },
+        amount: { type: Number },
+        gatewayOrderId: { type: String } // Razorpay order ID if applicable
+    }
 }, { timestamps: true });
 
 // Indexes
@@ -87,5 +96,7 @@ orderSchema.index({ smartvpsServiceId: 1 });
 orderSchema.index({ lastSyncTime: -1 });
 orderSchema.index({ expiryDate: 1 });
 orderSchema.index({ provider: 1 });
+orderSchema.index({ 'pendingRenewal.renewalTxnId': 1 }); // For webhook lookup
+orderSchema.index({ 'renewalPayments.renewalTxnId': 1 }); // For idempotency check
 
 export default mongoose.models.Order || mongoose.model('Order', orderSchema);

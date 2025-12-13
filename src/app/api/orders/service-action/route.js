@@ -206,6 +206,88 @@ export async function POST(request) {
           throw new Error('Hostycare service ID not found for this order');
         }
         break;
+
+      case 'status':
+        console.log('[STATUS] Fetching VPS power status');
+        if (hostycareApi && order.hostycareServiceId) {
+          console.log('[STATUS] Using Hostycare API with service ID:', order.hostycareServiceId);
+          try {
+            const serviceInfo = await hostycareApi.getServiceInfo(order.hostycareServiceId);
+            const serviceDetails = await hostycareApi.getServiceDetails(order.hostycareServiceId);
+            
+            console.log('[STATUS] Service Info:', JSON.stringify(serviceInfo, null, 2));
+            console.log('[STATUS] Service Details:', JSON.stringify(serviceDetails, null, 2));
+
+            // Parse the power state from the response
+            let powerState = 'unknown';
+            let rawStatus = null;
+
+            // Check serviceInfo first (usually has real-time status)
+            if (serviceInfo) {
+              rawStatus = serviceInfo.status || serviceInfo.state || serviceInfo.power_status || serviceInfo.vps_status;
+              
+              // Also check nested properties
+              if (!rawStatus && serviceInfo.vps) {
+                rawStatus = serviceInfo.vps.status || serviceInfo.vps.state || serviceInfo.vps.power;
+              }
+              if (!rawStatus && serviceInfo.server) {
+                rawStatus = serviceInfo.server.status || serviceInfo.server.state || serviceInfo.server.power;
+              }
+            }
+
+            // Fallback to serviceDetails if no status found
+            if (!rawStatus && serviceDetails) {
+              rawStatus = serviceDetails.status || serviceDetails.state || serviceDetails.power_status;
+              
+              if (!rawStatus && serviceDetails.vps) {
+                rawStatus = serviceDetails.vps.status || serviceDetails.vps.state;
+              }
+            }
+
+            // Normalize the status
+            if (rawStatus) {
+              const statusLower = String(rawStatus).toLowerCase();
+              if (['online', 'running', 'active', 'started', 'on', '1', 'true'].includes(statusLower)) {
+                powerState = 'running';
+              } else if (['offline', 'stopped', 'inactive', 'off', '0', 'false', 'shutdown'].includes(statusLower)) {
+                powerState = 'stopped';
+              } else if (['suspended', 'paused'].includes(statusLower)) {
+                powerState = 'suspended';
+              } else if (['installing', 'provisioning', 'building', 'creating', 'starting', 'stopping', 'rebooting'].includes(statusLower)) {
+                powerState = 'busy';
+              } else {
+                powerState = statusLower; // Use as-is if we can't map it
+              }
+            }
+
+            // Sync state to database
+            await syncServerState(order._id, serviceDetails, serviceInfo);
+
+            result = {
+              success: true,
+              powerState: powerState,
+              rawStatus: rawStatus,
+              serviceInfo: serviceInfo,
+              serviceDetails: serviceDetails,
+              lastSync: new Date().toISOString()
+            };
+          } catch (statusError) {
+            console.error('[STATUS] Error fetching status:', statusError);
+            result = {
+              success: false,
+              error: statusError.message,
+              powerState: 'unknown'
+            };
+          }
+        } else {
+          result = {
+            success: false,
+            error: 'Hostycare service ID not found',
+            powerState: 'unknown'
+          };
+        }
+        break;
+
       // In the reinstall case, update to match PHP SDK approach:
 
       // -------------------- REINSTALL via Virtualizor --------------------

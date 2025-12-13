@@ -129,6 +129,23 @@ export async function POST(request) {
       );
     }
 
+    // Idempotency check: See if this renewal was already processed
+    const alreadyProcessed = order.renewalPayments?.some(
+      rp => rp.renewalTxnId === renewalTxnId
+    );
+
+    if (alreadyProcessed) {
+      console.log(`[RENEWAL-CONFIRM] ⚠️ Renewal already processed: ${renewalTxnId}`);
+      const existingRenewal = order.renewalPayments.find(rp => rp.renewalTxnId === renewalTxnId);
+      return NextResponse.json({
+        success: true,
+        message: 'Renewal was already processed',
+        alreadyProcessed: true,
+        orderId: order._id,
+        newExpiryDate: existingRenewal?.newExpiry || order.expiryDate
+      });
+    }
+
     // Determine payment method from transaction ID or explicit parameter
     let actualPaymentMethod = paymentMethod;
     if (!actualPaymentMethod) {
@@ -387,6 +404,10 @@ export async function POST(request) {
       // Store renewal payment info for record keeping
       $push: {
         renewalPayments: renewalPayment
+      },
+      // Clear the pending renewal since it's now processed
+      $unset: {
+        pendingRenewal: 1
       }
     }, { new: true });
 

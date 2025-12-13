@@ -1,20 +1,32 @@
 import connectDB from "../../../../lib/db";
 import User from '../../../../models/userModel'
 import Order from '../../../../models/orderModel'
-import { getDataFromToken } from '../../../../helper/getDataFromToken'
+import { getDataFromToken, getAuthErrorResponse, AuthError } from '../../../../helper/getDataFromToken'
 
 export async function GET(request) {
     try {
         // Ensure DB is connected
         await connectDB();
 
-        // Extract user ID from JWT in the Authorization header
-        const userId = await getDataFromToken(request);
+        // Extract user ID from JWT - this now throws AuthError with proper codes
+        let userId;
+        try {
+            userId = await getDataFromToken(request);
+        } catch (authError) {
+            const errorResponse = getAuthErrorResponse(authError);
+            return new Response(JSON.stringify(errorResponse), {
+                status: 401,
+                headers: { 'Content-Type': 'application/json' }
+            });
+        }
 
         // Find user by ID
         const user = await User.findOne({ _id: userId }).lean();
         if (!user) {
-            return new Response(JSON.stringify({ message: 'User not found' }), {
+            return new Response(JSON.stringify({ 
+                message: 'User not found',
+                code: 'USER_NOT_FOUND'
+            }), {
                 status: 404,
                 headers: { 'Content-Type': 'application/json' }
             });

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 import { Cashfree } from 'cashfree-pg';
+import Razorpay from 'razorpay';
 
 // Initialize Cashfree
 Cashfree.XClientId = process.env.CASHFREE_APP_ID;
@@ -9,6 +10,12 @@ Cashfree.XClientSecret = process.env.CASHFREE_SECRET_KEY;
 Cashfree.XEnvironment = process.env.CASHFREE_ENVIRONMENT === 'SANDBOX' 
   ? Cashfree.Environment.SANDBOX 
   : Cashfree.Environment.PRODUCTION;
+
+// Initialize Razorpay
+const razorpay = new Razorpay({
+  key_id: process.env.RAZORPAY_KEY_ID,
+  key_secret: process.env.RAZORPAY_KEY_SECRET
+});
 
 export async function POST(request) {
   await connectDB();
@@ -39,7 +46,77 @@ export async function POST(request) {
     if (isRenewal) {
       console.log(`[PAYMENT-STATUS] Processing renewal transaction: ${txnId}`);
       
-      // Check with Cashfree API for renewal payment status
+      // First, check if we already processed this renewal (via webhook or earlier)
+      const orderWithRenewal = await Order.findOne({
+        'renewalPayments.renewalTxnId': txnId
+      });
+
+      if (orderWithRenewal) {
+        console.log(`[PAYMENT-STATUS] ✅ Renewal already processed for: ${txnId}`);
+        return NextResponse.json({
+          isRenewal: true,
+          renewalTxnId: txnId,
+          paymentStatus: 'SUCCESS',
+          alreadyProcessed: true,
+          message: "Renewal already processed"
+        });
+      }
+
+      // Find the order with this pending renewal
+      const orderWithPending = await Order.findOne({
+        'pendingRenewal.renewalTxnId': txnId
+      });
+
+      const paymentMethod = orderWithPending?.pendingRenewal?.paymentMethod || 'cashfree';
+      const razorpayOrderId = orderWithPending?.pendingRenewal?.gatewayOrderId;
+
+      console.log(`[PAYMENT-STATUS] Pending renewal found, payment method: ${paymentMethod}`);
+
+      // Check payment status based on method
+      if (paymentMethod === 'razorpay' && razorpayOrderId) {
+        console.log(`[PAYMENT-STATUS] Checking Razorpay order status: ${razorpayOrderId}`);
+        try {
+          const razorpayOrder = await razorpay.orders.fetch(razorpayOrderId);
+          console.log(`[PAYMENT-STATUS] Razorpay order status:`, razorpayOrder.status);
+
+          if (razorpayOrder.status === 'paid') {
+            return NextResponse.json({
+              isRenewal: true,
+              renewalTxnId: txnId,
+              paymentStatus: 'SUCCESS',
+              paymentMethod: 'razorpay',
+              message: "Razorpay renewal payment confirmed"
+            });
+          } else if (razorpayOrder.status === 'attempted') {
+            // Payment was attempted, check for payments
+            const payments = await razorpay.orders.fetchPayments(razorpayOrderId);
+            const successPayment = payments.items?.find(p => p.status === 'captured');
+            if (successPayment) {
+              return NextResponse.json({
+                isRenewal: true,
+                renewalTxnId: txnId,
+                paymentStatus: 'SUCCESS',
+                paymentMethod: 'razorpay',
+                razorpayPaymentId: successPayment.id,
+                message: "Razorpay renewal payment confirmed"
+              });
+            }
+          }
+
+          return NextResponse.json({
+            isRenewal: true,
+            renewalTxnId: txnId,
+            paymentStatus: razorpayOrder.status === 'created' ? 'PENDING' : razorpayOrder.status.toUpperCase(),
+            paymentMethod: 'razorpay',
+            message: "Razorpay renewal payment pending or failed"
+          });
+        } catch (razorpayError) {
+          console.error('[PAYMENT-STATUS] Razorpay API error:', razorpayError);
+          // Fall through to Cashfree check
+        }
+      }
+
+      // Check with Cashfree API (default or fallback)
       try {
         console.log(`[PAYMENT-STATUS] Checking Cashfree renewal order status: ${txnId}`);
         
@@ -56,6 +133,7 @@ export async function POST(request) {
               isRenewal: true,
               renewalTxnId: txnId,
               paymentStatus: 'SUCCESS',
+              paymentMethod: 'cashfree',
               message: "Renewal payment confirmed"
             });
           } else {
@@ -64,11 +142,25 @@ export async function POST(request) {
               isRenewal: true,
               renewalTxnId: txnId,
               paymentStatus: payment.payment_status,
+              paymentMethod: 'cashfree',
               message: "Renewal payment pending or failed"
             });
           }
         } else {
           console.log(`[PAYMENT-STATUS] No payment data found for renewal: ${txnId}`);
+          
+          // For UPI gateway payments, check if we have pending renewal info
+          if (paymentMethod === 'upi' && orderWithPending) {
+            // UPI payments are verified via webhook, so if we reach here, it's still pending
+            return NextResponse.json({
+              isRenewal: true,
+              renewalTxnId: txnId,
+              paymentStatus: 'PENDING',
+              paymentMethod: 'upi',
+              message: "UPI renewal payment pending - waiting for confirmation"
+            });
+          }
+
           return NextResponse.json({
             isRenewal: true,
             renewalTxnId: txnId,

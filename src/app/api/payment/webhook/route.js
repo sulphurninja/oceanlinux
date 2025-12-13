@@ -1,8 +1,11 @@
 import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
+import IPStock from '@/models/ipStockModel';
 import crypto from 'crypto';
 const AutoProvisioningService = require('@/services/autoProvisioningService');
+const HostycareAPI = require('@/services/hostycareApi');
+const SmartVPSAPI = require('@/services/smartvpsApi');
 
 export async function POST(request) {
   const webhookStartTime = Date.now();
@@ -53,7 +56,13 @@ export async function POST(request) {
 
       console.log(`[WEBHOOK] 💳 Payment successful for order: ${orderId}`);
 
-      // Find the order in our database
+      // Check if this is a RENEWAL transaction
+      if (orderId.startsWith('RENEWAL_')) {
+        console.log(`[WEBHOOK] 🔄 Detected RENEWAL transaction: ${orderId}`);
+        return await handleRenewalWebhook(orderId, payment, webhookStartTime);
+      }
+
+      // Find the order in our database (for new orders)
       const order = await Order.findOne({ clientTxnId: orderId });
 
       if (!order) {
@@ -179,5 +188,190 @@ export async function POST(request) {
       error: error.message,
       processingTime: totalWebhookTime
     });
+  }
+}
+
+// Helper function to determine provider from order with IPStock data
+async function getProviderFromOrder(order) {
+  console.log('[WEBHOOK-RENEWAL-PROVIDER] Determining provider for order:', order._id);
+
+  // Primary logic: Check if order has hostycare service ID
+  if (order.hostycareServiceId) {
+    console.log('[WEBHOOK-RENEWAL-PROVIDER] ✅ Detected Hostycare via serviceId');
+    return 'hostycare';
+  }
+
+  // Secondary logic: Check if ipStock has smartvps tag
+  if (order.ipStockId) {
+    try {
+      const ipStock = await IPStock.findById(order.ipStockId);
+      if (ipStock && ipStock.tags && ipStock.tags.includes('smartvps')) {
+        console.log('[WEBHOOK-RENEWAL-PROVIDER] ✅ Detected SmartVPS via ipStock tags');
+        return 'smartvps';
+      }
+    } catch (ipStockError) {
+      console.error('[WEBHOOK-RENEWAL-PROVIDER] Error fetching IPStock:', ipStockError);
+    }
+  }
+
+  // Additional fallback: Check smartvps service ID
+  if (order.smartvpsServiceId) {
+    console.log('[WEBHOOK-RENEWAL-PROVIDER] ✅ Detected SmartVPS via serviceId');
+    return 'smartvps';
+  }
+
+  // Final fallback: Check product name patterns for SmartVPS
+  if (order.productName?.includes('103.195') ||
+    order.ipAddress?.startsWith('103.195') ||
+    order.productName?.includes('🏅')) {
+    console.log('[WEBHOOK-RENEWAL-PROVIDER] ✅ Detected SmartVPS via patterns');
+    return 'smartvps';
+  }
+
+  // Default to oceanlinux
+  console.log('[WEBHOOK-RENEWAL-PROVIDER] ⚪ Defaulting to OceanLinux');
+  return 'oceanlinux';
+}
+
+// Handle renewal payment webhooks
+async function handleRenewalWebhook(renewalTxnId, payment, webhookStartTime) {
+  console.log(`[WEBHOOK-RENEWAL] 🔄 Processing renewal webhook for: ${renewalTxnId}`);
+
+  try {
+    // Find order by pending renewal transaction ID
+    const order = await Order.findOne({ 'pendingRenewal.renewalTxnId': renewalTxnId });
+
+    if (!order) {
+      console.error(`[WEBHOOK-RENEWAL] ❌ No order found with pending renewal: ${renewalTxnId}`);
+      return NextResponse.json(
+        { success: false, message: 'Order with pending renewal not found' },
+        { status: 404 }
+      );
+    }
+
+    console.log(`[WEBHOOK-RENEWAL] ✅ Found order: ${order._id}`);
+    console.log(`[WEBHOOK-RENEWAL] Product: ${order.productName}`);
+    console.log(`[WEBHOOK-RENEWAL] Current expiry: ${order.expiryDate}`);
+
+    // Check if this renewal was already processed (idempotency)
+    const alreadyProcessed = order.renewalPayments?.some(
+      rp => rp.renewalTxnId === renewalTxnId
+    );
+
+    if (alreadyProcessed) {
+      console.log(`[WEBHOOK-RENEWAL] ⚠️ Renewal already processed: ${renewalTxnId}`);
+      return NextResponse.json({
+        success: true,
+        message: 'Renewal already processed',
+        alreadyProcessed: true
+      });
+    }
+
+    // Determine provider
+    const provider = await getProviderFromOrder(order);
+    console.log(`[WEBHOOK-RENEWAL] Provider: ${provider}`);
+
+    // Calculate new expiry date
+    const currentExpiry = new Date(order.expiryDate);
+    const now = new Date();
+    const baseDate = currentExpiry > now ? currentExpiry : now;
+    const newExpiryDate = new Date(baseDate);
+    newExpiryDate.setDate(newExpiryDate.getDate() + 30);
+
+    console.log(`[WEBHOOK-RENEWAL] New expiry date: ${newExpiryDate}`);
+
+    // Process provider-specific renewal
+    let providerRenewalResult = null;
+    let providerRenewalSuccess = false;
+
+    if (provider === 'hostycare' && order.hostycareServiceId) {
+      console.log('[WEBHOOK-RENEWAL] Processing Hostycare renewal via API...');
+      try {
+        const api = new HostycareAPI();
+        providerRenewalResult = await api.renewService(order.hostycareServiceId);
+        console.log(`[WEBHOOK-RENEWAL] Hostycare renewal result:`, providerRenewalResult);
+        providerRenewalSuccess = true;
+      } catch (hostycareError) {
+        console.error(`[WEBHOOK-RENEWAL] Hostycare renewal API failed:`, hostycareError);
+        providerRenewalResult = { error: hostycareError.message };
+      }
+    } else if (provider === 'smartvps') {
+      const serviceIdentifier = order.smartvpsServiceId || order.ipAddress;
+      console.log(`[WEBHOOK-RENEWAL] Processing SmartVPS renewal for: ${serviceIdentifier}`);
+
+      if (serviceIdentifier) {
+        try {
+          const smartvpsApi = new SmartVPSAPI();
+          providerRenewalResult = await smartvpsApi.renewVps(serviceIdentifier);
+          console.log(`[WEBHOOK-RENEWAL] SmartVPS renewal result:`, providerRenewalResult);
+          providerRenewalSuccess = true;
+        } catch (smartvpsError) {
+          console.error(`[WEBHOOK-RENEWAL] SmartVPS renewal API failed:`, smartvpsError);
+          providerRenewalResult = { error: smartvpsError.message };
+        }
+      } else {
+        console.warn('[WEBHOOK-RENEWAL] SmartVPS missing service identifier');
+        providerRenewalResult = { error: 'Missing service identifier' };
+      }
+    } else {
+      console.log(`[WEBHOOK-RENEWAL] ${provider} renewal - no API call needed`);
+      providerRenewalSuccess = true;
+    }
+
+    // Create renewal payment record
+    const renewalPayment = {
+      paymentId: payment.payment.cf_payment_id,
+      amount: order.price,
+      paidAt: new Date(),
+      previousExpiry: currentExpiry,
+      newExpiry: newExpiryDate,
+      renewalTxnId: renewalTxnId,
+      provider: provider,
+      paymentMethod: 'cashfree',
+      providerRenewalResult: providerRenewalResult,
+      providerRenewalSuccess: providerRenewalSuccess,
+      processedViaWebhook: true
+    };
+
+    // Update order
+    const updatedOrder = await Order.findByIdAndUpdate(order._id, {
+      expiryDate: newExpiryDate,
+      lastAction: 'renew',
+      lastActionTime: new Date(),
+      transactionId: payment.payment.cf_payment_id,
+      gatewayOrderId: renewalTxnId,
+      paymentMethod: 'cashfree',
+      paymentDetails: {
+        cf_payment_id: payment.payment.cf_payment_id,
+        cf_order_id: renewalTxnId,
+        payment_status: payment.payment.payment_status,
+        payment_amount: payment.payment.payment_amount,
+        webhookProcessedAt: new Date()
+      },
+      $push: { renewalPayments: renewalPayment },
+      $unset: { pendingRenewal: 1 } // Clear pending renewal
+    }, { new: true });
+
+    const totalTime = Date.now() - webhookStartTime;
+    console.log(`[WEBHOOK-RENEWAL] ✅ Renewal completed successfully in ${totalTime}ms`);
+    console.log(`[WEBHOOK-RENEWAL] Order ${order._id} renewed until ${newExpiryDate}`);
+
+    return NextResponse.json({
+      success: true,
+      message: 'Renewal processed successfully via webhook',
+      orderId: order._id,
+      newExpiryDate: newExpiryDate,
+      provider: provider,
+      providerRenewalSuccess: providerRenewalSuccess,
+      processingTime: totalTime
+    });
+
+  } catch (error) {
+    console.error(`[WEBHOOK-RENEWAL] ❌ Error processing renewal:`, error);
+    return NextResponse.json({
+      success: false,
+      message: 'Error processing renewal webhook',
+      error: error.message
+    }, { status: 500 });
   }
 }

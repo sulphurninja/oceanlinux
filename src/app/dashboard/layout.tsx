@@ -43,6 +43,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import { toast } from 'sonner';
 import { AuthProvider } from '@/contexts/AuthContext';
+import { SessionAlertProvider } from '@/components/session-alert';
 import FloatingSupport from '@/components/component/floating-support';
 
 interface UserData {
@@ -251,8 +252,9 @@ export default function DashboardLayout({
     const currentPage = getPageInfo(pathname);
 
     return (
-        <AuthProvider>
-            <div className="min-h-screen bg-background">
+        <SessionAlertProvider>
+            <AuthProvider>
+                <div className="min-h-screen bg-background">
                 {/* Sidebar */}
                 <ResponsiveSidebar />
 
@@ -499,7 +501,8 @@ export default function DashboardLayout({
                     <FloatingSupport />
                 </div>
 
-            </div>
-        </AuthProvider>
+                </div>
+            </AuthProvider>
+        </SessionAlertProvider>
     );
 }

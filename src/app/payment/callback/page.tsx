@@ -2,8 +2,9 @@
 
 import { useEffect, useState, useRef, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Loader2, CheckCircle2, XCircle } from "lucide-react";
+import { Loader2, CheckCircle2, XCircle, Clock, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
 
 // Create a client component that uses useSearchParams
 function PaymentCallbackContent() {
@@ -37,7 +38,14 @@ function PaymentCallbackContent() {
         // Handle specific failure statuses
         if (statusParam === "processing_failed" || statusParam === "confirmation_failed") {
           setStatus("failed");
-          setMessage("Payment was successful but order processing failed. Please contact support with your transaction details.");
+          setMessage("Payment was successful but order processing failed. Don't worry - your payment is safe! Please contact support with your transaction ID for assistance.");
+          return;
+        }
+
+        // Check for session/auth errors in URL
+        if (statusParam === "session_expired" || statusParam === "auth_error") {
+          setStatus("failed");
+          setMessage("Your session expired during payment. If your payment was successful, it will be automatically processed. You can check your order status in the dashboard.");
           return;
         }
 
@@ -169,44 +177,97 @@ function PaymentCallbackContent() {
     verifyPayment();
   }, [router, searchParams]);
 
+  // Determine icon and colors based on message content
+  const isSessionError = message.toLowerCase().includes('session') || message.toLowerCase().includes('expired');
+  const isPaymentSafe = message.toLowerCase().includes('payment is safe') || message.toLowerCase().includes('automatically processed');
+
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-900 text-white p-4">
-      <div className="max-w-md w-full bg-gray-800 rounded-lg shadow-lg p-6 border dark:border-none border dark:border-none-gray-700">
-        <div className="flex flex-col items-center justify-center text-center space-y-4">
-          {status === "loading" && (
-            <Loader2 className="h-12 w-12 text-blue-500 animate-spin" />
+    <div className="min-h-screen flex items-center justify-center bg-background p-4">
+      <div className="max-w-md w-full bg-card rounded-xl shadow-xl p-8 border border-border">
+        <div className="flex flex-col items-center justify-center text-center space-y-6">
+          {/* Icon with glow effect */}
+          <div className={`
+            p-4 rounded-full 
+            ${status === "loading" ? "bg-blue-500/10" : ""}
+            ${status === "success" ? "bg-green-500/10" : ""}
+            ${status === "failed" && isSessionError ? "bg-amber-500/10" : ""}
+            ${status === "failed" && !isSessionError ? "bg-red-500/10" : ""}
+          `}>
+            {status === "loading" && (
+              <Loader2 className="h-12 w-12 text-blue-500 animate-spin" />
+            )}
+            {status === "success" && (
+              <CheckCircle2 className="h-12 w-12 text-green-500" />
+            )}
+            {status === "failed" && isSessionError && (
+              <Clock className="h-12 w-12 text-amber-500" />
+            )}
+            {status === "failed" && !isSessionError && (
+              <XCircle className="h-12 w-12 text-red-500" />
+            )}
+          </div>
+
+          {/* Title */}
+          <div className="space-y-2">
+            <h1 className="text-2xl font-bold text-foreground">
+              {status === "loading" && "Verifying Payment"}
+              {status === "success" && "Payment Successful"}
+              {status === "failed" && isSessionError && "Session Expired"}
+              {status === "failed" && !isSessionError && "Payment Issue"}
+            </h1>
+            
+            {/* Subtitle for context */}
+            {status === "failed" && isPaymentSafe && (
+              <p className="text-sm text-green-600 dark:text-green-400 font-medium">
+                ✓ Your payment is safe
+              </p>
+            )}
+          </div>
+
+          {/* Message */}
+          <p className="text-muted-foreground leading-relaxed">{message}</p>
+
+          {/* Transaction ID if available */}
+          {searchParams.get("client_txn_id") && status === "failed" && (
+            <div className="w-full p-3 bg-muted rounded-lg">
+              <p className="text-xs text-muted-foreground mb-1">Transaction Reference</p>
+              <p className="font-mono text-sm text-foreground break-all">
+                {searchParams.get("client_txn_id")}
+              </p>
+            </div>
           )}
 
-          {status === "success" && (
-            <CheckCircle2 className="h-12 w-12 text-green-500" />
-          )}
-
-          {status === "failed" && (
-            <XCircle className="h-12 w-12 text-red-500" />
-          )}
-
-          <h1 className="text-xl font-bold">
-            {status === "loading" ? "Verifying Payment" :
-              status === "success" ? "Payment Successful" : "Payment Issue"}
-          </h1>
-
-          <p className="text-gray-300">{message}</p>
-
+          {/* Actions */}
           {status !== "loading" && (
-            <div className="space-y-2 w-full">
-              <button
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-md transition"
+            <div className="space-y-3 w-full pt-2">
+              <Button
+                className="w-full"
+                size="lg"
                 onClick={() => router.push("/dashboard/viewLinux")}
               >
                 View My Orders
-              </button>
-              {status === "failed" && (
-                <button
-                  className="w-full bg-gray-600 hover:bg-gray-700 text-white py-2 px-4 rounded-md transition"
-                  onClick={() => router.push("/dashboard/ipStock")}
+              </Button>
+              
+              {status === "failed" && isSessionError && (
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  size="lg"
+                  onClick={() => router.push("/login")}
                 >
-                  Try Again
-                </button>
+                  Log In Again
+                </Button>
+              )}
+              
+              {status === "failed" && !isSessionError && (
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  size="lg"
+                  onClick={() => router.push("/support/tickets")}
+                >
+                  Contact Support
+                </Button>
               )}
             </div>
           )}
@@ -219,12 +280,16 @@ function PaymentCallbackContent() {
 // Fallback component to show while content is loading
 function PaymentCallbackFallback() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-900 text-white p-4">
-      <div className="max-w-md w-full bg-gray-800 rounded-lg shadow-lg p-6 border dark:border-none border dark:border-none-gray-700">
-        <div className="flex flex-col items-center justify-center text-center space-y-4">
-          <Loader2 className="h-12 w-12 text-blue-500 animate-spin" />
-          <h1 className="text-xl font-bold">Loading Payment Status</h1>
-          <p className="text-gray-300">Please wait while we verify your payment...</p>
+    <div className="min-h-screen flex items-center justify-center bg-background p-4">
+      <div className="max-w-md w-full bg-card rounded-xl shadow-xl p-8 border border-border">
+        <div className="flex flex-col items-center justify-center text-center space-y-6">
+          <div className="p-4 rounded-full bg-blue-500/10">
+            <Loader2 className="h-12 w-12 text-blue-500 animate-spin" />
+          </div>
+          <div className="space-y-2">
+            <h1 className="text-2xl font-bold text-foreground">Verifying Payment</h1>
+            <p className="text-muted-foreground">Please wait while we verify your payment...</p>
+          </div>
         </div>
       </div>
     </div>
