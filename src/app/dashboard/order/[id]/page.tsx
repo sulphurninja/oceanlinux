@@ -152,6 +152,7 @@ const OrderDetails = () => {
   const [serviceLoading, setServiceLoading] = useState(false);
   const [actionBusy, setActionBusy] = useState<string | null>(null);
   const [serverPowerState, setServerPowerState] = useState<'running' | 'stopped' | 'suspended' | 'busy' | 'unknown'>('unknown');
+  const [powerStateLoading, setPowerStateLoading] = useState(false);
   
   // Payment method for renewals
   const [renewalPaymentMethod, setRenewalPaymentMethod] = useState<'cashfree' | 'razorpay' | 'upi'>('cashfree');
@@ -183,12 +184,17 @@ const OrderDetails = () => {
     }
   }, [orderId]);
 
-  // Fetch server power state when order is loaded (for Hostycare orders)
+  // Fetch server power state when order is loaded (for Hostycare and SmartVPS orders)
   useEffect(() => {
-    if (order && order.hostycareServiceId && !loading) {
-      fetchServerPowerState();
+    if (order && !loading) {
+      const provider = getProviderFromOrder(order, ipStock);
+      // Fetch power state for both Hostycare and SmartVPS
+      if ((provider === 'hostycare' && order.hostycareServiceId) || 
+          (provider === 'smartvps' && (order.smartvpsServiceId || order.ipAddress))) {
+        fetchServerPowerState();
+      }
     }
-  }, [order?.hostycareServiceId, loading]);
+  }, [order?.hostycareServiceId, order?.smartvpsServiceId, order?.ipAddress, ipStock, loading]);
 
   const fetchOrderAndIPStock = async () => {
     setLoading(true);
@@ -456,21 +462,33 @@ const OrderDetails = () => {
 
     const provider = getProviderFromOrder(order, ipStock);
     
-    // Only fetch for Hostycare provider with service ID
-    if (provider !== 'hostycare' || !order.hostycareServiceId) {
+    // Check if this provider supports power state fetching
+    const isHostycare = provider === 'hostycare' && order.hostycareServiceId;
+    const isSmartVPS = provider === 'smartvps' && (order.smartvpsServiceId || order.ipAddress);
+    
+    if (!isHostycare && !isSmartVPS) {
       return;
     }
 
+    // Don't refetch if already loading
+    if (powerStateLoading) return;
+    
+    setPowerStateLoading(true);
+
     try {
-      console.log('[ORDER-DETAILS] Fetching server power state...');
-      const res = await fetch(`/api/orders/service-action`, {
+      console.log('[ORDER-DETAILS] Fetching server power state for provider:', provider);
+      
+      // Use the appropriate endpoint based on provider
+      const endpoint = provider === 'smartvps' ? 'smartvps-action' : 'service-action';
+      
+      const res = await fetch(`/api/orders/${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ orderId: order._id, action: 'status' })
       });
       const data = await res.json();
 
-      if (data.success && data.powerState) {
+      if (data.powerState) {
         console.log('[ORDER-DETAILS] Server power state:', data.powerState);
         setServerPowerState(data.powerState);
       } else {
@@ -480,6 +498,8 @@ const OrderDetails = () => {
     } catch (error) {
       console.error('[ORDER-DETAILS] Failed to fetch power state:', error);
       setServerPowerState('unknown');
+    } finally {
+      setPowerStateLoading(false);
     }
   };
 
@@ -513,8 +533,8 @@ const OrderDetails = () => {
         // Refresh order data to get latest synced information
         await fetchOrder();
 
-        // Also fetch power state for Hostycare
-        if (provider === 'hostycare') {
+        // Also fetch power state for Hostycare and SmartVPS
+        if (provider === 'hostycare' || provider === 'smartvps') {
           await fetchServerPowerState();
         }
 
@@ -553,13 +573,23 @@ const OrderDetails = () => {
       const data = await res.json();
 
       if (data.success) {
-        toast.success(`Action "${action}" executed successfully`);
-        
-        // For power actions, wait a bit then refresh state
+        // For power actions, show a more informative message
         if (['start', 'stop', 'restart'].includes(action)) {
+          const actionLabel = action === 'start' ? 'Starting' : action === 'stop' ? 'Stopping' : 'Restarting';
+          toast.success(`${actionLabel} server... This may take a few moments.`, {
+            duration: 4000,
+          });
+          
           // Give the server a moment to change state
-          await new Promise(resolve => setTimeout(resolve, 2000));
+          await new Promise(resolve => setTimeout(resolve, 3000));
           await fetchServerPowerState();
+          
+          // Show follow-up message to refresh if status doesn't update
+          toast.info('If status doesn\'t update, please refresh the page.', {
+            duration: 5000,
+          });
+        } else {
+          toast.success(`Action "${action}" executed successfully`);
         }
         
         await Promise.all([
@@ -573,7 +603,7 @@ const OrderDetails = () => {
       } else {
         toast.error(data.error || `Failed to execute "${action}"`);
         // Refresh power state on error too
-        if (['start', 'stop', 'restart'].includes(action) && provider === 'hostycare') {
+        if (['start', 'stop', 'restart'].includes(action) && (provider === 'hostycare' || provider === 'smartvps')) {
           await fetchServerPowerState();
         }
       }
@@ -581,7 +611,7 @@ const OrderDetails = () => {
       toast.error(e.message || `Failed to execute "${action}"`);
       // Refresh power state on error
       const provider = getProviderFromOrder(order, ipStock);
-      if (['start', 'stop', 'restart'].includes(action) && provider === 'hostycare') {
+      if (['start', 'stop', 'restart'].includes(action) && (provider === 'hostycare' || provider === 'smartvps')) {
         await fetchServerPowerState();
       }
     } finally {
@@ -923,6 +953,12 @@ const OrderDetails = () => {
     return getDaysUntilExpiry(order.expiryDate) < 0;
   };
 
+  // Check if order is unpaid (pending status means payment didn't go through)
+  const isUnpaid = (order: Order | null) => {
+    if (!order) return false;
+    return order.status.toLowerCase() === 'pending';
+  };
+
   const handleRenewService = async (selectedMethod?: 'cashfree' | 'razorpay' | 'upi') => {
     if (!order || !order.expiryDate) {
       toast.error('Order has no expiry date');
@@ -1134,6 +1170,56 @@ const OrderDetails = () => {
 
   // ... existing imports and code ...
 
+  // Helper to get power state badge for active servers
+  const getPowerStateBadge = () => {
+    if (powerStateLoading) {
+      return (
+        <Badge className="bg-muted text-muted-foreground border-border">
+          <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+          Checking...
+        </Badge>
+      );
+    }
+
+    switch (serverPowerState) {
+      case 'running':
+        return (
+          <Badge className="bg-green-500/10 text-green-600 border-green-500/20">
+            <div className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></div>
+            Online
+          </Badge>
+        );
+      case 'stopped':
+        return (
+          <Badge className="bg-red-500/10 text-red-600 border-red-500/20">
+            <div className="w-2 h-2 bg-red-500 rounded-full mr-2"></div>
+            Offline
+          </Badge>
+        );
+      case 'suspended':
+        return (
+          <Badge className="bg-red-500/10 text-red-600 border-red-500/20">
+            <div className="w-2 h-2 bg-red-500 rounded-full mr-2"></div>
+            Offline
+          </Badge>
+        );
+      case 'busy':
+        return (
+          <Badge className="bg-blue-500/10 text-blue-600 border-blue-500/20">
+            <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+            Processing
+          </Badge>
+        );
+      default:
+        return (
+          <Badge className="bg-primary/10 text-green-500 border-primary/20">
+            <div className="w-2 h-2 bg-primary rounded-full mr-2 animate-pulse"></div>
+            Active
+          </Badge>
+        );
+    }
+  };
+
   const getStatusBadge = (status: string, provisioningStatus?: string, lastAction?: string, order?: Order) => {
     if (actionBusy) {
       const actionLabels = {
@@ -1158,6 +1244,15 @@ const OrderDetails = () => {
       }
     }
 
+    const currentStatus = provisioningStatus || status;
+    const isActiveStatus = status.toLowerCase() === 'completed' || currentStatus.toLowerCase() === 'active';
+    const canShowPowerState = (provider === 'hostycare' || provider === 'smartvps') && isActiveStatus;
+
+    // For active servers with power state support, show actual power state
+    if (canShowPowerState && serverPowerState !== 'unknown') {
+      return getPowerStateBadge();
+    }
+
     if (status.toLowerCase() === 'completed') {
       return (
         <Badge className="bg-primary/10 text-green-500 border-primary/20">
@@ -1166,8 +1261,6 @@ const OrderDetails = () => {
         </Badge>
       );
     }
-
-    const currentStatus = provisioningStatus || status;
 
     // Check for configuration errors first
     if (order?.provisioningError &&
@@ -1185,6 +1278,15 @@ const OrderDetails = () => {
 
     switch (currentStatus.toLowerCase()) {
       case 'active':
+        // If we're here, powerState is unknown - show loading or default
+        if (powerStateLoading && (provider === 'hostycare' || provider === 'smartvps')) {
+          return (
+            <Badge className="bg-muted text-muted-foreground border-border">
+              <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+              Checking...
+            </Badge>
+          );
+        }
         return (
           <Badge className="bg-primary/10 text-green-500 border-primary/20">
             <div className="w-2 h-2 bg-primary rounded-full mr-2 animate-pulse"></div>
@@ -1208,9 +1310,9 @@ const OrderDetails = () => {
         );
       case 'suspended':
         return (
-          <Badge className="bg-destructive/10 text-destructive border-destructive/20">
-            <AlertTriangle className="w-3 h-3 mr-1" />
-            Suspended
+          <Badge className="bg-red-500/10 text-red-600 border-red-500/20">
+            <div className="w-2 h-2 bg-red-500 rounded-full mr-2"></div>
+            Offline
           </Badge>
         );
       case 'failed':
@@ -1352,8 +1454,89 @@ const OrderDetails = () => {
         </div>
 
         <div className='max-w-7xl mx-auto p-4 lg:p-6'>
-          {/* Check if service is expired */}
-          {isExpired(order) ? (
+          {/* Check if order is unpaid */}
+          {isUnpaid(order) ? (
+            /* Unpaid Order UI */
+            <div className="flex justify-center items-center min-h-[60vh]">
+              <Card className="shadow-lg border-0 bg-card max-w-lg w-full">
+                <CardContent className="p-6 lg:p-8 text-center">
+                  <div className="w-16 h-16 sm:w-20 sm:h-20 bg-red-100 dark:bg-red-900/20 rounded-full flex items-center justify-center mx-auto mb-6">
+                    <XCircle className="h-8 w-8 sm:h-10 sm:w-10 text-red-600 dark:text-red-400" />
+                  </div>
+
+                  <h2 className="text-xl sm:text-2xl font-bold mb-4">
+                    Order Purchase Didn't Go Through
+                  </h2>
+
+                  <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-xl p-4 sm:p-6 mb-6">
+                    <div className="flex items-start gap-3">
+                      <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
+                      <div className="text-left">
+                        <h3 className="font-semibold text-red-800 dark:text-red-200 mb-2">
+                          Payment Not Completed
+                        </h3>
+                        <p className="text-sm text-red-700 dark:text-red-300">
+                          This order was created but the payment was not completed. 
+                          The server has not been provisioned.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-muted/50 rounded-xl p-4 sm:p-6 mb-6 text-left">
+                    <h4 className="font-semibold mb-3 flex items-center gap-2">
+                      <Server className="h-4 w-4 text-muted-foreground" />
+                      Order Details
+                    </h4>
+                    <div className="space-y-3 text-sm">
+                      <div className="flex justify-between items-center">
+                        <span className="text-muted-foreground">Service:</span>
+                        <span className="font-medium text-foreground break-words max-w-[60%] text-right">
+                          {order.productName}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-muted-foreground">Configuration:</span>
+                        <span className="font-medium text-foreground">{order.memory}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-muted-foreground">Operating System:</span>
+                        <span className="font-medium text-foreground">{order.os}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-muted-foreground">Price:</span>
+                        <span className="font-medium text-foreground">₹{order.price}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-muted-foreground">Order ID:</span>
+                        <span className="font-mono text-xs bg-muted px-2 py-1 rounded break-all">
+                          {order._id}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
+                    <Button
+                      onClick={() => router.push('/dashboard/ipStock')}
+                      className="flex-1 gap-2 h-11 sm:h-12 text-base font-semibold bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70 shadow-lg"
+                    >
+                      <Server className="h-4 w-4 sm:h-5 sm:w-5" />
+                      Purchase New Server
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => router.push('/dashboard/viewLinux')}
+                      className="flex-1 gap-2 h-11 sm:h-12"
+                    >
+                      <ArrowLeft className="h-4 w-4" />
+                      Back to Servers
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          ) : isExpired(order) ? (
             /* Expired Service UI */
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 lg:gap-6">
               {/* Left Column - Service Information */}
@@ -1559,13 +1742,32 @@ const OrderDetails = () => {
                         </div>
                       </div>
 
-                      <div className="p-3 bg-primary/10 rounded-lg border border-primary/30 shadow-sm">
+                      <div className={cn(
+                        "p-3 rounded-lg border shadow-sm",
+                        (provider === 'hostycare' || provider === 'smartvps') && serverPowerState === 'running' && "bg-green-500/10 border-green-500/30",
+                        (provider === 'hostycare' || provider === 'smartvps') && serverPowerState === 'stopped' && "bg-red-500/10 border-red-500/30",
+                        (provider === 'hostycare' || provider === 'smartvps') && serverPowerState === 'busy' && "bg-blue-500/10 border-blue-500/30",
+                        !((provider === 'hostycare' || provider === 'smartvps') && ['running', 'stopped', 'busy'].includes(serverPowerState)) && "bg-primary/10 border-primary/30"
+                      )}>
                         <div className="flex items-center gap-3">
-                          <div className="h-10 w-10 rounded-lg bg-primary/20 flex items-center justify-center flex-shrink-0 shadow-sm">
-                            <Activity className="h-5 w-5 text-" />
+                          <div className={cn(
+                            "h-10 w-10 rounded-lg flex items-center justify-center flex-shrink-0 shadow-sm",
+                            (provider === 'hostycare' || provider === 'smartvps') && serverPowerState === 'running' && "bg-green-500/20",
+                            (provider === 'hostycare' || provider === 'smartvps') && serverPowerState === 'stopped' && "bg-red-500/20",
+                            (provider === 'hostycare' || provider === 'smartvps') && serverPowerState === 'busy' && "bg-blue-500/20",
+                            !((provider === 'hostycare' || provider === 'smartvps') && ['running', 'stopped', 'busy'].includes(serverPowerState)) && "bg-primary/20"
+                          )}>
+                            <Activity className={cn(
+                              "h-5 w-5",
+                              (provider === 'hostycare' || provider === 'smartvps') && serverPowerState === 'running' && "text-green-600",
+                              (provider === 'hostycare' || provider === 'smartvps') && serverPowerState === 'stopped' && "text-red-600",
+                              (provider === 'hostycare' || provider === 'smartvps') && serverPowerState === 'busy' && "text-blue-600"
+                            )} />
                           </div>
                           <div className="min-w-0 flex-1">
-                            <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Status</p>
+                            <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
+                              {(provider === 'hostycare' || provider === 'smartvps') ? 'Power Status' : 'Status'}
+                            </p>
                             <div className="mt-1">
                               {getStatusBadge(order.status, order.provisioningStatus, order.lastAction, order)}
                             </div>
@@ -1938,48 +2140,75 @@ const OrderDetails = () => {
                     </CardHeader>
                     <CardContent className="space-y-3">
                       {/* Server Power State Indicator */}
-                      {provider === 'hostycare' && (
+                      {(provider === 'hostycare' || provider === 'smartvps') && (
                         <div className={cn(
-                          "flex items-center gap-3 p-3 rounded-lg border",
-                          serverPowerState === 'running' && "bg-green-50 border-green-200 dark:bg-green-950/30 dark:border-green-800",
-                          serverPowerState === 'stopped' && "bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-800",
-                          serverPowerState === 'suspended' && "bg-amber-50 border-amber-200 dark:bg-amber-950/30 dark:border-amber-800",
-                          serverPowerState === 'busy' && "bg-blue-50 border-blue-200 dark:bg-blue-950/30 dark:border-blue-800",
-                          serverPowerState === 'unknown' && "bg-muted/50 border-border"
+                          "flex items-center gap-3 p-3 rounded-lg border transition-colors",
+                          powerStateLoading && "bg-muted/50 border-border",
+                          !powerStateLoading && serverPowerState === 'running' && "bg-green-50 border-green-200 dark:bg-green-950/30 dark:border-green-800",
+                          !powerStateLoading && serverPowerState === 'stopped' && "bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-800",
+                          !powerStateLoading && serverPowerState === 'suspended' && "bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-800",
+                          !powerStateLoading && serverPowerState === 'busy' && "bg-blue-50 border-blue-200 dark:bg-blue-950/30 dark:border-blue-800",
+                          !powerStateLoading && serverPowerState === 'unknown' && "bg-muted/50 border-border"
                         )}>
-                          <div className={cn(
-                            "w-3 h-3 rounded-full",
-                            serverPowerState === 'running' && "bg-green-500 animate-pulse",
-                            serverPowerState === 'stopped' && "bg-red-500",
-                            serverPowerState === 'suspended' && "bg-amber-500",
-                            serverPowerState === 'busy' && "bg-blue-500 animate-pulse",
-                            serverPowerState === 'unknown' && "bg-gray-400"
-                          )} />
-                          <div className="flex-1">
-                            <p className={cn(
-                              "text-sm font-medium",
-                              serverPowerState === 'running' && "text-green-700 dark:text-green-300",
-                              serverPowerState === 'stopped' && "text-red-700 dark:text-red-300",
-                              serverPowerState === 'suspended' && "text-amber-700 dark:text-amber-300",
-                              serverPowerState === 'busy' && "text-blue-700 dark:text-blue-300",
-                              serverPowerState === 'unknown' && "text-muted-foreground"
-                            )}>
-                              {serverPowerState === 'running' && 'Server is Running'}
-                              {serverPowerState === 'stopped' && 'Server is Stopped'}
-                              {serverPowerState === 'suspended' && 'Server is Suspended'}
-                              {serverPowerState === 'busy' && 'Processing...'}
-                              {serverPowerState === 'unknown' && 'Status Unknown'}
-                            </p>
-                            <p className="text-xs text-muted-foreground">
-                              {serverPowerState === 'running' && 'Your server is online and responding'}
-                              {serverPowerState === 'stopped' && 'Your server is powered off'}
-                              {serverPowerState === 'suspended' && 'Your server is paused'}
-                              {serverPowerState === 'busy' && 'Please wait while the action completes'}
-                              {serverPowerState === 'unknown' && 'Click Sync to check server status'}
-                            </p>
-                          </div>
-                          {serverPowerState === 'busy' && (
-                            <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+                          {powerStateLoading ? (
+                            <>
+                              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                              <div className="flex-1">
+                                <p className="text-sm font-medium text-muted-foreground">Checking Status...</p>
+                                <p className="text-xs text-muted-foreground">Fetching server power state</p>
+                              </div>
+                            </>
+                          ) : (
+                            <>
+                              <div className={cn(
+                                "w-3 h-3 rounded-full",
+                                serverPowerState === 'running' && "bg-green-500 animate-pulse",
+                                serverPowerState === 'stopped' && "bg-red-500",
+                                serverPowerState === 'suspended' && "bg-red-500",
+                                serverPowerState === 'busy' && "bg-blue-500 animate-pulse",
+                                serverPowerState === 'unknown' && "bg-gray-400"
+                              )} />
+                              <div className="flex-1">
+                                <p className={cn(
+                                  "text-sm font-medium",
+                                  serverPowerState === 'running' && "text-green-700 dark:text-green-300",
+                                  serverPowerState === 'stopped' && "text-red-700 dark:text-red-300",
+                                  serverPowerState === 'suspended' && "text-red-700 dark:text-red-300",
+                                  serverPowerState === 'busy' && "text-blue-700 dark:text-blue-300",
+                                  serverPowerState === 'unknown' && "text-muted-foreground"
+                                )}>
+                                  {serverPowerState === 'running' && 'Server is Online'}
+                                  {serverPowerState === 'stopped' && 'Server is Offline'}
+                                  {serverPowerState === 'suspended' && 'Server is Offline'}
+                                  {serverPowerState === 'busy' && 'Processing...'}
+                                  {serverPowerState === 'unknown' && 'Status Unknown'}
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                  {serverPowerState === 'running' && 'Your server is online and responding'}
+                                  {serverPowerState === 'stopped' && 'Your server is powered off'}
+                                  {serverPowerState === 'suspended' && 'Your server is powered off'}
+                                  {serverPowerState === 'busy' && 'Please wait while the action completes'}
+                                  {serverPowerState === 'unknown' && 'Click Sync to check server status'}
+                                </p>
+                              </div>
+                              {serverPowerState === 'busy' ? (
+                                <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+                              ) : (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => fetchServerPowerState()}
+                                  disabled={powerStateLoading}
+                                  className="h-8 w-8 p-0 hover:bg-muted"
+                                  title="Refresh status"
+                                >
+                                  <RefreshCw className={cn(
+                                    "h-4 w-4 text-muted-foreground",
+                                    powerStateLoading && "animate-spin"
+                                  )} />
+                                </Button>
+                              )}
+                            </>
                           )}
                         </div>
                       )}
@@ -2002,7 +2231,7 @@ const OrderDetails = () => {
                           ) : (
                             <Play className="h-4 w-4" />
                           )}
-                          {serverPowerState === 'running' ? 'Server Already Running' : 'Start Server'}
+                          {serverPowerState === 'running' ? 'Server Already Online' : 'Start Server'}
                         </Button>
 
                         <Button
@@ -2019,7 +2248,7 @@ const OrderDetails = () => {
                           ) : (
                             <Square className="h-4 w-4" />
                           )}
-                          {serverPowerState === 'stopped' ? 'Server Already Stopped' : 'Stop Server'}
+                          {serverPowerState === 'stopped' ? 'Server Already Offline' : 'Stop Server'}
                         </Button>
 
                         <Button
@@ -2036,7 +2265,7 @@ const OrderDetails = () => {
                           ) : (
                             <RotateCcw className="h-4 w-4" />
                           )}
-                          {serverPowerState === 'stopped' ? 'Cannot Restart (Stopped)' : 'Restart Server'}
+                          {serverPowerState === 'stopped' ? 'Cannot Restart (Offline)' : 'Restart Server'}
                         </Button>
                       </div>
 

@@ -443,6 +443,70 @@ export async function POST(request) {
         }
         break;
 
+      case 'status':
+        console.log('[SMARTVPS-ACTION][POST] Fetching power status for:', serviceIdentifier);
+        try {
+          const statusData = await api.status(serviceIdentifier);
+          
+          // Parse the response - SmartVPS returns a JSON string
+          const parsedStatusData = parseSmartVPSResponse(statusData, 'status');
+          
+          // SmartVPS exact fields:
+          // - PowerStatus: "Online" | "Offline" - ACTUAL power state (use this!)
+          // - MachineStatus: "active" | etc - VPS exists in system (not power state)
+          // - ActionStatus: "completed" | "pending" - last action status
+          const { PowerStatus, MachineStatus, ActionStatus } = parsedStatusData;
+          
+          console.log('[SMARTVPS-ACTION][POST] SmartVPS Status:', { PowerStatus, MachineStatus, ActionStatus });
+
+          // PowerStatus is the REAL power indicator
+          let powerState = 'unknown';
+          const powerStatusLower = (PowerStatus || '').toLowerCase();
+          
+          if (powerStatusLower === 'online') {
+            powerState = 'running';
+          } else if (powerStatusLower === 'offline') {
+            powerState = 'stopped';
+          } else if (ActionStatus?.toLowerCase() === 'pending') {
+            powerState = 'busy';
+          }
+
+          console.log('[SMARTVPS-ACTION][POST] Power state:', powerState, '(from PowerStatus:', PowerStatus, ')');
+
+          // Sync to database (don't await to speed up response)
+          const extractedCreds = extractSmartVPSCredentials(parsedStatusData, order);
+          const details = {
+            id: serviceIdentifier,
+            ip: extractedCreds.ip || serviceIdentifier,
+            status: powerState === 'running' ? 'active' : powerState === 'stopped' ? 'suspended' : MachineStatus,
+            username: extractedCreds.username,
+            password: extractedCreds.password,
+            os: extractedCreds.os,
+            ...parsedStatusData
+          };
+          
+          // Fire and forget - don't block response
+          syncServerState(orderId, details, details).catch(e => 
+            console.error('[SMARTVPS-ACTION][POST] Background sync error:', e.message)
+          );
+
+          return NextResponse.json({
+            success: true,
+            powerState,
+            powerStatus: PowerStatus,
+            machineStatus: MachineStatus,
+            actionStatus: ActionStatus,
+            lastSync: new Date().toISOString()
+          });
+        } catch (error) {
+          console.error('[SMARTVPS-ACTION][POST] Power status fetch error:', error.message);
+          return NextResponse.json({
+            success: false,
+            error: error.message,
+            powerState: 'unknown'
+          });
+        }
+
       default:
         console.log('[SMARTVPS-ACTION][POST] Unsupported action:', action);
         return NextResponse.json({ message: 'Unsupported action' }, { status: 400 });

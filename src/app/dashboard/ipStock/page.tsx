@@ -128,11 +128,18 @@ export default function IPStockPage() {
 
   const router = useRouter();
 
-  // Fetch available IP stocks on mount
+  // Fetch available IP stocks on mount, after refreshing SmartVPS availability
   useEffect(() => {
     const fetchIPStocks = async () => {
       try {
         setIsLoading(true);
+        // First, refresh SmartVPS availability so we honor live stock from provider
+        try {
+          await fetch("/api/smartvps/sync");
+        } catch (err) {
+          console.warn('[IPSTOCK] smartvps sync failed (will still load cached list)', err);
+        }
+
         const response = await fetch("/api/ipstock");
         const data = await response.json();
         // Filter out unavailable/out-of-stock items immediately

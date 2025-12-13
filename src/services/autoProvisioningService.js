@@ -182,16 +182,45 @@ class AutoProvisioningService {
     return any ? any[1] : null;
   }
 
-  async pickSmartVpsIp() {
+  /**
+   * Pick an IP from SmartVPS ipstock that matches the requested package.
+   * SmartVPS expects us to first fetch ipstock and then call buyvps with a concrete IP.
+   * We match on octets:
+   * - If package name has 3 numeric octets (e.g., 103.181.91), match first 3 octets.
+   * - Otherwise fall back to first 2 octets.
+   */
+  async pickSmartVpsIpForPackage(pkgName) {
     try {
       L.line('[SMARTVPS] Calling ipstock() …');
       const res = await this.smartvpsApi.ipstock();
       const data = this.normalizeSmartVpsResponse(res);
       const text = typeof data === 'string' ? data : JSON.stringify(data);
       L.kv('[SMARTVPS] ipstock() normalized', text?.slice(0, 400));
-      const ip = this.extractIp(text);
-      if (!ip) throw new Error('No available IP found in SmartVPS ipstock');
-      L.line(`[SMARTVPS] Selected IP: ${ip}`);
+
+      const parts = String(pkgName).split('.');
+      const numericParts = parts.filter(p => /^\d+$/.test(p));
+      const useThree = numericParts.length >= 3;
+      const prefix = useThree
+        ? numericParts.slice(0, 3).join('.')
+        : numericParts.slice(0, 2).join('.');
+
+      // Build regex: for 3-octet prefix -> 103\.181\.91\.\d{1,3}
+      // For 2-octet prefix -> 103\.181\.\d{1,3}\.\d{1,3}
+      const regex =
+        useThree
+          ? new RegExp(`\\b${prefix.replace(/\./g, '\\.')}\\.\\d{1,3}\\b`)
+          : new RegExp(`\\b${prefix.replace(/\./g, '\\.')}\\.\\d{1,3}\\.\\d{1,3}\\b`);
+
+      const match = text.match(regex);
+      const ip = match?.[0];
+
+      L.kv('[SMARTVPS] Desired package prefix', prefix);
+      L.kv('[SMARTVPS] Matched IP from ipstock', ip || '(none)');
+
+      if (!ip) {
+        throw new Error(`No available IP in SmartVPS ipstock matching prefix ${prefix}`);
+      }
+
       return ip;
     } catch (e) {
       throw new Error(`SmartVPS ipstock failed: ${e.message}`);
@@ -427,6 +456,10 @@ class AutoProvisioningService {
     const pkg = await this.pickSmartVpsPackage(ipStock, order);
     L.kv('[SMARTVPS] Using package for buy', pkg);
 
+    // Fetch an IP from SmartVPS that matches the package prefix
+    const selectedIp = await this.pickSmartVpsIpForPackage(pkg.name);
+    L.kv('[SMARTVPS] Using IP for buy', selectedIp);
+
     // CRITICAL: Acquire lock to prevent race conditions
     // This ensures only ONE order provisions from this package at a time
     let lockAcquired = false;
@@ -464,6 +497,7 @@ class AutoProvisioningService {
       let buyRes, boughtIp;
       const maxRetries = 3;
       let lastError;
+      let safetyCheckFailed = false; // Flag to track if safety check failed
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
@@ -472,7 +506,7 @@ class AutoProvisioningService {
         // Add timeout wrapper around the API call
         // Longer timeout for SmartVPS to fully process
         buyRes = await this.withTimeout(
-          this.smartvpsApi.buyVps(pkg.name, ram),
+          this.smartvpsApi.buyVps(selectedIp, ram),
           120000, // 2 minute timeout (was 45s)
           `SmartVPS buyVps timeout (attempt ${attempt})`
         );
@@ -516,7 +550,10 @@ class AutoProvisioningService {
           L.line(`[SMARTVPS]   → SmartVPS API fallback behavior detected!`);
           L.line(`[SMARTVPS]   → ORDER WILL BE MARKED AS FAILED (not provisioned)`);
           
-          // Mark order as failed immediately (will be caught by outer try-catch)
+          // Set flag to prevent continuation after loop
+          safetyCheckFailed = true;
+          
+          // Mark order as failed immediately
           await Order.findByIdAndUpdate(order._id, {
             provisioningStatus: 'failed',
             provisioningError: `WRONG PACKAGE ASSIGNED: Customer ordered "${requestedPackage}" (${packageFirstTwo}.*) but SmartVPS assigned "${boughtIp}" (${ipFirstTwo}.*). Package likely ran out of IPs. DO NOT provision this order.`,
@@ -525,12 +562,15 @@ class AutoProvisioningService {
             failedAt: new Date(),
           });
           
-          throw new Error(
+          // Throw error that will NOT be retried
+          const safetyError = new Error(
             `❌ PROVISIONING BLOCKED: SmartVPS assigned IP from wrong package! ` +
             `Customer ordered "${requestedPackage}" (${packageFirstTwo}.*) but received "${boughtIp}" (${ipFirstTwo}.*). ` +
             `This order has been marked as FAILED and will NOT be provisioned. ` +
             `Reason: Package ran out of IPs or SmartVPS API bug. Admin must manually resolve.`
           );
+          safetyError.isSafetyCheckFailure = true; // Mark as safety failure
+          throw safetyError;
         }
 
         // Success - break out of retry loop
@@ -541,6 +581,12 @@ class AutoProvisioningService {
       } catch (error) {
         lastError = error;
         L.line(`[SMARTVPS] ❌ buyVps attempt ${attempt} failed: ${error.message}`);
+
+        // CRITICAL: If safety check failed, do NOT retry - abort immediately
+        if (error.isSafetyCheckFailure || safetyCheckFailed) {
+          L.line(`[SMARTVPS] ❌ Safety check failure - aborting all retries`);
+          break; // Exit loop immediately, do not retry
+        }
 
         if (attempt < maxRetries) {
           // STRATEGIC DELAYS: Give SmartVPS API time to fully process and prevent race conditions
@@ -554,6 +600,12 @@ class AutoProvisioningService {
           await new Promise(resolve => setTimeout(resolve, delay));
         }
       }
+    }
+
+    // CRITICAL: If safety check failed, abort provisioning entirely
+    if (safetyCheckFailed) {
+      L.line(`[SMARTVPS] ❌ ABORTING: Safety check failed - wrong IP package assigned`);
+      throw lastError; // Re-throw the safety check error
     }
 
     // If all retries failed

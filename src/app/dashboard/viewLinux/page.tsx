@@ -454,9 +454,9 @@ const getStatusBadge = (status: string, provisioningStatus?: string, lastAction?
             );
         case 'suspended':
             return (
-                <Badge className="bg-orange-50 text-orange-700 border border-orange-200 dark:bg-orange-950 dark:text-orange-300 dark:border-orange-800">
-                    <AlertTriangle className="w-3 h-3 mr-1" />
-                    Suspended
+                <Badge className="bg-red-50 text-red-700 border border-red-200 dark:bg-red-950 dark:text-red-300 dark:border-red-800">
+                    <div className="w-2 h-2 bg-red-500 rounded-full mr-2"></div>
+                    Offline
                 </Badge>
             );
         case 'failed':

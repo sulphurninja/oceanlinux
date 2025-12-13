@@ -263,28 +263,31 @@ export async function POST(request) {
             // Sync state to database
             await syncServerState(order._id, serviceDetails, serviceInfo);
 
-            result = {
+            console.log('[STATUS] Returning power state:', powerState);
+            
+            // Return directly for status action (not wrapped in result)
+            return NextResponse.json({
               success: true,
               powerState: powerState,
               rawStatus: rawStatus,
               serviceInfo: serviceInfo,
               serviceDetails: serviceDetails,
               lastSync: new Date().toISOString()
-            };
+            });
           } catch (statusError) {
             console.error('[STATUS] Error fetching status:', statusError);
-            result = {
+            return NextResponse.json({
               success: false,
               error: statusError.message,
               powerState: 'unknown'
-            };
+            });
           }
         } else {
-          result = {
+          return NextResponse.json({
             success: false,
             error: 'Hostycare service ID not found',
             powerState: 'unknown'
-          };
+          });
         }
         break;
 
