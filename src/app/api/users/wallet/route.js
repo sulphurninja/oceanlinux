@@ -55,7 +55,7 @@ export async function POST(request) {
             return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
         }
 
-        const { amount, type, description, reference, metadata } = await request.json();
+        const { amount, type, description, reference, metadata, targetUserId } = await request.json();
 
         if (!amount || !type || !description) {
             return NextResponse.json(
@@ -71,10 +71,28 @@ export async function POST(request) {
             );
         }
 
-        let wallet = await Wallet.findOne({ userId });
+        // SECURITY: Credit operations require admin role
+        const creditOperations = ['credit', 'refund', 'bonus'];
+        if (creditOperations.includes(type)) {
+            // Check if requesting user is admin
+            const requestingUser = await User.findById(userId);
+            if (!requestingUser || requestingUser.role !== 'Admin') {
+                console.error(`[Wallet] Unauthorized credit attempt by user ${userId}, type: ${type}`);
+                return NextResponse.json(
+                    { message: 'Admin access required for credit operations' },
+                    { status: 403 }
+                );
+            }
+            console.log(`[Wallet] Admin ${userId} performing ${type} operation`);
+        }
+
+        // For admin operations on other users, use targetUserId; otherwise use requesting user's ID
+        const walletUserId = (targetUserId && creditOperations.includes(type)) ? targetUserId : userId;
+
+        let wallet = await Wallet.findOne({ userId: walletUserId });
 
         if (!wallet) {
-            wallet = new Wallet({ userId, balance: 0, transactions: [] });
+            wallet = new Wallet({ userId: walletUserId, balance: 0, transactions: [] });
         }
 
         const balanceBefore = wallet.balance;
@@ -85,10 +103,18 @@ export async function POST(request) {
             case 'credit':
             case 'refund':
             case 'bonus':
+                // Already verified admin above
                 balanceAfter = balanceBefore + amount;
                 wallet.totalCredits += amount;
                 break;
             case 'debit':
+                // Users can only debit their own wallet
+                if (walletUserId !== userId) {
+                    return NextResponse.json(
+                        { message: 'Cannot debit another user\'s wallet' },
+                        { status: 403 }
+                    );
+                }
                 if (balanceBefore < amount) {
                     return NextResponse.json(
                         { message: 'Insufficient wallet balance' },
@@ -113,13 +139,16 @@ export async function POST(request) {
             reference,
             balanceBefore,
             balanceAfter,
-            metadata
+            metadata,
+            performedBy: userId // Track who performed the transaction
         };
 
         wallet.balance = balanceAfter;
         wallet.transactions.push(transaction);
 
         await wallet.save();
+
+        console.log(`[Wallet] Transaction completed: ${type} ${amount} for user ${walletUserId} by ${userId}`);
 
         return NextResponse.json({
             message: 'Transaction successful',

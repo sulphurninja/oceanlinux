@@ -3,6 +3,7 @@ import connectDB from '@/lib/db';
 import { getDataFromToken } from '@/helper/getDataFromToken';
 import Order from '@/models/orderModel';
 import User from '@/models/userModel';
+import IPStock from '@/models/ipStockModel';
 import { Cashfree } from 'cashfree-pg';
 import Razorpay from 'razorpay';
 import crypto from 'crypto';
@@ -49,26 +50,78 @@ export async function POST(request) {
     const { 
       productName, 
       memory, 
-      price, 
-      originalPrice, 
       promoCode, 
-      promoDiscount, 
       ipStockId,
       paymentMethod = 'razorpay' // Default to Razorpay if not specified
     } = reqBody;
 
     // 4. Basic validation
-    if (!productName || !memory || !price) {
+    if (!productName || !memory || !ipStockId) {
       return NextResponse.json(
-        { message: 'Missing required fields' },
+        { message: 'Missing required fields (productName, memory, ipStockId)' },
         { status: 400 }
       );
     }
 
-    // 5. Generate a unique order ID
+    // 5. SERVER-SIDE PRICE VALIDATION - Fetch actual price from database
+    const ipStock = await IPStock.findById(ipStockId);
+    if (!ipStock) {
+      console.error(`[Payment] IPStock not found: ${ipStockId}`);
+      return NextResponse.json(
+        { message: 'Product not found' },
+        { status: 404 }
+      );
+    }
+
+    // Check if product is available
+    if (!ipStock.available) {
+      return NextResponse.json(
+        { message: 'This product is currently unavailable' },
+        { status: 400 }
+      );
+    }
+
+    // Get the actual price from the database for this memory option
+    const memoryOption = ipStock.memoryOptions.get(memory);
+    if (!memoryOption || !memoryOption.price) {
+      console.error(`[Payment] Memory option ${memory} not found or has no price for IPStock ${ipStockId}`);
+      return NextResponse.json(
+        { message: `Memory option ${memory} is not available for this product` },
+        { status: 400 }
+      );
+    }
+
+    // Server-validated price (from database, NOT from frontend)
+    const originalPrice = memoryOption.price;
+    let price = originalPrice;
+    let promoDiscount = 0;
+
+    // Validate promo code if provided
+    if (promoCode) {
+      const validPromo = ipStock.promoCodes.find(
+        p => p.code.toUpperCase() === promoCode.toUpperCase() && p.isActive
+      );
+
+      if (validPromo) {
+        if (validPromo.discountType === 'percentage') {
+          promoDiscount = Math.round((originalPrice * validPromo.discount) / 100);
+        } else {
+          promoDiscount = validPromo.discount;
+        }
+        price = Math.max(1, originalPrice - promoDiscount); // Minimum price is 1 rupee
+        console.log(`[Payment] Applied promo code ${promoCode}: ${originalPrice} - ${promoDiscount} = ${price}`);
+      } else {
+        console.log(`[Payment] Invalid or inactive promo code: ${promoCode}`);
+        // Don't apply any discount for invalid promo codes
+      }
+    }
+
+    console.log(`[Payment] Server-validated price: originalPrice=${originalPrice}, discount=${promoDiscount}, finalPrice=${price}`);
+
+    // 6. Generate a unique order ID
     const clientTxnId = `ORDER_${Date.now()}_${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
 
-    // 6. Calculate expiry date (30 days from now)
+    // 7. Calculate expiry date (30 days from now)
     const expiryDate = new Date();
     expiryDate.setDate(expiryDate.getDate() + 30);
 
@@ -86,7 +139,7 @@ export async function POST(request) {
       }
     };
 
-    // 7. Create order with selected payment gateway (with automatic fallback)
+    // 8. Create order with selected payment gateway (with automatic fallback)
     let actualPaymentMethod = paymentMethod;
     let orderCreationError = null;
 
@@ -244,16 +297,19 @@ export async function POST(request) {
       };
     }
 
-    // 8. Create a pending order in our database
+    // 9. Create a pending order in our database
+    // Only store promo code if it was valid and actually applied (promoDiscount > 0)
+    const appliedPromoCode = promoDiscount > 0 ? promoCode : null;
+    
     const newOrder = await Order.create({
       user: userId,
       productName,
       memory,
       price: Math.round(price),
-      originalPrice: originalPrice || price,
-      promoCode: promoCode || null,
-      promoDiscount: promoDiscount || 0,
-      ipStockId: ipStockId || null,
+      originalPrice: originalPrice,
+      promoCode: appliedPromoCode,
+      promoDiscount: promoDiscount,
+      ipStockId: ipStockId,
       clientTxnId,
       gatewayOrderId: gatewayOrderId,
       paymentMethod: actualPaymentMethod, // Use the actual method (after fallback)
@@ -275,7 +331,7 @@ export async function POST(request) {
       responseData.originalMethod = paymentMethod;
     }
 
-    // 9. Return order details for frontend
+    // 10. Return order details for frontend
     return NextResponse.json(responseData);
 
   } catch (error) {

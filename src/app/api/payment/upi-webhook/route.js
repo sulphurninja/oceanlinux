@@ -13,6 +13,45 @@ const AutoProvisioningService = require('@/services/autoProvisioningService');
  * - customer_name, customer_vpa, id, p_info, redirect_url, remark
  * - status (success/failure), txnAt, udf1, udf2, udf3, upi_txn_id
  */
+
+// Verify payment with UPI Gateway API
+async function verifyUPIPayment(clientTxnId) {
+  const UPI_GATEWAY_KEY = process.env.UPI_GATEWAY_API_KEY;
+  if (!UPI_GATEWAY_KEY) {
+    console.error('[UPI Webhook] UPI_GATEWAY_API_KEY not configured');
+    return { verified: false, error: 'API key not configured' };
+  }
+
+  try {
+    const response = await fetch('https://merchant.upigateway.com/api/check_order_status', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        key: UPI_GATEWAY_KEY,
+        client_txn_id: clientTxnId
+      })
+    });
+
+    const data = await response.json();
+    console.log('[UPI Webhook] Verification response:', data);
+
+    if (data.status === true && data.data?.status === 'success') {
+      return { 
+        verified: true, 
+        amount: parseFloat(data.data.amount),
+        upi_txn_id: data.data.upi_txn_id
+      };
+    }
+
+    return { verified: false, status: data.data?.status, error: data.msg };
+  } catch (error) {
+    console.error('[UPI Webhook] Verification error:', error);
+    return { verified: false, error: error.message };
+  }
+}
+
 export async function POST(request) {
   await connectDB();
 
@@ -44,7 +83,7 @@ export async function POST(request) {
 
     console.log('[UPI Webhook] Received data:', webhookData);
 
-    const { client_txn_id, status, upi_txn_id, id } = webhookData;
+    const { client_txn_id, status, upi_txn_id, id, amount: webhookAmount } = webhookData;
 
     if (!client_txn_id) {
       console.error('[UPI Webhook] Missing client_txn_id');
@@ -69,15 +108,43 @@ export async function POST(request) {
 
     // Only process successful payments
     if (status === 'success') {
+      // SECURITY: Verify the payment with UPI Gateway API before confirming
+      console.log('[UPI Webhook] Verifying payment with UPI Gateway API...');
+      const verification = await verifyUPIPayment(client_txn_id);
+      
+      if (!verification.verified) {
+        console.error(`[UPI Webhook] Payment verification FAILED for ${client_txn_id}:`, verification);
+        return NextResponse.json(
+          { success: false, message: 'Payment verification failed', error: verification.error },
+          { status: 400 }
+        );
+      }
+
+      // SECURITY: Verify the amount matches what we expected
+      const expectedAmount = order.price;
+      const paidAmount = verification.amount || parseFloat(webhookAmount);
+      
+      if (Math.abs(paidAmount - expectedAmount) > 1) { // Allow ₹1 tolerance for rounding
+        console.error(`[UPI Webhook] Amount mismatch! Expected: ${expectedAmount}, Paid: ${paidAmount}`);
+        return NextResponse.json(
+          { success: false, message: 'Payment amount mismatch' },
+          { status: 400 }
+        );
+      }
+
+      console.log(`[UPI Webhook] Payment verified! Amount: ${paidAmount}, Expected: ${expectedAmount}`);
+
       // Update order status
       order.status = 'confirmed';
-      order.transactionId = upi_txn_id || id;
+      order.transactionId = verification.upi_txn_id || upi_txn_id || id;
       order.gatewayOrderId = id; // Store UPI Gateway order ID
       order.paymentDetails = {
-        upi_txn_id: upi_txn_id,
+        upi_txn_id: verification.upi_txn_id || upi_txn_id,
         customer_vpa: webhookData.customer_vpa,
         txnAt: webhookData.txnAt,
-        remark: webhookData.remark
+        remark: webhookData.remark,
+        verified: true,
+        verifiedAmount: paidAmount
       };
       await order.save();
 
