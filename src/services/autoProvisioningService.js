@@ -120,28 +120,49 @@ class AutoProvisioningService {
   // --- SMARTVPS HELPERS ----------------------------------------------------
 
   // Decide if this IPStock belongs to SmartVPS
-  // 1) tags include "smartvps" (case-insensitive)
-  // 2) provider field equals "smartvps" (case-insensitive)
-  // 3) name includes "smartvps"
-  // 4) productName includes "smartvps" (last resort)
+  // Detection methods:
+  // 1) tags include "smartvps" OR "ocean linux" (Ocean Linux = SmartVPS)
+  // 2) provider field equals "smartvps"
+  // 3) name starts with 🌊 (Ocean Linux emoji)
+  // 4) has defaultConfigurations.smartvps block
+  // 5) productName starts with 🌊
   isSmartVpsStock(ipStock, order) {
     const tags = Array.isArray(ipStock?.tags) ? ipStock.tags : [];
     const provider = (ipStock?.provider || '').toString().toLowerCase();
-    const name = (ipStock?.name || '').toString().toLowerCase();
-    const product = (order?.productName || '').toString().toLowerCase();
+    const name = (ipStock?.name || '').toString();
+    const product = (order?.productName || '').toString();
 
-    const tagged = tags.some(t => String(t).toLowerCase() === 'smartvps');
+    // Check tags - both 'smartvps' and 'ocean linux' indicate SmartVPS
+    const taggedSmartVps = tags.some(t => String(t).toLowerCase() === 'smartvps');
+    const taggedOceanLinux = tags.some(t => String(t).toLowerCase() === 'ocean linux');
+    
+    // Check provider field
     const byProvider = provider === 'smartvps';
-    const byName = name.includes('smartvps');
-    const byProduct = product.includes('smartvps');
+    
+    // Check name starts with 🌊 (Ocean Linux naming convention)
+    const byNameEmoji = name.startsWith('🌊');
+    
+    // Check if has smartvps config block
+    const hasSmartVpsConfig = !!(ipStock?.defaultConfigurations?.smartvps || 
+                                  ipStock?.defaultConfigurations?.get?.('smartvps'));
+    
+    // Check product name starts with 🌊
+    const byProductEmoji = product.startsWith('🌊');
+
+    const isSmartVps = taggedSmartVps || taggedOceanLinux || byProvider || 
+                       byNameEmoji || hasSmartVpsConfig || byProductEmoji;
 
     L.kv('IPStock.tags', tags);
     L.kv('IPStock.provider', ipStock?.provider || '(missing)');
     L.kv('IPStock.name', ipStock?.name || '(missing)');
     L.kv('Order.productName', order?.productName || '(missing)');
-    L.kv('SmartVPS detection', { tagged, byProvider, byName, byProduct });
+    L.kv('SmartVPS detection', { 
+      taggedSmartVps, taggedOceanLinux, byProvider, 
+      byNameEmoji, hasSmartVpsConfig, byProductEmoji,
+      result: isSmartVps 
+    });
 
-    return tagged || byProvider || byName || byProduct;
+    return isSmartVps;
   }
 
   // SmartVPS response normalizer
@@ -456,9 +477,10 @@ class AutoProvisioningService {
     const pkg = await this.pickSmartVpsPackage(ipStock, order);
     L.kv('[SMARTVPS] Using package for buy', pkg);
 
-    // Fetch an IP from SmartVPS that matches the package prefix
-    const selectedIp = await this.pickSmartVpsIpForPackage(pkg.name);
-    L.kv('[SMARTVPS] Using IP for buy', selectedIp);
+    // SmartVPS buyVps expects the package NAME (IP prefix like "103.82.74"), NOT a full IP
+    // Their API: { "ip" : "103.82.74", "ram" : "8" }
+    const packageNameForBuy = pkg.name;
+    L.kv('[SMARTVPS] Using package name for buy', packageNameForBuy);
 
     // CRITICAL: Acquire lock to prevent race conditions
     // This ensures only ONE order provisions from this package at a time
@@ -501,12 +523,13 @@ class AutoProvisioningService {
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        L.line(`[SMARTVPS] Calling buyVps(${pkg.name}, ${ram}) - attempt ${attempt}/${maxRetries} …`);
+        L.line(`[SMARTVPS] Calling buyVps(${packageNameForBuy}, ${ram}) - attempt ${attempt}/${maxRetries} …`);
 
         // Add timeout wrapper around the API call
         // Longer timeout for SmartVPS to fully process
+        // SmartVPS expects package name (IP prefix) not a full IP address
         buyRes = await this.withTimeout(
-          this.smartvpsApi.buyVps(selectedIp, ram),
+          this.smartvpsApi.buyVps(packageNameForBuy, ram),
           120000, // 2 minute timeout (was 45s)
           `SmartVPS buyVps timeout (attempt ${attempt})`
         );
