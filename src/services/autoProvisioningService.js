@@ -525,14 +525,8 @@ class AutoProvisioningService {
       try {
         L.line(`[SMARTVPS] Calling buyVps(${packageNameForBuy}, ${ram}) - attempt ${attempt}/${maxRetries} …`);
 
-        // Add timeout wrapper around the API call
-        // Longer timeout for SmartVPS to fully process
-        // SmartVPS expects package name (IP prefix) not a full IP address
-        buyRes = await this.withTimeout(
-          this.smartvpsApi.buyVps(packageNameForBuy, ram),
-          120000, // 2 minute timeout (was 45s)
-          `SmartVPS buyVps timeout (attempt ${attempt})`
-        );
+        // buyVps API has 3 minute timeout built-in, no extra wrapper needed
+        buyRes = await this.smartvpsApi.buyVps(packageNameForBuy, ram);
 
         const buyText = typeof buyRes === 'string' ? buyRes : JSON.stringify(buyRes);
         L.kv(`[SMARTVPS] buyVps attempt ${attempt} response`, buyText.slice(0, 500));
@@ -612,14 +606,13 @@ class AutoProvisioningService {
         }
 
         if (attempt < maxRetries) {
-          // STRATEGIC DELAYS: Give SmartVPS API time to fully process and prevent race conditions
-          // Attempt 1 → Wait 2 minutes before retry 2
-          // Attempt 2 → Wait 3 minutes before retry 3
-          const delayMinutes = attempt + 1; // 2 min, 3 min
-          const delay = delayMinutes * 60 * 1000;
+          // Shorter delays since buyVps API now has 3 minute timeout built-in
+          // Attempt 1 → Wait 30 seconds before retry 2
+          // Attempt 2 → Wait 45 seconds before retry 3
+          const delaySeconds = attempt === 1 ? 30 : 45;
+          const delay = delaySeconds * 1000;
           
-          L.line(`[SMARTVPS] ⏳ Strategic delay: Waiting ${delayMinutes} minute(s) (${delay}ms) before retry...`);
-          L.line(`[SMARTVPS] 💡 This allows SmartVPS API to fully process and prevents race conditions`);
+          L.line(`[SMARTVPS] ⏳ Waiting ${delaySeconds}s before retry...`);
           await new Promise(resolve => setTimeout(resolve, delay));
         }
       }

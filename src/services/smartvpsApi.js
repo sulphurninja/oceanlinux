@@ -23,9 +23,9 @@ function buildAuthHeader() {
   return `Basic ${b64}`;
 }
 
-async function httpFetch(path, { method = 'POST', jsonBody, query } = {}) {
+async function httpFetch(path, { method = 'POST', jsonBody, query, timeoutMs = 60_000 } = {}) {
   const ac = new AbortController();
-  const t = setTimeout(() => ac.abort(), 25_000);
+  const t = setTimeout(() => ac.abort(), timeoutMs);
 
   const url = new URL(path, BASE_URL);
   if (query) {
@@ -108,7 +108,13 @@ class SmartVpsAPI {
   changeOS(ip, os) { return httpFetch('api/oceansmart/changeos', { jsonBody: { ip, os } }); }
 
   // Buy (call ipstock first and pick a usable IP; ram string/number)
-  buyVps(ip, ram) { return httpFetch('api/oceansmart/buyvps', { jsonBody: { ip, ram: String(ram) } }); }
+  // buyVps needs a longer timeout as it provisions a server
+  buyVps(ip, ram) { 
+    return httpFetch('api/oceansmart/buyvps', { 
+      jsonBody: { ip, ram: String(ram) },
+      timeoutMs: 180_000 // 3 minutes for server provisioning
+    }); 
+  }
 
   // Renew VPS - FIXED WITH EXPLICIT POST METHOD AND ENHANCED LOGGING
   renewVps(ip) {
