@@ -10,6 +10,7 @@ import PricingSection from "@/components/landing/pricing";
 import Scalability from "@/components/landing/Scalability";
 import Security from "@/components/landing/Security";
 import SupportAndReliability from "@/components/landing/SupportAndReliability";
+import FloatingSupport from "@/components/component/floating-support";
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
@@ -204,6 +205,9 @@ export default function LandingPage() {
         <CTA />
       </main>
       <Footer />
+      
+      {/* Floating Support & WhatsApp Widget */}
+      <FloatingSupport />
     </div>
   )
 }

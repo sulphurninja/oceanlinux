@@ -3,6 +3,8 @@ import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 import { Cashfree } from 'cashfree-pg';
 import Razorpay from 'razorpay';
+import NotificationService from '@/services/notificationService';
+const AutoProvisioningService = require('@/services/autoProvisioningService');
 
 // Initialize Cashfree
 Cashfree.XClientId = process.env.CASHFREE_APP_ID;
@@ -190,9 +192,28 @@ export async function POST(request) {
 
     console.log(`Order found: ${order._id}, status: ${order.status}`);
 
-    // If order is already confirmed, just return it
+    // If order is already confirmed, check if provisioning is needed
     if (order.status === 'confirmed') {
       console.log(`Order ${order._id} is already confirmed`);
+      
+      // Check if provisioning was missed (no IP assigned and not in progress)
+      const needsProvisioning = !order.ipAddress && 
+        order.provisioningStatus !== 'completed' && 
+        order.provisioningStatus !== 'in_progress';
+      
+      if (needsProvisioning) {
+        console.log(`[PAYMENT-STATUS] Order ${order._id} confirmed but not provisioned, triggering now...`);
+        try {
+          const provisioningService = new AutoProvisioningService();
+          provisioningService.provisionServer(order._id.toString())
+            .then(result => console.log(`[PAYMENT-STATUS] Late provisioning result for ${order._id}:`, result))
+            .catch(error => console.error(`[PAYMENT-STATUS] Late provisioning failed for ${order._id}:`, error));
+          console.log("[PAYMENT-STATUS] Late provisioning initiated");
+        } catch (provisionError) {
+          console.error("[PAYMENT-STATUS] Error starting late provisioning:", provisionError);
+        }
+      }
+      
       return NextResponse.json({
         order: {
           id: order._id.toString(),
@@ -238,6 +259,55 @@ export async function POST(request) {
             confirmedAt: new Date()
           };
           await order.save();
+
+          // 🚀 TRIGGER AUTO-PROVISIONING FOR CASHFREE PAYMENTS
+          // This is critical - webhook may not always be received
+          // First check if already provisioned or in progress
+          const freshOrder = await Order.findById(order._id);
+          const alreadyProvisioning = freshOrder?.provisioningStatus === 'in_progress' || 
+                                       freshOrder?.provisioningStatus === 'completed' ||
+                                       freshOrder?.ipAddress;
+          
+          if (alreadyProvisioning) {
+            console.log(`[PAYMENT-STATUS] Order ${order._id} already provisioning/provisioned, skipping`);
+          } else {
+            console.log(`[PAYMENT-STATUS] 🚀 Triggering auto-provisioning for Cashfree order ${order._id}`);
+            try {
+              const provisioningService = new AutoProvisioningService();
+
+            // Send notifications
+            try {
+              await NotificationService.notifyOrderConfirmed(order.user, order);
+              await NotificationService.notifyOrderProvisioning(order.user, order);
+            } catch (notifError) {
+              console.error('[PAYMENT-STATUS] Notification error:', notifError);
+            }
+
+            // Start provisioning in background (don't await)
+            provisioningService.provisionServer(order._id.toString())
+              .then(async result => {
+                console.log(`[PAYMENT-STATUS] Auto-provisioning completed for order ${order._id}:`, result);
+                if (result.success) {
+                  await NotificationService.notifyOrderCompleted(order.user, order, {
+                    ipAddress: result.ipAddress || 'Available in dashboard',
+                    username: result.username || 'root',
+                    password: result.password || 'Check dashboard'
+                  });
+                } else {
+                  await NotificationService.notifyOrderFailed(order.user, order, result.error);
+                }
+              })
+              .catch(async error => {
+                console.error(`[PAYMENT-STATUS] Auto-provisioning failed for order ${order._id}:`, error);
+                await NotificationService.notifyOrderFailed(order.user, order, error.message);
+              });
+
+              console.log("[PAYMENT-STATUS] Auto-provisioning initiated for Cashfree payment");
+            } catch (provisionError) {
+              console.error("[PAYMENT-STATUS] Error starting auto-provisioning:", provisionError);
+              // Don't fail the response - provisioning can be retried
+            }
+          }
           
           return NextResponse.json({
             order: {

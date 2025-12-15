@@ -89,6 +89,11 @@ export default function Header() {
                                         🔌 API Docs
                                     </Link>
                                 </DropdownMenuItem>
+                                <DropdownMenuItem asChild>
+                                    <Link href="/tools/proxy-setup" className="flex items-center gap-2 cursor-pointer">
+                                        🔧 Proxy Setup Tool
+                                    </Link>
+                                </DropdownMenuItem>
                             </DropdownMenuContent>
                         </DropdownMenu>
 

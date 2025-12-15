@@ -33,6 +33,7 @@ const footerSections = {
       { name: "🎟️ Support Tickets", href: "/support/tickets" },
       { name: "⚠️ Server Status", href: "/status" },
       { name: "📋 API Documentation", href: "/docs/api" },
+      { name: "🔧 Proxy Setup Tool", href: "/tools/proxy-setup" },
     ]
   },
   company: {

@@ -1,0 +1,828 @@
+'use client';
+
+import React, { useState, useRef, useEffect } from 'react';
+import Link from 'next/link';
+import {
+    Terminal,
+    Server,
+    CheckCircle,
+    AlertCircle,
+    Info,
+    Loader2,
+    Shield,
+    Globe,
+    Eye,
+    EyeOff,
+    Copy,
+    Play,
+    RefreshCw,
+    Wifi,
+    User,
+    Key,
+    ArrowRight,
+    Sparkles,
+    Zap,
+    ExternalLink,
+    ChevronRight,
+    Star,
+    Clock,
+    Users,
+    Award,
+    HeadphonesIcon
+} from 'lucide-react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from "@/components/ui/dialog";
+import { Progress } from "@/components/ui/progress";
+import Header from "@/components/landing/Header";
+import Footer from "@/components/landing/Footer";
+import FloatingSupport from "@/components/component/floating-support";
+
+type Step = 'credentials' | 'connecting' | 'proxy-setup' | 'complete';
+type LogType = 'info' | 'success' | 'error' | 'command' | 'output';
+
+interface LogEntry {
+    type: LogType;
+    message: string;
+    timestamp: Date;
+}
+
+const PublicProxySetupPage = () => {
+    const terminalRef = useRef<HTMLDivElement>(null);
+
+    // Connection state
+    const [step, setStep] = useState<Step>('credentials');
+    const [isConnecting, setIsConnecting] = useState(false);
+    const [isSettingUp, setIsSettingUp] = useState(false);
+    const [progress, setProgress] = useState(0);
+
+    // Server credentials
+    const [serverIp, setServerIp] = useState('');
+    const [serverUsername, setServerUsername] = useState('root');
+    const [serverPassword, setServerPassword] = useState('');
+    const [showServerPassword, setShowServerPassword] = useState(false);
+
+    // Detected info
+    const [detectedOs, setDetectedOs] = useState<string | null>(null);
+    const [isSquidInstalled, setIsSquidInstalled] = useState(false);
+
+    // Proxy credentials dialog
+    const [showProxyDialog, setShowProxyDialog] = useState(false);
+    const [proxyUsername, setProxyUsername] = useState('');
+    const [proxyPassword, setProxyPassword] = useState('');
+    const [showProxyPassword, setShowProxyPassword] = useState(false);
+
+    // Final result
+    const [proxyResult, setProxyResult] = useState<{
+        ip: string;
+        port: number;
+        username: string;
+        password: string;
+        format: string;
+    } | null>(null);
+
+    // Terminal logs
+    const [logs, setLogs] = useState<LogEntry[]>([]);
+
+    // Auto-scroll terminal
+    useEffect(() => {
+        if (terminalRef.current) {
+            terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
+        }
+    }, [logs]);
+
+    const addLog = (type: LogType, message: string) => {
+        setLogs(prev => [...prev, { type, message, timestamp: new Date() }]);
+    };
+
+    const clearLogs = () => {
+        setLogs([]);
+    };
+
+    const copyToClipboard = (text: string, label?: string) => {
+        navigator.clipboard.writeText(text);
+        toast.success(`${label || 'Text'} copied to clipboard!`);
+    };
+
+    // Parse IP:Username:Password format
+    const parseCredentials = (input: string) => {
+        const parts = input.split(':');
+        if (parts.length >= 3) {
+            setServerIp(parts[0]);
+            setServerUsername(parts[1]);
+            setServerPassword(parts.slice(2).join(':'));
+            toast.success('Credentials parsed successfully!');
+        }
+    };
+
+    // Connect and detect OS
+    const handleConnect = async () => {
+        if (!serverIp || !serverUsername || !serverPassword) {
+            toast.error('Please fill in all server credentials');
+            return;
+        }
+
+        setIsConnecting(true);
+        setStep('connecting');
+        clearLogs();
+        addLog('info', `Connecting to ${serverIp}...`);
+        addLog('command', `ssh ${serverUsername}@${serverIp}`);
+
+        try {
+            const response = await fetch('/api/terminal/proxy-setup', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    ip: serverIp,
+                    username: serverUsername,
+                    password: serverPassword,
+                    action: 'detect'
+                })
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                setDetectedOs(data.os);
+                setIsSquidInstalled(data.isSquidInstalled);
+                addLog('success', `✓ Connected successfully!`);
+                addLog('output', `Detected OS: ${data.os}`);
+                addLog('output', `Squid proxy: ${data.isSquidInstalled ? 'Installed' : 'Not installed'}`);
+                setStep('proxy-setup');
+                setTimeout(() => setShowProxyDialog(true), 500);
+            } else {
+                addLog('error', `✗ ${data.message}`);
+                toast.error(data.message);
+                setStep('credentials');
+            }
+        } catch (error: any) {
+            addLog('error', `✗ Connection failed: ${error.message}`);
+            toast.error('Failed to connect to server');
+            setStep('credentials');
+        } finally {
+            setIsConnecting(false);
+        }
+    };
+
+    // Setup proxy
+    const handleSetupProxy = async () => {
+        if (!proxyUsername || !proxyPassword) {
+            toast.error('Please enter proxy username and password');
+            return;
+        }
+
+        setShowProxyDialog(false);
+        setIsSettingUp(true);
+        setProgress(0);
+
+        addLog('info', 'Starting proxy setup...');
+        addLog('command', 'apt-get update / yum update');
+        setProgress(10);
+
+        try {
+            const progressInterval = setInterval(() => {
+                setProgress(prev => Math.min(prev + 10, 90));
+            }, 2000);
+
+            addLog('info', `Installing Squid proxy server...`);
+            setProgress(20);
+
+            const response = await fetch('/api/terminal/proxy-setup', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    ip: serverIp,
+                    username: serverUsername,
+                    password: serverPassword,
+                    proxyUsername: proxyUsername,
+                    proxyPassword: proxyPassword,
+                    action: 'full-setup'
+                })
+            });
+
+            clearInterval(progressInterval);
+
+            const data = await response.json();
+
+            if (data.success) {
+                setProgress(100);
+                addLog('success', '✓ Squid proxy installed');
+                addLog('success', '✓ Configuration applied');
+                addLog('success', `✓ User "${proxyUsername}" created`);
+                addLog('success', '✓ Firewall port 3128 opened');
+                addLog('success', '✓ Proxy server is running!');
+                
+                setProxyResult(data.proxyDetails);
+                setStep('complete');
+                toast.success('Proxy setup completed successfully!');
+            } else {
+                addLog('error', `✗ ${data.message}`);
+                toast.error(data.message);
+                setStep('proxy-setup');
+            }
+        } catch (error: any) {
+            addLog('error', `✗ Setup failed: ${error.message}`);
+            toast.error('Proxy setup failed');
+            setStep('proxy-setup');
+        } finally {
+            setIsSettingUp(false);
+        }
+    };
+
+    // Reset everything
+    const handleReset = () => {
+        setStep('credentials');
+        setServerIp('');
+        setServerUsername('root');
+        setServerPassword('');
+        setDetectedOs(null);
+        setIsSquidInstalled(false);
+        setProxyUsername('');
+        setProxyPassword('');
+        setProxyResult(null);
+        setProgress(0);
+        clearLogs();
+    };
+
+    const getLogIcon = (type: LogType) => {
+        switch (type) {
+            case 'success': return <CheckCircle className="h-3.5 w-3.5 text-green-500" />;
+            case 'error': return <AlertCircle className="h-3.5 w-3.5 text-red-500" />;
+            case 'command': return <Terminal className="h-3.5 w-3.5 text-blue-500" />;
+            case 'output': return <ArrowRight className="h-3.5 w-3.5 text-gray-500" />;
+            default: return <Info className="h-3.5 w-3.5 text-blue-400" />;
+        }
+    };
+
+    const getLogColor = (type: LogType) => {
+        switch (type) {
+            case 'success': return 'text-green-400';
+            case 'error': return 'text-red-400';
+            case 'command': return 'text-yellow-400';
+            case 'output': return 'text-gray-400';
+            default: return 'text-blue-400';
+        }
+    };
+
+    return (
+        <div className="min-h-screen bg-background text-foreground">
+            <Header />
+
+            {/* Hero Section */}
+            <section className="relative py-16 lg:py-24 overflow-hidden">
+                <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-background to-primary/10" />
+                <div className="absolute inset-0 bg-[url('/grid.svg')] opacity-5" />
+                
+                <div className="container mx-auto px-4 sm:px-6 lg:px-8 relative">
+                    <div className="text-center max-w-4xl mx-auto mb-12">
+                        <Badge className="mb-4 bg-primary/10 text-primary border-primary/20">
+                            <Zap className="h-3 w-3 mr-1" />
+                            Free Tool
+                        </Badge>
+                        <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold mb-6 bg-gradient-to-r from-foreground via-primary to-foreground bg-clip-text text-transparent">
+                            One-Click Proxy Setup
+                        </h1>
+                        <p className="text-lg md:text-xl text-muted-foreground mb-8 max-w-2xl mx-auto">
+                            Install and configure a Squid proxy server on your Linux VPS in seconds. 
+                            No technical knowledge required. Works with Ubuntu, CentOS, and more.
+                        </p>
+                        
+                        {/* Trust Badges */}
+                        <div className="flex flex-wrap justify-center gap-6 mb-8">
+                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                <Shield className="h-5 w-5 text-green-500" />
+                                <span>Secure SSH Connection</span>
+                            </div>
+                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                <Clock className="h-5 w-5 text-blue-500" />
+                                <span>Setup in 2 Minutes</span>
+                            </div>
+                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                <Users className="h-5 w-5 text-purple-500" />
+                                <span>10,000+ Users</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Main Tool Section */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 max-w-7xl mx-auto">
+                        {/* Left Column - Credentials & Controls */}
+                        <div className="space-y-6">
+                            {/* Progress Steps */}
+                            <div className="flex flex-wrap gap-2 justify-center lg:justify-start">
+                                <Badge variant={step === 'credentials' ? 'default' : 'secondary'} className="gap-1.5">
+                                    <User className="h-3 w-3" />
+                                    1. Credentials
+                                </Badge>
+                                <ChevronRight className="h-5 w-5 text-muted-foreground hidden sm:block" />
+                                <Badge variant={step === 'connecting' || step === 'proxy-setup' ? 'default' : 'secondary'} className="gap-1.5">
+                                    <Wifi className="h-3 w-3" />
+                                    2. Connect
+                                </Badge>
+                                <ChevronRight className="h-5 w-5 text-muted-foreground hidden sm:block" />
+                                <Badge variant={step === 'complete' ? 'default' : 'secondary'} className="gap-1.5">
+                                    <CheckCircle className="h-3 w-3" />
+                                    3. Done
+                                </Badge>
+                            </div>
+
+                            {/* Credentials Card */}
+                            <Card className="border-border shadow-xl">
+                                <CardHeader className="pb-4">
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center border border-primary/20">
+                                                <Server className="h-6 w-6 text-primary" />
+                                            </div>
+                                            <div>
+                                                <CardTitle className="text-lg">Server Credentials</CardTitle>
+                                                <CardDescription>Enter your Linux VPS details</CardDescription>
+                                            </div>
+                                        </div>
+                                        {step !== 'credentials' && (
+                                            <Button variant="ghost" size="sm" onClick={handleReset}>
+                                                <RefreshCw className="h-4 w-4" />
+                                            </Button>
+                                        )}
+                                    </div>
+                                </CardHeader>
+                                <CardContent className="space-y-4">
+                                    {/* Quick Paste */}
+                                    <div className="space-y-2">
+                                        <Label className="text-sm font-medium flex items-center gap-2">
+                                            <Zap className="h-4 w-4 text-yellow-500" />
+                                            Quick Paste (IP:Username:Password)
+                                        </Label>
+                                        <Input
+                                            placeholder="103.85.118.123:root:yourpassword"
+                                            onChange={(e) => parseCredentials(e.target.value)}
+                                            disabled={step !== 'credentials'}
+                                            className="font-mono text-sm"
+                                        />
+                                    </div>
+
+                                    <div className="relative">
+                                        <div className="absolute inset-0 flex items-center">
+                                            <span className="w-full border-t" />
+                                        </div>
+                                        <div className="relative flex justify-center text-xs uppercase">
+                                            <span className="bg-card px-2 text-muted-foreground">Or enter manually</span>
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-4">
+                                        <div className="space-y-2">
+                                            <Label htmlFor="ip" className="flex items-center gap-2">
+                                                <Globe className="h-4 w-4 text-muted-foreground" />
+                                                Server IP Address
+                                            </Label>
+                                            <Input
+                                                id="ip"
+                                                value={serverIp}
+                                                onChange={(e) => setServerIp(e.target.value)}
+                                                placeholder="103.85.118.123"
+                                                disabled={step !== 'credentials'}
+                                                className="font-mono"
+                                            />
+                                        </div>
+
+                                        <div className="space-y-2">
+                                            <Label htmlFor="username" className="flex items-center gap-2">
+                                                <User className="h-4 w-4 text-muted-foreground" />
+                                                SSH Username
+                                            </Label>
+                                            <Input
+                                                id="username"
+                                                value={serverUsername}
+                                                onChange={(e) => setServerUsername(e.target.value)}
+                                                placeholder="root"
+                                                disabled={step !== 'credentials'}
+                                            />
+                                        </div>
+
+                                        <div className="space-y-2">
+                                            <Label htmlFor="password" className="flex items-center gap-2">
+                                                <Key className="h-4 w-4 text-muted-foreground" />
+                                                SSH Password
+                                            </Label>
+                                            <div className="relative">
+                                                <Input
+                                                    id="password"
+                                                    type={showServerPassword ? 'text' : 'password'}
+                                                    value={serverPassword}
+                                                    onChange={(e) => setServerPassword(e.target.value)}
+                                                    placeholder="••••••••"
+                                                    disabled={step !== 'credentials'}
+                                                    className="pr-10"
+                                                />
+                                                <Button
+                                                    type="button"
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="absolute right-0 top-0 h-full px-3"
+                                                    onClick={() => setShowServerPassword(!showServerPassword)}
+                                                >
+                                                    {showServerPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                                                </Button>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <Button
+                                        onClick={handleConnect}
+                                        disabled={!serverIp || !serverUsername || !serverPassword || isConnecting || step !== 'credentials'}
+                                        className="w-full gap-2"
+                                        size="lg"
+                                    >
+                                        {isConnecting ? (
+                                            <>
+                                                <Loader2 className="h-4 w-4 animate-spin" />
+                                                Connecting...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Play className="h-4 w-4" />
+                                                Connect & Setup Proxy
+                                            </>
+                                        )}
+                                    </Button>
+                                </CardContent>
+                            </Card>
+
+                            {/* Result Card */}
+                            {proxyResult && (
+                                <Card className="border-green-500/50 bg-green-500/5 shadow-xl">
+                                    <CardHeader className="pb-4">
+                                        <CardTitle className="text-lg flex items-center gap-2 text-green-600 dark:text-green-400">
+                                            <CheckCircle className="h-5 w-5" />
+                                            🎉 Proxy Ready!
+                                        </CardTitle>
+                                        <CardDescription>
+                                            Your proxy server is configured and running on port 3128
+                                        </CardDescription>
+                                    </CardHeader>
+                                    <CardContent className="space-y-4">
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <div className="space-y-1">
+                                                <Label className="text-xs text-muted-foreground">IP Address</Label>
+                                                <p className="font-mono text-sm font-medium">{proxyResult.ip}</p>
+                                            </div>
+                                            <div className="space-y-1">
+                                                <Label className="text-xs text-muted-foreground">Port</Label>
+                                                <p className="font-mono text-sm font-medium">{proxyResult.port}</p>
+                                            </div>
+                                            <div className="space-y-1">
+                                                <Label className="text-xs text-muted-foreground">Username</Label>
+                                                <p className="font-mono text-sm font-medium">{proxyResult.username}</p>
+                                            </div>
+                                            <div className="space-y-1">
+                                                <Label className="text-xs text-muted-foreground">Password</Label>
+                                                <p className="font-mono text-sm font-medium">{proxyResult.password}</p>
+                                            </div>
+                                        </div>
+
+                                        <div className="p-3 bg-slate-900 rounded-lg">
+                                            <Label className="text-xs text-gray-400 mb-2 block">Full Proxy String</Label>
+                                            <div className="flex items-center gap-2">
+                                                <code className="flex-1 text-green-400 font-mono text-sm break-all">
+                                                    {proxyResult.format}
+                                                </code>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="h-8 w-8 flex-shrink-0"
+                                                    onClick={() => copyToClipboard(proxyResult.format, 'Proxy string')}
+                                                >
+                                                    <Copy className="h-4 w-4" />
+                                                </Button>
+                                            </div>
+                                        </div>
+
+                                        <div className="flex gap-2">
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                className="flex-1 gap-2"
+                                                onClick={() => copyToClipboard(`${proxyResult.ip}:${proxyResult.port}`, 'IP:Port')}
+                                            >
+                                                <Copy className="h-4 w-4" />
+                                                Copy IP:Port
+                                            </Button>
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                className="flex-1 gap-2"
+                                                onClick={() => copyToClipboard(`${proxyResult.username}:${proxyResult.password}`, 'Credentials')}
+                                            >
+                                                <Copy className="h-4 w-4" />
+                                                Copy Auth
+                                            </Button>
+                                        </div>
+                                    </CardContent>
+                                </Card>
+                            )}
+                        </div>
+
+                        {/* Right Column - Terminal */}
+                        <div className="space-y-4">
+                            <Card className="border-border overflow-hidden shadow-xl">
+                                <div className="bg-slate-900 dark:bg-slate-950">
+                                    {/* Terminal Header */}
+                                    <div className="h-10 bg-slate-800 dark:bg-slate-900 border-b border-slate-700 flex items-center px-4 gap-2">
+                                        <div className="w-3 h-3 rounded-full bg-red-500"></div>
+                                        <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
+                                        <div className="w-3 h-3 rounded-full bg-green-500"></div>
+                                        <span className="ml-3 text-xs text-slate-400 font-mono flex items-center gap-2">
+                                            <Terminal className="h-3.5 w-3.5" />
+                                            OceanLinux Terminal
+                                        </span>
+                                        {detectedOs && (
+                                            <Badge variant="outline" className="ml-auto text-xs bg-slate-700 border-slate-600 text-slate-300">
+                                                {detectedOs}
+                                            </Badge>
+                                        )}
+                                    </div>
+
+                                    {/* Terminal Body */}
+                                    <div
+                                        ref={terminalRef}
+                                        className="h-[400px] overflow-y-auto p-4 font-mono text-sm"
+                                    >
+                                        {logs.length === 0 ? (
+                                            <div className="text-slate-500 flex flex-col items-center justify-center h-full gap-3">
+                                                <Terminal className="h-12 w-12 text-slate-600" />
+                                                <p>Enter server credentials to begin</p>
+                                                <p className="text-xs text-slate-600">
+                                                    Proxy will be installed on port 3128
+                                                </p>
+                                            </div>
+                                        ) : (
+                                            <div className="space-y-1">
+                                                {logs.map((log, index) => (
+                                                    <div key={index} className="flex items-start gap-2">
+                                                        <span className="text-slate-600 text-xs flex-shrink-0 w-16">
+                                                            {log.timestamp.toLocaleTimeString('en-US', { hour12: false })}
+                                                        </span>
+                                                        {getLogIcon(log.type)}
+                                                        <span className={cn("flex-1", getLogColor(log.type))}>
+                                                            {log.message}
+                                                        </span>
+                                                    </div>
+                                                ))}
+                                                {(isConnecting || isSettingUp) && (
+                                                    <div className="flex items-center gap-2 text-blue-400">
+                                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                                        <span className="animate-pulse">Processing...</span>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Progress Bar */}
+                                    {isSettingUp && (
+                                        <div className="px-4 pb-4">
+                                            <Progress value={progress} className="h-2" />
+                                            <p className="text-xs text-slate-400 mt-2 text-center">
+                                                Installing and configuring proxy server... {progress}%
+                                            </p>
+                                        </div>
+                                    )}
+                                </div>
+                            </Card>
+
+                            {/* Supported OS */}
+                            <Card className="border-border">
+                                <CardContent className="p-4">
+                                    <div className="flex items-start gap-3">
+                                        <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                                            <Shield className="h-5 w-5 text-primary" />
+                                        </div>
+                                        <div className="text-sm">
+                                            <p className="font-semibold mb-1">Supported Operating Systems</p>
+                                            <p className="text-muted-foreground">
+                                                Ubuntu 20.04/22.04, Debian 10/11, CentOS 7/8, Rocky Linux, AlmaLinux
+                                            </p>
+                                        </div>
+                                    </div>
+                                </CardContent>
+                            </Card>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            {/* Features Section */}
+            <section className="py-16 bg-muted/30">
+                <div className="container mx-auto px-4 sm:px-6 lg:px-8">
+                    <div className="text-center mb-12">
+                        <h2 className="text-3xl md:text-4xl font-bold mb-4">Why Use Our Proxy Setup Tool?</h2>
+                        <p className="text-muted-foreground max-w-2xl mx-auto">
+                            The easiest way to set up a proxy server on your Linux VPS
+                        </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                        <Card className="border-border text-center p-6">
+                            <div className="w-14 h-14 mx-auto mb-4 rounded-xl bg-blue-500/10 flex items-center justify-center">
+                                <Zap className="h-7 w-7 text-blue-500" />
+                            </div>
+                            <h3 className="font-semibold mb-2">One-Click Setup</h3>
+                            <p className="text-sm text-muted-foreground">
+                                No terminal commands needed. Just enter credentials and we handle everything.
+                            </p>
+                        </Card>
+
+                        <Card className="border-border text-center p-6">
+                            <div className="w-14 h-14 mx-auto mb-4 rounded-xl bg-green-500/10 flex items-center justify-center">
+                                <Shield className="h-7 w-7 text-green-500" />
+                            </div>
+                            <h3 className="font-semibold mb-2">Secure Connection</h3>
+                            <p className="text-sm text-muted-foreground">
+                                SSH encrypted connection. Your credentials never leave your browser.
+                            </p>
+                        </Card>
+
+                        <Card className="border-border text-center p-6">
+                            <div className="w-14 h-14 mx-auto mb-4 rounded-xl bg-purple-500/10 flex items-center justify-center">
+                                <Globe className="h-7 w-7 text-purple-500" />
+                            </div>
+                            <h3 className="font-semibold mb-2">Any VPS Provider</h3>
+                            <p className="text-sm text-muted-foreground">
+                                Works with any Linux VPS - DigitalOcean, AWS, OceanLinux, Vultr, and more.
+                            </p>
+                        </Card>
+
+                        <Card className="border-border text-center p-6">
+                            <div className="w-14 h-14 mx-auto mb-4 rounded-xl bg-orange-500/10 flex items-center justify-center">
+                                <Clock className="h-7 w-7 text-orange-500" />
+                            </div>
+                            <h3 className="font-semibold mb-2">2-Minute Setup</h3>
+                            <p className="text-sm text-muted-foreground">
+                                From start to finish in under 2 minutes. Fast and reliable.
+                            </p>
+                        </Card>
+                    </div>
+                </div>
+            </section>
+
+            {/* CTA Section */}
+            <section className="py-16">
+                <div className="container mx-auto px-4 sm:px-6 lg:px-8">
+                    <Card className="bg-gradient-to-r from-primary/10 via-primary/5 to-primary/10 border-primary/20">
+                        <CardContent className="p-8 md:p-12 text-center">
+                            <div className="max-w-2xl mx-auto">
+                                <h2 className="text-2xl md:text-3xl font-bold mb-4">
+                                    Need a Linux VPS?
+                                </h2>
+                                <p className="text-muted-foreground mb-6">
+                                    Get affordable premium Linux VPS hosting from OceanLinux. 
+                                    Starting at just ₹599/month with 99.9% uptime guarantee.
+                                </p>
+                                <div className="flex flex-col sm:flex-row gap-4 justify-center">
+                                    <Button asChild size="lg" className="gap-2">
+                                        <Link href="/hosting">
+                                            <Server className="h-4 w-4" />
+                                            View Hosting Plans
+                                        </Link>
+                                    </Button>
+                                    <Button asChild variant="outline" size="lg" className="gap-2">
+                                        <Link href="/support/tickets">
+                                            <HeadphonesIcon className="h-4 w-4" />
+                                            Contact Support
+                                        </Link>
+                                    </Button>
+                                </div>
+                            </div>
+                        </CardContent>
+                    </Card>
+                </div>
+            </section>
+
+            <Footer />
+            <FloatingSupport />
+
+            {/* Proxy Credentials Dialog */}
+            <Dialog open={showProxyDialog} onOpenChange={setShowProxyDialog}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+                                <Shield className="h-5 w-5 text-primary" />
+                            </div>
+                            <div>
+                                <span>Create Proxy Credentials</span>
+                                <p className="text-sm font-normal text-muted-foreground mt-0.5">
+                                    Set up authentication for your proxy server
+                                </p>
+                            </div>
+                        </DialogTitle>
+                    </DialogHeader>
+                    
+                    <div className="space-y-4 py-4">
+                        {detectedOs && (
+                            <div className="flex items-center gap-2 p-3 bg-muted/50 rounded-lg">
+                                <img 
+                                    src={detectedOs.includes('ubuntu') ? '/ubuntu.png' : '/centos.png'} 
+                                    className="w-6 h-6 rounded" 
+                                    alt={detectedOs}
+                                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+                                />
+                                <span className="text-sm">
+                                    Detected: <strong className="capitalize">{detectedOs}</strong>
+                                </span>
+                                <Badge variant="outline" className="ml-auto text-xs">
+                                    Port 3128
+                                </Badge>
+                            </div>
+                        )}
+
+                        <div className="space-y-2">
+                            <Label htmlFor="proxyUser" className="flex items-center gap-2">
+                                <User className="h-4 w-4 text-muted-foreground" />
+                                Proxy Username
+                            </Label>
+                            <Input
+                                id="proxyUser"
+                                value={proxyUsername}
+                                onChange={(e) => setProxyUsername(e.target.value)}
+                                placeholder="myproxyuser"
+                                autoFocus
+                            />
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label htmlFor="proxyPass" className="flex items-center gap-2">
+                                <Key className="h-4 w-4 text-muted-foreground" />
+                                Proxy Password
+                            </Label>
+                            <div className="relative">
+                                <Input
+                                    id="proxyPass"
+                                    type={showProxyPassword ? 'text' : 'password'}
+                                    value={proxyPassword}
+                                    onChange={(e) => setProxyPassword(e.target.value)}
+                                    placeholder="••••••••"
+                                    className="pr-10"
+                                />
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    className="absolute right-0 top-0 h-full px-3"
+                                    onClick={() => setShowProxyPassword(!showProxyPassword)}
+                                >
+                                    {showProxyPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                                </Button>
+                            </div>
+                        </div>
+
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            className="w-full gap-2"
+                            onClick={() => {
+                                const randomUser = `user${Math.random().toString(36).slice(2, 8)}`;
+                                const randomPass = Math.random().toString(36).slice(2, 14);
+                                setProxyUsername(randomUser);
+                                setProxyPassword(randomPass);
+                                toast.success('Random credentials generated!');
+                            }}
+                        >
+                            <Sparkles className="h-4 w-4" />
+                            Generate Random Credentials
+                        </Button>
+                    </div>
+
+                    <DialogFooter className="gap-2">
+                        <Button variant="outline" onClick={() => setShowProxyDialog(false)}>
+                            Cancel
+                        </Button>
+                        <Button 
+                            onClick={handleSetupProxy}
+                            disabled={!proxyUsername || !proxyPassword}
+                            className="gap-2"
+                        >
+                            <Play className="h-4 w-4" />
+                            Install Proxy
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+        </div>
+    );
+};
+
+export default PublicProxySetupPage;

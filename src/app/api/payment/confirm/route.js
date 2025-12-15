@@ -65,6 +65,19 @@ export async function POST(request) {
       // Check if order is already confirmed by webhook
       if (order.status === 'confirmed') {
         console.log(`[UPI] Order ${order._id} already confirmed by webhook`);
+        
+        // Check if provisioning is needed (might have been missed by webhook)
+        if (!order.ipAddress && order.provisioningStatus !== 'completed' && order.provisioningStatus !== 'in_progress') {
+          console.log(`[UPI] Order ${order._id} needs provisioning, triggering now...`);
+          // Don't return early - let it fall through to provisioning section
+        } else {
+          console.log(`[UPI] Order ${order._id} already provisioned or in progress`);
+          return NextResponse.json({
+            success: true,
+            message: 'Payment already confirmed',
+            orderId: order._id
+          });
+        }
       } else {
         // Order not yet confirmed, webhook might be pending
         console.log(`[UPI] Order ${order._id} awaiting webhook confirmation`);

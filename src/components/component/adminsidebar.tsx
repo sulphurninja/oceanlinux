@@ -120,6 +120,11 @@ const AdminSidebar = () => {
       label: 'Announcements',
       icon: Megaphone,
       badge: 'New'
+    },
+    {
+      href: '/admin/settings',
+      label: 'Site Settings',
+      icon: Settings,
     }
   ];
 
