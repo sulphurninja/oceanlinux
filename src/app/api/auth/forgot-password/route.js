@@ -46,6 +46,7 @@ export async function POST(request) {
     });
 
     // Send reset email
+    console.log('[Forgot Password] Attempting to send reset email to:', user.email);
     const emailService = new EmailService();
     const emailResult = await emailService.sendForgotPasswordEmail(
       user.email,
@@ -54,14 +55,21 @@ export async function POST(request) {
     );
 
     if (!emailResult.success) {
-      console.error('Failed to send reset email:', emailResult.error);
+      console.error('[Forgot Password] Failed to send reset email:', emailResult.error);
+      
+      // Clean up the token since email failed
+      await PasswordReset.deleteMany({ userId: user._id });
+      
       return new Response(JSON.stringify({
-        message: 'Failed to send reset email. Please try again later.'
+        message: emailResult.error || 'Failed to send reset email. Please try again later.',
+        hint: 'If this issue persists, please contact support.'
       }), {
         status: 500,
         headers: { 'Content-Type': 'application/json' }
       });
     }
+    
+    console.log('[Forgot Password] Reset email sent successfully to:', user.email);
 
     return new Response(JSON.stringify({
       message: 'If an account with that email exists, we have sent a password reset link.',

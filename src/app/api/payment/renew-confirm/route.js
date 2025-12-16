@@ -54,11 +54,13 @@ async function getProviderFromOrder(order) {
           serverType: ipStock.serverType
         });
 
-        if (ipStock.tags && ipStock.tags.includes('smartvps')) {
+        // Check for both 'smartvps' and 'ocean linux' tags (SmartVPS uses 'ocean linux' tag)
+        const tagsLower = ipStock.tags?.map(t => t.toLowerCase()) || [];
+        if (tagsLower.includes('smartvps') || tagsLower.includes('ocean linux')) {
           console.log('[RENEWAL-PROVIDER] ✅ Detected SmartVPS via ipStock tags:', ipStock.tags);
           return 'smartvps';
         } else {
-          console.log('[RENEWAL-PROVIDER] IPStock tags do not include smartvps:', ipStock.tags);
+          console.log('[RENEWAL-PROVIDER] IPStock tags do not include smartvps/ocean linux:', ipStock.tags);
         }
       } else {
         console.log('[RENEWAL-PROVIDER] IPStock not found for ID:', order.ipStockId);
@@ -76,10 +78,17 @@ async function getProviderFromOrder(order) {
     return 'smartvps';
   }
 
+  // Check explicit provider field
+  if (order.provider === 'smartvps') {
+    console.log('[RENEWAL-PROVIDER] ✅ Detected SmartVPS via explicit provider field');
+    return 'smartvps';
+  }
+
   // Final fallback: Check product name patterns for SmartVPS
-  if (order.productName.includes('103.195') ||
+  if (order.productName?.includes('🌊') ||
+    order.productName?.includes('103.195') ||
     order.ipAddress?.startsWith('103.195') ||
-    order.productName.includes('🏅')) {
+    order.productName?.includes('🏅')) {
     console.log('[RENEWAL-PROVIDER] ✅ Detected SmartVPS via patterns');
     console.log('[RENEWAL-PROVIDER] Product name:', order.productName);
     console.log('[RENEWAL-PROVIDER] IP address:', order.ipAddress);

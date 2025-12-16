@@ -112,11 +112,16 @@ export async function POST(request) {
         );
       }
 
+      // Calculate expiry date as exactly 30 days from NOW (payment confirmation time)
+      const expiryDate = new Date();
+      expiryDate.setDate(expiryDate.getDate() + 30);
+      
       // Update order status and store payment details
       order.status = 'confirmed';
       order.transactionId = razorpay_payment_id;
       order.gatewayOrderId = razorpay_order_id; // Store Razorpay order ID
       order.paymentMethod = 'razorpay';
+      order.expiryDate = expiryDate; // Set expiry to 30 days from payment confirmation
       order.paymentDetails = {
         razorpay_payment_id: razorpay_payment_id,
         razorpay_order_id: razorpay_order_id,
@@ -126,6 +131,7 @@ export async function POST(request) {
       await order.save();
 
       console.log(`Order ${order._id} confirmed with Razorpay payment ${razorpay_payment_id} (order: ${razorpay_order_id})`);
+      console.log(`Order expiry set to: ${expiryDate.toISOString()} (30 days from now)`);
 
     } else {
       // Cashfree verification
@@ -152,11 +158,16 @@ export async function POST(request) {
           );
         }
 
+        // Calculate expiry date as exactly 30 days from NOW (payment confirmation time)
+        const expiryDate = new Date();
+        expiryDate.setDate(expiryDate.getDate() + 30);
+        
         // Update order status and store payment details
         order.status = 'confirmed';
         order.transactionId = payment.cf_payment_id;
         order.gatewayOrderId = order.clientTxnId; // Cashfree uses clientTxnId as order_id
         order.paymentMethod = 'cashfree';
+        order.expiryDate = expiryDate; // Set expiry to 30 days from payment confirmation
         order.paymentDetails = {
           cf_payment_id: payment.cf_payment_id,
           cf_order_id: order.clientTxnId,
@@ -171,6 +182,7 @@ export async function POST(request) {
         await order.save();
 
         console.log(`Order ${order._id} confirmed with Cashfree payment ${payment.cf_payment_id} (order: ${order.clientTxnId})`);
+        console.log(`Order expiry set to: ${expiryDate.toISOString()} (30 days from now)`);
 
       } catch (cashfreeError) {
         console.error('Cashfree verification error:', cashfreeError);

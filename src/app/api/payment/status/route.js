@@ -242,11 +242,16 @@ export async function POST(request) {
         if (payment.payment_status === 'SUCCESS') {
           console.log(`Payment confirmed for order ${order._id}`);
           
+          // Calculate expiry date as exactly 30 days from NOW (payment confirmation time)
+          const expiryDate = new Date();
+          expiryDate.setDate(expiryDate.getDate() + 30);
+          
           // Update order status and store payment details
           order.status = 'confirmed';
           order.transactionId = payment.cf_payment_id;
           order.gatewayOrderId = order.clientTxnId; // Cashfree uses clientTxnId as order_id
           order.paymentMethod = 'cashfree';
+          order.expiryDate = expiryDate; // Set expiry to 30 days from payment confirmation
           order.paymentDetails = {
             cf_payment_id: payment.cf_payment_id,
             cf_order_id: order.clientTxnId,
@@ -259,6 +264,8 @@ export async function POST(request) {
             confirmedAt: new Date()
           };
           await order.save();
+          
+          console.log(`Order expiry set to: ${expiryDate.toISOString()} (30 days from now)`);
 
           // 🚀 TRIGGER AUTO-PROVISIONING FOR CASHFREE PAYMENTS
           // This is critical - webhook may not always be received

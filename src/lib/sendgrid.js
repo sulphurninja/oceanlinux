@@ -1,15 +1,35 @@
 const sgMail = require('@sendgrid/mail');
 
-sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+// Only set API key if it exists
+const apiKey = process.env.SENDGRID_API_KEY;
+if (apiKey) {
+  sgMail.setApiKey(apiKey);
+  console.log('[EmailService] SendGrid API key configured');
+} else {
+  console.warn('[EmailService] ⚠️ SENDGRID_API_KEY not configured - emails will fail!');
+}
 
 class EmailService {
   constructor() {
     this.fromEmail = process.env.SENDGRID_FROM_EMAIL || 'hello@oceanlinux.com';
     this.fromName = 'OceanLinux Team';
+    this.isConfigured = !!process.env.SENDGRID_API_KEY;
   }
 
   async sendEmail({ to, subject, html, templateId = null, dynamicTemplateData = null }) {
+    // Check if SendGrid is configured
+    if (!this.isConfigured) {
+      console.error('[EmailService] ❌ SendGrid API key not configured');
+      console.error('[EmailService] Please set SENDGRID_API_KEY in your .env file');
+      return { 
+        success: false, 
+        error: 'Email service not configured. Please contact support.' 
+      };
+    }
+
     try {
+      console.log(`[EmailService] Sending email to: ${to}, subject: ${subject}`);
+      
       const msg = {
         to,
         from: {
@@ -27,11 +47,31 @@ class EmailService {
       }
 
       const result = await sgMail.send(msg);
-      console.log('Email sent successfully:', result[0].statusCode);
+      console.log('[EmailService] ✅ Email sent successfully:', result[0].statusCode);
       return { success: true, result };
     } catch (error) {
-      console.error('Email sending failed:', error);
-      return { success: false, error: error.message };
+      console.error('[EmailService] ❌ Email sending failed');
+      console.error('[EmailService] Error name:', error.name);
+      console.error('[EmailService] Error message:', error.message);
+      
+      // Log SendGrid specific error details
+      if (error.response) {
+        console.error('[EmailService] SendGrid response status:', error.response.status);
+        console.error('[EmailService] SendGrid response body:', JSON.stringify(error.response.body, null, 2));
+      }
+      
+      // Provide user-friendly error messages
+      let userMessage = 'Failed to send email. Please try again later.';
+      
+      if (error.response?.status === 401) {
+        userMessage = 'Email service authentication failed. Please contact support.';
+      } else if (error.response?.status === 403) {
+        userMessage = 'Email service permission denied. Please contact support.';
+      } else if (error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED') {
+        userMessage = 'Unable to connect to email service. Please try again later.';
+      }
+      
+      return { success: false, error: userMessage };
     }
   }
 

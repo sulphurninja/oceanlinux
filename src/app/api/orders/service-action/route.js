@@ -3,6 +3,7 @@ import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 import { getDataFromToken } from '@/helper/getDataFromToken';
 const HostycareAPI = require('@/services/hostycareApi');
+const SmartVpsAPI = require('@/services/smartvpsApi');
 // at top of /api/orders/service-action/route.js
 import { VirtualizorAPI } from '@/services/virtualizorApi';   // you exported the class by name
 // or: import VirtualizorAPI from '@/services/virtualizorApi'; // you also export default
@@ -148,12 +149,24 @@ export async function POST(request) {
 
     let result;
 
-    // Initialize the appropriate APIs
+    // Initialize the appropriate APIs based on provider
     let virtualizorApi = null;
     let hostycareApi = null;
+    let smartvpsApi = null;
 
-    if (order.provider === 'hostycare' || !order.provider) {
+    // Detect provider type
+    const isSmartVps = order.provider === 'smartvps' || 
+                       order.smartvpsDetails?.ip || 
+                       (order.productName && order.productName.includes('🌊'));
+    
+    console.log(`[SERVICE-ACTION][POST] Provider detection: isSmartVps=${isSmartVps}, order.provider=${order.provider}`);
+
+    if (isSmartVps) {
+      smartvpsApi = new SmartVpsAPI();
+      console.log('[SERVICE-ACTION][POST] Using SmartVPS API');
+    } else if (order.provider === 'hostycare' || !order.provider) {
       hostycareApi = new HostycareAPI();
+      console.log('[SERVICE-ACTION][POST] Using Hostycare API');
 
       // Only initialize VirtualizorAPI for actions that need it (reinstall, templates)
       if (action === 'reinstall' || action === 'templates') {
@@ -164,7 +177,15 @@ export async function POST(request) {
     switch (action) {
       case 'start':
         console.log('[START] Starting VPS service');
-        if (hostycareApi && order.hostycareServiceId) {
+        if (smartvpsApi) {
+          console.log('[START] Using SmartVPS API with IP:', ipAddress);
+          const apiRes = await smartvpsApi.start(ipAddress);
+          result = {
+            success: true,
+            message: 'SmartVPS start command sent successfully',
+            apiResponse: apiRes
+          };
+        } else if (hostycareApi && order.hostycareServiceId) {
           console.log('[START] Using Hostycare API with service ID:', order.hostycareServiceId);
           result = await hostycareApi.startService(order.hostycareServiceId);
           result = {
@@ -173,13 +194,21 @@ export async function POST(request) {
             apiResponse: result
           };
         } else {
-          throw new Error('Hostycare service ID not found for this order');
+          throw new Error('No valid API configured for this order (missing service ID or provider)');
         }
         break;
 
       case 'stop':
         console.log('[STOP] Stopping VPS service');
-        if (hostycareApi && order.hostycareServiceId) {
+        if (smartvpsApi) {
+          console.log('[STOP] Using SmartVPS API with IP:', ipAddress);
+          const apiRes = await smartvpsApi.stop(ipAddress);
+          result = {
+            success: true,
+            message: 'SmartVPS stop command sent successfully',
+            apiResponse: apiRes
+          };
+        } else if (hostycareApi && order.hostycareServiceId) {
           console.log('[STOP] Using Hostycare API with service ID:', order.hostycareServiceId);
           result = await hostycareApi.stopService(order.hostycareServiceId);
           result = {
@@ -188,13 +217,24 @@ export async function POST(request) {
             apiResponse: result
           };
         } else {
-          throw new Error('Hostycare service ID not found for this order');
+          throw new Error('No valid API configured for this order (missing service ID or provider)');
         }
         break;
 
       case 'restart':
         console.log('[RESTART] Restarting VPS service');
-        if (hostycareApi && order.hostycareServiceId) {
+        if (smartvpsApi) {
+          // SmartVPS doesn't have restart - do stop then start
+          console.log('[RESTART] Using SmartVPS API - stop then start');
+          await smartvpsApi.stop(ipAddress);
+          await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2s
+          const apiRes = await smartvpsApi.start(ipAddress);
+          result = {
+            success: true,
+            message: 'SmartVPS restart command sent successfully (stop + start)',
+            apiResponse: apiRes
+          };
+        } else if (hostycareApi && order.hostycareServiceId) {
           console.log('[RESTART] Using Hostycare API with service ID:', order.hostycareServiceId);
           result = await hostycareApi.rebootService(order.hostycareServiceId);
           result = {
@@ -203,13 +243,67 @@ export async function POST(request) {
             apiResponse: result
           };
         } else {
-          throw new Error('Hostycare service ID not found for this order');
+          throw new Error('No valid API configured for this order (missing service ID or provider)');
         }
         break;
 
       case 'status':
         console.log('[STATUS] Fetching VPS power status');
-        if (hostycareApi && order.hostycareServiceId) {
+        if (smartvpsApi) {
+          console.log('[STATUS] Using SmartVPS API with IP:', ipAddress);
+          try {
+            const apiRes = await smartvpsApi.status(ipAddress);
+            console.log('[STATUS] SmartVPS response:', JSON.stringify(apiRes, null, 2));
+
+            // Parse SmartVPS status response
+            let powerState = 'unknown';
+            let rawStatus = apiRes?.status || apiRes?.state || apiRes?.power || apiRes;
+
+            if (typeof rawStatus === 'string') {
+              const statusLower = rawStatus.toLowerCase();
+              if (['online', 'running', 'active', 'started', 'on', '1'].includes(statusLower)) {
+                powerState = 'running';
+              } else if (['offline', 'stopped', 'inactive', 'off', '0', 'shutdown'].includes(statusLower)) {
+                powerState = 'stopped';
+              } else if (['suspended', 'paused'].includes(statusLower)) {
+                powerState = 'suspended';
+              } else {
+                powerState = statusLower;
+              }
+            } else if (typeof rawStatus === 'object' && rawStatus !== null) {
+              // Handle object response
+              const state = rawStatus.status || rawStatus.state || rawStatus.power;
+              if (state) {
+                const stateLower = String(state).toLowerCase();
+                if (['online', 'running', 'active', 'started', 'on', '1'].includes(stateLower)) {
+                  powerState = 'running';
+                } else if (['offline', 'stopped', 'inactive', 'off', '0', 'shutdown'].includes(stateLower)) {
+                  powerState = 'stopped';
+                } else {
+                  powerState = stateLower;
+                }
+              }
+            }
+
+            console.log('[STATUS] SmartVPS power state:', powerState);
+            
+            return NextResponse.json({
+              success: true,
+              powerState: powerState,
+              rawStatus: rawStatus,
+              provider: 'smartvps',
+              lastSync: new Date().toISOString()
+            });
+          } catch (statusError) {
+            console.error('[STATUS] SmartVPS error:', statusError);
+            return NextResponse.json({
+              success: false,
+              error: statusError.message,
+              powerState: 'unknown',
+              provider: 'smartvps'
+            });
+          }
+        } else if (hostycareApi && order.hostycareServiceId) {
           console.log('[STATUS] Using Hostycare API with service ID:', order.hostycareServiceId);
           try {
             const serviceInfo = await hostycareApi.getServiceInfo(order.hostycareServiceId);
@@ -285,9 +379,100 @@ export async function POST(request) {
         } else {
           return NextResponse.json({
             success: false,
-            error: 'Hostycare service ID not found',
+            error: 'No valid API configured for this order',
             powerState: 'unknown'
           });
+        }
+        break;
+
+      case 'format':
+        console.log('[FORMAT] Formatting VPS');
+        if (smartvpsApi) {
+          console.log('[FORMAT] Using SmartVPS API with IP:', ipAddress);
+          const apiRes = await smartvpsApi.format(ipAddress);
+          result = {
+            success: true,
+            message: 'SmartVPS format command sent successfully',
+            apiResponse: apiRes
+          };
+        } else {
+          throw new Error('Format action is only available for SmartVPS orders');
+        }
+        break;
+
+      case 'changeos':
+        console.log('[CHANGEOS] Changing OS');
+        if (smartvpsApi) {
+          const osType = body.osType || body.os || payload?.os;
+          if (!osType) {
+            throw new Error('OS type is required for changeOS action');
+          }
+          console.log('[CHANGEOS] Using SmartVPS API with IP:', ipAddress, 'OS:', osType);
+          const apiRes = await smartvpsApi.changeOS(ipAddress, osType);
+          result = {
+            success: true,
+            message: `SmartVPS OS change to ${osType} sent successfully`,
+            apiResponse: apiRes
+          };
+        } else {
+          throw new Error('changeOS action is only available for SmartVPS orders');
+        }
+        break;
+
+      case 'sync':
+        console.log('[SYNC] Syncing VPS status');
+        if (smartvpsApi) {
+          console.log('[SYNC] Using SmartVPS API with IP:', ipAddress);
+          try {
+            const apiRes = await smartvpsApi.status(ipAddress);
+            console.log('[SYNC] SmartVPS status response:', JSON.stringify(apiRes, null, 2));
+            
+            // Update order with synced data
+            await Order.findByIdAndUpdate(orderId, {
+              lastSyncTime: new Date(),
+              $push: {
+                logs: {
+                  action: 'sync',
+                  timestamp: new Date(),
+                  details: 'SmartVPS status synced',
+                  success: true
+                }
+              }
+            });
+
+            result = {
+              success: true,
+              message: 'SmartVPS status synced successfully',
+              apiResponse: apiRes
+            };
+          } catch (syncError) {
+            console.error('[SYNC] SmartVPS sync error:', syncError);
+            result = {
+              success: false,
+              message: `Sync failed: ${syncError.message}`,
+              error: syncError.message
+            };
+          }
+        } else if (hostycareApi && order.hostycareServiceId) {
+          // Use existing status logic for hostycare sync
+          try {
+            const serviceInfo = await hostycareApi.getServiceInfo(order.hostycareServiceId);
+            const serviceDetails = await hostycareApi.getServiceDetails(order.hostycareServiceId);
+            await syncServerState(order._id, serviceDetails, serviceInfo);
+            result = {
+              success: true,
+              message: 'Hostycare status synced successfully',
+              serviceInfo,
+              serviceDetails
+            };
+          } catch (syncError) {
+            result = {
+              success: false,
+              message: `Sync failed: ${syncError.message}`
+            };
+          }
+        } else {
+          throw new Error('No valid API configured for sync');
         }
         break;
 

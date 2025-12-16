@@ -252,7 +252,8 @@ export async function POST(request) {
         break;
 
       case 'reboot':
-        console.log('[SMARTVPS-ACTION][POST] Rebooting service:', serviceIdentifier);
+      case 'restart': // Support both 'reboot' and 'restart' action names
+        console.log('[SMARTVPS-ACTION][POST] Rebooting/Restarting service:', serviceIdentifier);
         // SmartVPS doesn't have direct reboot, so we stop then start
         try {
           console.log('[SMARTVPS-ACTION][POST] Stopping for reboot...');
@@ -507,6 +508,41 @@ export async function POST(request) {
           });
         }
 
+      case 'sync':
+        console.log('[SMARTVPS-ACTION][POST] Sync action requested for:', serviceIdentifier);
+        try {
+          const statusData = await api.status(serviceIdentifier);
+          const parsedStatusData = parseSmartVPSResponse(statusData, 'status');
+          const extractedCredentials = extractSmartVPSCredentials(parsedStatusData, order);
+          
+          const details = {
+            id: serviceIdentifier,
+            ip: extractedCredentials.ip || serviceIdentifier,
+            status: extractedCredentials.status === 'active' || extractedCredentials.status === 'Online' ? 'active' : 'unknown',
+            username: extractedCredentials.username || 'Administrator',
+            password: extractedCredentials.password,
+            os: extractedCredentials.os,
+            ...parsedStatusData
+          };
+
+          const syncResult = await syncServerState(orderId, details, details);
+          console.log('[SMARTVPS-ACTION][POST] Sync completed:', syncResult);
+          
+          result = {
+            synced: true,
+            message: 'SmartVPS status synced successfully',
+            credentialsUpdated: !!(syncResult.username || syncResult.password || syncResult.os),
+            lastSyncTime: syncResult.lastSyncTime
+          };
+        } catch (syncError) {
+          console.error('[SMARTVPS-ACTION][POST] Sync error:', syncError);
+          result = {
+            synced: false,
+            message: `Sync failed: ${syncError.message}`
+          };
+        }
+        break;
+
       default:
         console.log('[SMARTVPS-ACTION][POST] Unsupported action:', action);
         return NextResponse.json({ message: 'Unsupported action' }, { status: 400 });
@@ -514,8 +550,8 @@ export async function POST(request) {
 
     console.log('[SMARTVPS-ACTION][POST] Action completed, checking if sync is needed');
 
-    // After any other action (start, stop, reboot), fetch the latest server state and sync it
-    if (['start', 'stop', 'reboot'].includes(action)) {
+    // After any other action (start, stop, reboot, restart), fetch the latest server state and sync it
+    if (['start', 'stop', 'reboot', 'restart'].includes(action)) {
       console.log('[SMARTVPS-ACTION][POST] Action requires sync, scheduling delayed sync');
       try {
         setTimeout(async () => {

@@ -134,10 +134,15 @@ export async function POST(request) {
 
       console.log(`[UPI Webhook] Payment verified! Amount: ${paidAmount}, Expected: ${expectedAmount}`);
 
+      // Calculate expiry date as exactly 30 days from NOW (payment confirmation time)
+      const expiryDate = new Date();
+      expiryDate.setDate(expiryDate.getDate() + 30);
+
       // Update order status
       order.status = 'confirmed';
       order.transactionId = verification.upi_txn_id || upi_txn_id || id;
       order.gatewayOrderId = id; // Store UPI Gateway order ID
+      order.expiryDate = expiryDate; // Set expiry to 30 days from payment confirmation
       order.paymentDetails = {
         upi_txn_id: verification.upi_txn_id || upi_txn_id,
         customer_vpa: webhookData.customer_vpa,
@@ -149,6 +154,7 @@ export async function POST(request) {
       await order.save();
 
       console.log(`[UPI Webhook] Order ${order._id} confirmed with UPI txn ${upi_txn_id}`);
+      console.log(`[UPI Webhook] Order expiry set to: ${expiryDate.toISOString()} (30 days from now)`);
 
       // Send notifications
       try {

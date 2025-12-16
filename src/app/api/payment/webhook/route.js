@@ -83,10 +83,15 @@ export async function POST(request) {
       const orderUpdateStart = Date.now();
       console.log(`[WEBHOOK] 📝 UPDATING ORDER STATUS...`);
 
+      // Calculate expiry date as exactly 30 days from NOW (payment confirmation time)
+      const expiryDate = new Date();
+      expiryDate.setDate(expiryDate.getDate() + 30);
+
       order.status = 'confirmed';
       order.transactionId = payment.payment.cf_payment_id;
       order.gatewayOrderId = payment.order.order_id; // Store Cashfree order ID
       order.paymentMethod = 'cashfree';
+      order.expiryDate = expiryDate; // Set expiry to 30 days from payment confirmation
       
       // Store additional payment info
       order.webhookAmount = payment.payment.payment_amount.toString();
@@ -110,6 +115,7 @@ export async function POST(request) {
       await order.save();
       const orderUpdateTime = Date.now() - orderUpdateStart;
       console.log(`[WEBHOOK] ✅ ORDER UPDATED to 'confirmed' in ${orderUpdateTime}ms`);
+      console.log(`[WEBHOOK] 📅 Order expiry set to: ${expiryDate.toISOString()} (30 days from now)`);
 
       // 🚀 TRIGGER AUTO-PROVISIONING
       console.log("\n" + "-".repeat(60));
@@ -201,13 +207,22 @@ async function getProviderFromOrder(order) {
     return 'hostycare';
   }
 
-  // Secondary logic: Check if ipStock has smartvps tag
+  // Check explicit provider field
+  if (order.provider === 'smartvps') {
+    console.log('[WEBHOOK-RENEWAL-PROVIDER] ✅ Detected SmartVPS via explicit provider field');
+    return 'smartvps';
+  }
+
+  // Secondary logic: Check if ipStock has smartvps or ocean linux tag
   if (order.ipStockId) {
     try {
       const ipStock = await IPStock.findById(order.ipStockId);
-      if (ipStock && ipStock.tags && ipStock.tags.includes('smartvps')) {
-        console.log('[WEBHOOK-RENEWAL-PROVIDER] ✅ Detected SmartVPS via ipStock tags');
-        return 'smartvps';
+      if (ipStock && ipStock.tags) {
+        const tagsLower = ipStock.tags.map(t => t.toLowerCase());
+        if (tagsLower.includes('smartvps') || tagsLower.includes('ocean linux')) {
+          console.log('[WEBHOOK-RENEWAL-PROVIDER] ✅ Detected SmartVPS via ipStock tags:', ipStock.tags);
+          return 'smartvps';
+        }
       }
     } catch (ipStockError) {
       console.error('[WEBHOOK-RENEWAL-PROVIDER] Error fetching IPStock:', ipStockError);
@@ -221,7 +236,8 @@ async function getProviderFromOrder(order) {
   }
 
   // Final fallback: Check product name patterns for SmartVPS
-  if (order.productName?.includes('103.195') ||
+  if (order.productName?.includes('🌊') ||
+    order.productName?.includes('103.195') ||
     order.ipAddress?.startsWith('103.195') ||
     order.productName?.includes('🏅')) {
     console.log('[WEBHOOK-RENEWAL-PROVIDER] ✅ Detected SmartVPS via patterns');

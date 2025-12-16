@@ -266,35 +266,43 @@ const OrderDetails = () => {
       hostycareServiceId: order.hostycareServiceId,
       smartvpsServiceId: order.smartvpsServiceId,
       ipStockId: order.ipStockId,
-      ipStockTags: ipStock?.tags || 'No IPStock data'
+      ipStockTags: ipStock?.tags || 'No IPStock data',
+      productName: order.productName
     });
 
-    // Primary logic: Check if order has hostycare service ID
+    // Check explicit provider field first
+    if (order.provider === 'smartvps') {
+      console.log('[ORDER-DETAILS] Detected SmartVPS via explicit provider field');
+      return 'smartvps';
+    }
+
+    // Check if order has hostycare service ID
     if (order.hostycareServiceId) {
       console.log('[ORDER-DETAILS] Detected Hostycare via serviceId');
       return 'hostycare';
     }
 
-    // Secondary logic: Check if ipStock has smartvps tag
-    if (ipStock && ipStock.tags && ipStock.tags.includes('smartvps')) {
-      console.log('[ORDER-DETAILS] Detected SmartVPS via ipStock tags');
-      return 'smartvps';
-    }
-
-    // Fallback: Check explicit provider field
-
-
-    // Additional fallback: Check smartvps service ID
+    // Check smartvps service ID
     if (order.smartvpsServiceId) {
       console.log('[ORDER-DETAILS] Detected SmartVPS via serviceId');
       return 'smartvps';
     }
 
-    // Final fallback: Check product name patterns for SmartVPS
-    if (order.productName.includes('103.195') ||
+    // Check if ipStock has smartvps or ocean linux tag (SmartVPS uses 'ocean linux' tag)
+    if (ipStock && ipStock.tags) {
+      const tagsLower = ipStock.tags.map((t: string) => t.toLowerCase());
+      if (tagsLower.includes('smartvps') || tagsLower.includes('ocean linux')) {
+        console.log('[ORDER-DETAILS] Detected SmartVPS via ipStock tags:', ipStock.tags);
+        return 'smartvps';
+      }
+    }
+
+    // Check product name patterns for SmartVPS (🌊 emoji indicates SmartVPS)
+    if (order.productName?.includes('🌊') ||
+      order.productName?.includes('103.195') ||
       order.ipAddress?.startsWith('103.195') ||
-      order.productName.includes('🏅')) {
-      console.log('[ORDER-DETAILS] Detected SmartVPS via patterns');
+      order.productName?.includes('🏅')) {
+      console.log('[ORDER-DETAILS] Detected SmartVPS via product name patterns');
       return 'smartvps';
     }
 
