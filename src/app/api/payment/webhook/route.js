@@ -117,43 +117,65 @@ export async function POST(request) {
       console.log(`[WEBHOOK] ✅ ORDER UPDATED to 'confirmed' in ${orderUpdateTime}ms`);
       console.log(`[WEBHOOK] 📅 Order expiry set to: ${expiryDate.toISOString()} (30 days from now)`);
 
-      // 🚀 TRIGGER AUTO-PROVISIONING
+      // 🚀 TRIGGER AUTO-PROVISIONING (with duplicate prevention)
       console.log("\n" + "-".repeat(60));
-      console.log(`[WEBHOOK] 🚀 STARTING AUTO-PROVISIONING for order ${order._id}`);
+      console.log(`[WEBHOOK] 🚀 CHECKING AUTO-PROVISIONING for order ${order._id}`);
       console.log("-".repeat(60));
 
       try {
-        const provisioningService = new AutoProvisioningService();
-        console.log(`[WEBHOOK] 🔄 Creating AutoProvisioningService instance...`);
+        // CRITICAL: Re-fetch order to check current provisioning state
+        // This prevents race conditions where confirm/status API already started provisioning
+        const freshOrder = await Order.findById(order._id);
+        const alreadyProvisioning = freshOrder?.provisioningStatus === 'provisioning' ||
+                                     freshOrder?.provisioningStatus === 'active' ||
+                                     freshOrder?.ipAddress;
+        
+        if (alreadyProvisioning) {
+          console.log(`[WEBHOOK] ⚠️ Order ${order._id} already provisioning/provisioned, skipping`);
+          console.log(`[WEBHOOK]   → Status: ${freshOrder?.provisioningStatus}`);
+          console.log(`[WEBHOOK]   → IP: ${freshOrder?.ipAddress || 'none'}`);
+          console.log(`[WEBHOOK]   → Lock ID: ${freshOrder?.provisioningLockId || 'none'}`);
+        } else {
+          console.log(`[WEBHOOK] 🚀 Starting auto-provisioning for order ${order._id}`);
+          
+          const provisioningService = new AutoProvisioningService();
+          console.log(`[WEBHOOK] 🔄 Creating AutoProvisioningService instance...`);
 
-        // Start auto-provisioning in background
-        const provisioningPromise = provisioningService.provisionServer(order._id.toString());
+          // Start auto-provisioning in background
+          // The provisionServer method now has atomic DB locking to prevent duplicates
+          const provisioningPromise = provisioningService.provisionServer(order._id.toString());
 
-        // Handle the promise in background
-        provisioningPromise
-          .then(result => {
-            const provisioningEndTime = Date.now();
-            console.log("\n" + "★".repeat(60));
-            console.log(`[AUTO-PROVISION] 🏁 PROVISIONING COMPLETED for order ${order._id}`);
-            console.log(`[AUTO-PROVISION] ⏱️ Total time: ${provisioningEndTime - webhookStartTime}ms`);
-            console.log("★".repeat(60));
+          // Handle the promise in background
+          provisioningPromise
+            .then(result => {
+              const provisioningEndTime = Date.now();
+              console.log("\n" + "★".repeat(60));
+              console.log(`[AUTO-PROVISION] 🏁 PROVISIONING COMPLETED for order ${order._id}`);
+              console.log(`[AUTO-PROVISION] ⏱️ Total time: ${provisioningEndTime - webhookStartTime}ms`);
+              console.log("★".repeat(60));
 
-            if (result && result.success) {
-              console.log(`[AUTO-PROVISION] ✅ SUCCESS! Details:`);
-              console.log(`   - Service ID: ${result.serviceId || 'N/A'}`);
-              console.log(`   - IP Address: ${result.ipAddress || 'N/A'}`);
-            } else {
-              console.error(`[AUTO-PROVISION] ❌ FAILED! Error: ${result?.error || 'Unknown error'}`);
-            }
-          })
-          .catch(error => {
-            console.error("\n" + "💥".repeat(60));
-            console.error(`[AUTO-PROVISION] 💥 CRITICAL ERROR for order ${order._id}:`);
-            console.error(`   - Error Message: ${error.message}`);
-            console.error("💥".repeat(60));
-          });
+              // Only log success if actually provisioned (not skipped due to duplicate)
+              if (result && result.success && !result.alreadyProvisioned && !result.alreadyProvisioning) {
+                console.log(`[AUTO-PROVISION] ✅ SUCCESS! Details:`);
+                console.log(`   - Service ID: ${result.serviceId || 'N/A'}`);
+                console.log(`   - IP Address: ${result.ipAddress || 'N/A'}`);
+              } else if (result?.alreadyProvisioned || result?.alreadyProvisioning) {
+                console.log(`[AUTO-PROVISION] ⚠️ SKIPPED - Already handled by another process`);
+                console.log(`   - Already Provisioned: ${result?.alreadyProvisioned}`);
+                console.log(`   - Already Provisioning: ${result?.alreadyProvisioning}`);
+              } else {
+                console.error(`[AUTO-PROVISION] ❌ FAILED! Error: ${result?.error || 'Unknown error'}`);
+              }
+            })
+            .catch(error => {
+              console.error("\n" + "💥".repeat(60));
+              console.error(`[AUTO-PROVISION] 💥 CRITICAL ERROR for order ${order._id}:`);
+              console.error(`   - Error Message: ${error.message}`);
+              console.error("💥".repeat(60));
+            });
 
-        console.log(`[WEBHOOK] ✅ Auto-provisioning initiated successfully`);
+          console.log(`[WEBHOOK] ✅ Auto-provisioning initiated successfully`);
+        }
 
       } catch (provisioningError) {
         console.error(`[WEBHOOK] ❌ ERROR initiating auto-provisioning:`, provisioningError);

@@ -276,7 +276,9 @@ export async function POST(request) {
                                        freshOrder?.ipAddress;
           
           if (alreadyProvisioning) {
-            console.log(`[PAYMENT-STATUS] Order ${order._id} already provisioning/provisioned, skipping`);
+            console.log(`[PAYMENT-STATUS] ⚠️ Order ${order._id} already provisioning/provisioned, skipping`);
+            console.log(`[PAYMENT-STATUS]   → Status: ${freshOrder?.provisioningStatus}`);
+            console.log(`[PAYMENT-STATUS]   → IP: ${freshOrder?.ipAddress || 'none'}`);
           } else {
             console.log(`[PAYMENT-STATUS] 🚀 Triggering auto-provisioning for Cashfree order ${order._id}`);
             try {
@@ -291,16 +293,18 @@ export async function POST(request) {
             }
 
             // Start provisioning in background (don't await)
+            // The provisionServer method now has atomic DB locking to prevent duplicates
             provisioningService.provisionServer(order._id.toString())
               .then(async result => {
                 console.log(`[PAYMENT-STATUS] Auto-provisioning completed for order ${order._id}:`, result);
-                if (result.success) {
+                // Only send notifications if actually provisioned (not skipped due to duplicate)
+                if (result.success && !result.alreadyProvisioned && !result.alreadyProvisioning) {
                   await NotificationService.notifyOrderCompleted(order.user, order, {
                     ipAddress: result.ipAddress || 'Available in dashboard',
                     username: result.username || 'root',
                     password: result.password || 'Check dashboard'
                   });
-                } else {
+                } else if (!result.success && !result.alreadyProvisioning) {
                   await NotificationService.notifyOrderFailed(order.user, order, result.error);
                 }
               })

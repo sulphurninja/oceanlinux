@@ -346,10 +346,121 @@ class AutoProvisioningService {
     L.line('✅ Database connected');
 
     try {
-      // STEP 1: Find the order
-      L.head('STEP 1: LOAD ORDER & DUPLICATE CHECK');
-      const order = await Order.findById(orderId);
-      if (!order) throw new Error(`Order ${orderId} not found in database`);
+      // =====================================================================
+      // STEP 1: ATOMIC DATABASE LOCK - Prevents duplicate provisioning
+      // This is CRITICAL for serverless environments where in-memory locks don't work
+      // We use MongoDB's findOneAndUpdate with conditions to atomically acquire a lock
+      // =====================================================================
+      L.head('STEP 1: ATOMIC DATABASE LOCK & DUPLICATE CHECK');
+      
+      // Generate a unique lock ID for this provisioning attempt
+      const lockId = `${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
+      L.kv('Lock ID', lockId);
+      
+      // Attempt to atomically acquire the provisioning lock
+      // This will ONLY succeed if:
+      // 1. provisioningStatus is NOT 'provisioning' or 'active'
+      // 2. OR if 'provisioning' status is older than 5 minutes (stale lock)
+      // 3. AND order exists
+      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+      
+      const lockedOrder = await Order.findOneAndUpdate(
+        {
+          _id: orderId,
+          $or: [
+            // Order not yet provisioned or provisioning
+            { provisioningStatus: { $nin: ['provisioning', 'active'] } },
+            // OR stale provisioning lock (older than 5 minutes)
+            { 
+              provisioningStatus: 'provisioning',
+              lastProvisionAttempt: { $lt: fiveMinutesAgo }
+            }
+          ],
+          // Extra safety: Don't provision if already has IP address
+          ipAddress: { $in: [null, '', undefined] }
+        },
+        {
+          $set: {
+            provisioningStatus: 'provisioning',
+            lastProvisionAttempt: new Date(),
+            provisioningLockId: lockId,
+            autoProvisioned: true
+          }
+        },
+        {
+          new: true,
+          runValidators: false
+        }
+      );
+      
+      // If we couldn't acquire the lock, check why
+      if (!lockedOrder) {
+        const existingOrder = await Order.findById(orderId);
+        
+        if (!existingOrder) {
+          throw new Error(`Order ${orderId} not found in database`);
+        }
+        
+        // Check if already provisioned successfully
+        if (existingOrder.provisioningStatus === 'active' && existingOrder.ipAddress) {
+          L.line(`\n⚠️⚠️⚠️ ORDER ALREADY PROVISIONED ⚠️⚠️⚠️`);
+          L.kv('  → IP Address', existingOrder.ipAddress);
+          L.kv('  → Provider', existingOrder.provider);
+          L.kv('  → Username', existingOrder.username);
+          L.line(`⚠️⚠️⚠️ SKIPPING PROVISIONING ⚠️⚠️⚠️\n`);
+          
+          return {
+            success: true,
+            alreadyProvisioned: true,
+            ipAddress: existingOrder.ipAddress,
+            credentials: { username: existingOrder.username, password: existingOrder.password },
+            message: 'Order was already provisioned successfully',
+            totalTime: Date.now() - startTime
+          };
+        }
+        
+        // Check if currently being provisioned by another process
+        if (existingOrder.provisioningStatus === 'provisioning') {
+          const timeSinceAttempt = existingOrder.lastProvisionAttempt 
+            ? Date.now() - new Date(existingOrder.lastProvisionAttempt).getTime()
+            : 0;
+          
+          L.line(`\n⏳⏳⏳ ORDER CURRENTLY BEING PROVISIONED BY ANOTHER PROCESS ⏳⏳⏳`);
+          L.kv('  → Lock ID', existingOrder.provisioningLockId || 'unknown');
+          L.kv('  → Time since attempt', `${Math.round(timeSinceAttempt / 1000)}s ago`);
+          L.line(`⏳⏳⏳ ABORTING TO PREVENT DUPLICATE ⏳⏳⏳\n`);
+          
+          return {
+            success: false,
+            alreadyProvisioning: true,
+            message: `Order is currently being provisioned by another process (lock: ${existingOrder.provisioningLockId})`,
+            totalTime: Date.now() - startTime
+          };
+        }
+        
+        // Check if order already has an IP (somehow)
+        if (existingOrder.ipAddress) {
+          L.line(`\n⚠️⚠️⚠️ ORDER ALREADY HAS IP ADDRESS ⚠️⚠️⚠️`);
+          L.kv('  → IP Address', existingOrder.ipAddress);
+          L.line(`⚠️⚠️⚠️ SKIPPING PROVISIONING ⚠️⚠️⚠️\n`);
+          
+          return {
+            success: true,
+            alreadyProvisioned: true,
+            ipAddress: existingOrder.ipAddress,
+            message: 'Order already has an IP address assigned',
+            totalTime: Date.now() - startTime
+          };
+        }
+        
+        throw new Error(`Failed to acquire provisioning lock for order ${orderId}. Current status: ${existingOrder.provisioningStatus}`);
+      }
+      
+      // Lock acquired successfully!
+      const order = lockedOrder;
+      L.line(`\n🔒🔒🔒 PROVISIONING LOCK ACQUIRED 🔒🔒🔒`);
+      L.kv('  → Lock ID', lockId);
+      L.kv('  → Order ID', order._id.toString());
       
       L.kv('Order._id', order._id.toString());
       L.kv('Order.productName', order.productName);
@@ -362,43 +473,7 @@ class AutoProvisioningService {
       L.kv('Order.os', order.os || '(Default)');
       L.kv('Order.ipStockId', order.ipStockId || '(NOT SET)');
 
-      // === CRITICAL: Prevent duplicate provisioning ===
-      if (order.provisioningStatus === 'active' && order.ipAddress) {
-        L.line(`\n⚠️⚠️⚠️ ORDER ALREADY PROVISIONED ⚠️⚠️⚠️`);
-        L.kv('  → IP Address', order.ipAddress);
-        L.kv('  → Provider', order.provider);
-        L.kv('  → Username', order.username);
-        L.line(`⚠️⚠️⚠️ SKIPPING PROVISIONING ⚠️⚠️⚠️\n`);
-        
-        return {
-          success: true,
-          alreadyProvisioned: true,
-          ipAddress: order.ipAddress,
-          credentials: { username: order.username, password: order.password },
-          message: 'Order was already provisioned successfully',
-          totalTime: Date.now() - startTime
-        };
-      }
-
-      // Check if currently being provisioned (within last 10 minutes)
-      // IMPORTANT: Only block if status is 'provisioning' (not 'failed')
-      // This allows manual retries for failed orders
-      if (order.provisioningStatus === 'provisioning' && order.lastProvisionAttempt) {
-        const timeSinceAttempt = Date.now() - new Date(order.lastProvisionAttempt).getTime();
-        if (timeSinceAttempt < 10 * 60 * 1000) { // 10 minutes
-          L.line(`\n⏳⏳⏳ ORDER CURRENTLY BEING PROVISIONED ⏳⏳⏳`);
-          L.kv('  → Time since attempt', `${Math.round(timeSinceAttempt / 1000)}s ago`);
-          L.line(`⏳⏳⏳ ABORTING TO PREVENT DUPLICATE ⏳⏳⏳\n`);
-          
-          throw new Error(`Order is currently being provisioned by another process (started ${Math.round(timeSinceAttempt / 1000)}s ago). Please wait.`);
-        } else {
-          L.line(`⚠️ Order stuck in 'provisioning' state for ${Math.round(timeSinceAttempt / 60000)} minutes, allowing retry...`);
-        }
-      } else if (order.provisioningStatus === 'failed') {
-        L.line(`✅ Order has 'failed' status, allowing manual retry...`);
-      }
-
-      L.line(`✅ Duplicate check passed, proceeding with provisioning...`);
+      L.line(`✅ Database lock acquired, proceeding with provisioning...`);
 
       // STEP 2: Find IP Stock configuration (to decide provider)
       L.head('STEP 2: LOAD IPSTOCK & DETECT PROVIDER');

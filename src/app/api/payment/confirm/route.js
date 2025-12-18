@@ -200,37 +200,52 @@ export async function POST(request) {
       console.error('Failed to create payment confirmation notification:', notifError);
     }
 
-    // Trigger auto-provisioning
+    // Trigger auto-provisioning with duplicate prevention
     try {
-      const provisioningService = new AutoProvisioningService();
+      // CRITICAL: Re-fetch order to check current provisioning state
+      // This prevents race conditions where webhook already started provisioning
+      const freshOrder = await Order.findById(order._id);
+      const alreadyProvisioning = freshOrder?.provisioningStatus === 'provisioning' ||
+                                   freshOrder?.provisioningStatus === 'active' ||
+                                   freshOrder?.ipAddress;
+      
+      if (alreadyProvisioning) {
+        console.log(`[PAYMENT-CONFIRM] ⚠️ Order ${order._id} already provisioning/provisioned, skipping`);
+        console.log(`[PAYMENT-CONFIRM]   → Status: ${freshOrder?.provisioningStatus}`);
+        console.log(`[PAYMENT-CONFIRM]   → IP: ${freshOrder?.ipAddress || 'none'}`);
+      } else {
+        console.log(`[PAYMENT-CONFIRM] 🚀 Starting auto-provisioning for order ${order._id}`);
+        
+        const provisioningService = new AutoProvisioningService();
 
-      // Create notification for provisioning start
-      await NotificationService.notifyOrderProvisioning(order.user, order);
+        // Create notification for provisioning start
+        await NotificationService.notifyOrderProvisioning(order.user, order);
 
-      // Start provisioning in background
-      provisioningService.provisionServer(order._id.toString())
-        .then(async result => {
-          console.log(`Auto-provisioning completed for order ${order._id}:`, result);
+        // Start provisioning in background
+        provisioningService.provisionServer(order._id.toString())
+          .then(async result => {
+            console.log(`[PAYMENT-CONFIRM] Auto-provisioning completed for order ${order._id}:`, result);
 
-          // Create notification for successful provisioning
-          if (result.success) {
-            await NotificationService.notifyOrderCompleted(order.user, order, {
-              ipAddress: result.ipAddress || 'Available in dashboard',
-              username: result.username || 'root',
-              password: result.password || 'Check dashboard'
-            });
-          } else {
-            await NotificationService.notifyOrderFailed(order.user, order, result.error);
-          }
-        })
-        .catch(async error => {
-          console.error(`Auto-provisioning failed for order ${order._id}:`, error);
-          await NotificationService.notifyOrderFailed(order.user, order, error.message);
-        });
+            // Create notification for successful provisioning
+            if (result.success && !result.alreadyProvisioned && !result.alreadyProvisioning) {
+              await NotificationService.notifyOrderCompleted(order.user, order, {
+                ipAddress: result.ipAddress || 'Available in dashboard',
+                username: result.username || 'root',
+                password: result.password || 'Check dashboard'
+              });
+            } else if (!result.success && !result.alreadyProvisioning) {
+              await NotificationService.notifyOrderFailed(order.user, order, result.error);
+            }
+          })
+          .catch(async error => {
+            console.error(`[PAYMENT-CONFIRM] Auto-provisioning failed for order ${order._id}:`, error);
+            await NotificationService.notifyOrderFailed(order.user, order, error.message);
+          });
 
-      console.log("Auto-provisioning initiated");
+        console.log("[PAYMENT-CONFIRM] Auto-provisioning initiated");
+      }
     } catch (error) {
-      console.error("Error starting auto-provisioning:", error);
+      console.error("[PAYMENT-CONFIRM] Error starting auto-provisioning:", error);
       // Don't fail the response - provisioning can be retried
     }
 

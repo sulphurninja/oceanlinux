@@ -1,26 +1,84 @@
-const sgMail = require('@sendgrid/mail');
+/**
+ * OceanLinux Email Service
+ * 
+ * This module now uses Nodemailer instead of SendGrid.
+ * For backwards compatibility, it exports the same interface.
+ * 
+ * Configure these environment variables:
+ * - SMTP_HOST: SMTP server hostname (e.g., smtp.gmail.com, email-smtp.us-east-1.amazonaws.com)
+ * - SMTP_PORT: SMTP port (default: 587)
+ * - SMTP_USER: SMTP username/email
+ * - SMTP_PASS: SMTP password or app-specific password
+ * - SMTP_SECURE: Use TLS (true for port 465, false for 587)
+ * - SMTP_FROM_EMAIL: Sender email address
+ * - SMTP_FROM_NAME: Sender name (default: OceanLinux Team)
+ * 
+ * Legacy SendGrid vars are still checked as fallback:
+ * - SENDGRID_FROM_EMAIL (used if SMTP_FROM_EMAIL not set)
+ */
 
-// Only set API key if it exists
-const apiKey = process.env.SENDGRID_API_KEY;
-if (apiKey) {
-  sgMail.setApiKey(apiKey);
-  console.log('[EmailService] SendGrid API key configured');
-} else {
-  console.warn('[EmailService] ⚠️ SENDGRID_API_KEY not configured - emails will fail!');
+const nodemailer = require('nodemailer');
+
+// Create transporter once
+let transporter = null;
+let isConfigured = false;
+
+function initializeTransporter() {
+  const smtpHost = process.env.SMTP_HOST;
+  const smtpPort = process.env.SMTP_PORT || 587;
+  const smtpUser = process.env.SMTP_USER;
+  const smtpPass = process.env.SMTP_PASS;
+  const smtpSecure = process.env.SMTP_SECURE === 'true';
+
+  if (!smtpHost || !smtpUser || !smtpPass) {
+    console.warn('[EmailService] ⚠️ SMTP not configured - emails will fail!');
+    console.warn('[EmailService] Required: SMTP_HOST, SMTP_USER, SMTP_PASS');
+    return;
+  }
+
+  try {
+    transporter = nodemailer.createTransport({
+      host: smtpHost,
+      port: parseInt(smtpPort),
+      secure: smtpSecure,
+      auth: {
+        user: smtpUser,
+        pass: smtpPass,
+      },
+      pool: true,
+      maxConnections: 5,
+      connectionTimeout: 10000,
+      greetingTimeout: 10000,
+      socketTimeout: 30000,
+    });
+
+    isConfigured = true;
+    console.log(`[EmailService] ✅ Nodemailer configured: ${smtpHost}:${smtpPort}`);
+
+    // Verify connection asynchronously
+    transporter.verify()
+      .then(() => console.log('[EmailService] ✅ SMTP connection verified'))
+      .catch(err => console.error('[EmailService] ❌ SMTP verification failed:', err.message));
+
+  } catch (error) {
+    console.error('[EmailService] ❌ Failed to initialize:', error.message);
+  }
 }
+
+// Initialize on module load
+initializeTransporter();
 
 class EmailService {
   constructor() {
-    this.fromEmail = process.env.SENDGRID_FROM_EMAIL || 'hello@oceanlinux.com';
-    this.fromName = 'OceanLinux Team';
-    this.isConfigured = !!process.env.SENDGRID_API_KEY;
+    this.fromEmail = process.env.SMTP_FROM_EMAIL || process.env.SENDGRID_FROM_EMAIL || 'hello@oceanlinux.com';
+    this.fromName = process.env.SMTP_FROM_NAME || 'OceanLinux Team';
+    this.isConfigured = isConfigured;
   }
 
   async sendEmail({ to, subject, html, templateId = null, dynamicTemplateData = null }) {
-    // Check if SendGrid is configured
-    if (!this.isConfigured) {
-      console.error('[EmailService] ❌ SendGrid API key not configured');
-      console.error('[EmailService] Please set SENDGRID_API_KEY in your .env file');
+    if (!this.isConfigured || !transporter) {
+      console.error('[EmailService] ❌ SMTP not configured');
+      console.error('[EmailService] Set: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM_EMAIL');
       return { 
         success: false, 
         error: 'Email service not configured. Please contact support.' 
@@ -28,47 +86,41 @@ class EmailService {
     }
 
     try {
-      console.log(`[EmailService] Sending email to: ${to}, subject: ${subject}`);
+      console.log(`[EmailService] 📧 Sending email to: ${to}, subject: ${subject}`);
       
-      const msg = {
-        to,
+      const mailOptions = {
         from: {
-          email: this.fromEmail,
           name: this.fromName,
+          address: this.fromEmail,
         },
+        to,
         subject,
+        html,
       };
 
-      if (templateId && dynamicTemplateData) {
-        msg.templateId = templateId;
-        msg.dynamicTemplateData = dynamicTemplateData;
-      } else {
-        msg.html = html;
-      }
+      const result = await transporter.sendMail(mailOptions);
+      
+      console.log('[EmailService] ✅ Email sent successfully');
+      console.log(`[EmailService]   → Message ID: ${result.messageId}`);
 
-      const result = await sgMail.send(msg);
-      console.log('[EmailService] ✅ Email sent successfully:', result[0].statusCode);
-      return { success: true, result };
+      return { success: true, messageId: result.messageId, result };
+
     } catch (error) {
       console.error('[EmailService] ❌ Email sending failed');
-      console.error('[EmailService] Error name:', error.name);
-      console.error('[EmailService] Error message:', error.message);
+      console.error('[EmailService] Error:', error.message);
       
-      // Log SendGrid specific error details
-      if (error.response) {
-        console.error('[EmailService] SendGrid response status:', error.response.status);
-        console.error('[EmailService] SendGrid response body:', JSON.stringify(error.response.body, null, 2));
+      if (error.responseCode) {
+        console.error('[EmailService] SMTP Code:', error.responseCode);
       }
-      
-      // Provide user-friendly error messages
+
       let userMessage = 'Failed to send email. Please try again later.';
       
-      if (error.response?.status === 401) {
+      if (error.code === 'EAUTH') {
         userMessage = 'Email service authentication failed. Please contact support.';
-      } else if (error.response?.status === 403) {
-        userMessage = 'Email service permission denied. Please contact support.';
-      } else if (error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED') {
+      } else if (error.code === 'ECONNECTION' || error.code === 'ESOCKET') {
         userMessage = 'Unable to connect to email service. Please try again later.';
+      } else if (error.code === 'EENVELOPE') {
+        userMessage = 'Invalid email address. Please check and try again.';
       }
       
       return { success: false, error: userMessage };

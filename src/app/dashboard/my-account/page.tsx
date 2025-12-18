@@ -157,6 +157,14 @@ const MyAccount = () => {
     });
     const [activeTab, setActiveTab] = useState('profile');
 
+    // Email change state
+    const [emailChangeMode, setEmailChangeMode] = useState(false);
+    const [newEmail, setNewEmail] = useState('');
+    const [verificationCode, setVerificationCode] = useState('');
+    const [emailChangeStep, setEmailChangeStep] = useState<'input' | 'verify'>('input');
+    const [emailChangePending, setEmailChangePending] = useState(false);
+    const [emailChangeError, setEmailChangeError] = useState('');
+
     const router = useRouter();
 
     const { theme, setTheme, systemTheme } = useTheme();
@@ -392,6 +400,102 @@ const MyAccount = () => {
         }
     };
 
+    // Email change handlers
+    const handleRequestEmailChange = async () => {
+        if (!newEmail) {
+            setEmailChangeError('Please enter a new email address');
+            return;
+        }
+
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(newEmail)) {
+            setEmailChangeError('Please enter a valid email address');
+            return;
+        }
+
+        if (newEmail.toLowerCase() === user.email.toLowerCase()) {
+            setEmailChangeError('New email must be different from your current email');
+            return;
+        }
+
+        setEmailChangeError('');
+        setEmailChangePending(true);
+
+        try {
+            const response = await fetch('/api/users/update-email', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ newEmail })
+            });
+
+            const data = await response.json();
+
+            if (!response.ok || !data.success) {
+                setEmailChangeError(data.message || 'Failed to send verification code');
+                return;
+            }
+
+            toast.success('Verification code sent to your new email!');
+            setEmailChangeStep('verify');
+
+        } catch (error) {
+            console.error('Email change error:', error);
+            setEmailChangeError('Failed to send verification code. Please try again.');
+        } finally {
+            setEmailChangePending(false);
+        }
+    };
+
+    const handleVerifyEmailChange = async () => {
+        if (!verificationCode || verificationCode.length !== 6) {
+            setEmailChangeError('Please enter the 6-digit verification code');
+            return;
+        }
+
+        setEmailChangeError('');
+        setEmailChangePending(true);
+
+        try {
+            const response = await fetch('/api/users/update-email', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ verificationCode })
+            });
+
+            const data = await response.json();
+
+            if (!response.ok || !data.success) {
+                setEmailChangeError(data.message || 'Invalid verification code');
+                return;
+            }
+
+            toast.success('Email address updated successfully!');
+            
+            // Update local state
+            setUser(prev => ({ ...prev, email: data.newEmail }));
+            
+            // Reset email change state
+            setEmailChangeMode(false);
+            setNewEmail('');
+            setVerificationCode('');
+            setEmailChangeStep('input');
+
+        } catch (error) {
+            console.error('Email verification error:', error);
+            setEmailChangeError('Failed to verify. Please try again.');
+        } finally {
+            setEmailChangePending(false);
+        }
+    };
+
+    const cancelEmailChange = () => {
+        setEmailChangeMode(false);
+        setNewEmail('');
+        setVerificationCode('');
+        setEmailChangeStep('input');
+        setEmailChangeError('');
+    };
+
     const getInitials = (name: string) => {
         return name.split(' ').map(n => n[0]).join('').toUpperCase();
     };
@@ -614,16 +718,139 @@ const MyAccount = () => {
                                                 className={cn(!isEditing && "bg-muted")}
                                             />
                                         </div>
-                                        <div>
-                                            <Label htmlFor="email">Email Address</Label>
-                                            <Input
-                                                id="email"
-                                                type="email"
-                                                value={user.email}
-                                                onChange={(e) => setUser({ ...user, email: e.target.value })}
-                                                disabled={!isEditing}
-                                                className={cn(!isEditing && "bg-muted")}
-                                            />
+                                        <div className="md:col-span-2">
+                                            <Label htmlFor="email" className="flex items-center justify-between">
+                                                <span>Email Address</span>
+                                                {!emailChangeMode && (
+                                                    <Button
+                                                        variant="link"
+                                                        size="sm"
+                                                        className="text-xs h-auto p-0 text-primary"
+                                                        onClick={() => setEmailChangeMode(true)}
+                                                    >
+                                                        Change Email
+                                                    </Button>
+                                                )}
+                                            </Label>
+                                            
+                                            {!emailChangeMode ? (
+                                                <Input
+                                                    id="email"
+                                                    type="email"
+                                                    value={user.email}
+                                                    disabled={true}
+                                                    className="bg-muted"
+                                                />
+                                            ) : (
+                                                <div className="space-y-3 mt-2 p-4 border rounded-lg bg-muted/30">
+                                                    {emailChangeStep === 'input' ? (
+                                                        <>
+                                                            <div className="text-sm text-muted-foreground mb-2">
+                                                                Current email: <span className="font-medium text-foreground">{user.email}</span>
+                                                            </div>
+                                                            <div>
+                                                                <Label htmlFor="newEmail">New Email Address</Label>
+                                                                <Input
+                                                                    id="newEmail"
+                                                                    type="email"
+                                                                    value={newEmail}
+                                                                    onChange={(e) => setNewEmail(e.target.value)}
+                                                                    placeholder="Enter new email address"
+                                                                    className="mt-1"
+                                                                />
+                                                            </div>
+                                                            {emailChangeError && (
+                                                                <p className="text-sm text-red-500 flex items-center gap-1">
+                                                                    <AlertCircle className="h-4 w-4" />
+                                                                    {emailChangeError}
+                                                                </p>
+                                                            )}
+                                                            <div className="flex gap-2 pt-2">
+                                                                <Button
+                                                                    onClick={handleRequestEmailChange}
+                                                                    disabled={emailChangePending}
+                                                                    className="gap-1"
+                                                                >
+                                                                    {emailChangePending ? (
+                                                                        <RefreshCw className="h-4 w-4 animate-spin" />
+                                                                    ) : (
+                                                                        <Mail className="h-4 w-4" />
+                                                                    )}
+                                                                    Send Verification Code
+                                                                </Button>
+                                                                <Button variant="outline" onClick={cancelEmailChange}>
+                                                                    Cancel
+                                                                </Button>
+                                                            </div>
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <div className="text-sm text-muted-foreground mb-2">
+                                                                We sent a verification code to: <span className="font-medium text-foreground">{newEmail}</span>
+                                                            </div>
+                                                            <div>
+                                                                <Label htmlFor="verificationCode">Verification Code</Label>
+                                                                <Input
+                                                                    id="verificationCode"
+                                                                    type="text"
+                                                                    value={verificationCode}
+                                                                    onChange={(e) => setVerificationCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                                                                    placeholder="Enter 6-digit code"
+                                                                    className="mt-1 text-center text-2xl tracking-widest font-mono"
+                                                                    maxLength={6}
+                                                                />
+                                                            </div>
+                                                            {emailChangeError && (
+                                                                <p className="text-sm text-red-500 flex items-center gap-1">
+                                                                    <AlertCircle className="h-4 w-4" />
+                                                                    {emailChangeError}
+                                                                </p>
+                                                            )}
+                                                            <div className="flex gap-2 pt-2">
+                                                                <Button
+                                                                    onClick={handleVerifyEmailChange}
+                                                                    disabled={emailChangePending || verificationCode.length !== 6}
+                                                                    className="gap-1"
+                                                                >
+                                                                    {emailChangePending ? (
+                                                                        <RefreshCw className="h-4 w-4 animate-spin" />
+                                                                    ) : (
+                                                                        <Check className="h-4 w-4" />
+                                                                    )}
+                                                                    Verify & Update Email
+                                                                </Button>
+                                                                <Button
+                                                                    variant="outline"
+                                                                    onClick={() => {
+                                                                        setEmailChangeStep('input');
+                                                                        setVerificationCode('');
+                                                                        setEmailChangeError('');
+                                                                    }}
+                                                                >
+                                                                    Back
+                                                                </Button>
+                                                                <Button variant="ghost" onClick={cancelEmailChange}>
+                                                                    Cancel
+                                                                </Button>
+                                                            </div>
+                                                            <p className="text-xs text-muted-foreground mt-2">
+                                                                Didn't receive the code? Check your spam folder or{' '}
+                                                                <button
+                                                                    type="button"
+                                                                    className="text-primary underline"
+                                                                    onClick={() => {
+                                                                        setEmailChangeStep('input');
+                                                                        setVerificationCode('');
+                                                                        setEmailChangeError('');
+                                                                    }}
+                                                                >
+                                                                    try again
+                                                                </button>
+                                                            </p>
+                                                        </>
+                                                    )}
+                                                </div>
+                                            )}
                                         </div>
                                         <div>
                                             <Label htmlFor="phone">Phone Number</Label>

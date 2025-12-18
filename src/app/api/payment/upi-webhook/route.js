@@ -163,34 +163,51 @@ export async function POST(request) {
         console.error('[UPI Webhook] Failed to create payment confirmation notification:', notifError);
       }
 
-      // Trigger auto-provisioning
+      // Trigger auto-provisioning (with duplicate prevention)
       try {
-        const provisioningService = new AutoProvisioningService();
+        // CRITICAL: Re-fetch order to check current provisioning state
+        // This prevents race conditions where confirm API already started provisioning
+        const freshOrder = await Order.findById(order._id);
+        const alreadyProvisioning = freshOrder?.provisioningStatus === 'provisioning' ||
+                                     freshOrder?.provisioningStatus === 'active' ||
+                                     freshOrder?.ipAddress;
+        
+        if (alreadyProvisioning) {
+          console.log(`[UPI Webhook] ⚠️ Order ${order._id} already provisioning/provisioned, skipping`);
+          console.log(`[UPI Webhook]   → Status: ${freshOrder?.provisioningStatus}`);
+          console.log(`[UPI Webhook]   → IP: ${freshOrder?.ipAddress || 'none'}`);
+        } else {
+          console.log(`[UPI Webhook] 🚀 Starting auto-provisioning for order ${order._id}`);
+          
+          const provisioningService = new AutoProvisioningService();
 
-        // Create notification for provisioning start
-        await NotificationService.notifyOrderProvisioning(order.user, order);
+          // Create notification for provisioning start
+          await NotificationService.notifyOrderProvisioning(order.user, order);
 
-        // Start provisioning in background
-        provisioningService.provisionServer(order._id.toString())
-          .then(async result => {
-            console.log(`[UPI Webhook] Auto-provisioning completed for order ${order._id}:`, result);
+          // Start provisioning in background
+          // The provisionServer method now has atomic DB locking to prevent duplicates
+          provisioningService.provisionServer(order._id.toString())
+            .then(async result => {
+              console.log(`[UPI Webhook] Auto-provisioning completed for order ${order._id}:`, result);
 
-            if (result.success) {
-              await NotificationService.notifyOrderCompleted(order.user, order, {
-                ipAddress: result.ipAddress || 'Available in dashboard',
-                username: result.username || 'root',
-                password: result.password || 'Check dashboard'
-              });
-            } else {
-              await NotificationService.notifyOrderFailed(order.user, order, result.error);
-            }
-          })
-          .catch(async error => {
-            console.error(`[UPI Webhook] Auto-provisioning failed for order ${order._id}:`, error);
-            await NotificationService.notifyOrderFailed(order.user, order, error.message);
-          });
+              // Only send notifications if actually provisioned (not skipped due to duplicate)
+              if (result.success && !result.alreadyProvisioned && !result.alreadyProvisioning) {
+                await NotificationService.notifyOrderCompleted(order.user, order, {
+                  ipAddress: result.ipAddress || 'Available in dashboard',
+                  username: result.username || 'root',
+                  password: result.password || 'Check dashboard'
+                });
+              } else if (!result.success && !result.alreadyProvisioning) {
+                await NotificationService.notifyOrderFailed(order.user, order, result.error);
+              }
+            })
+            .catch(async error => {
+              console.error(`[UPI Webhook] Auto-provisioning failed for order ${order._id}:`, error);
+              await NotificationService.notifyOrderFailed(order.user, order, error.message);
+            });
 
-        console.log("[UPI Webhook] Auto-provisioning initiated");
+          console.log("[UPI Webhook] Auto-provisioning initiated");
+        }
       } catch (error) {
         console.error("[UPI Webhook] Error starting auto-provisioning:", error);
         // Don't fail the response - provisioning can be retried
