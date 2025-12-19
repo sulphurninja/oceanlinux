@@ -140,7 +140,7 @@ export default function ForgotPasswordPage() {
           {/* Logo */}
           <div className="text-center mb-8">
             <Link href="/" className="inline-block">
-              <img src="/oceanlinux.png" className="h-16 mx-auto mb-4" alt="OceanLinux" />
+              <img src="/ol.png" className="h-16 mx-auto mb-4" alt="OceanLinux" />
               <h1 className="text-2xl font-bold bg-gradient-to-r from-primary to-foreground bg-clip-text text-transparent">
                 OceanLinux
               </h1>
