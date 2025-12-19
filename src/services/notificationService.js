@@ -1,5 +1,9 @@
 import Notification from '../models/notificationModel.js';
 import connectDB from '../lib/db.js';
+import User from '../models/userModel.js';
+
+// Import EmailService
+const EmailService = require('../lib/sendgrid');
 
 class NotificationService {
 
@@ -20,11 +24,33 @@ class NotificationService {
       });
 
       await notification.save();
-      console.log(`Notification created for user ${userId}: ${title}`);
+      console.log(`[NOTIFICATION] Created for user ${userId}: ${title}`);
       return notification;
     } catch (error) {
       console.error('Error creating notification:', error);
       throw error;
+    }
+  }
+
+  // Helper to get user details for emails
+  static async getUserDetails(userId) {
+    try {
+      const user = await User.findById(userId).select('name email').lean();
+      return user;
+    } catch (error) {
+      console.error('[NOTIFICATION] Error fetching user:', error);
+      return null;
+    }
+  }
+
+  // Helper to send email (non-blocking)
+  static async sendEmailAsync(emailFn) {
+    try {
+      const emailService = new EmailService();
+      await emailFn(emailService);
+    } catch (error) {
+      console.error('[NOTIFICATION] Email sending failed:', error.message);
+      // Don't throw - emails are non-critical
     }
   }
 
@@ -204,7 +230,8 @@ class NotificationService {
   }
 
   static async notifyOrderCompleted(userId, order, serverDetails = {}) {
-    return this.create(
+    // Create in-app notification
+    const notification = await this.create(
       userId,
       'order_completed',
       'Server Ready!',
@@ -216,6 +243,25 @@ class NotificationService {
         priority: 'high'
       }
     );
+
+    // Send email notification (non-blocking)
+    this.sendEmailAsync(async (emailService) => {
+      const user = await this.getUserDetails(userId);
+      if (user?.email) {
+        await emailService.sendOrderSuccessEmail(
+          user.email,
+          user.name || 'Customer',
+          order._id.toString(),
+          order.productName,
+          order.price,
+          serverDetails.ipAddress || order.ipAddress || 'Check dashboard',
+          { username: serverDetails.username, password: serverDetails.password }
+        );
+        console.log(`[NOTIFICATION] Order completion email sent to ${user.email}`);
+      }
+    });
+
+    return notification;
   }
 
   static async notifyOrderFailed(userId, order, error) {
@@ -235,7 +281,7 @@ class NotificationService {
 
   // Ticket related notifications
   static async notifyTicketCreated(userId, ticket) {
-    return this.create(
+    const notification = await this.create(
       userId,
       'ticket_created',
       'Support Ticket Created',
@@ -247,15 +293,32 @@ class NotificationService {
         priority: 'medium'
       }
     );
+
+    // Send email notification
+    this.sendEmailAsync(async (emailService) => {
+      const user = await this.getUserDetails(userId);
+      if (user?.email) {
+        await emailService.sendTicketCreatedEmail(
+          user.email,
+          user.name || 'Customer',
+          ticket.ticketId,
+          ticket.subject,
+          ticket.category || 'General'
+        );
+        console.log(`[NOTIFICATION] Ticket created email sent to ${user.email}`);
+      }
+    });
+
+    return notification;
   }
 
-  static async notifyTicketReplied(userId, ticket, isFromAdmin = true) {
+  static async notifyTicketReplied(userId, ticket, isFromAdmin = true, lastMessage = '') {
     const title = isFromAdmin ? 'Support Team Replied' : 'Your Reply Sent';
     const message = isFromAdmin
       ? `Our support team has replied to your ticket "${ticket.subject}"`
       : `Your reply has been sent for ticket "${ticket.subject}"`;
 
-    return this.create(
+    const notification = await this.create(
       userId,
       'ticket_replied',
       title,
@@ -267,10 +330,30 @@ class NotificationService {
         priority: isFromAdmin ? 'high' : 'medium'
       }
     );
+
+    // Send email notification for admin replies only
+    if (isFromAdmin) {
+      this.sendEmailAsync(async (emailService) => {
+        const user = await this.getUserDetails(userId);
+        if (user?.email) {
+          await emailService.sendTicketUpdateEmail(
+            user.email,
+            user.name || 'Customer',
+            ticket.ticketId,
+            ticket.subject,
+            ticket.status || 'in-progress',
+            lastMessage
+          );
+          console.log(`[NOTIFICATION] Ticket reply email sent to ${user.email}`);
+        }
+      });
+    }
+
+    return notification;
   }
 
   static async notifyTicketResolved(userId, ticket) {
-    return this.create(
+    const notification = await this.create(
       userId,
       'ticket_resolved',
       'Ticket Resolved',
@@ -282,10 +365,28 @@ class NotificationService {
         priority: 'medium'
       }
     );
+
+    // Send email notification
+    this.sendEmailAsync(async (emailService) => {
+      const user = await this.getUserDetails(userId);
+      if (user?.email) {
+        await emailService.sendTicketUpdateEmail(
+          user.email,
+          user.name || 'Customer',
+          ticket.ticketId,
+          ticket.subject,
+          'resolved',
+          'Your issue has been resolved. Thank you for contacting OceanLinux support!'
+        );
+        console.log(`[NOTIFICATION] Ticket resolved email sent to ${user.email}`);
+      }
+    });
+
+    return notification;
   }
 
   // Announcement notifications
-  static async notifyAnnouncement(userId, announcement) {
+  static async notifyAnnouncement(userId, announcement, sendEmail = false) {
     const typeIcons = {
       promotion: 'gift',
       update: 'refresh-cw',
@@ -294,7 +395,7 @@ class NotificationService {
       security: 'shield'
     };
 
-    return this.create(
+    const notification = await this.create(
       userId,
       'announcement',
       announcement.title,
@@ -306,6 +407,132 @@ class NotificationService {
         priority: announcement.type === 'security' ? 'urgent' : 'medium'
       }
     );
+
+    // Send email notification if requested
+    if (sendEmail) {
+      this.sendEmailAsync(async (emailService) => {
+        const user = await this.getUserDetails(userId);
+        if (user?.email) {
+          await emailService.sendAnnouncementEmail(
+            user.email,
+            user.name || 'Customer',
+            {
+              title: announcement.title,
+              content: announcement.content,
+              type: announcement.type || 'update',
+              actionUrl: announcement.actionUrl,
+              actionText: announcement.actionText
+            }
+          );
+          console.log(`[NOTIFICATION] Announcement email sent to ${user.email}`);
+        }
+      });
+    }
+
+    return notification;
+  }
+
+  // Service expiry reminder notification
+  static async notifyServiceExpiring(userId, order, daysLeft) {
+    const notification = await this.create(
+      userId,
+      'service_expiring',
+      daysLeft <= 1 ? '🚨 Service Expires Tomorrow!' : `⏰ Service Expires in ${daysLeft} Days`,
+      `Your ${order.productName} (IP: ${order.ipAddress || 'N/A'}) will expire ${daysLeft <= 1 ? 'tomorrow' : `in ${daysLeft} days`}. Renew now to avoid service interruption.`,
+      { orderId: order._id, expiryDate: order.expiryDate, daysLeft },
+      {
+        actionUrl: `/dashboard/order/${order._id}`,
+        icon: daysLeft <= 1 ? 'alert-triangle' : 'clock',
+        priority: daysLeft <= 1 ? 'urgent' : daysLeft <= 3 ? 'high' : 'medium'
+      }
+    );
+
+    // Send email notification
+    this.sendEmailAsync(async (emailService) => {
+      const user = await this.getUserDetails(userId);
+      if (user?.email) {
+        await emailService.sendExpiryReminderEmail(
+          user.email,
+          user.name || 'Customer',
+          order._id.toString(),
+          order.productName,
+          order.ipAddress || 'Check dashboard',
+          order.expiryDate,
+          daysLeft
+        );
+        console.log(`[NOTIFICATION] Expiry reminder email sent to ${user.email}`);
+      }
+    });
+
+    return notification;
+  }
+
+  // Service renewal success notification
+  static async notifyRenewalSuccess(userId, order, newExpiryDate) {
+    const notification = await this.create(
+      userId,
+      'renewal_success',
+      '✅ Renewal Successful',
+      `Your ${order.productName} has been renewed successfully! New expiry: ${new Date(newExpiryDate).toLocaleDateString('en-IN', { year: 'numeric', month: 'long', day: 'numeric' })}`,
+      { orderId: order._id, newExpiryDate },
+      {
+        actionUrl: `/dashboard/order/${order._id}`,
+        icon: 'check-circle',
+        priority: 'high'
+      }
+    );
+
+    // Send email notification
+    this.sendEmailAsync(async (emailService) => {
+      const user = await this.getUserDetails(userId);
+      if (user?.email) {
+        await emailService.sendRenewalSuccessEmail(
+          user.email,
+          user.name || 'Customer',
+          order._id.toString(),
+          order.productName,
+          order.price,
+          order.ipAddress || 'Check dashboard',
+          newExpiryDate
+        );
+        console.log(`[NOTIFICATION] Renewal success email sent to ${user.email}`);
+      }
+    });
+
+    return notification;
+  }
+
+  // Service suspended notification
+  static async notifyServiceSuspended(userId, order) {
+    const notification = await this.create(
+      userId,
+      'service_suspended',
+      '⚠️ Service Suspended',
+      `Your ${order.productName} (IP: ${order.ipAddress || 'N/A'}) has been suspended due to non-renewal. Renew now to restore access.`,
+      { orderId: order._id },
+      {
+        actionUrl: `/dashboard/order/${order._id}`,
+        icon: 'alert-circle',
+        priority: 'urgent'
+      }
+    );
+
+    // Send email notification
+    this.sendEmailAsync(async (emailService) => {
+      const user = await this.getUserDetails(userId);
+      if (user?.email) {
+        await emailService.sendServiceSuspendedEmail(
+          user.email,
+          user.name || 'Customer',
+          order._id.toString(),
+          order.productName,
+          order.ipAddress || 'N/A'
+        );
+        console.log(`[NOTIFICATION] Service suspended email sent to ${user.email}`);
+      }
+    });
+
+    return notification;
   }
 
   // Server action notifications
