@@ -24,7 +24,8 @@ import {
   MessageSquare,
   Users,
   BarChart3,
-  Megaphone
+  Megaphone,
+  ClipboardList
 } from 'lucide-react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../ui/collapsible';
 import { useRouter, usePathname } from 'next/navigation';
@@ -114,6 +115,12 @@ const AdminSidebar = () => {
       href: '/admin/manageOrders',
       label: 'Orders',
       icon: BarChart3,
+    },
+    {
+      href: '/admin/server-action-requests',
+      label: 'Action Requests',
+      icon: ClipboardList,
+      badge: 'Manual'
     },
     {
       href: '/admin/announcements',

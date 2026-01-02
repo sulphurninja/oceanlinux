@@ -25,12 +25,14 @@ export async function POST(request) {
             });
         }
 
+        // Hash password before storing
+        const hashedPassword = await bcrypt.hash(password, 12);
 
         // Create new user
         const newUser = await User.create({
             name,
             email,
-            password,
+            password: hashedPassword,
         });
 
         const tokenData = {

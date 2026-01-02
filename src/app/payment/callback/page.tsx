@@ -63,7 +63,7 @@ function PaymentCallbackContent() {
         // HANDLE RENEWAL TRANSACTIONS
         if (isRenewal) {
           console.log(`[RENEWAL-CALLBACK] Processing renewal transaction: ${clientTxnId}`);
-          
+
           // First, verify payment status
           const statusResponse = await fetch("/api/payment/status", {
             method: "POST",
@@ -82,7 +82,7 @@ function PaymentCallbackContent() {
 
           if (statusData.paymentStatus === 'SUCCESS') {
             console.log(`[RENEWAL-CALLBACK] Payment successful, confirming renewal...`);
-            
+
             // Confirm the renewal
             const confirmResponse = await fetch("/api/payment/renew-confirm", {
               method: "POST",
@@ -99,7 +99,19 @@ function PaymentCallbackContent() {
             if (confirmResponse.ok && confirmData.success) {
               console.log(`[RENEWAL-CALLBACK] ✅ Renewal successful!`);
               setStatus("success");
-              setMessage("Renewal successful! Your service has been extended for 30 days.");
+
+              // Handle different processing scenarios
+              if (confirmData.processing) {
+                // Webhook is processing the renewal
+                setMessage("Payment successful! Your renewal is being processed and will be confirmed shortly.");
+              } else if (confirmData.alreadyProcessed) {
+                // Already processed by webhook
+                setMessage("Renewal successful! Your service has been extended for 30 days.");
+              } else {
+                // Processed by this confirmation
+                setMessage("Renewal successful! Your service has been extended for 30 days.");
+              }
+
               toast.success("Service renewed successfully!");
 
               setTimeout(() => {
@@ -115,7 +127,7 @@ function PaymentCallbackContent() {
             setStatus("failed");
             setMessage("Renewal payment verification failed. Please check your orders or contact support.");
           }
-          
+
           return;
         }
 
@@ -215,7 +227,7 @@ function PaymentCallbackContent() {
               {status === "failed" && isSessionError && "Session Expired"}
               {status === "failed" && !isSessionError && "Payment Issue"}
             </h1>
-            
+
             {/* Subtitle for context */}
             {status === "failed" && isPaymentSafe && (
               <p className="text-sm text-green-600 dark:text-green-400 font-medium">
@@ -247,7 +259,7 @@ function PaymentCallbackContent() {
               >
                 View My Orders
               </Button>
-              
+
               {status === "failed" && isSessionError && (
                 <Button
                   variant="outline"
@@ -258,7 +270,7 @@ function PaymentCallbackContent() {
                   Log In Again
                 </Button>
               )}
-              
+
               {status === "failed" && !isSessionError && (
                 <Button
                   variant="outline"

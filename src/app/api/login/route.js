@@ -24,15 +24,41 @@ export async function POST(request) {
             });
         }
 
-        // Verify password
+        // Verify password using bcrypt
+        let isPasswordValid = false;
+        let needsPasswordUpgrade = false;
 
-        if (password !== existingUser.password) {
+        try {
+            // Try bcrypt comparison first (for properly hashed passwords)
+            isPasswordValid = await bcrypt.compare(password, existingUser.password);
+        } catch (bcryptError) {
+            // If bcrypt fails, password might be plain text (legacy users)
+            console.log('Bcrypt comparison failed, checking plain text fallback');
+        }
+
+        // Fallback: Check if it's a plain text password (for users created before bcrypt implementation)
+        if (!isPasswordValid && password === existingUser.password) {
+            console.log('Plain text password match - will upgrade to bcrypt');
+            isPasswordValid = true;
+            needsPasswordUpgrade = true;
+        }
+
+        if (!isPasswordValid) {
             return new NextResponse(JSON.stringify({ message: 'Invalid credentials.' }), {
                 status: 400,
                 headers: {
                     'Content-Type': 'application/json'
                 }
             });
+        }
+
+        // If user had plain text password, upgrade it to bcrypt hash
+        if (needsPasswordUpgrade) {
+            console.log('Upgrading plain text password to bcrypt hash');
+            const hashedPassword = await bcrypt.hash(password, 12);
+            existingUser.password = hashedPassword;
+            await existingUser.save();
+            console.log('Password upgraded successfully');
         }
 
         // Generate token

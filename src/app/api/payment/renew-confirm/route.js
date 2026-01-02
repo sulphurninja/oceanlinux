@@ -206,36 +206,89 @@ export async function POST(request) {
       paymentVerified = true;
     } else {
       // Default to Cashfree
-      console.log('[RENEWAL-CONFIRM] Verifying Cashfree renewal payment');
+      console.log('[RENEWAL-CONFIRM] Processing Cashfree renewal payment');
       
-      try {
-        const cashfreeResponse = await Cashfree.PGOrderFetchPayments('2023-08-01', renewalTxnId);
-        console.log('[RENEWAL-CONFIRM] Cashfree payment verification response:', cashfreeResponse.data);
+      // For Cashfree renewals, we rely on the webhook to process the renewal
+      // The webhook handler has atomic processing and idempotency checks
+      // This endpoint is called from the payment callback page, which may arrive
+      // before or after the webhook. To avoid race conditions, we:
+      // 1. Check if webhook already processed this renewal
+      // 2. If not, check if payment is pending and let webhook handle it
+      // 3. Only verify payment if webhook hasn't processed it yet
+      
+      // First, check if webhook already processed this renewal
+      const alreadyProcessedByWebhook = order.renewalPayments?.some(
+        rp => rp.renewalTxnId === renewalTxnId && rp.processedViaWebhook === true
+      );
 
-        if (!cashfreeResponse.data || cashfreeResponse.data.length === 0) {
-          return NextResponse.json(
-            { success: false, message: 'No payment found for this renewal order' },
-            { status: 400 }
-          );
-        }
+      if (alreadyProcessedByWebhook) {
+        console.log('[RENEWAL-CONFIRM] ✅ Renewal already processed by webhook');
+        const existingRenewal = order.renewalPayments.find(rp => rp.renewalTxnId === renewalTxnId);
+        return NextResponse.json({
+          success: true,
+          message: 'Renewal already processed successfully',
+          alreadyProcessed: true,
+          orderId: order._id,
+          newExpiryDate: existingRenewal?.newExpiry || order.expiryDate,
+          processedBy: 'webhook'
+        });
+      }
 
-        const payment = cashfreeResponse.data[0];
+      // Check if there's a pending renewal for this transaction
+      const hasPendingRenewal = order.pendingRenewal?.renewalTxnId === renewalTxnId;
+      
+      if (hasPendingRenewal) {
+        console.log('[RENEWAL-CONFIRM] Pending renewal found, checking payment status...');
         
-        if (payment.payment_status !== 'SUCCESS') {
-          return NextResponse.json(
-            { success: false, message: 'Payment not successful' },
-            { status: 400 }
-          );
-        }
+        try {
+          // Try to verify payment with Cashfree
+          const cashfreeResponse = await Cashfree.PGOrderFetchPayments('2023-08-01', renewalTxnId);
+          console.log('[RENEWAL-CONFIRM] Cashfree payment verification response:', cashfreeResponse.data);
 
-        console.log('[RENEWAL-CONFIRM] ✅ Cashfree payment verified successfully');
-        payment_id = payment.cf_payment_id;
-        paymentVerified = true;
-      } catch (cashfreeError) {
-        console.error('[RENEWAL-CONFIRM] Cashfree verification error:', cashfreeError);
+          if (cashfreeResponse.data && cashfreeResponse.data.length > 0) {
+            const payment = cashfreeResponse.data[0];
+            
+            if (payment.payment_status === 'SUCCESS') {
+              console.log('[RENEWAL-CONFIRM] ✅ Cashfree payment verified successfully');
+              payment_id = payment.cf_payment_id;
+              paymentVerified = true;
+            } else {
+              console.log('[RENEWAL-CONFIRM] ⏳ Payment status:', payment.payment_status);
+              return NextResponse.json({
+                success: false,
+                message: `Payment status: ${payment.payment_status}. Please wait for payment confirmation.`,
+                paymentStatus: payment.payment_status
+              }, { status: 400 });
+            }
+          } else {
+            // No payment data yet - webhook will process it when it arrives
+            console.log('[RENEWAL-CONFIRM] ⏳ Payment data not available yet, webhook will process renewal');
+            return NextResponse.json({
+              success: true,
+              message: 'Payment is being processed. Your renewal will be confirmed shortly via webhook.',
+              processing: true,
+              orderId: order._id,
+              renewalTxnId: renewalTxnId
+            });
+          }
+        } catch (cashfreeError) {
+          console.error('[RENEWAL-CONFIRM] Cashfree verification error:', cashfreeError);
+          // Don't fail immediately - webhook might still process it
+          console.log('[RENEWAL-CONFIRM] ⏳ Verification failed, but webhook will process renewal');
+          return NextResponse.json({
+            success: true,
+            message: 'Payment verification in progress. Your renewal will be confirmed shortly via webhook.',
+            processing: true,
+            orderId: order._id,
+            renewalTxnId: renewalTxnId
+          });
+        }
+      } else {
+        // No pending renewal found - this shouldn't happen in normal flow
+        console.error('[RENEWAL-CONFIRM] ❌ No pending renewal found for transaction:', renewalTxnId);
         return NextResponse.json(
-          { success: false, message: 'Payment verification failed', error: cashfreeError.message },
-          { status: 500 }
+          { success: false, message: 'No pending renewal found for this transaction' },
+          { status: 404 }
         );
       }
     }

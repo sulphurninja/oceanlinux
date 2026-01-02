@@ -153,7 +153,7 @@ const OrderDetails = () => {
   const [actionBusy, setActionBusy] = useState<string | null>(null);
   const [serverPowerState, setServerPowerState] = useState<'running' | 'stopped' | 'suspended' | 'busy' | 'unknown'>('unknown');
   const [powerStateLoading, setPowerStateLoading] = useState(false);
-  
+
   // Payment method for renewals
   const [renewalPaymentMethod, setRenewalPaymentMethod] = useState<'cashfree' | 'razorpay' | 'upi'>('cashfree');
 
@@ -172,6 +172,10 @@ const OrderDetails = () => {
   const [osProgress, setOsProgress] = useState<string>('');
   const [osMode, setOsMode] = useState<'reinstall' | 'format'>('reinstall'); // label + behavior
 
+  // Manual server action request states
+  const [pendingRequest, setPendingRequest] = useState<any>(null);
+  const [requestLoading, setRequestLoading] = useState(false);
+
 
   useEffect(() => {
     if (orderId) {
@@ -189,9 +193,13 @@ const OrderDetails = () => {
     if (order && !loading) {
       const provider = getProviderFromOrder(order, ipStock);
       // Fetch power state for both Hostycare and SmartVPS
-      if ((provider === 'hostycare' && order.hostycareServiceId) || 
-          (provider === 'smartvps' && (order.smartvpsServiceId || order.ipAddress))) {
+      if ((provider === 'hostycare' && order.hostycareServiceId) ||
+        (provider === 'smartvps' && (order.smartvpsServiceId || order.ipAddress))) {
         fetchServerPowerState();
+      }
+      // Fetch pending request for manual products
+      if (provider === 'oceanlinux') {
+        fetchPendingRequest();
       }
     }
   }, [order?.hostycareServiceId, order?.smartvpsServiceId, order?.ipAddress, ipStock, loading]);
@@ -432,6 +440,57 @@ const OrderDetails = () => {
   };
 
 
+  // Fetch pending server action request for manual products
+  const fetchPendingRequest = async () => {
+    if (!order) return;
+
+    try {
+      const res = await fetch(`/api/server-actions/status?orderId=${order._id}`);
+      const data = await res.json();
+
+      if (data.success && data.hasRequest) {
+        setPendingRequest(data.request);
+      } else {
+        setPendingRequest(null);
+      }
+    } catch (error) {
+      console.error('[ORDER-DETAILS] Failed to fetch pending request:', error);
+    }
+  };
+
+  // Request server action for manual products
+  const requestServerAction = async (action: string) => {
+    if (!order) return;
+
+    const confirmed = confirm(
+      `Request ${action} action? An admin will review your request and perform the action.`
+    );
+    if (!confirmed) return;
+
+    setRequestLoading(true);
+    try {
+      const res = await fetch('/api/server-actions/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderId: order._id, action })
+      });
+
+      const data = await res.json();
+
+      if (data.success) {
+        toast.success('Request submitted! Admin will review shortly.');
+        await fetchPendingRequest();
+      } else {
+        toast.error(data.message || 'Failed to submit request');
+      }
+    } catch (error) {
+      console.error('[ORDER-DETAILS] Failed to request action:', error);
+      toast.error('Failed to submit request');
+    } finally {
+      setRequestLoading(false);
+    }
+  };
+
   // Check if server management actions are available
   const isServerManagementAvailable = (order: Order, ipStock: IPStock | null): boolean => {
     const provider = getProviderFromOrder(order, ipStock);
@@ -469,26 +528,26 @@ const OrderDetails = () => {
     if (!order) return;
 
     const provider = getProviderFromOrder(order, ipStock);
-    
+
     // Check if this provider supports power state fetching
     const isHostycare = provider === 'hostycare' && order.hostycareServiceId;
     const isSmartVPS = provider === 'smartvps' && (order.smartvpsServiceId || order.ipAddress);
-    
+
     if (!isHostycare && !isSmartVPS) {
       return;
     }
 
     // Don't refetch if already loading
     if (powerStateLoading) return;
-    
+
     setPowerStateLoading(true);
 
     try {
       console.log('[ORDER-DETAILS] Fetching server power state for provider:', provider);
-      
+
       // Use the appropriate endpoint based on provider
       const endpoint = provider === 'smartvps' ? 'smartvps-action' : 'service-action';
-      
+
       const res = await fetch(`/api/orders/${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -563,7 +622,7 @@ const OrderDetails = () => {
     if (!order || !isServerManagementAvailable(order, ipStock)) return;
 
     setActionBusy(action);
-    
+
     // Set power state to busy during action
     if (['start', 'stop', 'restart'].includes(action)) {
       setServerPowerState('busy');
@@ -587,11 +646,11 @@ const OrderDetails = () => {
           toast.success(`${actionLabel} server... This may take a few moments.`, {
             duration: 4000,
           });
-          
+
           // Give the server a moment to change state
           await new Promise(resolve => setTimeout(resolve, 3000));
           await fetchServerPowerState();
-          
+
           // Show follow-up message to refresh if status doesn't update
           toast.info('If status doesn\'t update, please refresh the page.', {
             duration: 5000,
@@ -599,7 +658,7 @@ const OrderDetails = () => {
         } else {
           toast.success(`Action "${action}" executed successfully`);
         }
-        
+
         await Promise.all([
           loadServiceDetails(),
           fetchOrder()
@@ -1049,7 +1108,7 @@ const OrderDetails = () => {
   const handleCashfreeRenewal = async (data: any) => {
     try {
       console.log("[RENEWAL] Initializing Cashfree renewal checkout");
-      
+
       if (!window.Cashfree) {
         throw new Error("Cashfree SDK not loaded");
       }
@@ -1059,7 +1118,7 @@ const OrderDetails = () => {
       });
 
       const returnUrl = `${window.location.origin}/payment/callback?client_txn_id=${data.renewalTxnId}&order_id=${order?._id}`;
-      
+
       const checkoutOptions = {
         paymentSessionId: data.cashfree.payment_session_id,
         returnUrl: returnUrl,
@@ -1068,11 +1127,11 @@ const OrderDetails = () => {
 
       console.log("[RENEWAL] Opening Cashfree checkout");
       await cashfree.checkout(checkoutOptions);
-      
+
     } catch (error: any) {
       console.error("[RENEWAL] Cashfree renewal error:", error);
       toast.error("Cashfree payment failed. Trying Razorpay...");
-      
+
       // Fallback to Razorpay
       await handleRenewService('razorpay');
     }
@@ -1081,7 +1140,7 @@ const OrderDetails = () => {
   const handleRazorpayRenewal = async (data: any) => {
     try {
       console.log("[RENEWAL] Initializing Razorpay renewal checkout");
-      
+
       if (!window.Razorpay) {
         throw new Error("Razorpay SDK not loaded");
       }
@@ -1135,22 +1194,22 @@ const OrderDetails = () => {
       };
 
       const rzp = new window.Razorpay(options);
-      
+
       rzp.on('payment.failed', function (response: any) {
         console.error("[RENEWAL] Razorpay payment failed:", response);
         toast.error("Razorpay payment failed. Trying UPI Gateway...");
         setActionBusy(null);
-        
+
         // Fallback to UPI Gateway
         handleRenewService('upi');
       });
 
       rzp.open();
-      
+
     } catch (error: any) {
       console.error("[RENEWAL] Razorpay renewal error:", error);
       toast.error("Razorpay payment failed. Trying UPI Gateway...");
-      
+
       // Fallback to UPI Gateway
       await handleRenewService('upi');
     }
@@ -1159,18 +1218,18 @@ const OrderDetails = () => {
   const handleUpiRenewal = async (data: any) => {
     try {
       console.log("[RENEWAL] Redirecting to UPI Gateway");
-      
+
       if (!data.upi || !data.upi.payment_url) {
         throw new Error("UPI Gateway payment URL not available");
       }
 
       // Redirect to UPI Gateway payment page
       window.location.href = data.upi.payment_url;
-      
+
     } catch (error: any) {
       console.error("[RENEWAL] UPI Gateway renewal error:", error);
       toast.error("UPI Gateway payment failed. Trying Cashfree...");
-      
+
       // Fallback to Cashfree
       await handleRenewService('cashfree');
     }
@@ -1484,7 +1543,7 @@ const OrderDetails = () => {
                           Payment Not Completed
                         </h3>
                         <p className="text-sm text-red-700 dark:text-red-300">
-                          This order was created but the payment was not completed. 
+                          This order was created but the payment was not completed.
                           The server has not been provisioned.
                         </p>
                       </div>
@@ -2042,6 +2101,106 @@ const OrderDetails = () => {
                     </CardContent>
                   </Card>
                 )}
+
+                {/* Manual Server Action Requests - For non-auto-provisioned products */}
+                {provider === 'oceanlinux' && (
+                  <Card className="border-border hover:shadow-md transition-shadow">
+                    <CardHeader className="pb-3">
+                      <CardTitle className="flex items-center gap-2 text-base lg:text-lg">
+                        <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                          <Settings2 className="h-4 w-4 text-primary" />
+                        </div>
+                        Server Actions
+                      </CardTitle>
+                      <CardDescription className="text-xs lg:text-sm">
+                        Request server actions - Admin will review and process
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {/* Pending Request Alert */}
+                      {pendingRequest && (
+                        <Alert className={
+                          pendingRequest.status === 'pending' ? 'bg-yellow-500/10 border-yellow-500/20' :
+                            pendingRequest.status === 'approved' ? 'bg-green-500/10 border-green-500/20' :
+                              'bg-red-500/10 border-red-500/20'
+                        }>
+                          <Clock className="h-4 w-4" />
+                          <AlertDescription>
+                            <div className="space-y-1">
+                              <p className="font-semibold">
+                                {pendingRequest.status === 'pending' && `${pendingRequest.action.toUpperCase()} request pending admin approval`}
+                                {pendingRequest.status === 'approved' && `${pendingRequest.action.toUpperCase()} request approved`}
+                                {pendingRequest.status === 'rejected' && `${pendingRequest.action.toUpperCase()} request rejected`}
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                Requested: {new Date(pendingRequest.requestedAt).toLocaleString()}
+                              </p>
+                              {pendingRequest.adminNotes && (
+                                <p className="text-xs mt-2 p-2 bg-muted rounded">
+                                  <span className="font-medium">Admin notes:</span> {pendingRequest.adminNotes}
+                                </p>
+                              )}
+                            </div>
+                          </AlertDescription>
+                        </Alert>
+                      )}
+
+                      {/* Action Buttons */}
+                      <div className="grid grid-cols-2 gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => requestServerAction('start')}
+                          disabled={!!pendingRequest || requestLoading}
+                          className="flex items-center gap-2"
+                        >
+                          {requestLoading ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Play className="h-4 w-4" />
+                          )}
+                          Request Start
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => requestServerAction('stop')}
+                          disabled={!!pendingRequest || requestLoading}
+                          className="flex items-center gap-2"
+                        >
+                          <Square className="h-4 w-4" />
+                          Request Stop
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => requestServerAction('restart')}
+                          disabled={!!pendingRequest || requestLoading}
+                          className="flex items-center gap-2"
+                        >
+                          <RotateCcw className="h-4 w-4" />
+                          Request Restart
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => requestServerAction('format')}
+                          disabled={!!pendingRequest || requestLoading}
+                          className="flex items-center gap-2"
+                        >
+                          <HardDriveIcon className="h-4 w-4" />
+                          Request Format
+                        </Button>
+                      </div>
+
+                      {!pendingRequest && (
+                        <p className="text-xs text-muted-foreground text-center pt-2">
+                          Submit a request and an admin will process it shortly
+                        </p>
+                      )}
+                    </CardContent>
+                  </Card>
+                )}
               </div>
               <Dialog
                 open={osDialogOpen}
@@ -2229,8 +2388,8 @@ const OrderDetails = () => {
                           disabled={!!actionBusy || serverPowerState === 'running' || serverPowerState === 'busy'}
                           className={cn(
                             "h-10 gap-2 text-sm",
-                            serverPowerState === 'running' 
-                              ? "bg-muted text-muted-foreground cursor-not-allowed" 
+                            serverPowerState === 'running'
+                              ? "bg-muted text-muted-foreground cursor-not-allowed"
                               : "bg-primary hover:bg-primary/90"
                           )}
                         >
@@ -2375,8 +2534,8 @@ const OrderDetails = () => {
                   </Card>
                 )}
 
-                {/* Billing & Renewal */}
-                {order.expiryDate && (
+                {/* Billing & Renewal - Hide for manual orders (oceanlinux provider) */}
+                {order.expiryDate && provider !== 'oceanlinux' && (
                   <Card className="border-border hover:shadow-md transition-shadow">
                     <CardHeader className="pb-3">
                       <CardTitle className="flex items-center gap-2 text-base lg:text-lg">
@@ -2516,7 +2675,7 @@ const OrderDetails = () => {
                                 UPI
                               </button>
                             </div>
-                            
+
                             <Button
                               onClick={() => handleRenewService()}
                               disabled={actionBusy === 'renew'}

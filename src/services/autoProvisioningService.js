@@ -30,17 +30,17 @@ class AutoProvisioningService {
   // Acquire a lock for a specific SmartVPS package
   async acquirePackageLock(packageName, orderId, maxWaitMs = 30000) {
     const startTime = Date.now();
-    
+
     while (Date.now() - startTime < maxWaitMs) {
       const existingLock = provisioningLocks.get(packageName);
-      
+
       if (!existingLock) {
         // No lock exists, acquire it
         provisioningLocks.set(packageName, { locked: true, orderId, acquiredAt: new Date() });
         L.line(`[LOCK] 🔒 Acquired lock for package "${packageName}" (order: ${orderId})`);
         return true;
       }
-      
+
       // Lock exists, check if it's stale (older than 2 minutes = likely crashed)
       const lockAge = Date.now() - new Date(existingLock.acquiredAt).getTime();
       if (lockAge > 120000) {
@@ -48,12 +48,12 @@ class AutoProvisioningService {
         provisioningLocks.delete(packageName);
         continue;
       }
-      
+
       // Lock is held by another order, wait
       L.line(`[LOCK] ⏳ Package "${packageName}" is locked by order ${existingLock.orderId}, waiting...`);
       await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
     }
-    
+
     // Timeout
     throw new Error(`Failed to acquire lock for package "${packageName}" after ${maxWaitMs}ms. Another order is currently provisioning from this package.`);
   }
@@ -61,7 +61,7 @@ class AutoProvisioningService {
   // Release a lock for a specific SmartVPS package
   releasePackageLock(packageName, orderId) {
     const existingLock = provisioningLocks.get(packageName);
-    
+
     if (existingLock && existingLock.orderId === orderId) {
       provisioningLocks.delete(packageName);
       L.line(`[LOCK] 🔓 Released lock for package "${packageName}" (order: ${orderId})`);
@@ -135,31 +135,31 @@ class AutoProvisioningService {
     // Check tags - both 'smartvps' and 'ocean linux' indicate SmartVPS
     const taggedSmartVps = tags.some(t => String(t).toLowerCase() === 'smartvps');
     const taggedOceanLinux = tags.some(t => String(t).toLowerCase() === 'ocean linux');
-    
+
     // Check provider field
     const byProvider = provider === 'smartvps';
-    
+
     // Check name starts with 🌊 (Ocean Linux naming convention)
     const byNameEmoji = name.startsWith('🌊');
-    
+
     // Check if has smartvps config block
-    const hasSmartVpsConfig = !!(ipStock?.defaultConfigurations?.smartvps || 
-                                  ipStock?.defaultConfigurations?.get?.('smartvps'));
-    
+    const hasSmartVpsConfig = !!(ipStock?.defaultConfigurations?.smartvps ||
+      ipStock?.defaultConfigurations?.get?.('smartvps'));
+
     // Check product name starts with 🌊
     const byProductEmoji = product.startsWith('🌊');
 
-    const isSmartVps = taggedSmartVps || taggedOceanLinux || byProvider || 
-                       byNameEmoji || hasSmartVpsConfig || byProductEmoji;
+    const isSmartVps = taggedSmartVps || taggedOceanLinux || byProvider ||
+      byNameEmoji || hasSmartVpsConfig || byProductEmoji;
 
     L.kv('IPStock.tags', tags);
     L.kv('IPStock.provider', ipStock?.provider || '(missing)');
     L.kv('IPStock.name', ipStock?.name || '(missing)');
     L.kv('Order.productName', order?.productName || '(missing)');
-    L.kv('SmartVPS detection', { 
-      taggedSmartVps, taggedOceanLinux, byProvider, 
+    L.kv('SmartVPS detection', {
+      taggedSmartVps, taggedOceanLinux, byProvider,
       byNameEmoji, hasSmartVpsConfig, byProductEmoji,
-      result: isSmartVps 
+      result: isSmartVps
     });
 
     return isSmartVps;
@@ -255,9 +255,9 @@ class AutoProvisioningService {
     try {
       // CRITICAL: Use EXACT package ID and name from IPStock configuration
       // This ensures customer gets EXACTLY what they ordered
-      const smartvpsConfig = ipStock?.defaultConfigurations?.get?.('smartvps') || 
-                            ipStock?.defaultConfigurations?.smartvps;
-      
+      const smartvpsConfig = ipStock?.defaultConfigurations?.get?.('smartvps') ||
+        ipStock?.defaultConfigurations?.smartvps;
+
       if (!smartvpsConfig) {
         throw new Error('IPStock missing SmartVPS configuration (defaultConfigurations.smartvps)');
       }
@@ -352,18 +352,18 @@ class AutoProvisioningService {
       // We use MongoDB's findOneAndUpdate with conditions to atomically acquire a lock
       // =====================================================================
       L.head('STEP 1: ATOMIC DATABASE LOCK & DUPLICATE CHECK');
-      
+
       // Generate a unique lock ID for this provisioning attempt
       const lockId = `${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
       L.kv('Lock ID', lockId);
-      
+
       // Attempt to atomically acquire the provisioning lock
       // This will ONLY succeed if:
       // 1. provisioningStatus is NOT 'provisioning' or 'active'
       // 2. OR if 'provisioning' status is older than 5 minutes (stale lock)
       // 3. AND order exists
       const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
-      
+
       const lockedOrder = await Order.findOneAndUpdate(
         {
           _id: orderId,
@@ -371,7 +371,7 @@ class AutoProvisioningService {
             // Order not yet provisioned or provisioning
             { provisioningStatus: { $nin: ['provisioning', 'active'] } },
             // OR stale provisioning lock (older than 5 minutes)
-            { 
+            {
               provisioningStatus: 'provisioning',
               lastProvisionAttempt: { $lt: fiveMinutesAgo }
             }
@@ -392,15 +392,15 @@ class AutoProvisioningService {
           runValidators: false
         }
       );
-      
+
       // If we couldn't acquire the lock, check why
       if (!lockedOrder) {
         const existingOrder = await Order.findById(orderId);
-        
+
         if (!existingOrder) {
           throw new Error(`Order ${orderId} not found in database`);
         }
-        
+
         // Check if already provisioned successfully
         if (existingOrder.provisioningStatus === 'active' && existingOrder.ipAddress) {
           L.line(`\n⚠️⚠️⚠️ ORDER ALREADY PROVISIONED ⚠️⚠️⚠️`);
@@ -408,7 +408,7 @@ class AutoProvisioningService {
           L.kv('  → Provider', existingOrder.provider);
           L.kv('  → Username', existingOrder.username);
           L.line(`⚠️⚠️⚠️ SKIPPING PROVISIONING ⚠️⚠️⚠️\n`);
-          
+
           return {
             success: true,
             alreadyProvisioned: true,
@@ -418,18 +418,18 @@ class AutoProvisioningService {
             totalTime: Date.now() - startTime
           };
         }
-        
+
         // Check if currently being provisioned by another process
         if (existingOrder.provisioningStatus === 'provisioning') {
-          const timeSinceAttempt = existingOrder.lastProvisionAttempt 
+          const timeSinceAttempt = existingOrder.lastProvisionAttempt
             ? Date.now() - new Date(existingOrder.lastProvisionAttempt).getTime()
             : 0;
-          
+
           L.line(`\n⏳⏳⏳ ORDER CURRENTLY BEING PROVISIONED BY ANOTHER PROCESS ⏳⏳⏳`);
           L.kv('  → Lock ID', existingOrder.provisioningLockId || 'unknown');
           L.kv('  → Time since attempt', `${Math.round(timeSinceAttempt / 1000)}s ago`);
           L.line(`⏳⏳⏳ ABORTING TO PREVENT DUPLICATE ⏳⏳⏳\n`);
-          
+
           return {
             success: false,
             alreadyProvisioning: true,
@@ -437,13 +437,13 @@ class AutoProvisioningService {
             totalTime: Date.now() - startTime
           };
         }
-        
+
         // Check if order already has an IP (somehow)
         if (existingOrder.ipAddress) {
           L.line(`\n⚠️⚠️⚠️ ORDER ALREADY HAS IP ADDRESS ⚠️⚠️⚠️`);
           L.kv('  → IP Address', existingOrder.ipAddress);
           L.line(`⚠️⚠️⚠️ SKIPPING PROVISIONING ⚠️⚠️⚠️\n`);
-          
+
           return {
             success: true,
             alreadyProvisioned: true,
@@ -452,16 +452,16 @@ class AutoProvisioningService {
             totalTime: Date.now() - startTime
           };
         }
-        
+
         throw new Error(`Failed to acquire provisioning lock for order ${orderId}. Current status: ${existingOrder.provisioningStatus}`);
       }
-      
+
       // Lock acquired successfully!
       const order = lockedOrder;
       L.line(`\n🔒🔒🔒 PROVISIONING LOCK ACQUIRED 🔒🔒🔒`);
       L.kv('  → Lock ID', lockId);
       L.kv('  → Order ID', order._id.toString());
-      
+
       L.kv('Order._id', order._id.toString());
       L.kv('Order.productName', order.productName);
       L.kv('Order.memory', order.memory);
@@ -532,7 +532,7 @@ class AutoProvisioningService {
 
   // --- SMARTVPS PATH -------------------------------------------------------
 
-// ... existing code ...
+  // ... existing code ...
 
   // --- SMARTVPS PATH -------------------------------------------------------
 
@@ -565,7 +565,7 @@ class AutoProvisioningService {
       lockAcquired = true;
     } catch (lockError) {
       L.line(`[SMARTVPS] ❌ Failed to acquire lock: ${lockError.message}`);
-      
+
       // Mark order as failed since we can't acquire lock
       await Order.findByIdAndUpdate(order._id, {
         provisioningStatus: 'failed',
@@ -573,7 +573,7 @@ class AutoProvisioningService {
         autoProvisioned: true,
         provider: 'smartvps'
       });
-      
+
       throw new Error(`Cannot provision: ${lockError.message}. Please try again in a moment.`);
     }
 
@@ -596,191 +596,203 @@ class AutoProvisioningService {
       let lastError;
       let safetyCheckFailed = false; // Flag to track if safety check failed
 
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        L.line(`[SMARTVPS] Calling buyVps(${packageNameForBuy}, ${ram}) - attempt ${attempt}/${maxRetries} …`);
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          L.line(`[SMARTVPS] Calling buyVps(${packageNameForBuy}, ${ram}) - attempt ${attempt}/${maxRetries} …`);
 
-        // buyVps API has 3 minute timeout built-in, no extra wrapper needed
-        buyRes = await this.smartvpsApi.buyVps(packageNameForBuy, ram);
+          // buyVps API has 3 minute timeout built-in, no extra wrapper needed
+          buyRes = await this.smartvpsApi.buyVps(packageNameForBuy, ram);
 
-        const buyText = typeof buyRes === 'string' ? buyRes : JSON.stringify(buyRes);
-        L.kv(`[SMARTVPS] buyVps attempt ${attempt} response`, buyText.slice(0, 500));
+          const buyText = typeof buyRes === 'string' ? buyRes : JSON.stringify(buyRes);
+          L.kv(`[SMARTVPS] buyVps attempt ${attempt} response`, buyText.slice(0, 500));
 
-        // Extract the assigned IP from the buy response
-        boughtIp = this.extractIp(buyText);
-        L.kv('[SMARTVPS] assigned/bought IP', boughtIp);
+          // Extract the assigned IP from the buy response
+          boughtIp = this.extractIp(buyText);
+          L.kv('[SMARTVPS] assigned/bought IP', boughtIp);
 
-        if (!boughtIp) {
-          throw new Error('SmartVPS buyVps did not return an assigned IP');
-        }
+          if (!boughtIp) {
+            throw new Error('SmartVPS buyVps did not return an assigned IP');
+          }
 
-        // CRITICAL SAFETY CHECK: Verify the IP belongs to the requested package
-        // We only check the FIRST 2 OCTETS (e.g., "103.83")
-        // Package "103.83.x" or "103.83.249" → Accept any IP starting with "103.83"
-        // Package "103.181.91" → Accept any IP starting with "103.181" (e.g., 103.181.90, 103.181.91, etc.)
-        const requestedPackage = pkg.name; // e.g., "103.83.x" or "103.181.91"
-        const ipParts = boughtIp.split('.'); // e.g., ["103", "83", "249", "120"]
-        
-        // Extract first 2 octets from package name (remove 'x', 'X', trailing dots, etc.)
-        const packageParts = requestedPackage.split('.');
-        const packageFirstTwo = packageParts.slice(0, 2).join('.'); // e.g., "103.83" or "103.181"
-        
-        // Extract first 2 octets from assigned IP
-        const ipFirstTwo = ipParts.slice(0, 2).join('.'); // e.g., "103.83"
-        
-        const ipMatches = (ipFirstTwo === packageFirstTwo);
-        
-        L.kv('[SMARTVPS]   → Requested package', requestedPackage);
-        L.kv('[SMARTVPS]   → Package first 2 octets', packageFirstTwo);
-        L.kv('[SMARTVPS]   → Assigned IP', boughtIp);
-        L.kv('[SMARTVPS]   → IP first 2 octets', ipFirstTwo);
-        L.kv('[SMARTVPS]   → Match', ipMatches ? '✅ MATCH' : '❌ NO MATCH');
-        
-        if (!ipMatches) {
-          L.line(`[SMARTVPS] ❌ CRITICAL: SmartVPS assigned IP from WRONG package!`);
-          L.line(`[SMARTVPS]   → This indicates the requested package ran out of IPs`);
-          L.line(`[SMARTVPS]   → SmartVPS API fallback behavior detected!`);
-          L.line(`[SMARTVPS]   → ORDER WILL BE MARKED AS FAILED (not provisioned)`);
-          
-          // Set flag to prevent continuation after loop
-          safetyCheckFailed = true;
-          
-          // Mark order as failed immediately
-          await Order.findByIdAndUpdate(order._id, {
-            provisioningStatus: 'failed',
-            provisioningError: `WRONG PACKAGE ASSIGNED: Customer ordered "${requestedPackage}" (${packageFirstTwo}.*) but SmartVPS assigned "${boughtIp}" (${ipFirstTwo}.*). Package likely ran out of IPs. DO NOT provision this order.`,
-            status: 'failed',
-            autoProvisioned: true,
-            failedAt: new Date(),
-          });
-          
-          // Throw error that will NOT be retried
-          const safetyError = new Error(
-            `❌ PROVISIONING BLOCKED: SmartVPS assigned IP from wrong package! ` +
-            `Customer ordered "${requestedPackage}" (${packageFirstTwo}.*) but received "${boughtIp}" (${ipFirstTwo}.*). ` +
-            `This order has been marked as FAILED and will NOT be provisioned. ` +
-            `Reason: Package ran out of IPs or SmartVPS API bug. Admin must manually resolve.`
-          );
-          safetyError.isSafetyCheckFailure = true; // Mark as safety failure
-          throw safetyError;
-        }
+          // CRITICAL SAFETY CHECK: Verify the IP belongs to the requested package
+          // We need to match based on how many numeric octets are in the package name
+          // Examples:
+          // - Package "103.83.x" or "103.83" → Match first 2 octets (103.83)
+          // - Package "103.184" → Match first 3 octets (103.184) - NOT just "103.18"!
+          // - Package "103.181.91" → Match first 3 octets (103.181.91)
+          const requestedPackage = pkg.name; // e.g., "103.83.x" or "103.184" or "103.181.91"
+          const ipParts = boughtIp.split('.'); // e.g., ["103", "186", "44", "73"]
 
-        // Success - break out of retry loop
-        L.line(`[SMARTVPS] ✅ buyVps succeeded on attempt ${attempt}`);
-        L.line(`[SMARTVPS] ✅ IP verification passed: ${boughtIp} matches package ${requestedPackage}`);
-        break;
+          // Extract numeric octets from package name (filter out 'x', 'X', etc.)
+          const packageParts = requestedPackage.split('.');
+          const numericPackageParts = packageParts.filter(p => /^\d+$/.test(p));
 
-      } catch (error) {
-        lastError = error;
-        L.line(`[SMARTVPS] ❌ buyVps attempt ${attempt} failed: ${error.message}`);
+          // Determine how many octets to compare based on package name
+          // For "103.184" → 2 numeric parts → compare 2 octets
+          // For "103.181.91" → 3 numeric parts → compare 3 octets
+          const numOctetsToCompare = numericPackageParts.length;
 
-        // CRITICAL: If safety check failed, do NOT retry - abort immediately
-        if (error.isSafetyCheckFailure || safetyCheckFailed) {
-          L.line(`[SMARTVPS] ❌ Safety check failure - aborting all retries`);
-          break; // Exit loop immediately, do not retry
-        }
+          // Extract the prefix to match (e.g., "103.184" or "103.181.91")
+          const packagePrefix = numericPackageParts.join('.');
 
-        if (attempt < maxRetries) {
-          // Shorter delays since buyVps API now has 3 minute timeout built-in
-          // Attempt 1 → Wait 30 seconds before retry 2
-          // Attempt 2 → Wait 45 seconds before retry 3
-          const delaySeconds = attempt === 1 ? 30 : 45;
-          const delay = delaySeconds * 1000;
-          
-          L.line(`[SMARTVPS] ⏳ Waiting ${delaySeconds}s before retry...`);
-          await new Promise(resolve => setTimeout(resolve, delay));
-        }
-      }
-    }
+          // Extract the same number of octets from assigned IP
+          const ipPrefix = ipParts.slice(0, numOctetsToCompare).join('.');
 
-    // CRITICAL: If safety check failed, abort provisioning entirely
-    if (safetyCheckFailed) {
-      L.line(`[SMARTVPS] ❌ ABORTING: Safety check failed - wrong IP package assigned`);
-      throw lastError; // Re-throw the safety check error
-    }
+          const ipMatches = (ipPrefix === packagePrefix);
 
-    // If all retries failed
-    if (!buyRes || !boughtIp) {
-      throw new Error(`SmartVPS buyVps failed after ${maxRetries} attempts. Last error: ${lastError?.message || 'Unknown'}`);
-    }
+          L.kv('[SMARTVPS]   → Requested package', requestedPackage);
+          L.kv('[SMARTVPS]   → Package numeric parts', numericPackageParts);
+          L.kv('[SMARTVPS]   → Octets to compare', numOctetsToCompare);
+          L.kv('[SMARTVPS]   → Package prefix', packagePrefix);
+          L.kv('[SMARTVPS]   → Assigned IP', boughtIp);
+          L.kv('[SMARTVPS]   → IP prefix', ipPrefix);
+          L.kv('[SMARTVPS]   → Match', ipMatches ? '✅ MATCH' : '❌ NO MATCH');
 
-    // Get credentials with retry logic
-    // SmartVPS needs time to provision and make credentials available
-    let statusObj = {};
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        L.line(`[SMARTVPS] Calling status(${boughtIp}) - attempt ${attempt}/${maxRetries} …`);
+          if (!ipMatches) {
+            L.line(`[SMARTVPS] ❌ CRITICAL: SmartVPS assigned IP from WRONG package!`);
+            L.line(`[SMARTVPS]   → This indicates the requested package ran out of IPs`);
+            L.line(`[SMARTVPS]   → SmartVPS API fallback behavior detected!`);
+            L.line(`[SMARTVPS]   → ORDER WILL BE MARKED AS FAILED (not provisioned)`);
 
-        const statusRaw = await this.withTimeout(
-          this.smartvpsApi.status(boughtIp),
-          90000, // 90 second timeout for status (was 30s)
-          `SmartVPS status timeout (attempt ${attempt})`
-        );
+            // Set flag to prevent continuation after loop
+            safetyCheckFailed = true;
 
-        const statusNormalized = this.normalizeSmartVpsResponse(statusRaw);
-        L.kv(`[SMARTVPS] status attempt ${attempt} normalized`, statusNormalized);
+            // Mark order as failed immediately
+            await Order.findByIdAndUpdate(order._id, {
+              provisioningStatus: 'failed',
+              provisioningError: `WRONG PACKAGE ASSIGNED: Customer ordered "${requestedPackage}" (${packageFirstTwo}.*) but SmartVPS assigned "${boughtIp}" (${ipFirstTwo}.*). Package likely ran out of IPs. DO NOT provision this order.`,
+              status: 'failed',
+              autoProvisioned: true,
+              failedAt: new Date(),
+            });
 
-        statusObj = statusNormalized;
-        if (typeof statusObj === 'string') {
-          try {
-            statusObj = JSON.parse(statusObj);
-          } catch {
-            try {
-              const unquoted = statusObj.replace(/^"+|"+$/g, '').replace(/\\"/g, '"');
-              statusObj = JSON.parse(unquoted);
-            } catch {
-              statusObj = {};
-            }
+            // Throw error that will NOT be retried
+            const safetyError = new Error(
+              `❌ PROVISIONING BLOCKED: SmartVPS assigned IP from wrong package! ` +
+              `Customer ordered "${requestedPackage}" (${packageFirstTwo}.*) but received "${boughtIp}" (${ipFirstTwo}.*). ` +
+              `This order has been marked as FAILED and will NOT be provisioned. ` +
+              `Reason: Package ran out of IPs or SmartVPS API bug. Admin must manually resolve.`
+            );
+            safetyError.isSafetyCheckFailure = true; // Mark as safety failure
+            throw safetyError;
+          }
+
+          // Success - break out of retry loop
+          L.line(`[SMARTVPS] ✅ buyVps succeeded on attempt ${attempt}`);
+          L.line(`[SMARTVPS] ✅ IP verification passed: ${boughtIp} matches package ${requestedPackage}`);
+          break;
+
+        } catch (error) {
+          lastError = error;
+          L.line(`[SMARTVPS] ❌ buyVps attempt ${attempt} failed: ${error.message}`);
+
+          // CRITICAL: If safety check failed, do NOT retry - abort immediately
+          if (error.isSafetyCheckFailure || safetyCheckFailed) {
+            L.line(`[SMARTVPS] ❌ Safety check failure - aborting all retries`);
+            break; // Exit loop immediately, do not retry
+          }
+
+          if (attempt < maxRetries) {
+            // Shorter delays since buyVps API now has 3 minute timeout built-in
+            // Attempt 1 → Wait 30 seconds before retry 2
+            // Attempt 2 → Wait 45 seconds before retry 3
+            const delaySeconds = attempt === 1 ? 30 : 45;
+            const delay = delaySeconds * 1000;
+
+            L.line(`[SMARTVPS] ⏳ Waiting ${delaySeconds}s before retry...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
           }
         }
+      }
 
-        // Success - break out of retry loop
-        L.line(`[SMARTVPS] ✅ status succeeded on attempt ${attempt}`);
-        break;
+      // CRITICAL: If safety check failed, abort provisioning entirely
+      if (safetyCheckFailed) {
+        L.line(`[SMARTVPS] ❌ ABORTING: Safety check failed - wrong IP package assigned`);
+        throw lastError; // Re-throw the safety check error
+      }
 
-      } catch (error) {
-        L.line(`[SMARTVPS] ❌ status attempt ${attempt} failed: ${error.message}`);
+      // If all retries failed
+      if (!buyRes || !boughtIp) {
+        throw new Error(`SmartVPS buyVps failed after ${maxRetries} attempts. Last error: ${lastError?.message || 'Unknown'}`);
+      }
 
-        if (attempt < maxRetries) {
-          // STRATEGIC DELAYS: Server may still be provisioning
-          // Attempt 1 → Wait 1 minute before retry 2
-          // Attempt 2 → Wait 2 minutes before retry 3
-          const delayMinutes = attempt; // 1 min, 2 min
-          const delay = delayMinutes * 60 * 1000;
-          
-          L.line(`[SMARTVPS] ⏳ Strategic delay: Waiting ${delayMinutes} minute(s) (${delay}ms) before retry...`);
-          L.line(`[SMARTVPS] 💡 Server may still be provisioning, giving it time to complete`);
-          await new Promise(resolve => setTimeout(resolve, delay));
+      // Get credentials with retry logic
+      // SmartVPS needs time to provision and make credentials available
+      let statusObj = {};
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          L.line(`[SMARTVPS] Calling status(${boughtIp}) - attempt ${attempt}/${maxRetries} …`);
+
+          const statusRaw = await this.withTimeout(
+            this.smartvpsApi.status(boughtIp),
+            90000, // 90 second timeout for status (was 30s)
+            `SmartVPS status timeout (attempt ${attempt})`
+          );
+
+          const statusNormalized = this.normalizeSmartVpsResponse(statusRaw);
+          L.kv(`[SMARTVPS] status attempt ${attempt} normalized`, statusNormalized);
+
+          statusObj = statusNormalized;
+          if (typeof statusObj === 'string') {
+            try {
+              statusObj = JSON.parse(statusObj);
+            } catch {
+              try {
+                const unquoted = statusObj.replace(/^"+|"+$/g, '').replace(/\\"/g, '"');
+                statusObj = JSON.parse(unquoted);
+              } catch {
+                statusObj = {};
+              }
+            }
+          }
+
+          // Success - break out of retry loop
+          L.line(`[SMARTVPS] ✅ status succeeded on attempt ${attempt}`);
+          break;
+
+        } catch (error) {
+          L.line(`[SMARTVPS] ❌ status attempt ${attempt} failed: ${error.message}`);
+
+          if (attempt < maxRetries) {
+            // STRATEGIC DELAYS: Server may still be provisioning
+            // Attempt 1 → Wait 1 minute before retry 2
+            // Attempt 2 → Wait 2 minutes before retry 3
+            const delayMinutes = attempt; // 1 min, 2 min
+            const delay = delayMinutes * 60 * 1000;
+
+            L.line(`[SMARTVPS] ⏳ Strategic delay: Waiting ${delayMinutes} minute(s) (${delay}ms) before retry...`);
+            L.line(`[SMARTVPS] 💡 Server may still be provisioning, giving it time to complete`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+          }
         }
       }
-    }
 
-    const ipAddress = statusObj.IP || boughtIp;
-    const username = statusObj.Usernane || statusObj.Username || this.getLoginUsernameFromProductName(order.productName);
-    const password = statusObj.Password || '';
-    const os = statusObj.OS || targetOS;
-    const expiryDate = statusObj.ExpiryDate ? new Date(statusObj.ExpiryDate) : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+      const ipAddress = statusObj.IP || boughtIp;
+      const username = statusObj.Usernane || statusObj.Username || this.getLoginUsernameFromProductName(order.productName);
+      const password = statusObj.Password || '';
+      const os = statusObj.OS || targetOS;
+      const expiryDate = statusObj.ExpiryDate ? new Date(statusObj.ExpiryDate) : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
 
-    L.kv('[SMARTVPS] extracted.ip', ipAddress);
-    L.kv('[SMARTVPS] extracted.username', username);
-    L.kv('[SMARTVPS] extracted.password(masked)', password ? password.substring(0, 4) + '****' : '(blank)');
-    L.kv('[SMARTVPS] extracted.os', os);
-    L.kv('[SMARTVPS] extracted.expiryDate', expiryDate.toISOString());
+      L.kv('[SMARTVPS] extracted.ip', ipAddress);
+      L.kv('[SMARTVPS] extracted.username', username);
+      L.kv('[SMARTVPS] extracted.password(masked)', password ? password.substring(0, 4) + '****' : '(blank)');
+      L.kv('[SMARTVPS] extracted.os', os);
+      L.kv('[SMARTVPS] extracted.expiryDate', expiryDate.toISOString());
 
-    const updateData = {
-      status: 'active',
-      provisioningStatus: 'active',
-      provider: 'smartvps',  // Explicitly set provider
-      hostycareServiceId: undefined,
-      username,
-      password,
-      ipAddress,
-      autoProvisioned: true,
-      provisioningError: '',
-      os,
-      expiryDate
-    };
-    await Order.findByIdAndUpdate(order._id, updateData);
+      const updateData = {
+        status: 'active',
+        provisioningStatus: 'active',
+        provider: 'smartvps',  // Explicitly set provider
+        hostycareServiceId: undefined,
+        username,
+        password,
+        ipAddress,
+        autoProvisioned: true,
+        provisioningError: '',
+        os,
+        expiryDate
+      };
+      await Order.findByIdAndUpdate(order._id, updateData);
 
       const totalTime = Date.now() - startTime;
       console.log("\n" + "✅".repeat(80));
