@@ -11,8 +11,8 @@ const SmartVPSAPI = require('@/services/smartvpsApi');
 // Initialize Cashfree
 Cashfree.XClientId = process.env.CASHFREE_APP_ID;
 Cashfree.XClientSecret = process.env.CASHFREE_SECRET_KEY;
-Cashfree.XEnvironment = process.env.CASHFREE_ENVIRONMENT === 'SANDBOX' 
-  ? Cashfree.Environment.SANDBOX 
+Cashfree.XEnvironment = process.env.CASHFREE_ENVIRONMENT === 'SANDBOX'
+  ? Cashfree.Environment.SANDBOX
   : Cashfree.Environment.PRODUCTION;
 
 // Initialize Razorpay
@@ -112,6 +112,7 @@ export async function POST(request) {
       orderId,
       paymentMethod,
       razorpayPaymentId,
+      razorpayOrderId,
       razorpaySignature
     } = await request.json();
 
@@ -173,7 +174,7 @@ export async function POST(request) {
     // Verify payment based on method
     if (actualPaymentMethod === 'razorpay') {
       console.log('[RENEWAL-CONFIRM] Verifying Razorpay renewal payment');
-      
+
       if (!razorpayPaymentId || !razorpaySignature) {
         return NextResponse.json(
           { success: false, message: 'Missing Razorpay payment details' },
@@ -181,10 +182,23 @@ export async function POST(request) {
         );
       }
 
-      // Verify Razorpay signature
+      // Use razorpay order ID from request, or fall back to pendingRenewal.gatewayOrderId
+      const orderIdForSignature = razorpayOrderId || order.pendingRenewal?.gatewayOrderId;
+
+      if (!orderIdForSignature) {
+        console.error('[RENEWAL-CONFIRM] ❌ Missing Razorpay order ID for signature verification');
+        return NextResponse.json(
+          { success: false, message: 'Missing Razorpay order ID' },
+          { status: 400 }
+        );
+      }
+
+      console.log('[RENEWAL-CONFIRM] Using Razorpay order ID for signature:', orderIdForSignature);
+
+      // Verify Razorpay signature using the correct order_id|payment_id format
       const generatedSignature = crypto
         .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
-        .update(`${renewalTxnId}|${razorpayPaymentId}`)
+        .update(`${orderIdForSignature}|${razorpayPaymentId}`)
         .digest('hex');
 
       if (generatedSignature === razorpaySignature) {
@@ -193,6 +207,8 @@ export async function POST(request) {
         paymentVerified = true;
       } else {
         console.error('[RENEWAL-CONFIRM] ❌ Razorpay signature verification failed');
+        console.error('[RENEWAL-CONFIRM] Expected signature format: order_id|payment_id');
+        console.error('[RENEWAL-CONFIRM] order_id used:', orderIdForSignature);
         return NextResponse.json(
           { success: false, message: 'Payment verification failed' },
           { status: 400 }
@@ -207,7 +223,7 @@ export async function POST(request) {
     } else {
       // Default to Cashfree
       console.log('[RENEWAL-CONFIRM] Processing Cashfree renewal payment');
-      
+
       // For Cashfree renewals, we rely on the webhook to process the renewal
       // The webhook handler has atomic processing and idempotency checks
       // This endpoint is called from the payment callback page, which may arrive
@@ -215,7 +231,7 @@ export async function POST(request) {
       // 1. Check if webhook already processed this renewal
       // 2. If not, check if payment is pending and let webhook handle it
       // 3. Only verify payment if webhook hasn't processed it yet
-      
+
       // First, check if webhook already processed this renewal
       const alreadyProcessedByWebhook = order.renewalPayments?.some(
         rp => rp.renewalTxnId === renewalTxnId && rp.processedViaWebhook === true
@@ -236,10 +252,10 @@ export async function POST(request) {
 
       // Check if there's a pending renewal for this transaction
       const hasPendingRenewal = order.pendingRenewal?.renewalTxnId === renewalTxnId;
-      
+
       if (hasPendingRenewal) {
         console.log('[RENEWAL-CONFIRM] Pending renewal found, checking payment status...');
-        
+
         try {
           // Try to verify payment with Cashfree
           const cashfreeResponse = await Cashfree.PGOrderFetchPayments('2023-08-01', renewalTxnId);
@@ -247,7 +263,7 @@ export async function POST(request) {
 
           if (cashfreeResponse.data && cashfreeResponse.data.length > 0) {
             const payment = cashfreeResponse.data[0];
-            
+
             if (payment.payment_status === 'SUCCESS') {
               console.log('[RENEWAL-CONFIRM] ✅ Cashfree payment verified successfully');
               payment_id = payment.cf_payment_id;
@@ -302,41 +318,41 @@ export async function POST(request) {
 
     const cf_payment_id = payment_id;
 
-      // Determine the provider for this order using the enhanced function with IPStock lookup
-      const provider = await getProviderFromOrder(order);
-      console.log(`[RENEWAL-CONFIRM] Final determined provider: ${provider} for order ${orderId}`);
+    // Determine the provider for this order using the enhanced function with IPStock lookup
+    const provider = await getProviderFromOrder(order);
+    console.log(`[RENEWAL-CONFIRM] Final determined provider: ${provider} for order ${orderId}`);
 
-      // Calculate new expiry date (30 days from current expiry or now, whichever is later)
-      const currentExpiry = new Date(order.expiryDate);
-      const now = new Date();
-      const baseDate = currentExpiry > now ? currentExpiry : now;
-      const newExpiryDate = new Date(baseDate);
-      newExpiryDate.setDate(newExpiryDate.getDate() + 30);
+    // Calculate new expiry date (30 days from current expiry or now, whichever is later)
+    const currentExpiry = new Date(order.expiryDate);
+    const now = new Date();
+    const baseDate = currentExpiry > now ? currentExpiry : now;
+    const newExpiryDate = new Date(baseDate);
+    newExpiryDate.setDate(newExpiryDate.getDate() + 30);
 
-      console.log(`Renewing order ${order._id}:`);
-      console.log(`  Provider: ${provider}`);
-      console.log(`  Current expiry: ${currentExpiry}`);
-      console.log(`  New expiry: ${newExpiryDate}`);
-      console.log(`  Payment ID: ${cf_payment_id}`);
+    console.log(`Renewing order ${order._id}:`);
+    console.log(`  Provider: ${provider}`);
+    console.log(`  Current expiry: ${currentExpiry}`);
+    console.log(`  New expiry: ${newExpiryDate}`);
+    console.log(`  Payment ID: ${cf_payment_id}`);
 
-      // Create renewal payment record with full payment details
-      const renewalPayment = {
-        paymentId: cf_payment_id,
-        amount: order.price,
-        paidAt: new Date(),
-        previousExpiry: currentExpiry,
-        newExpiry: newExpiryDate,
-        renewalTxnId: renewalTxnId,
-        provider: provider,
-        paymentMethod: actualPaymentMethod,
-        gatewayOrderId: actualPaymentMethod === 'razorpay' ? razorpayPaymentId : renewalTxnId,
-        paymentDetails: {
-          method: actualPaymentMethod,
-          payment_id: cf_payment_id,
-          order_id: actualPaymentMethod === 'razorpay' ? razorpayPaymentId : renewalTxnId,
-          confirmedAt: new Date()
-        }
-      };
+    // Create renewal payment record with full payment details
+    const renewalPayment = {
+      paymentId: cf_payment_id,
+      amount: order.price,
+      paidAt: new Date(),
+      previousExpiry: currentExpiry,
+      newExpiry: newExpiryDate,
+      renewalTxnId: renewalTxnId,
+      provider: provider,
+      paymentMethod: actualPaymentMethod,
+      gatewayOrderId: actualPaymentMethod === 'razorpay' ? razorpayPaymentId : renewalTxnId,
+      paymentDetails: {
+        method: actualPaymentMethod,
+        payment_id: cf_payment_id,
+        order_id: actualPaymentMethod === 'razorpay' ? razorpayPaymentId : renewalTxnId,
+        confirmedAt: new Date()
+      }
+    };
 
     // Handle provider-specific renewal logic
     let providerRenewalResult = null;
@@ -518,17 +534,17 @@ export async function POST(request) {
         : 'Service renewed successfully! Note: Hostycare API renewal encountered an issue, but your service period has been extended.';
     }
 
-      console.log('[RENEWAL-CONFIRM] === RENEWAL PROCESS COMPLETE ===');
-      console.log('[RENEWAL-CONFIRM] Final response being sent to client:', {
-        ...response,
-        renewalDetails: {
-          ...response.renewalDetails,
-          providerApiCallMade: provider === 'smartvps' || provider === 'hostycare',
-          providerApiSuccess: providerRenewalSuccess
-        }
-      });
+    console.log('[RENEWAL-CONFIRM] === RENEWAL PROCESS COMPLETE ===');
+    console.log('[RENEWAL-CONFIRM] Final response being sent to client:', {
+      ...response,
+      renewalDetails: {
+        ...response.renewalDetails,
+        providerApiCallMade: provider === 'smartvps' || provider === 'hostycare',
+        providerApiSuccess: providerRenewalSuccess
+      }
+    });
 
-      return NextResponse.json(response);
+    return NextResponse.json(response);
 
   } catch (error) {
     console.error('[RENEWAL-CONFIRM] === RENEWAL PROCESS ERROR ===');

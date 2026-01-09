@@ -33,17 +33,39 @@ export async function POST(request) {
         });
     }
 }
-// GET method remains the same
+// GET method - fetch all IP stocks
 export async function GET(request) {
-    await connectDB();
+    console.log('[IPSTOCK-API] GET request received');
 
     try {
-        const ipStocks = await IPStock.find({});
-        return new Response(JSON.stringify(ipStocks), {
+        await connectDB();
+        console.log('[IPSTOCK-API] Database connected');
+
+        // Use lean() for faster query - returns plain JS objects instead of Mongoose documents
+        const ipStocks = await IPStock.find({}).lean().maxTimeMS(10000);
+        console.log(`[IPSTOCK-API] Found ${ipStocks?.length || 0} IP stocks`);
+
+        if (!ipStocks) {
+            console.log('[IPSTOCK-API] No IP stocks found (null result)');
+            return new Response(JSON.stringify([]), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' }
+            });
+        }
+
+        const jsonResponse = JSON.stringify(ipStocks);
+        console.log(`[IPSTOCK-API] Response size: ${jsonResponse.length} bytes`);
+
+        return new Response(jsonResponse, {
             status: 200,
-            headers: { 'Content-Type': 'application/json' }
+            headers: {
+                'Content-Type': 'application/json',
+                'Cache-Control': 'no-cache'
+            }
         });
     } catch (error) {
+        console.error('[IPSTOCK-API] Error fetching IP stocks:', error.message);
+        console.error('[IPSTOCK-API] Error stack:', error.stack);
         return new Response(JSON.stringify({ error: 'Failed to fetch IP Stocks', details: error.message }), {
             status: 500,
             headers: { 'Content-Type': 'application/json' }

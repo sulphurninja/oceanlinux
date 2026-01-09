@@ -1165,6 +1165,7 @@ const OrderDetails = () => {
                 orderId: order?._id,
                 paymentMethod: 'razorpay',
                 razorpayPaymentId: response.razorpay_payment_id,
+                razorpayOrderId: response.razorpay_order_id,
                 razorpaySignature: response.razorpay_signature
               })
             });

@@ -128,27 +128,33 @@ export default function IPStockPage() {
 
   const router = useRouter();
 
-  // Fetch available IP stocks on mount, after refreshing SmartVPS availability
+  // Fetch available IP stocks on mount, then sync SmartVPS in background
   useEffect(() => {
     const fetchIPStocks = async () => {
       try {
         setIsLoading(true);
-        // First, refresh SmartVPS availability so we honor live stock from provider
-        try {
-          await fetch("/api/smartvps/sync");
-        } catch (err) {
-          console.warn('[IPSTOCK] smartvps sync failed (will still load cached list)', err);
-        }
-
+        
+        // First, load IP stocks immediately so users see available plans
         const response = await fetch("/api/ipstock");
         const data = await response.json();
         // Filter out unavailable/out-of-stock items immediately
         const availableStocks = data.filter((stock: IPStock) => stock.available);
         setIpStocks(availableStocks);
+        setIsLoading(false);
+        
+        // Then, sync SmartVPS in the background (don't block on this)
+        // This updates stock availability from the provider for next page load
+        fetch("/api/smartvps/sync")
+          .then(() => {
+            console.log('[IPSTOCK] SmartVPS sync completed in background');
+          })
+          .catch((err) => {
+            console.warn('[IPSTOCK] SmartVPS sync failed in background (cached list already shown)', err);
+          });
+          
       } catch (error) {
         toast.error("Failed to load plans");
         console.error(error);
-      } finally {
         setIsLoading(false);
       }
     };
