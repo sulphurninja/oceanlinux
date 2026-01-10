@@ -172,10 +172,16 @@ export async function POST(request) {
     // Determine payment method from transaction ID or explicit parameter
     let actualPaymentMethod = paymentMethod;
     if (!actualPaymentMethod) {
-      // Auto-detect from transaction ID or order data
-      if (renewalTxnId.startsWith('RENEWAL_')) {
-        // Could be any method, check order data or default to cashfree
-        actualPaymentMethod = order.paymentMethod || 'cashfree';
+      // Check pending renewal for payment method (most accurate for current renewal)
+      if (order.pendingRenewal?.paymentMethod) {
+        actualPaymentMethod = order.pendingRenewal.paymentMethod;
+        logger.logInfo('Payment method detected from pendingRenewal', { method: actualPaymentMethod });
+      }
+      // Fallback: Auto-detect from transaction ID or order data
+      else if (renewalTxnId.startsWith('RENEWAL_')) {
+        // Default to cashfree for renewal transactions
+        actualPaymentMethod = 'cashfree';
+        logger.logInfo('Payment method defaulted to cashfree for renewal transaction');
       }
     }
 

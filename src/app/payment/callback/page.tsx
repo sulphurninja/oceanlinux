@@ -89,7 +89,8 @@ function PaymentCallbackContent() {
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 renewalTxnId: clientTxnId,
-                orderId: orderId
+                orderId: orderId,
+                paymentMethod: 'cashfree' // Add payment method for proper verification
               })
             });
 
