@@ -11,6 +11,22 @@ class ResellerWalletService {
      * @param {string} description 
      * @returns {Promise<{success: boolean, transactionId: string, newBalance: number, error?: string}>}
      */
+    async hasSufficientBalance(resellerId, amount) {
+        const reseller = await Reseller.findById(resellerId);
+        if (!reseller) return false;
+
+        const availableBalance = reseller.wallet.balance + (reseller.wallet.creditLimit || 0);
+        return availableBalance >= amount;
+    }
+
+    /**
+     * Deduct amount from reseller wallet for an order
+     * @param {string} resellerId 
+     * @param {number} amount 
+     * @param {string} orderId 
+     * @param {string} description 
+     * @returns {Promise<{success: boolean, transactionId: string, newBalance: number, error?: string}>}
+     */
     async deductForOrder(resellerId, amount, orderId, description = 'Order provisioning') {
         const session = await mongoose.startSession();
         session.startTransaction();

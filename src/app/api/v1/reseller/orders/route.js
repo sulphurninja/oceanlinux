@@ -92,7 +92,7 @@ export async function POST(request) {
         });
 
         // 5. Deduct Wallet
-        await ResellerWalletService.deduct(
+        await ResellerWalletService.deductForOrder(
             reseller._id,
             finalPrice,
             newOrder._id,
