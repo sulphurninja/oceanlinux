@@ -132,6 +132,12 @@ const AdminSidebar = () => {
       href: '/admin/settings',
       label: 'Site Settings',
       icon: Settings,
+    },
+    {
+      href: '/admin/resellers',
+      label: 'Resellers',
+      icon: Users,
+      badge: 'B2B'
     }
   ];
 

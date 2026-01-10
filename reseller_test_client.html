@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reseller API Test Client</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; line-height: 1.6; }
+        .card { border: 1px solid #ddd; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
+        .success { color: green; }
+        .error { color: red; }
+        input { padding: 8px; width: 300px; margin-bottom: 10px; }
+        button { padding: 10px 20px; background: #0070f3; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        button:hover { background: #0051a2; }
+        pre { background: #f5f5f5; padding: 10px; border-radius: 4px; overflow-x: auto; }
+        .product-item { border: 1px solid #eee; padding: 10px; margin-bottom: 10px; border-radius: 4px; }
+        .badge { background: #eee; padding: 2px 6px; border-radius: 4px; font-size: 0.8em; }
+    </style>
+</head>
+<body>
+    <h1>Reseller API Test Console</h1>
+    
+    <div class="card">
+        <h2>1. Configuration</h2>
+        <div>
+            <label>API URL:</label><br>
+            <input type="text" id="apiUrl" value="http://localhost:3000/api/v1/reseller">
+        </div>
+        <div>
+            <label>API Key:</label><br>
+            <input type="text" id="apiKey" placeholder="Enter your x-api-key">
+        </div>
+        <div>
+            <label>API Secret:</label><br>
+            <input type="password" id="apiSecret" placeholder="Enter your x-api-secret">
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>2. Actions</h2>
+        <div style="margin-bottom: 20px;">
+            <button onclick="getProducts()">Step A: List Products</button>
+            <button onclick="getWallet()">Check Wallet</button>
+        </div>
+
+        <div id="products-container"></div>
+    </div>
+
+    <div class="card">
+        <h2>3. Output / Logs</h2>
+        <pre id="output">Ready...</pre>
+    </div>
+
+    <script>
+        function log(data) {
+            const output = document.getElementById('output');
+            output.textContent = typeof data === 'object' ? JSON.stringify(data, null, 2) : data;
+        }
+
+        function getHeaders() {
+            return {
+                'Content-Type': 'application/json',
+                'x-api-key': document.getElementById('apiKey').value,
+                'x-api-secret': document.getElementById('apiSecret').value
+            };
+        }
+
+        async function getWallet() {
+            try {
+                const baseUrl = document.getElementById('apiUrl').value;
+                const res = await fetch(`${baseUrl}/wallet`, { headers: getHeaders() });
+                const data = await res.json();
+                log(data);
+            } catch (err) {
+                log('Error: ' + err.message);
+            }
+        }
+
+        async function getProducts() {
+            try {
+                const baseUrl = document.getElementById('apiUrl').value;
+                const res = await fetch(`${baseUrl}/products`, { headers: getHeaders() });
+                const data = await res.json();
+                
+                log(data);
+
+                if (data.success && data.products) {
+                    renderProducts(data.products, data.currency);
+                } else {
+                    document.getElementById('products-container').innerHTML = '<p class="error">Failed to load products</p>';
+                }
+            } catch (err) {
+                log('Error: ' + err.message);
+            }
+        }
+
+        function renderProducts(products, currency) {
+            const container = document.getElementById('products-container');
+            container.innerHTML = '<h3>Available Products</h3>';
+
+            if (products.length === 0) {
+                container.innerHTML += '<p>No available products found.</p>';
+                return;
+            }
+
+            products.forEach(p => {
+                const div = document.createElement('div');
+                div.className = 'product-item';
+                
+                let optionsHtml = '';
+                if (p.memoryOptions) {
+                    // Handle both Map (object) and array structures if necessary, but API returns object map
+                    Object.entries(p.memoryOptions).forEach(([ram, details]) => {
+                        optionsHtml += `
+                            <div style="margin-top: 5px; display: flex; justify-content: space-between; align-items: center;">
+                                <span><b>${ram}</b> - ${currency} ${details.price}</span>
+                                <button onclick="buyProduct('${p._id}', '${ram}', ${details.price})" style="padding: 5px 10px; font-size: 0.8em;">Buy Now</button>
+                            </div>
+                        `;
+                    });
+                }
+
+                div.innerHTML = `
+                    <div style="font-weight: bold; font-size: 1.1em;">${p.name} <span class="badge">${p.serverType}</span></div>
+                    <div style="margin-top: 10px;">${optionsHtml}</div>
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        async function buyProduct(productId, memoryOption, price) {
+            const userEmail = prompt("Enter customer email for this order:", "customer@test.com");
+            if (!userEmail) return;
+
+            if (!confirm(`Confirm purchase of ${memoryOption} for ${price}?`)) return;
+
+            try {
+                const baseUrl = document.getElementById('apiUrl').value;
+                log('Processing order...');
+                
+                const res = await fetch(`${baseUrl}/orders`, { 
+                    method: 'POST',
+                    headers: getHeaders(),
+                    body: JSON.stringify({
+                        productId,
+                        memoryOption,
+                        userEmail
+                    })
+                });
+                
+                const data = await res.json();
+                log(data);
+                
+                if (data.success) {
+                    alert('Order Placed Successfully! ID: ' + data.order._id);
+                    getWallet(); // Refresh wallet
+                }
+            } catch (err) {
+                log('Error: ' + err.message);
+            }
+        }
+    </script>
+</body>
+</html>

@@ -17,13 +17,15 @@ import {
   Lock,
   HelpCircle,
   PanelLeftClose,
-  PanelLeft
+  PanelLeft,
+  FileCode
 } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
 import { toast } from 'sonner';
 import { ThemeToggle } from '@/components/ui/theme-toggle';
+import { Wallet } from 'lucide-react';
 
 interface NavItem {
   href: string;
@@ -33,7 +35,7 @@ interface NavItem {
   children?: NavItem[];
 }
 
-const ResponsiveSidebar = () => {
+const ResponsiveSidebar = ({ user }: { user?: any }) => {
   const [open, setOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const router = useRouter();
@@ -118,7 +120,21 @@ const ResponsiveSidebar = () => {
       href: '/dashboard/scripts',
       label: 'Scripts',
       icon: NotebookText,
-    }
+    },
+    // Conditionally add Reseller Wallet
+    ...(user?.userType === 'reseller' ? [
+      {
+        href: '/dashboard/reseller-wallet',
+        label: 'Reseller Wallet',
+        icon: Wallet,
+        badge: 'Manage'
+      },
+      {
+        href: '/dashboard/reseller-api-docs',
+        label: 'API Documentation',
+        icon: FileCode,
+      }
+    ] : [])
   ];
 
   const accountItems: NavItem[] = [
@@ -210,7 +226,7 @@ const ResponsiveSidebar = () => {
                     <Badge
                       className={cn(
                         "text-[10px] px-2 py-0 h-5 font-semibold",
-                        isActive(item.href) 
+                        isActive(item.href)
                           ? "bg-primary-foreground/20 text-primary-foreground border-primary-foreground/30"
                           : "bg-primary text-primary-foreground border-primary shadow-sm"
                       )}

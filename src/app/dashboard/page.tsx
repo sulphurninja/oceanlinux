@@ -92,9 +92,14 @@ interface DashboardStats {
   recentOrders: any[];
   monthlySpending: number[];
   orderStatusBreakdown: {
-    pending: number;
     completed: number;
     failed: number;
+  };
+  resellerWallet?: {
+    balance: number;
+    currency: string;
+    creditLimit: number;
+    totalSpent: number;
   };
 }
 
@@ -355,6 +360,27 @@ export default function Dashboard() {
 
         {/* Stats Grid - Modern Clean Cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* Reseller Wallet Card */}
+          {stats?.resellerWallet && (
+            <Card className="border-border hover:shadow-md transition-shadow bg-primary/5 border-primary/20">
+              <CardContent className="p-5">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1">
+                    <p className="text-xs font-medium text-primary mb-2">Wallet Balance</p>
+                    <p className="text-2xl font-bold text-foreground">{formatCurrency(stats.resellerWallet.balance)}</p>
+                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-2">
+                      <Button variant="link" className="p-0 h-auto text-xs" onClick={() => router.push('/dashboard/reseller-wallet')}>
+                        Add Funds
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="h-10 w-10 rounded-lg bg-primary/20 flex items-center justify-center flex-shrink-0">
+                    <IndianRupee className="h-5 w-5 text-primary" />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
           <Card className="border-border hover:shadow-md transition-shadow">
             <CardContent className="p-5">
               <div className="flex items-start justify-between gap-3">

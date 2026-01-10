@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Order from '@/models/orderModel';
+import User from '@/models/userModel';
+import Reseller from '@/models/resellerModel';
 import connectDB from '@/lib/db';
 import { getDataFromToken } from '@/helper/getDataFromToken';
 
@@ -40,7 +42,24 @@ export async function GET(request: NextRequest) {
     })
       .sort({ createdAt: -1 })
       .limit(10)
+      .limit(10)
       .lean();
+
+    // Check for reseller status
+    const user = await User.findById(userId);
+    let resellerInfo = null;
+
+    if (user?.userType === 'reseller' && user?.resellerId) {
+      const reseller = await Reseller.findById(user.resellerId);
+      if (reseller) {
+        resellerInfo = {
+          balance: reseller.wallet?.balance || 0,
+          currency: reseller.wallet?.currency || 'INR',
+          creditLimit: reseller.wallet?.creditLimit || 0,
+          totalSpent: reseller.stats?.totalSpent || 0
+        };
+      }
+    }
 
     // Calculate stats
     const totalOrders = allOrders.length;
@@ -88,7 +107,9 @@ export async function GET(request: NextRequest) {
         createdAt: order.createdAt,
       })),
       monthlySpending,
+      monthlySpending,
       orderStatusBreakdown,
+      resellerWallet: resellerInfo,
     };
 
     return NextResponse.json(stats);

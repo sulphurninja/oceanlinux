@@ -79,7 +79,12 @@ function LoginPage({ className, ...props }: React.ComponentPropsWithoutRef<"div"
     const checkUser = async () => {
       const response = await fetch('/api/users/me');
       if (response.ok) {
-        router.push('/dashboard');
+        const data = await response.json();
+        if (data?.userType === 'reseller') {
+          router.push('/dashboard/reseller-wallet');
+        } else {
+          router.push('/dashboard');
+        }
       }
     };
     checkUser();
@@ -101,7 +106,11 @@ function LoginPage({ className, ...props }: React.ComponentPropsWithoutRef<"div"
     const data = await response.json();
 
     if (response.ok) {
-      router.push('/dashboard');
+      if (data.result?.userType === 'reseller') {
+        router.push('/dashboard/reseller-wallet');
+      } else {
+        router.push('/dashboard');
+      }
     } else {
       setError(data.message || 'Invalid email or password.');
     }
@@ -126,9 +135,9 @@ function LoginPage({ className, ...props }: React.ComponentPropsWithoutRef<"div"
           <div className="max-w-2xl">
             {/* Brand */}
             <div className="flex items-center gap-3 mb-8">
-              <img 
-                src="/ol.png" 
-                className="h-16 w-auto transition-all duration-200 hover:scale-105" 
+              <img
+                src="/ol.png"
+                className="h-16 w-auto transition-all duration-200 hover:scale-105"
                 alt="OceanLinux"
               />
               <div>

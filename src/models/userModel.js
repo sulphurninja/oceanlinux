@@ -65,6 +65,17 @@ const userSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Wallet'
     },
+    // Reseller Integration
+    resellerId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Reseller',
+        default: null
+    },
+    userType: {
+        type: String,
+        enum: ['customer', 'reseller', 'admin'],
+        default: 'customer'
+    },
     // API usage settings
     apiSettings: {
         monthlyLimit: {

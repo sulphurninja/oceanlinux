@@ -85,7 +85,34 @@ const orderSchema = new mongoose.Schema({
         paymentMethod: { type: String },
         amount: { type: Number },
         gatewayOrderId: { type: String } // Razorpay order ID if applicable
-    }
+    },
+
+    // Reseller Tracking
+    resellerId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Reseller',
+        index: true
+    },
+
+    // Financial Tracking for Resellers
+    pricing: {
+        basePrice: Number,      // Cost price (OceanLinux price)
+        resellerPrice: Number,  // Price charged to reseller (base + markup)
+        customerPrice: Number,  // End customer price (if known)
+        markup: Number          // Your margin
+    },
+
+    // Wallet Deduction Tracking
+    walletDeduction: {
+        deducted: { type: Boolean, default: false },
+        amount: Number,
+        transactionId: String,
+        timestamp: Date
+    },
+
+    // API Order Tracking
+    apiOrderId: String,  // Reseller's order ID
+    apiMetadata: mongoose.Schema.Types.Mixed
 }, { timestamps: true });
 
 // Indexes
