@@ -83,6 +83,10 @@ function PaymentCallbackContent() {
           if (statusData.paymentStatus === 'SUCCESS') {
             console.log(`[RENEWAL-CALLBACK] Payment successful, confirming renewal...`);
 
+            // Detect payment method from status response (supports cashfree, razorpay, upi)
+            const detectedPaymentMethod = statusData.paymentMethod || 'cashfree';
+            console.log(`[RENEWAL-CALLBACK] Detected payment method: ${detectedPaymentMethod}`);
+
             // Confirm the renewal
             const confirmResponse = await fetch("/api/payment/renew-confirm", {
               method: "POST",
@@ -90,7 +94,7 @@ function PaymentCallbackContent() {
               body: JSON.stringify({
                 renewalTxnId: clientTxnId,
                 orderId: orderId,
-                paymentMethod: 'cashfree' // Add payment method for proper verification
+                paymentMethod: detectedPaymentMethod // Use detected method for proper verification
               })
             });
 
