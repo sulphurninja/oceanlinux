@@ -6,6 +6,7 @@ import crypto from 'crypto';
 const AutoProvisioningService = require('@/services/autoProvisioningService');
 const HostycareAPI = require('@/services/hostycareApi');
 const SmartVPSAPI = require('@/services/smartvpsApi');
+const RenewalLogger = require('@/services/renewalLogger');
 
 export async function POST(request) {
   const webhookStartTime = Date.now();
@@ -92,11 +93,11 @@ export async function POST(request) {
       order.gatewayOrderId = payment.order.order_id; // Store Cashfree order ID
       order.paymentMethod = 'cashfree';
       order.expiryDate = expiryDate; // Set expiry to 30 days from payment confirmation
-      
+
       // Store additional payment info
       order.webhookAmount = payment.payment.payment_amount.toString();
       order.webhookCustomerEmail = payment.customer_details.customer_email;
-      
+
       // Store comprehensive payment details
       order.paymentDetails = {
         cf_payment_id: payment.payment.cf_payment_id,
@@ -127,9 +128,9 @@ export async function POST(request) {
         // This prevents race conditions where confirm/status API already started provisioning
         const freshOrder = await Order.findById(order._id);
         const alreadyProvisioning = freshOrder?.provisioningStatus === 'provisioning' ||
-                                     freshOrder?.provisioningStatus === 'active' ||
-                                     freshOrder?.ipAddress;
-        
+          freshOrder?.provisioningStatus === 'active' ||
+          freshOrder?.ipAddress;
+
         if (alreadyProvisioning) {
           console.log(`[WEBHOOK] ⚠️ Order ${order._id} already provisioning/provisioned, skipping`);
           console.log(`[WEBHOOK]   → Status: ${freshOrder?.provisioningStatus}`);
@@ -137,7 +138,7 @@ export async function POST(request) {
           console.log(`[WEBHOOK]   → Lock ID: ${freshOrder?.provisioningLockId || 'none'}`);
         } else {
           console.log(`[WEBHOOK] 🚀 Starting auto-provisioning for order ${order._id}`);
-          
+
           const provisioningService = new AutoProvisioningService();
           console.log(`[WEBHOOK] 🔄 Creating AutoProvisioningService instance...`);
 
@@ -275,6 +276,8 @@ async function getProviderFromOrder(order) {
 async function handleRenewalWebhook(renewalTxnId, payment, webhookStartTime) {
   console.log(`[WEBHOOK-RENEWAL] 🔄 Processing renewal webhook for: ${renewalTxnId}`);
 
+  let logger = null; // Will be initialized after finding order
+
   try {
     // Find order by pending renewal transaction ID
     const order = await Order.findOne({ 'pendingRenewal.renewalTxnId': renewalTxnId });
@@ -291,6 +294,13 @@ async function handleRenewalWebhook(renewalTxnId, payment, webhookStartTime) {
     console.log(`[WEBHOOK-RENEWAL] Product: ${order.productName}`);
     console.log(`[WEBHOOK-RENEWAL] Current expiry: ${order.expiryDate}`);
 
+    // Initialize logger
+    logger = new RenewalLogger(order, renewalTxnId, 'webhook');
+    logger.logInfo('Webhook renewal processing started', {
+      productName: order.productName,
+      currentExpiry: order.expiryDate
+    });
+
     // Check if this renewal was already processed (idempotency)
     const alreadyProcessed = order.renewalPayments?.some(
       rp => rp.renewalTxnId === renewalTxnId
@@ -298,6 +308,8 @@ async function handleRenewalWebhook(renewalTxnId, payment, webhookStartTime) {
 
     if (alreadyProcessed) {
       console.log(`[WEBHOOK-RENEWAL] ⚠️ Renewal already processed: ${renewalTxnId}`);
+      logger.logWarning('Renewal already processed - idempotency check');
+      await logger.finalize(true, order.expiryDate);
       return NextResponse.json({
         success: true,
         message: 'Renewal already processed',
@@ -308,6 +320,8 @@ async function handleRenewalWebhook(renewalTxnId, payment, webhookStartTime) {
     // Determine provider
     const provider = await getProviderFromOrder(order);
     console.log(`[WEBHOOK-RENEWAL] Provider: ${provider}`);
+    logger.logInfo('Provider determined', { provider });
+    logger.setPaymentInfo('cashfree', payment.payment.cf_payment_id, order.price);
 
     // Calculate new expiry date
     const currentExpiry = new Date(order.expiryDate);
@@ -324,13 +338,18 @@ async function handleRenewalWebhook(renewalTxnId, payment, webhookStartTime) {
 
     if (provider === 'hostycare' && order.hostycareServiceId) {
       console.log('[WEBHOOK-RENEWAL] Processing Hostycare renewal via API...');
+      logger.logInfo('Calling Hostycare renewal API', { serviceId: order.hostycareServiceId });
       try {
+        const apiStart = Date.now();
         const api = new HostycareAPI();
         providerRenewalResult = await api.renewService(order.hostycareServiceId);
+        const apiDuration = Date.now() - apiStart;
         console.log(`[WEBHOOK-RENEWAL] Hostycare renewal result:`, providerRenewalResult);
         providerRenewalSuccess = true;
+        logger.setProviderApiResult('hostycare', true, providerRenewalResult, null, apiDuration);
       } catch (hostycareError) {
         console.error(`[WEBHOOK-RENEWAL] Hostycare renewal API failed:`, hostycareError);
+        logger.setProviderApiResult('hostycare', false, null, hostycareError);
         providerRenewalResult = { error: hostycareError.message };
       }
     } else if (provider === 'smartvps') {
@@ -339,12 +358,16 @@ async function handleRenewalWebhook(renewalTxnId, payment, webhookStartTime) {
 
       if (serviceIdentifier) {
         try {
+          const apiStart = Date.now();
           const smartvpsApi = new SmartVPSAPI();
           providerRenewalResult = await smartvpsApi.renewVps(serviceIdentifier);
+          const apiDuration = Date.now() - apiStart;
           console.log(`[WEBHOOK-RENEWAL] SmartVPS renewal result:`, providerRenewalResult);
           providerRenewalSuccess = true;
+          logger.setProviderApiResult('smartvps', true, providerRenewalResult, null, apiDuration);
         } catch (smartvpsError) {
           console.error(`[WEBHOOK-RENEWAL] SmartVPS renewal API failed:`, smartvpsError);
+          logger.setProviderApiResult('smartvps', false, null, smartvpsError);
           providerRenewalResult = { error: smartvpsError.message };
         }
       } else {
@@ -376,6 +399,7 @@ async function handleRenewalWebhook(renewalTxnId, payment, webhookStartTime) {
       expiryDate: newExpiryDate,
       lastAction: 'renew',
       lastActionTime: new Date(),
+      provider: provider, // Store provider for future renewals
       transactionId: payment.payment.cf_payment_id,
       gatewayOrderId: renewalTxnId,
       paymentMethod: 'cashfree',
@@ -393,6 +417,10 @@ async function handleRenewalWebhook(renewalTxnId, payment, webhookStartTime) {
     const totalTime = Date.now() - webhookStartTime;
     console.log(`[WEBHOOK-RENEWAL] ✅ Renewal completed successfully in ${totalTime}ms`);
     console.log(`[WEBHOOK-RENEWAL] Order ${order._id} renewed until ${newExpiryDate}`);
+    logger.logSuccess('Renewal completed successfully', { totalTime: `${totalTime}ms` });
+
+    // Finalize logger
+    await logger.finalize(true, newExpiryDate);
 
     return NextResponse.json({
       success: true,
@@ -406,6 +434,9 @@ async function handleRenewalWebhook(renewalTxnId, payment, webhookStartTime) {
 
   } catch (error) {
     console.error(`[WEBHOOK-RENEWAL] ❌ Error processing renewal:`, error);
+    if (logger) {
+      await logger.finalize(false, null, error.message, error.stack);
+    }
     return NextResponse.json({
       success: false,
       message: 'Error processing renewal webhook',

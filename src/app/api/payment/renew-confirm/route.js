@@ -7,6 +7,7 @@ import Razorpay from 'razorpay';
 import crypto from 'crypto';
 const HostycareAPI = require('@/services/hostycareApi');
 const SmartVPSAPI = require('@/services/smartvpsApi');
+const RenewalLogger = require('@/services/renewalLogger');
 
 // Initialize Cashfree
 Cashfree.XClientId = process.env.CASHFREE_APP_ID;
@@ -106,6 +107,8 @@ export async function POST(request) {
 
   console.log("========== RENEWAL PAYMENT CONFIRMATION API ==========");
 
+  let logger = null; // Will be initialized after we find the order
+
   try {
     const {
       renewalTxnId,
@@ -139,6 +142,14 @@ export async function POST(request) {
       );
     }
 
+    // Initialize logger now that we have the order
+    logger = new RenewalLogger(order, renewalTxnId, 'confirm-api');
+    logger.logInfo('Renewal confirmation request received', {
+      paymentMethod,
+      orderId,
+      renewalTxnId
+    });
+
     // Idempotency check: See if this renewal was already processed
     const alreadyProcessed = order.renewalPayments?.some(
       rp => rp.renewalTxnId === renewalTxnId
@@ -146,6 +157,8 @@ export async function POST(request) {
 
     if (alreadyProcessed) {
       console.log(`[RENEWAL-CONFIRM] ⚠️ Renewal already processed: ${renewalTxnId}`);
+      logger.logWarning('Renewal already processed - idempotency check');
+      await logger.finalize(true, order.expiryDate);
       const existingRenewal = order.renewalPayments.find(rp => rp.renewalTxnId === renewalTxnId);
       return NextResponse.json({
         success: true,
@@ -203,12 +216,16 @@ export async function POST(request) {
 
       if (generatedSignature === razorpaySignature) {
         console.log('[RENEWAL-CONFIRM] ✅ Razorpay signature verified');
+        logger.logSuccess('Razorpay payment verified');
         payment_id = razorpayPaymentId;
         paymentVerified = true;
+        logger.setPaymentInfo('razorpay', razorpayPaymentId, order.price);
       } else {
         console.error('[RENEWAL-CONFIRM] ❌ Razorpay signature verification failed');
         console.error('[RENEWAL-CONFIRM] Expected signature format: order_id|payment_id');
         console.error('[RENEWAL-CONFIRM] order_id used:', orderIdForSignature);
+        logger.logError('Razorpay signature verification failed');
+        await logger.finalize(false, null, 'Razorpay signature verification failed');
         return NextResponse.json(
           { success: false, message: 'Payment verification failed' },
           { status: 400 }
@@ -266,8 +283,10 @@ export async function POST(request) {
 
             if (payment.payment_status === 'SUCCESS') {
               console.log('[RENEWAL-CONFIRM] ✅ Cashfree payment verified successfully');
+              logger.logSuccess('Cashfree payment verified');
               payment_id = payment.cf_payment_id;
               paymentVerified = true;
+              logger.setPaymentInfo('cashfree', payment.cf_payment_id, order.price);
             } else {
               console.log('[RENEWAL-CONFIRM] ⏳ Payment status:', payment.payment_status);
               return NextResponse.json({
@@ -321,6 +340,7 @@ export async function POST(request) {
     // Determine the provider for this order using the enhanced function with IPStock lookup
     const provider = await getProviderFromOrder(order);
     console.log(`[RENEWAL-CONFIRM] Final determined provider: ${provider} for order ${orderId}`);
+    logger.logInfo('Provider determined', { provider });
 
     // Calculate new expiry date (30 days from current expiry or now, whichever is later)
     const currentExpiry = new Date(order.expiryDate);
@@ -360,13 +380,18 @@ export async function POST(request) {
 
     if (provider === 'hostycare' && order.hostycareServiceId) {
       console.log('[RENEWAL-CONFIRM] Processing Hostycare renewal');
+      logger.logInfo('Calling Hostycare renewal API', { serviceId: order.hostycareServiceId });
       try {
+        const apiStart = Date.now();
         const api = new HostycareAPI();
         providerRenewalResult = await api.renewService(order.hostycareServiceId);
+        const apiDuration = Date.now() - apiStart;
         console.log(`Hostycare renewal result for service ${order.hostycareServiceId}:`, providerRenewalResult);
         providerRenewalSuccess = true;
+        logger.setProviderApiResult('hostycare', true, providerRenewalResult, null, apiDuration);
       } catch (hostycareError) {
         console.error(`Hostycare renewal failed for order ${order._id}:`, hostycareError);
+        logger.setProviderApiResult('hostycare', false, null, hostycareError);
         providerRenewalResult = { error: hostycareError.message };
         // We still consider the renewal successful since payment was processed
         // The service renewal might succeed later or can be retried manually
@@ -406,6 +431,7 @@ export async function POST(request) {
           console.log('[RENEWAL-CONFIRM] SmartVPS renewal response:', JSON.stringify(providerRenewalResult, null, 2));
 
           providerRenewalSuccess = true;
+          logger.setProviderApiResult('smartvps', true, providerRenewalResult, null, renewalDuration);
 
           console.log('[RENEWAL-CONFIRM] ✅ SmartVPS renewal API call completed successfully');
           console.log('[RENEWAL-CONFIRM] Service identifier', serviceIdentifier, 'has been renewed via SmartVPS API');
@@ -423,6 +449,8 @@ export async function POST(request) {
           console.error('[RENEWAL-CONFIRM] SmartVPS error message:', smartvpsError.message);
           console.error('[RENEWAL-CONFIRM] SmartVPS error stack:', smartvpsError.stack);
           console.log('[RENEWAL-CONFIRM] ❌ SmartVPS renewal API call failed');
+
+          logger.setProviderApiResult('smartvps', false, null, smartvpsError, renewalDuration);
 
           providerRenewalResult = {
             error: smartvpsError.message,
@@ -469,11 +497,12 @@ export async function POST(request) {
     });
 
     // Update the order with new expiry date and payment info
-    // IMPORTANT: Update main payment fields to reflect the latest renewal transaction
+    // IMPORTANT: Update main payment fields  to reflect the latest renewal transaction
     const updatedOrder = await Order.findByIdAndUpdate(orderId, {
       expiryDate: newExpiryDate,
       lastAction: 'renew',
       lastActionTime: new Date(),
+      provider: provider, // Store provider for accurate future renewals
       // Update main payment fields with latest renewal payment
       transactionId: cf_payment_id,
       gatewayOrderId: renewalPayment.gatewayOrderId,
@@ -504,6 +533,10 @@ export async function POST(request) {
       providerRenewalSuccess: providerRenewalSuccess,
       renewalPayments: updatedOrder.renewalPayments?.length || 0
     });
+    logger.logSuccess('Database updated with new expiry date', { newExpiryDate });
+
+    // Finalize logger with success
+    await logger.finalize(true, newExpiryDate);
 
     // Prepare success response with provider-specific information
     const response = {
@@ -552,6 +585,12 @@ export async function POST(request) {
     console.error('[RENEWAL-CONFIRM] Error type:', error.constructor.name);
     console.error('[RENEWAL-CONFIRM] Error message:', error.message);
     console.error('[RENEWAL-CONFIRM] Error stack:', error.stack);
+
+    // Finalize logger with failure
+    if (logger) {
+      await logger.finalize(false, null, error.message, error.stack);
+    }
+
     return NextResponse.json(
       { success: false, message: 'Server error', error: error.message },
       { status: 500 }
