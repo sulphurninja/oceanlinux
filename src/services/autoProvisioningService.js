@@ -736,11 +736,17 @@ class AutoProvisioningService {
           }
 
           // CRITICAL SAFETY CHECK: Verify the assigned IP belongs to the requested package
-          // We requested a PACKAGE NAME (e.g., "103.82.72"), so check if assigned IP starts with it
-          // For example: requested "103.82.72", got "103.82.72.116" → MATCH ✅
-          const ipMatches = String(boughtIp).startsWith(specificIpToBuy + '.');
+          // We requested a PACKAGE NAME (e.g., "103.82.72" or "103.109.18x")
+          // SmartVPS uses 'x' as a wildcard, so normalize before checking
+          // Examples:
+          //   - Package "103.82.72" + IP "103.82.72.116" → MATCH ✅
+          //   - Package "103.109.18x" + IP "103.109.183.6" → Normalize to "103.109.18" → MATCH ✅
+          const normalizedPackage = String(specificIpToBuy).replace(/x+$/i, ''); // Strip trailing 'x' wildcards
+          const ipMatches = String(boughtIp).startsWith(normalizedPackage + '.') ||
+            String(boughtIp).startsWith(normalizedPackage);
 
           L.kv('[SMARTVPS]   → Requested package', specificIpToBuy);
+          L.kv('[SMARTVPS]   → Normalized package prefix', normalizedPackage);
           L.kv('[SMARTVPS]   → Assigned IP from SmartVPS', boughtIp);
           L.kv('[SMARTVPS]   → IP belongs to package', ipMatches ? '✅ MATCH' : '❌ NO MATCH');
 
