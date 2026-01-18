@@ -210,43 +210,129 @@ class AutoProvisioningService {
    * - If package name has 3 numeric octets (e.g., 103.181.91), match first 3 octets.
    * - Otherwise fall back to first 2 octets.
    */
-  async pickSmartVpsIpForPackage(pkgName) {
+/**
+ * CORRECTED VERSION - Pick a package from Smart VPS ipstock
+ * 
+ * KEY INSIGHT: The ipstock API returns PACKAGE NAMES and IP COUNTS, not individual IPs!
+ * 
+ * Example response:
+ * {
+ *   "packages": [
+ *     {"id": 5, "name": "103.82.72", "ipv4": 71, "status": "active"}
+ *   ]
+ * }
+ * 
+ * We search for a matching package and return its NAME (e.g., "103.82.72"),
+ * then buyVps("103.82.72", "16") will assign a random IP from that package's pool.
+ */async pickSmartVpsIpForPackage(pkgName) {
     try {
       L.line('[SMARTVPS] Calling ipstock() …');
       const res = await this.smartvpsApi.ipstock();
       const data = this.normalizeSmartVpsResponse(res);
-      const text = typeof data === 'string' ? data : JSON.stringify(data);
-      L.kv('[SMARTVPS] ipstock() normalized', text?.slice(0, 400));
 
-      const parts = String(pkgName).split('.');
-      const numericParts = parts.filter(p => /^\d+$/.test(p));
-      const useThree = numericParts.length >= 3;
-      const prefix = useThree
-        ? numericParts.slice(0, 3).join('.')
-        : numericParts.slice(0, 2).join('.');
-
-      // Build regex: for 3-octet prefix -> 103\.181\.91\.\d{1,3}
-      // For 2-octet prefix -> 103\.181\.\d{1,3}\.\d{1,3}
-      const regex =
-        useThree
-          ? new RegExp(`\\b${prefix.replace(/\./g, '\\.')}\\.\\d{1,3}\\b`)
-          : new RegExp(`\\b${prefix.replace(/\./g, '\\.')}\\.\\d{1,3}\\.\\d{1,3}\\b`);
-
-      const match = text.match(regex);
-      const ip = match?.[0];
-
-      L.kv('[SMARTVPS] Desired package prefix', prefix);
-      L.kv('[SMARTVPS] Matched IP from ipstock', ip || '(none)');
-
-      if (!ip) {
-        throw new Error(`No available IP in SmartVPS ipstock matching prefix ${prefix}`);
+      // Parse response to get packages array
+      let parsed = data;
+      if (typeof data === 'string') {
+        try {
+          parsed = JSON.parse(data);
+        } catch (e) {
+          L.line(`[SMARTVPS] Failed to parse ipstock response: ${e.message}`);
+          throw new Error('Invalid ipstock response format');
+        }
       }
 
-      return ip;
+      const packages = parsed?.packages || [];
+      L.line(`[SMARTVPS] Found ${packages.length} packages in ipstock`);
+
+      if (packages.length === 0) {
+        throw new Error('No packages available in SmartVPS ipstock');
+      }
+
+      // Strategy: Try to find exact match first, then similar packages
+      const requestedPrefix = String(pkgName).trim();
+      const parts = requestedPrefix.split('.');
+      const numericParts = parts.filter(p => /^\d+$/.test(p));
+
+      let selectedPackage = null;
+      let matchStrategy = null;
+
+      // 1. Try EXACT match (e.g., "103.82.72" === "103.82.72")
+      selectedPackage = packages.find(pkg =>
+        pkg.name === requestedPrefix &&
+        pkg.status === 'active' &&
+        Number(pkg.ipv4 || 0) > 0
+      );
+
+      if (selectedPackage) {
+        matchStrategy = `exact match`;
+      } else if (numericParts.length >= 3) {
+        // 2. Try exact 3-octet match (e.g., "103.82.72" matches "103.82.72")
+        const prefix3 = numericParts.slice(0, 3).join('.');
+        selectedPackage = packages.find(pkg => {
+          const pkgName = String(pkg.name || '').replace(/[^0-9.]/g, '');
+          return pkgName.startsWith(prefix3) &&
+            pkg.status === 'active' &&
+            Number(pkg.ipv4 || 0) > 0;
+        });
+
+        if (selectedPackage) {
+          matchStrategy = `3-octet prefix match (${prefix3})`;
+        } else {
+          // 3. Fallback to 2-octet match (e.g., "103.82.*")
+          const prefix2 = numericParts.slice(0, 2).join('.');
+          selectedPackage = packages.find(pkg => {
+            const pkgName = String(pkg.name || '').replace(/[^0-9.]/g, '');
+            return pkgName.startsWith(prefix2) &&
+              pkg.status === 'active' &&
+              Number(pkg.ipv4 || 0) > 0;
+          });
+
+          if (selectedPackage) {
+            matchStrategy = `2-octet prefix match (${prefix2})`;
+            L.line(`[SMARTVPS] ⚠️ No exact match for ${requestedPrefix}, using fallback`);
+          }
+        }
+      } else {
+        // Only 2 octets requested, try prefix match
+        const prefix2 = numericParts.slice(0, 2).join('.');
+        selectedPackage = packages.find(pkg => {
+          const pkgName = String(pkg.name || '').replace(/[^0-9.]/g, '');
+          return pkgName.startsWith(prefix2) &&
+            pkg.status === 'active' &&
+            Number(pkg.ipv4 || 0) > 0;
+        });
+
+        if (selectedPackage) {
+          matchStrategy = `2-octet prefix match`;
+        }
+      }
+
+      L.kv('[SMARTVPS] Requested package', requestedPrefix);
+      L.kv('[SMARTVPS] Match strategy', matchStrategy || 'none');
+
+      if (selectedPackage) {
+        L.kv('[SMARTVPS] Selected package name', selectedPackage.name);
+        L.kv('[SMARTVPS] Available IPs in package', selectedPackage.ipv4);
+        L.line(`[SMARTVPS] ✅ Will request package "${selectedPackage.name}" and SmartVPS will assign an IP from its pool`);
+
+        // Return the PACKAGE NAME (not a full IP) - SmartVPS will assign an IP from this package
+        return selectedPackage.name;
+      }
+
+      // No match found
+      L.line(`[SMARTVPS] ❌ No matching package found`);
+      L.line(`[SMARTVPS] Available packages:`);
+      packages.filter(p => p.status === 'active').slice(0, 10).forEach(p => {
+        L.line(`  - ${p.name} (${p.ipv4} IPs available)`);
+      });
+
+      throw new Error(`No package matching or similar to "${requestedPrefix}" found in ipstock`);
+
     } catch (e) {
       throw new Error(`SmartVPS ipstock failed: ${e.message}`);
     }
   }
+
 
   // BEFORE: pickSmartVpsIp() tries to regex IPv4 from ipstock
   // AFTER: pick a package by name/id, return a descriptor
@@ -322,11 +408,14 @@ class AutoProvisioningService {
 
       L.line(`[SMARTVPS] ✅ Exact package verified and available:`);
       L.kv('[SMARTVPS]   → ID', exactMatch.id);
-      L.kv('[SMARTVPS]   → Name', exactMatch.name);
+      L.kv('[SMARTVPS]   → Name (current in API)', exactMatch.name);
+      L.kv('[SMARTVPS]  → Name (customer ordered)', storedName);
       L.kv('[SMARTVPS]   → Status', exactMatch.status);
       L.kv('[SMARTVPS]   → Available IPv4', exactMatch.ipv4);
 
-      return { id: exactMatch.id, name: exactMatch.name };
+      // CRITICAL: Return the STORED name (what customer ordered), not the current API name
+      // Even if SmartVPS renamed the package, we need to search for IPs matching what the customer ordered
+      return { id: exactMatch.id, name: storedName };
     } catch (e) {
       throw new Error(`SmartVPS package selection failed: ${e.message}`);
     }
@@ -548,20 +637,52 @@ class AutoProvisioningService {
     L.kv('[SMARTVPS] parsed RAM (GB)', ram);
     if (!ram) throw new Error(`Unable to parse RAM from memory "${order.memory}" for SmartVPS`);
 
-    // Get package with retry logic
-    const pkg = await this.pickSmartVpsPackage(ipStock, order);
-    L.kv('[SMARTVPS] Using package for buy', pkg);
+    // Extract IP prefix from product name (e.g., "🌊 103.82.72" -> "103.82.72")
+    // Remove emoji, spaces, and extract the IP pattern
+    const productNameClean = String(order.productName || '').replace(/[^\d.]/g, '');
+    const requestedIpPrefix = productNameClean.trim();
 
-    // SmartVPS buyVps expects the package NAME (IP prefix like "103.82.74"), NOT a full IP
-    // Their API: { "ip" : "103.82.74", "ram" : "8" }
-    const packageNameForBuy = pkg.name;
-    L.kv('[SMARTVPS] Using package name for buy', packageNameForBuy);
+    L.line(`[SMARTVPS] Customer ordered product: ${order.productName}`);
+    L.kv('[SMARTVPS] Extracted IP prefix', requestedIpPrefix);
+
+    if (!requestedIpPrefix || !requestedIpPrefix.match(/^\d+\.\d+/)) {
+      throw new Error(`Cannot extract IP prefix from product name "${order.productName}". Expected format like "🌊 103.82.72"`);
+    }
+
+    // CRITICAL: Pick a SPECIFIC IP from ipstock matching what customer ordered
+    // We don't care about package IDs or package names - just find IPs in the requested range!
+    // According to SmartVPS docs: "First you need to call ipstock api to get the available ip 
+    // and then call this api to buy the vps"
+    let specificIpToBuy;
+    try {
+      L.line(`[SMARTVPS] Searching ipstock for available IPs matching: ${requestedIpPrefix}.*`);
+      specificIpToBuy = await this.pickSmartVpsIpForPackage(requestedIpPrefix);
+      L.kv('[SMARTVPS] Specific IP selected from ipstock', specificIpToBuy);
+
+      if (!specificIpToBuy) {
+        throw new Error(`No available IP found matching ${requestedIpPrefix}.*. Package may be out of stock.`);
+      }
+    } catch (ipstockError) {
+      L.line(`[SMARTVPS] ❌ Failed to get IP from ipstock: ${ipstockError.message}`);
+
+      // Mark order as failed BEFORE purchasing anything
+      await Order.findByIdAndUpdate(order._id, {
+        provisioningStatus: 'failed',
+        provisioningError: `No available IPs matching "${requestedIpPrefix}.*". SmartVPS may be out of stock for this IP range. Error: ${ipstockError.message}`,
+        autoProvisioned: true,
+        provider: 'smartvps'
+      });
+
+      throw new Error(`Cannot provision: ${ipstockError.message}. No financial loss - purchase was not attempted.`);
+    }
+
+    L.line(`[SMARTVPS] ✅ Will purchase specific IP: ${specificIpToBuy} with ${ram}GB RAM`);
 
     // CRITICAL: Acquire lock to prevent race conditions
-    // This ensures only ONE order provisions from this package at a time
+    // This ensures only ONE order provisions from this IP range at a time
     let lockAcquired = false;
     try {
-      await this.acquirePackageLock(pkg.name, order._id.toString());
+      await this.acquirePackageLock(requestedIpPrefix, order._id.toString());
       lockAcquired = true;
     } catch (lockError) {
       L.line(`[SMARTVPS] ❌ Failed to acquire lock: ${lockError.message}`);
@@ -598,10 +719,11 @@ class AutoProvisioningService {
 
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
-          L.line(`[SMARTVPS] Calling buyVps(${packageNameForBuy}, ${ram}) - attempt ${attempt}/${maxRetries} …`);
+          // Use the SPECIFIC IP we selected from ipstock, not just package name
+          L.line(`[SMARTVPS] Calling buyVps(${specificIpToBuy}, ${ram}) - attempt ${attempt}/${maxRetries} …`);
 
           // buyVps API has 3 minute timeout built-in, no extra wrapper needed
-          buyRes = await this.smartvpsApi.buyVps(packageNameForBuy, ram);
+          buyRes = await this.smartvpsApi.buyVps(specificIpToBuy, ram);
 
           const buyText = typeof buyRes === 'string' ? buyRes : JSON.stringify(buyRes);
           L.kv(`[SMARTVPS] buyVps attempt ${attempt} response`, buyText.slice(0, 500));
@@ -609,49 +731,24 @@ class AutoProvisioningService {
           // Extract the assigned IP from the buy response
           boughtIp = this.extractIp(buyText);
           L.kv('[SMARTVPS] assigned/bought IP', boughtIp);
-
           if (!boughtIp) {
             throw new Error('SmartVPS buyVps did not return an assigned IP');
           }
 
-          // CRITICAL SAFETY CHECK: Verify the IP belongs to the requested package
-          // We need to match based on how many numeric octets are in the package name
-          // Examples:
-          // - Package "103.83.x" or "103.83" → Match first 2 octets (103.83)
-          // - Package "103.184" → Match first 3 octets (103.184) - NOT just "103.18"!
-          // - Package "103.181.91" → Match first 3 octets (103.181.91)
-          const requestedPackage = pkg.name; // e.g., "103.83.x" or "103.184" or "103.181.91"
-          const ipParts = boughtIp.split('.'); // e.g., ["103", "186", "44", "73"]
+          // CRITICAL SAFETY CHECK: Verify the assigned IP belongs to the requested package
+          // We requested a PACKAGE NAME (e.g., "103.82.72"), so check if assigned IP starts with it
+          // For example: requested "103.82.72", got "103.82.72.116" → MATCH ✅
+          const ipMatches = String(boughtIp).startsWith(specificIpToBuy + '.');
 
-          // Extract numeric octets from package name (filter out 'x', 'X', etc.)
-          const packageParts = requestedPackage.split('.');
-          const numericPackageParts = packageParts.filter(p => /^\d+$/.test(p));
-
-          // Determine how many octets to compare based on package name
-          // For "103.184" → 2 numeric parts → compare 2 octets
-          // For "103.181.91" → 3 numeric parts → compare 3 octets
-          const numOctetsToCompare = numericPackageParts.length;
-
-          // Extract the prefix to match (e.g., "103.184" or "103.181.91")
-          const packagePrefix = numericPackageParts.join('.');
-
-          // Extract the same number of octets from assigned IP
-          const ipPrefix = ipParts.slice(0, numOctetsToCompare).join('.');
-
-          const ipMatches = (ipPrefix === packagePrefix);
-
-          L.kv('[SMARTVPS]   → Requested package', requestedPackage);
-          L.kv('[SMARTVPS]   → Package numeric parts', numericPackageParts);
-          L.kv('[SMARTVPS]   → Octets to compare', numOctetsToCompare);
-          L.kv('[SMARTVPS]   → Package prefix', packagePrefix);
-          L.kv('[SMARTVPS]   → Assigned IP', boughtIp);
-          L.kv('[SMARTVPS]   → IP prefix', ipPrefix);
-          L.kv('[SMARTVPS]   → Match', ipMatches ? '✅ MATCH' : '❌ NO MATCH');
+          L.kv('[SMARTVPS]   → Requested package', specificIpToBuy);
+          L.kv('[SMARTVPS]   → Assigned IP from SmartVPS', boughtIp);
+          L.kv('[SMARTVPS]   → IP belongs to package', ipMatches ? '✅ MATCH' : '❌ NO MATCH');
 
           if (!ipMatches) {
             L.line(`[SMARTVPS] ❌ CRITICAL: SmartVPS assigned IP from WRONG package!`);
-            L.line(`[SMARTVPS]   → This indicates the requested package ran out of IPs`);
-            L.line(`[SMARTVPS]   → SmartVPS API fallback behavior detected!`);
+            L.line(`[SMARTVPS]   → We requested package: ${specificIpToBuy}`);
+            L.line(`[SMARTVPS]   → SmartVPS gave us IP: ${boughtIp}`);
+            L.line(`[SMARTVPS]   → This IP does not belong to the requested package!`);
             L.line(`[SMARTVPS]   → ORDER WILL BE MARKED AS FAILED (not provisioned)`);
 
             // Set flag to prevent continuation after loop
@@ -660,7 +757,7 @@ class AutoProvisioningService {
             // Mark order as failed immediately
             await Order.findByIdAndUpdate(order._id, {
               provisioningStatus: 'failed',
-              provisioningError: `WRONG PACKAGE ASSIGNED: Customer ordered "${requestedPackage}" (${packageFirstTwo}.*) but SmartVPS assigned "${boughtIp}" (${ipFirstTwo}.*). Package likely ran out of IPs. DO NOT provision this order.`,
+              provisioningError: `WRONG IP ASSIGNED: Customer ordered IP range "${requestedIpPrefix}.*" and we requested IP "${specificIpToBuy}" but SmartVPS assigned "${boughtIp}". This IP does not match. DO NOT provision this order. Likely cause: IP became unavailable between ipstock check and purchase.`,
               status: 'failed',
               autoProvisioned: true,
               failedAt: new Date(),
@@ -668,10 +765,10 @@ class AutoProvisioningService {
 
             // Throw error that will NOT be retried
             const safetyError = new Error(
-              `❌ PROVISIONING BLOCKED: SmartVPS assigned IP from wrong package! ` +
-              `Customer ordered "${requestedPackage}" (${packageFirstTwo}.*) but received "${boughtIp}" (${ipFirstTwo}.*). ` +
-              `This order has been marked as FAILED and will NOT be provisioned. ` +
-              `Reason: Package ran out of IPs or SmartVPS API bug. Admin must manually resolve.`
+              `❌ PROVISIONING BLOCKED: SmartVPS assigned wrong IP! ` +
+              `Requested: "${specificIpToBuy}" but received: "${boughtIp}". ` +
+              `IP range ordered: "${requestedIpPrefix}.*". Order marked as FAILED and will NOT be provisioned. ` +
+              `Likely cause: IP became unavailable between ipstock check and purchase, or SmartVPS API bug. Admin must manually resolve.`
             );
             safetyError.isSafetyCheckFailure = true; // Mark as safety failure
             throw safetyError;
@@ -679,7 +776,7 @@ class AutoProvisioningService {
 
           // Success - break out of retry loop
           L.line(`[SMARTVPS] ✅ buyVps succeeded on attempt ${attempt}`);
-          L.line(`[SMARTVPS] ✅ IP verification passed: ${boughtIp} matches package ${requestedPackage}`);
+          L.line(`[SMARTVPS] ✅ IP verification passed: ${boughtIp} matches requested IP ${specificIpToBuy}`);
           break;
 
         } catch (error) {
@@ -817,7 +914,7 @@ class AutoProvisioningService {
     } finally {
       // ALWAYS release the lock, even if provisioning failed
       if (lockAcquired) {
-        this.releasePackageLock(pkg.name, order._id.toString());
+        this.releasePackageLock(requestedIpPrefix, order._id.toString());
       }
     }
   }
