@@ -190,6 +190,53 @@ export default function ResellerApiDocsPage() {
                             `} />
                         </CardContent>
                     </Card>
+
+                    {/* Manage Server */}
+                    <Card>
+                        <CardHeader>
+                            <div className="flex items-center gap-2">
+                                <Badge className="bg-green-600 hover:bg-green-700">POST</Badge>
+                                <CardTitle className="text-xl font-mono">/orders/manage</CardTitle>
+                            </div>
+                            <CardDescription>Execute server management actions (start, stop, restart, status, format, changeos)</CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            <h4 className="font-semibold text-sm mb-2">Request Body</h4>
+                            <CodeBlock code={`
+{
+  "orderId": "ord_123...",
+  "action": "start|stop|restart|status|format|changeos|sync",
+  "osType": "ubuntu"  // Required only for changeos
+}
+                            `} />
+
+                            <h4 className="font-semibold text-sm mt-4 mb-2">Available Actions</h4>
+                            <ul className="list-disc pl-5 space-y-1 text-sm text-muted-foreground">
+                                <li><code>start</code> - Start the VPS server</li>
+                                <li><code>stop</code> - Stop the VPS server</li>
+                                <li><code>restart</code> - Restart the VPS server</li>
+                                <li><code>status</code> - Get current power status</li>
+                                <li><code>format</code> - Format/reset the VPS (OceanLinux only)</li>
+                                <li><code>changeos</code> - Change OS (OceanLinux only, requires osType)</li>
+                                <li><code>sync</code> - Sync server status from provider</li>
+                            </ul>
+
+                            <h4 className="font-semibold text-sm mt-4 mb-2">Response Example</h4>
+                            <CodeBlock code={`
+{
+  "success": true,
+  "action": "status",
+  "orderId": "ord_123...",
+  "ipAddress": "103.82.72.120",
+  "message": "Status retrieved",
+  "data": {
+    "powerState": "running"
+  },
+  "timestamp": "2024-03-20T10:00:00Z"
+}
+                            `} />
+                        </CardContent>
+                    </Card>
                 </TabsContent>
 
                 <TabsContent value="errors" className="space-y-4">

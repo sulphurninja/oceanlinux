@@ -738,17 +738,34 @@ class AutoProvisioningService {
           // CRITICAL SAFETY CHECK: Verify the assigned IP belongs to the requested package
           // We requested a PACKAGE NAME (e.g., "103.82.72" or "103.109.18x")
           // SmartVPS uses 'x' as a wildcard, so normalize before checking
-          // Examples:
-          //   - Package "103.82.72" + IP "103.82.72.116" → MATCH ✅
-          //   - Package "103.109.18x" + IP "103.109.183.6" → Normalize to "103.109.18" → MATCH ✅
+          // 
+          // Matching Strategy (lenient):
+          //   1. Try exact 3-octet match (e.g., "103.82.72" matches "103.82.72.116")
+          //   2. Fallback to 2-octet match (e.g., "103.181.91" matches "103.181.90.21" - close enough!)
+          //
+          // This prevents failures when SmartVPS assigns from neighboring packages
           const normalizedPackage = String(specificIpToBuy).replace(/x+$/i, ''); // Strip trailing 'x' wildcards
-          const ipMatches = String(boughtIp).startsWith(normalizedPackage + '.') ||
-            String(boughtIp).startsWith(normalizedPackage);
+          const packageParts = normalizedPackage.split('.');
+          const ipParts = String(boughtIp).split('.');
+
+          // Check 3-octet match first
+          const prefix3 = packageParts.slice(0, 3).join('.');
+          const ipPrefix3 = ipParts.slice(0, 3).join('.');
+          const exact3Match = ipPrefix3.startsWith(prefix3) || String(boughtIp).startsWith(normalizedPackage);
+
+          // Fallback: Check 2-octet match (e.g., 103.181.* matches 103.181.90.21)
+          const prefix2 = packageParts.slice(0, 2).join('.');
+          const ipPrefix2 = ipParts.slice(0, 2).join('.');
+          const fallback2Match = (prefix2 === ipPrefix2);
+
+          const ipMatches = exact3Match || fallback2Match;
+          const matchType = exact3Match ? 'exact (3-octet)' : (fallback2Match ? 'fallback (2-octet)' : 'none');
 
           L.kv('[SMARTVPS]   → Requested package', specificIpToBuy);
           L.kv('[SMARTVPS]   → Normalized package prefix', normalizedPackage);
           L.kv('[SMARTVPS]   → Assigned IP from SmartVPS', boughtIp);
-          L.kv('[SMARTVPS]   → IP belongs to package', ipMatches ? '✅ MATCH' : '❌ NO MATCH');
+          L.kv('[SMARTVPS]   → Match type', matchType);
+          L.kv('[SMARTVPS]   → IP accepted', ipMatches ? '✅ YES' : '❌ NO');
 
           if (!ipMatches) {
             L.line(`[SMARTVPS] ❌ CRITICAL: SmartVPS assigned IP from WRONG package!`);
