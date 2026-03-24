@@ -64,7 +64,9 @@ export async function POST(request) {
       targetAudience,
       actionUrl,
       actionText,
-      scheduledFor
+      scheduledFor,
+      showAsLoginPopup,
+      communityLink
     } = await request.json();
 
     if (!title || !content) {
@@ -82,20 +84,34 @@ export async function POST(request) {
       targetAudience: targetAudience || 'all',
       actionUrl,
       actionText,
+      showAsLoginPopup: Boolean(showAsLoginPopup),
+      communityLink: communityLink || '',
       scheduledFor: scheduledFor ? new Date(scheduledFor) : null,
       createdBy: userId
     });
 
     await announcement.save();
 
-    // If status is 'sent', send emails and notifications immediately
+    // If status is 'sent', send emails/notifications only for normal announcements.
+    // Login popup announcements are published without broadcasting.
     if (status === 'sent') {
-      await sendAnnouncementEmails(announcement);
-      await sendAnnouncementNotifications(announcement); // Add this line
+      if (announcement.showAsLoginPopup) {
+        announcement.sentAt = new Date();
+        announcement.status = 'sent';
+        await announcement.save();
+      } else {
+        await sendAnnouncementEmails(announcement);
+        await sendAnnouncementNotifications(announcement);
+      }
     }
 
+    const responseMessage =
+      status === 'sent' && announcement.showAsLoginPopup
+        ? 'Login popup published successfully'
+        : 'Announcement created successfully';
+
     return new Response(JSON.stringify({
-      message: 'Announcement created successfully',
+      message: responseMessage,
       announcement
     }), {
       status: 201,

@@ -32,8 +32,8 @@ export async function POST(req: NextRequest) {
       // DEBUG (optional): list instance methods to verify shape
       // console.log("VZ methods:", Object.getOwnPropertyNames(Object.getPrototypeOf(vz)));
 
-      const vpsid = await vz.findVpsId({ ip, hostname, username });
-      return NextResponse.json({ ok: true, vpsid });
+      const result = await vz.findVpsId({ ip, hostname, username });
+      return NextResponse.json({ ok: true, vpsid: result?.vpsid || result, virt: result?.virt || null });
     }
 
     if (action === "templates") {

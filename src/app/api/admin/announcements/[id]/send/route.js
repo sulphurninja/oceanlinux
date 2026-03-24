@@ -41,6 +41,27 @@ export async function POST(request, { params }) {
       });
     }
 
+    // Login popup announcements should be published without broadcast email/notification.
+    if (announcement.showAsLoginPopup) {
+      announcement.status = 'sent';
+      announcement.sentAt = new Date();
+      await announcement.save();
+
+      return new Response(JSON.stringify({
+        message: 'Login popup published successfully',
+        announcement,
+        stats: {
+          total: 0,
+          emailsSent: 0,
+          emailsFailed: 0,
+          notificationsSent: 0
+        }
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
     console.log(`[ANNOUNCEMENT] Sending announcement: ${announcement.title}`);
 
     // Send emails and notifications to all users

@@ -270,6 +270,7 @@ export class VirtualizorAPI {
   static _normalizeVm([key, vm]) {
     const vpsid = String(vm?.vpsid ?? vm?.vid ?? vm?.subid ?? key ?? "");
     const hostname = (vm?.hostname || vm?.host || vm?.name || "").toString().trim();
+    const virt = (vm?.virt || vm?.virt_type || vm?.virtualization || "").toString().trim().toLowerCase();
     const ips = [
       ...VirtualizorAPI._valToIps(vm?.ips),
       ...VirtualizorAPI._valToIps(vm?.ip),
@@ -279,7 +280,7 @@ export class VirtualizorAPI {
       ...VirtualizorAPI._valToIps(vm?.ipv4),
     ].filter(Boolean);
 
-    return { vpsid, hostname, ips: Array.from(new Set(ips)) };
+    return { vpsid, hostname, virt, ips: Array.from(new Set(ips)) };
   }
 
   async _listMyVms(accountIndex) {
@@ -317,7 +318,7 @@ export class VirtualizorAPI {
    *  3) hostname (exact)
    *  4) if only one VM is visible on that account, pick it
    *
-   * Returns the vpsid string. Also caches (vpsid -> accountIndex) for later calls.
+   * Returns { vpsid, virt } object. Also caches (vpsid -> accountIndex) for later calls.
    * Returns null ONLY if nothing matched across all accounts.
    */
   async findVpsId(by = {}) {
@@ -342,40 +343,35 @@ export class VirtualizorAPI {
 
         // Log all VMs found for debugging
         vms.forEach((vm, idx) => {
-          console.log(`[VirtualizorAPI][findVpsId] Account ${i} VM ${idx}: vpsid=${vm.vpsid}, hostname=${vm.hostname}, ips=[${vm.ips.join(', ')}]`);
+          console.log(`[VirtualizorAPI][findVpsId] Account ${i} VM ${idx}: vpsid=${vm.vpsid}, hostname=${vm.hostname}, virt=${vm.virt}, ips=[${vm.ips.join(', ')}]`);
         });
 
         const matchIpHost = () => {
           if (!ipIn || !hostIn) return null;
-          const m = vms.find(vm => vm.ips.includes(ipIn) && vm.hostname.toLowerCase() === hostIn);
-          if (m) console.log(`[VirtualizorAPI][findVpsId] Account ${i} IP+hostname match: ${m.vpsid}`);
-          return m?.vpsid || null;
+          return vms.find(vm => vm.ips.includes(ipIn) && vm.hostname.toLowerCase() === hostIn) || null;
         };
 
         const matchIp = () => {
           if (!ipIn) return null;
-          const m = vms.find(vm => vm.ips.includes(ipIn));
-          if (m) console.log(`[VirtualizorAPI][findVpsId] Account ${i} IP match: ${m.vpsid}`);
-          return m?.vpsid || null;
+          return vms.find(vm => vm.ips.includes(ipIn)) || null;
         };
 
         const matchHost = () => {
           if (!hostIn) return null;
-          const m = vms.find(vm => vm.hostname.toLowerCase() === hostIn);
-          if (m) console.log(`[VirtualizorAPI][findVpsId] Account ${i} hostname match: ${m.vpsid}`);
-          return m?.vpsid || null;
+          return vms.find(vm => vm.hostname.toLowerCase() === hostIn) || null;
         };
 
-        const vpsid =
+        const matched =
           matchIpHost() ||
           matchIp()     ||
           matchHost()   ||
-          (vms.length === 1 ? vms[0].vpsid : null);
+          (vms.length === 1 ? vms[0] : null);
 
-        if (vpsid) {
-          console.log(`[VirtualizorAPI][findVpsId] Found VPS ${vpsid} on account ${i}`);
+        if (matched?.vpsid) {
+          const vpsid = matched.vpsid;
+          console.log(`[VirtualizorAPI][findVpsId] Found VPS ${vpsid} (virt: ${matched.virt || 'unknown'}) on account ${i}`);
           this._vpsAccountCache.set(vpsid, i);
-          return vpsid;
+          return { vpsid, virt: matched.virt || null };
         } else {
           console.log(`[VirtualizorAPI][findVpsId] No matching VPS found on account ${i}`);
         }

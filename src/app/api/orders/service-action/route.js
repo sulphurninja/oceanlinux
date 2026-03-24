@@ -38,18 +38,14 @@ function generateSecurePassword() {
 }
 
 
-function flattenOslist(oslist) {
-  // Accept shapes like: oslist[virt][distro][osid] = { osid, name, filename, ... }
+function flattenOslist(oslist, virtFilter) {
   const out = {};
   if (!oslist || typeof oslist !== 'object') return out;
 
-  // first level can be virt (kvm/xen/proxk/etc)
-  for (const virt of Object.values(oslist)) {
-    if (!virt || typeof virt !== 'object') continue;
-    // second level can be distro
-    for (const distro of Object.values(virt)) {
+  const flattenDistros = (distroMap) => {
+    if (!distroMap || typeof distroMap !== 'object') return;
+    for (const distro of Object.values(distroMap)) {
       if (!distro || typeof distro !== 'object') continue;
-      // third level are templates keyed by osid
       for (const [id, tpl] of Object.entries(distro)) {
         if (!id || !tpl || typeof tpl !== 'object') continue;
         const name =
@@ -60,6 +56,19 @@ function flattenOslist(oslist) {
         out[String(id)] = String(name);
       }
     }
+  };
+
+  if (virtFilter) {
+    const key = String(virtFilter).toLowerCase();
+    const match = Object.entries(oslist).find(([k]) => k.toLowerCase() === key);
+    if (match) {
+      flattenDistros(match[1]);
+      return out;
+    }
+  }
+
+  for (const virt of Object.values(oslist)) {
+    flattenDistros(virt);
   }
   return out;
 }
@@ -306,60 +315,78 @@ export async function POST(request) {
         } else if (hostycareApi && order.hostycareServiceId) {
           console.log('[STATUS] Using Hostycare API with service ID:', order.hostycareServiceId);
           try {
-            const serviceInfo = await hostycareApi.getServiceInfo(order.hostycareServiceId);
-            const serviceDetails = await hostycareApi.getServiceDetails(order.hostycareServiceId);
-            
-            console.log('[STATUS] Service Info:', JSON.stringify(serviceInfo, null, 2));
-            console.log('[STATUS] Service Details:', JSON.stringify(serviceDetails, null, 2));
+            // Fetch both endpoints independently so one failure doesn't kill the other
+            let serviceInfo = null;
+            let serviceDetails = null;
+
+            // Use makeRawRequest so we get the data even when API returns success:false
+            // (e.g. when a server is offline, Hostycare may return status in the error response)
+            try {
+              serviceInfo = await hostycareApi.makeRawRequest(`/services/${order.hostycareServiceId}/getInfo`);
+              console.log('[STATUS] Service Info:', JSON.stringify(serviceInfo, null, 2));
+            } catch (infoErr) {
+              console.warn('[STATUS] getServiceInfo failed (non-fatal):', infoErr.message);
+            }
+
+            try {
+              serviceDetails = await hostycareApi.makeRawRequest(`/services/${order.hostycareServiceId}`);
+              console.log('[STATUS] Service Details:', JSON.stringify(serviceDetails, null, 2));
+            } catch (detailsErr) {
+              console.warn('[STATUS] getServiceDetails failed (non-fatal):', detailsErr.message);
+            }
+
+            if (!serviceInfo && !serviceDetails) {
+              throw new Error('Both Hostycare status endpoints failed');
+            }
 
             // Parse the power state from the response
             let powerState = 'unknown';
             let rawStatus = null;
 
-            // Check serviceInfo first (usually has real-time status)
-            if (serviceInfo) {
-              rawStatus = serviceInfo.status || serviceInfo.state || serviceInfo.power_status || serviceInfo.vps_status;
-              
-              // Also check nested properties
-              if (!rawStatus && serviceInfo.vps) {
-                rawStatus = serviceInfo.vps.status || serviceInfo.vps.state || serviceInfo.vps.power;
+            const extractStatus = (obj) => {
+              if (!obj) return null;
+              // Direct fields (WHMCS-style domainstatus first, then generic)
+              const direct = obj.domainstatus || obj.domainStatus || obj.status || obj.state || obj.power_status || obj.vps_status;
+              if (direct) return direct;
+              // Nested under common keys
+              for (const key of ['data', 'result', 'vps', 'server', 'service']) {
+                if (obj[key]) {
+                  const nested = obj[key].domainstatus || obj[key].domainStatus || obj[key].status || obj[key].state || obj[key].power_status || obj[key].power;
+                  if (nested) return nested;
+                }
               }
-              if (!rawStatus && serviceInfo.server) {
-                rawStatus = serviceInfo.server.status || serviceInfo.server.state || serviceInfo.server.power;
-              }
-            }
+              return null;
+            };
 
-            // Fallback to serviceDetails if no status found
-            if (!rawStatus && serviceDetails) {
-              rawStatus = serviceDetails.status || serviceDetails.state || serviceDetails.power_status;
-              
-              if (!rawStatus && serviceDetails.vps) {
-                rawStatus = serviceDetails.vps.status || serviceDetails.vps.state;
-              }
-            }
+            rawStatus = extractStatus(serviceInfo) || extractStatus(serviceDetails);
+
+            console.log('[STATUS] Extracted rawStatus:', rawStatus);
 
             // Normalize the status
             if (rawStatus) {
-              const statusLower = String(rawStatus).toLowerCase();
+              const statusLower = String(rawStatus).toLowerCase().trim();
               if (['online', 'running', 'active', 'started', 'on', '1', 'true'].includes(statusLower)) {
                 powerState = 'running';
-              } else if (['offline', 'stopped', 'inactive', 'off', '0', 'false', 'shutdown'].includes(statusLower)) {
+              } else if (['offline', 'stopped', 'inactive', 'off', '0', 'false', 'shutdown', 'terminated', 'down'].includes(statusLower)) {
                 powerState = 'stopped';
-              } else if (['suspended', 'paused'].includes(statusLower)) {
+              } else if (['suspended', 'paused', 'cancelled'].includes(statusLower)) {
                 powerState = 'suspended';
               } else if (['installing', 'provisioning', 'building', 'creating', 'starting', 'stopping', 'rebooting'].includes(statusLower)) {
                 powerState = 'busy';
               } else {
-                powerState = statusLower; // Use as-is if we can't map it
+                powerState = statusLower;
               }
             }
 
             // Sync state to database
-            await syncServerState(order._id, serviceDetails, serviceInfo);
+            try {
+              await syncServerState(order._id, serviceDetails, serviceInfo);
+            } catch (syncErr) {
+              console.warn('[STATUS] syncServerState failed (non-fatal):', syncErr.message);
+            }
 
             console.log('[STATUS] Returning power state:', powerState);
-            
-            // Return directly for status action (not wrapped in result)
+
             return NextResponse.json({
               success: true,
               powerState: powerState,
@@ -504,9 +531,9 @@ export async function POST(request) {
           const hostname = guessHostnameFromOrder(order);
           console.log(`[SERVICE-ACTION][POST] Order hostname: ${hostname || 'Not found'}`);
 
-          const vpsid = await virtualizorApi.findVpsId({ ip: ipAddress, hostname });
+          const vpsResult = await virtualizorApi.findVpsId({ ip: ipAddress, hostname });
 
-          if (!vpsid) {
+          if (!vpsResult) {
             console.error(`[SERVICE-ACTION][POST] No VPS found for IP ${ipAddress}`);
             return NextResponse.json({
               success: false,
@@ -519,6 +546,7 @@ export async function POST(request) {
             }, { status: 404 });
           }
 
+          const vpsid = typeof vpsResult === 'object' ? vpsResult.vpsid : vpsResult;
           console.log(`[SERVICE-ACTION][POST] Step 2: VPS found with ID: ${vpsid}`);
 
           const pwd = providedPwd || generateSecurePassword();
@@ -618,14 +646,17 @@ export async function POST(request) {
           const hostname = guessHostnameFromOrder(order);
           console.log(`[SERVICE-ACTION][POST] Order hostname: ${hostname || 'Not found'}`);
 
-          const vpsid = await virtualizorApi.findVpsId({ ip: ipAddress, hostname });
+          const vpsResult = await virtualizorApi.findVpsId({ ip: ipAddress, hostname });
 
-          if (!vpsid) {
+          if (!vpsResult) {
             console.error(`[SERVICE-ACTION][POST] No VPS found for IP ${ipAddress}`);
             return NextResponse.json({ success: false, error: `No VPS visible for IP ${ipAddress}` }, { status: 404 });
           }
 
-          console.log(`[SERVICE-ACTION][POST] Step 2: VPS found with ID: ${vpsid}`);
+          const vpsid = typeof vpsResult === 'object' ? vpsResult.vpsid : vpsResult;
+          const vpsVirtFromFind = typeof vpsResult === 'object' ? vpsResult.virt : null;
+
+          console.log(`[SERVICE-ACTION][POST] Step 2: VPS found with ID: ${vpsid}, virt: ${vpsVirtFromFind || 'unknown'}`);
           console.log(`[SERVICE-ACTION][POST] Step 3: Fetching available templates...`);
 
           const startTime = Date.now();
@@ -634,8 +665,30 @@ export async function POST(request) {
 
           console.log(`[SERVICE-ACTION][POST] Step 4: Templates fetched in ${duration}ms`);
 
-          const flat = flattenOslist(tplRaw?.oslist || tplRaw?.os || tplRaw);
-          console.log(`[SERVICE-ACTION][POST] Step 5: Found ${Object.keys(flat).length} templates`);
+          // Determine the VPS virt type: prefer from findVpsId, then from template response
+          const vpsVirt =
+            vpsVirtFromFind ||
+            tplRaw?.virt ||
+            tplRaw?.info?.virt ||
+            tplRaw?.vs?.virt ||
+            tplRaw?.vps?.virt ||
+            tplRaw?.vs_info?.virt ||
+            null;
+
+          const oslistData = tplRaw?.oslist || tplRaw?.os || tplRaw;
+
+          if (vpsVirt) {
+            console.log(`[SERVICE-ACTION][POST] VPS virt type: ${vpsVirt} — filtering templates to this type only`);
+          } else {
+            const oslistKeys = oslistData ? Object.keys(oslistData) : [];
+            console.log(`[SERVICE-ACTION][POST] Could not detect virt type, oslist keys: [${oslistKeys.join(', ')}]`);
+            if (oslistKeys.length === 1) {
+              console.log(`[SERVICE-ACTION][POST] Only one virt type found: ${oslistKeys[0]}`);
+            }
+          }
+
+          const flat = flattenOslist(oslistData, vpsVirt);
+          console.log(`[SERVICE-ACTION][POST] Step 5: Found ${Object.keys(flat).length} templates (filtered by virt: ${vpsVirt || 'none'})`);
 
           return NextResponse.json({
             success: true,

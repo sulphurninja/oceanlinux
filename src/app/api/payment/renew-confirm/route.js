@@ -5,6 +5,7 @@ import IPStock from '@/models/ipStockModel';
 import { Cashfree } from 'cashfree-pg';
 import Razorpay from 'razorpay';
 import crypto from 'crypto';
+import { calculateRenewalExpiryDate } from '@/lib/expiryHelper';
 const HostycareAPI = require('@/services/hostycareApi');
 const SmartVPSAPI = require('@/services/smartvpsApi');
 const RenewalLogger = require('@/services/renewalLogger');
@@ -348,12 +349,8 @@ export async function POST(request) {
     console.log(`[RENEWAL-CONFIRM] Final determined provider: ${provider} for order ${orderId}`);
     logger.logInfo('Provider determined', { provider });
 
-    // Calculate new expiry date (30 days from current expiry or now, whichever is later)
-    const currentExpiry = new Date(order.expiryDate);
-    const now = new Date();
-    const baseDate = currentExpiry > now ? currentExpiry : now;
-    const newExpiryDate = new Date(baseDate);
-    newExpiryDate.setDate(newExpiryDate.getDate() + 30);
+    // Calculate new expiry based on the number of days in the base month
+    const newExpiryDate = calculateRenewalExpiryDate(order.expiryDate);
 
     console.log(`Renewing order ${order._id}:`);
     console.log(`  Provider: ${provider}`);

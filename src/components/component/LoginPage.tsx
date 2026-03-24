@@ -106,6 +106,8 @@ function LoginPage({ className, ...props }: React.ComponentPropsWithoutRef<"div"
     const data = await response.json();
 
     if (response.ok) {
+      sessionStorage.removeItem('loginPopupShownInSession');
+      sessionStorage.setItem('justLoggedIn', '1');
       if (data.result?.userType === 'reseller') {
         router.push('/dashboard/reseller-wallet');
       } else {

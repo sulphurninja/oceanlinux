@@ -1011,7 +1011,9 @@ const OrderDetails = () => {
   const isRenewalEligible = (order: Order | null) => {
     if (!order || !order.expiryDate) return false;
     const daysLeft = getDaysUntilExpiry(order.expiryDate);
-    return daysLeft <= 30 && daysLeft >= -7;
+    // Show the renewal button 2 days before the expiry date,
+    // and keep it visible up to 7 days after expiry.
+    return daysLeft <= 2 && daysLeft >= -7;
   };
 
 
@@ -1282,9 +1284,9 @@ const OrderDetails = () => {
         );
       default:
         return (
-          <Badge className="bg-primary/10 text-green-500 border-primary/20">
-            <div className="w-2 h-2 bg-primary rounded-full mr-2 animate-pulse"></div>
-            Active
+          <Badge className="bg-red-500/10 text-red-600 border-red-500/20">
+            <div className="w-2 h-2 bg-red-500 rounded-full mr-2"></div>
+            Offline
           </Badge>
         );
     }
@@ -1319,7 +1321,7 @@ const OrderDetails = () => {
     const canShowPowerState = (provider === 'hostycare' || provider === 'smartvps') && isActiveStatus;
 
     // For active servers with power state support, show actual power state
-    if (canShowPowerState && serverPowerState !== 'unknown') {
+    if (canShowPowerState) {
       return getPowerStateBadge();
     }
 
@@ -2318,7 +2320,7 @@ const OrderDetails = () => {
                           !powerStateLoading && serverPowerState === 'stopped' && "bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-800",
                           !powerStateLoading && serverPowerState === 'suspended' && "bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-800",
                           !powerStateLoading && serverPowerState === 'busy' && "bg-blue-50 border-blue-200 dark:bg-blue-950/30 dark:border-blue-800",
-                          !powerStateLoading && serverPowerState === 'unknown' && "bg-muted/50 border-border"
+                          !powerStateLoading && serverPowerState === 'unknown' && "bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-800"
                         )}>
                           {powerStateLoading ? (
                             <>
@@ -2336,7 +2338,7 @@ const OrderDetails = () => {
                                 serverPowerState === 'stopped' && "bg-red-500",
                                 serverPowerState === 'suspended' && "bg-red-500",
                                 serverPowerState === 'busy' && "bg-blue-500 animate-pulse",
-                                serverPowerState === 'unknown' && "bg-gray-400"
+                                serverPowerState === 'unknown' && "bg-red-500"
                               )} />
                               <div className="flex-1">
                                 <p className={cn(
@@ -2345,20 +2347,20 @@ const OrderDetails = () => {
                                   serverPowerState === 'stopped' && "text-red-700 dark:text-red-300",
                                   serverPowerState === 'suspended' && "text-red-700 dark:text-red-300",
                                   serverPowerState === 'busy' && "text-blue-700 dark:text-blue-300",
-                                  serverPowerState === 'unknown' && "text-muted-foreground"
+                                  serverPowerState === 'unknown' && "text-red-700 dark:text-red-300"
                                 )}>
                                   {serverPowerState === 'running' && 'Server is Online'}
                                   {serverPowerState === 'stopped' && 'Server is Offline'}
                                   {serverPowerState === 'suspended' && 'Server is Offline'}
                                   {serverPowerState === 'busy' && 'Processing...'}
-                                  {serverPowerState === 'unknown' && 'Status Unknown'}
+                                  {serverPowerState === 'unknown' && 'Server is Offline'}
                                 </p>
                                 <p className="text-xs text-muted-foreground">
                                   {serverPowerState === 'running' && 'Your server is online and responding'}
                                   {serverPowerState === 'stopped' && 'Your server is powered off'}
                                   {serverPowerState === 'suspended' && 'Your server is powered off'}
                                   {serverPowerState === 'busy' && 'Please wait while the action completes'}
-                                  {serverPowerState === 'unknown' && 'Click Sync to check server status'}
+                                  {serverPowerState === 'unknown' && 'Your server is powered off'}
                                 </p>
                               </div>
                               {serverPowerState === 'busy' ? (

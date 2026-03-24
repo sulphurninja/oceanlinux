@@ -3,6 +3,7 @@ import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 import IPStock from '@/models/ipStockModel';
 import crypto from 'crypto';
+import { calculateExpiryDate, calculateRenewalExpiryDate } from '@/lib/expiryHelper';
 const AutoProvisioningService = require('@/services/autoProvisioningService');
 const SlotIPPackage = require('@/models/slotIpPackageModel');
 const HostycareAPI = require('@/services/hostycareApi');
@@ -85,15 +86,14 @@ export async function POST(request) {
       const orderUpdateStart = Date.now();
       console.log(`[WEBHOOK] 📝 UPDATING ORDER STATUS...`);
 
-      // Calculate expiry date as exactly 30 days from NOW (payment confirmation time)
-      const expiryDate = new Date();
-      expiryDate.setDate(expiryDate.getDate() + 30);
+      // Calculate expiry based on the number of days in the current month
+      const expiryDate = calculateExpiryDate();
 
       order.status = 'confirmed';
       order.transactionId = payment.payment.cf_payment_id;
       order.gatewayOrderId = payment.order.order_id; // Store Cashfree order ID
       order.paymentMethod = 'cashfree';
-      order.expiryDate = expiryDate; // Set expiry to 30 days from payment confirmation
+      order.expiryDate = expiryDate;
 
       // Store additional payment info
       order.webhookAmount = payment.payment.payment_amount.toString();
@@ -117,7 +117,7 @@ export async function POST(request) {
       await order.save();
       const orderUpdateTime = Date.now() - orderUpdateStart;
       console.log(`[WEBHOOK] ✅ ORDER UPDATED to 'confirmed' in ${orderUpdateTime}ms`);
-      console.log(`[WEBHOOK] 📅 Order expiry set to: ${expiryDate.toISOString()} (30 days from now)`);
+      console.log(`[WEBHOOK] 📅 Order expiry set to: ${expiryDate.toISOString()}`);
 
       // Allocate slot IP if this is a slot IP purchase
       if (order.slotIpPackageId && !order.slotIpId) {
@@ -357,12 +357,8 @@ async function handleRenewalWebhook(renewalTxnId, payment, webhookStartTime) {
     logger.logInfo('Provider determined', { provider });
     logger.setPaymentInfo('cashfree', payment.payment.cf_payment_id, order.price);
 
-    // Calculate new expiry date
-    const currentExpiry = new Date(order.expiryDate);
-    const now = new Date();
-    const baseDate = currentExpiry > now ? currentExpiry : now;
-    const newExpiryDate = new Date(baseDate);
-    newExpiryDate.setDate(newExpiryDate.getDate() + 30);
+    // Calculate new expiry based on the number of days in the base month
+    const newExpiryDate = calculateRenewalExpiryDate(order.expiryDate);
 
     console.log(`[WEBHOOK-RENEWAL] New expiry date: ${newExpiryDate}`);
 

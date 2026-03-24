@@ -69,7 +69,8 @@ class HostycareAPI {
         'username': this.username,
         'token': token,
         'Content-Type': 'application/x-www-form-urlencoded',
-        'Accept': 'application/json'
+        'Accept': 'application/json',
+        'User-Agent': 'OceanLinux/1.0 (Server; Reseller API Client)',
       };
 
       const config = { method, headers };
@@ -86,7 +87,12 @@ class HostycareAPI {
       try {
         data = JSON.parse(responseText);
       } catch (parseError) {
-        throw new Error(`Invalid JSON response: ${responseText}`);
+        // Cloudflare challenge pages return HTML instead of JSON
+        if (responseText.includes('Just a moment') || responseText.includes('cf_chl_opt') || responseText.includes('challenge-platform')) {
+          console.error('[HOSTYCARE] Cloudflare challenge detected — server IP may need whitelisting');
+          throw new Error('Hostycare API blocked by Cloudflare protection. Server IP may need whitelisting.');
+        }
+        throw new Error(`Invalid response from Hostycare API (status ${response.status})`);
       }
 
       // Throw if Hostycare embeds error in JSON even with HTTP 200
@@ -104,6 +110,40 @@ class HostycareAPI {
         apiKeyPresent: !!this.apiKey,
         endpoint: this.endpoint + action
       });
+      throw error;
+    }
+  }
+
+  async makeRawRequest(action, method = 'GET', params = {}) {
+    try {
+      const token = this.generateToken();
+      const headers = {
+        'username': this.username,
+        'token': token,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Accept': 'application/json',
+        'User-Agent': 'OceanLinux/1.0 (Server; Reseller API Client)',
+      };
+
+      const config = { method, headers };
+
+      if (method === 'POST') {
+        config.body = params instanceof URLSearchParams ? params : this.buildFormParams(params);
+      }
+
+      const response = await fetch(`${this.endpoint}${action}`, config);
+      const responseText = await response.text();
+
+      try {
+        return JSON.parse(responseText);
+      } catch {
+        if (responseText.includes('Just a moment') || responseText.includes('cf_chl_opt')) {
+          throw new Error('Hostycare API blocked by Cloudflare protection.');
+        }
+        throw new Error(`Invalid response from Hostycare API (status ${response.status})`);
+      }
+    } catch (error) {
+      console.error('[HOSTYCARE] Raw request error:', error.message);
       throw error;
     }
   }

@@ -28,6 +28,14 @@ const announcementSchema = new mongoose.Schema({
     actionText: {
         type: String
     },
+    showAsLoginPopup: {
+        type: Boolean,
+        default: false
+    },
+    communityLink: {
+        type: String,
+        default: ''
+    },
     targetAudience: {
         type: String,
         enum: ['all', 'customers', 'new-users', 'premium'],

@@ -45,6 +45,7 @@ import { toast } from 'sonner';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { SessionAlertProvider } from '@/components/session-alert';
 import FloatingSupport from '@/components/component/floating-support';
+import LoginNewsPopup from '@/components/login-news-popup';
 
 interface UserData {
     _id: string;
@@ -255,6 +256,7 @@ export default function DashboardLayout({
         <SessionAlertProvider>
             <AuthProvider>
                 <div className="min-h-screen bg-background">
+                    <LoginNewsPopup />
                     {/* Sidebar */}
                     <ResponsiveSidebar user={user} />
 
