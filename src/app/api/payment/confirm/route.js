@@ -6,6 +6,7 @@ import Razorpay from 'razorpay';
 import crypto from 'crypto';
 import NotificationService from '@/services/notificationService';
 const AutoProvisioningService = require('@/services/autoProvisioningService');
+const SlotIPPackage = require('@/models/slotIpPackageModel');
 
 // Initialize Cashfree
 Cashfree.XClientId = process.env.CASHFREE_APP_ID;
@@ -200,10 +201,62 @@ export async function POST(request) {
       console.error('Failed to create payment confirmation notification:', notifError);
     }
 
-    // Trigger auto-provisioning with duplicate prevention
+    // Allocate a slot IP if this is a slot IP purchase
+    if (order.slotIpPackageId && !order.slotIpId) {
+      try {
+        console.log(`[PAYMENT-CONFIRM] Allocating slot IP for order ${order._id}`);
+
+        const allocated = await SlotIPPackage.findOneAndUpdate(
+          {
+            _id: order.slotIpPackageId,
+            'ips.allocated': false,
+          },
+          {
+            $set: {
+              'ips.$.allocated': true,
+              'ips.$.orderId': order._id,
+              'ips.$.allocatedAt': new Date(),
+            },
+          },
+          { new: true }
+        );
+
+        if (allocated) {
+          const slotIp = allocated.ips.find(
+            ip => ip.orderId && ip.orderId.toString() === order._id.toString()
+          );
+
+          if (slotIp) {
+            order.slotIpId = slotIp._id.toString();
+            order.ipAddress = `${slotIp.ip}:${slotIp.port}`;
+            order.username = slotIp.username;
+            order.password = slotIp.password;
+            order.provisioningStatus = 'active';
+            order.autoProvisioned = true;
+            order.provider = 'slotip';
+            await order.save();
+            console.log(`[PAYMENT-CONFIRM] Slot IP allocated: ${slotIp.proxy} -> order ${order._id}`);
+          }
+        } else {
+          console.error(`[PAYMENT-CONFIRM] No available slot IPs in package ${order.slotIpPackageId}`);
+          order.provisioningStatus = 'failed';
+          order.provisioningError = 'No available slot IPs in this package';
+          await order.save();
+        }
+      } catch (slotError) {
+        console.error(`[PAYMENT-CONFIRM] Slot IP allocation failed:`, slotError);
+        order.provisioningStatus = 'failed';
+        order.provisioningError = `Slot IP allocation failed: ${slotError.message}`;
+        await order.save();
+      }
+    }
+
+    // Trigger auto-provisioning with duplicate prevention (skip for slot IPs)
     try {
-      // CRITICAL: Re-fetch order to check current provisioning state
-      // This prevents race conditions where webhook already started provisioning
+      // Skip auto-provisioning for slot IP orders (already allocated above)
+      if (order.slotIpPackageId) {
+        console.log(`[PAYMENT-CONFIRM] Slot IP order - skipping auto-provisioning`);
+      } else {
       const freshOrder = await Order.findById(order._id);
       const alreadyProvisioning = freshOrder?.provisioningStatus === 'provisioning' ||
                                    freshOrder?.provisioningStatus === 'active' ||
@@ -244,9 +297,9 @@ export async function POST(request) {
 
         console.log("[PAYMENT-CONFIRM] Auto-provisioning initiated");
       }
+      } // end of slot IP skip block
     } catch (error) {
       console.error("[PAYMENT-CONFIRM] Error starting auto-provisioning:", error);
-      // Don't fail the response - provisioning can be retried
     }
 
     return NextResponse.json({

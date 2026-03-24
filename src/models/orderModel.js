@@ -9,6 +9,8 @@ const orderSchema = new mongoose.Schema({
     promoCode: { type: String },
     promoDiscount: { type: Number, default: 0 },
     ipStockId: { type: String },
+    slotIpPackageId: { type: String },
+    slotIpId: { type: String },
     transactionId: { type: String, default: '' },
     status: { type: String, default: 'pending' },
     ipAddress: { type: String, default: '' },
@@ -35,7 +37,7 @@ const orderSchema = new mongoose.Schema({
     // Provider identification
     provider: {
         type: String,
-        enum: ['hostycare', 'smartvps'],
+        enum: ['hostycare', 'smartvps', 'slotip'],
         default: 'hostycare'
     },
 

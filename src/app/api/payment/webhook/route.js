@@ -4,6 +4,7 @@ import Order from '@/models/orderModel';
 import IPStock from '@/models/ipStockModel';
 import crypto from 'crypto';
 const AutoProvisioningService = require('@/services/autoProvisioningService');
+const SlotIPPackage = require('@/models/slotIpPackageModel');
 const HostycareAPI = require('@/services/hostycareApi');
 const SmartVPSAPI = require('@/services/smartvpsApi');
 const RenewalLogger = require('@/services/renewalLogger');
@@ -118,14 +119,46 @@ export async function POST(request) {
       console.log(`[WEBHOOK] ✅ ORDER UPDATED to 'confirmed' in ${orderUpdateTime}ms`);
       console.log(`[WEBHOOK] 📅 Order expiry set to: ${expiryDate.toISOString()} (30 days from now)`);
 
-      // 🚀 TRIGGER AUTO-PROVISIONING (with duplicate prevention)
+      // Allocate slot IP if this is a slot IP purchase
+      if (order.slotIpPackageId && !order.slotIpId) {
+        try {
+          console.log(`[WEBHOOK] Allocating slot IP for order ${order._id}`);
+          const allocated = await SlotIPPackage.findOneAndUpdate(
+            { _id: order.slotIpPackageId, 'ips.allocated': false },
+            { $set: { 'ips.$.allocated': true, 'ips.$.orderId': order._id, 'ips.$.allocatedAt': new Date() } },
+            { new: true }
+          );
+          if (allocated) {
+            const slotIp = allocated.ips.find(ip => ip.orderId && ip.orderId.toString() === order._id.toString());
+            if (slotIp) {
+              order.slotIpId = slotIp._id.toString();
+              order.ipAddress = `${slotIp.ip}:${slotIp.port}`;
+              order.username = slotIp.username;
+              order.password = slotIp.password;
+              order.provisioningStatus = 'active';
+              order.autoProvisioned = true;
+              order.provider = 'slotip';
+              await order.save();
+              console.log(`[WEBHOOK] Slot IP allocated: ${slotIp.proxy}`);
+            }
+          } else {
+            order.provisioningStatus = 'failed';
+            order.provisioningError = 'No available slot IPs';
+            await order.save();
+          }
+        } catch (slotErr) {
+          console.error(`[WEBHOOK] Slot IP allocation error:`, slotErr);
+        }
+      }
+
       console.log("\n" + "-".repeat(60));
-      console.log(`[WEBHOOK] 🚀 CHECKING AUTO-PROVISIONING for order ${order._id}`);
+      console.log(`[WEBHOOK] CHECKING AUTO-PROVISIONING for order ${order._id}`);
       console.log("-".repeat(60));
 
       try {
-        // CRITICAL: Re-fetch order to check current provisioning state
-        // This prevents race conditions where confirm/status API already started provisioning
+        if (order.slotIpPackageId) {
+          console.log(`[WEBHOOK] Slot IP order - skipping auto-provisioning`);
+        } else {
         const freshOrder = await Order.findById(order._id);
         const alreadyProvisioning = freshOrder?.provisioningStatus === 'provisioning' ||
           freshOrder?.provisioningStatus === 'active' ||
@@ -177,6 +210,7 @@ export async function POST(request) {
 
           console.log(`[WEBHOOK] ✅ Auto-provisioning initiated successfully`);
         }
+        } // end slot IP skip block
 
       } catch (provisioningError) {
         console.error(`[WEBHOOK] ❌ ERROR initiating auto-provisioning:`, provisioningError);

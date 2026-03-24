@@ -1,23 +1,31 @@
 import { NextResponse } from 'next/server';
 import connectDB from '../../../lib/db';
 import IPStock from '../../../models/ipStockModel';
+const SlotIPPackage = require('../../../models/slotIpPackageModel');
 
 export async function POST(req) {
     try {
-        const { promoCode, ipStockId, productPrice } = await req.json(); // Add productPrice
+        const { promoCode, ipStockId, slotIpPackageId, productPrice } = await req.json();
         
         await connectDB();
-        
-        const ipStock = await IPStock.findById(ipStockId);
-        
-        if (!ipStock) {
-            return NextResponse.json({ 
-                valid: false, 
-                message: 'IP Stock not found' 
-            }, { status: 404 });
+
+        let promoCodes = [];
+
+        if (slotIpPackageId) {
+            const slotPkg = await SlotIPPackage.findById(slotIpPackageId);
+            if (!slotPkg) {
+                return NextResponse.json({ valid: false, message: 'Package not found' }, { status: 404 });
+            }
+            promoCodes = slotPkg.promoCodes || [];
+        } else {
+            const ipStock = await IPStock.findById(ipStockId);
+            if (!ipStock) {
+                return NextResponse.json({ valid: false, message: 'IP Stock not found' }, { status: 404 });
+            }
+            promoCodes = ipStock.promoCodes || [];
         }
         
-        const promo = ipStock.promoCodes.find(
+        const promo = promoCodes.find(
             p => p.code.toLowerCase() === promoCode.toLowerCase() && p.isActive
         );
         

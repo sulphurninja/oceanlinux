@@ -112,6 +112,12 @@ const AdminSidebar = () => {
       icon: ServerIcon,
     },
     {
+      href: '/admin/slotIps',
+      label: 'Slot IPs',
+      icon: ServerIcon,
+      badge: 'New'
+    },
+    {
       href: '/admin/manageOrders',
       label: 'Orders',
       icon: BarChart3,

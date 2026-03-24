@@ -4,6 +4,7 @@ import { getDataFromToken } from '@/helper/getDataFromToken';
 import Order from '@/models/orderModel';
 import User from '@/models/userModel';
 import IPStock from '@/models/ipStockModel';
+const SlotIPPackage = require('@/models/slotIpPackageModel');
 import { Cashfree } from 'cashfree-pg';
 import Razorpay from 'razorpay';
 import crypto from 'crypto';
@@ -52,67 +53,93 @@ export async function POST(request) {
       memory, 
       promoCode, 
       ipStockId,
-      paymentMethod = 'razorpay' // Default to Razorpay if not specified
+      slotIpPackageId,
+      paymentMethod = 'razorpay'
     } = reqBody;
 
-    // 4. Basic validation
-    if (!productName || !memory || !ipStockId) {
-      return NextResponse.json(
-        { message: 'Missing required fields (productName, memory, ipStockId)' },
-        { status: 400 }
-      );
-    }
+    let originalPrice, price, promoDiscount = 0;
+    let isSlotIpPurchase = false;
 
-    // 5. SERVER-SIDE PRICE VALIDATION - Fetch actual price from database
-    const ipStock = await IPStock.findById(ipStockId);
-    if (!ipStock) {
-      console.error(`[Payment] IPStock not found: ${ipStockId}`);
-      return NextResponse.json(
-        { message: 'Product not found' },
-        { status: 404 }
-      );
-    }
+    if (slotIpPackageId) {
+      // ===== SLOT IP PURCHASE FLOW =====
+      isSlotIpPurchase = true;
 
-    // Check if product is available
-    if (!ipStock.available) {
-      return NextResponse.json(
-        { message: 'This product is currently unavailable' },
-        { status: 400 }
-      );
-    }
+      if (!productName) {
+        return NextResponse.json({ message: 'Missing productName' }, { status: 400 });
+      }
 
-    // Get the actual price from the database for this memory option
-    const memoryOption = ipStock.memoryOptions.get(memory);
-    if (!memoryOption || !memoryOption.price) {
-      console.error(`[Payment] Memory option ${memory} not found or has no price for IPStock ${ipStockId}`);
-      return NextResponse.json(
-        { message: `Memory option ${memory} is not available for this product` },
-        { status: 400 }
-      );
-    }
+      const slotPkg = await SlotIPPackage.findById(slotIpPackageId);
+      if (!slotPkg) {
+        return NextResponse.json({ message: 'Slot IP package not found' }, { status: 404 });
+      }
+      if (!slotPkg.available) {
+        return NextResponse.json({ message: 'This slot IP package is currently unavailable' }, { status: 400 });
+      }
 
-    // Server-validated price (from database, NOT from frontend)
-    const originalPrice = memoryOption.price;
-    let price = originalPrice;
-    let promoDiscount = 0;
+      const availableIps = slotPkg.ips.filter(ip => !ip.allocated);
+      if (availableIps.length === 0) {
+        return NextResponse.json({ message: 'No slot IPs available in this package' }, { status: 400 });
+      }
 
-    // Validate promo code if provided
-    if (promoCode) {
-      const validPromo = ipStock.promoCodes.find(
-        p => p.code.toUpperCase() === promoCode.toUpperCase() && p.isActive
-      );
+      originalPrice = slotPkg.price;
+      price = originalPrice;
 
-      if (validPromo) {
-        if (validPromo.discountType === 'percentage') {
-          promoDiscount = Math.round((originalPrice * validPromo.discount) / 100);
-        } else {
-          promoDiscount = validPromo.discount;
+      if (promoCode && slotPkg.promoCodes) {
+        const validPromo = slotPkg.promoCodes.find(
+          p => p.code.toUpperCase() === promoCode.toUpperCase() && p.isActive
+        );
+        if (validPromo) {
+          promoDiscount = validPromo.discountType === 'percentage'
+            ? Math.round((originalPrice * validPromo.discount) / 100)
+            : validPromo.discount;
+          price = Math.max(1, originalPrice - promoDiscount);
+          console.log(`[Payment] Slot IP promo applied: ${originalPrice} - ${promoDiscount} = ${price}`);
         }
-        price = Math.max(1, originalPrice - promoDiscount); // Minimum price is 1 rupee
-        console.log(`[Payment] Applied promo code ${promoCode}: ${originalPrice} - ${promoDiscount} = ${price}`);
-      } else {
-        console.log(`[Payment] Invalid or inactive promo code: ${promoCode}`);
-        // Don't apply any discount for invalid promo codes
+      }
+
+      console.log(`[Payment] Slot IP purchase: pkg=${slotPkg.name}, price=${price}, available=${availableIps.length}`);
+
+    } else {
+      // ===== REGULAR IP STOCK PURCHASE FLOW =====
+      if (!productName || !memory || !ipStockId) {
+        return NextResponse.json(
+          { message: 'Missing required fields (productName, memory, ipStockId)' },
+          { status: 400 }
+        );
+      }
+
+      const ipStock = await IPStock.findById(ipStockId);
+      if (!ipStock) {
+        console.error(`[Payment] IPStock not found: ${ipStockId}`);
+        return NextResponse.json({ message: 'Product not found' }, { status: 404 });
+      }
+
+      if (!ipStock.available) {
+        return NextResponse.json({ message: 'This product is currently unavailable' }, { status: 400 });
+      }
+
+      const memoryOption = ipStock.memoryOptions.get(memory);
+      if (!memoryOption || !memoryOption.price) {
+        return NextResponse.json(
+          { message: `Memory option ${memory} is not available for this product` },
+          { status: 400 }
+        );
+      }
+
+      originalPrice = memoryOption.price;
+      price = originalPrice;
+
+      if (promoCode) {
+        const validPromo = ipStock.promoCodes.find(
+          p => p.code.toUpperCase() === promoCode.toUpperCase() && p.isActive
+        );
+        if (validPromo) {
+          promoDiscount = validPromo.discountType === 'percentage'
+            ? Math.round((originalPrice * validPromo.discount) / 100)
+            : validPromo.discount;
+          price = Math.max(1, originalPrice - promoDiscount);
+          console.log(`[Payment] Applied promo code ${promoCode}: ${originalPrice} - ${promoDiscount} = ${price}`);
+        }
       }
     }
 
@@ -298,26 +325,33 @@ export async function POST(request) {
     }
 
     // 9. Create a pending order in our database
-    // Only store promo code if it was valid and actually applied (promoDiscount > 0)
     const appliedPromoCode = promoDiscount > 0 ? promoCode : null;
-    
-    const newOrder = await Order.create({
+
+    const orderData = {
       user: userId,
       productName,
-      memory,
+      memory: isSlotIpPurchase ? 'Slot IP' : memory,
       price: Math.round(price),
       originalPrice: originalPrice,
       promoCode: appliedPromoCode,
       promoDiscount: promoDiscount,
-      ipStockId: ipStockId,
       clientTxnId,
       gatewayOrderId: gatewayOrderId,
-      paymentMethod: actualPaymentMethod, // Use the actual method (after fallback)
+      paymentMethod: actualPaymentMethod,
       status: 'pending',
       customerName: user.name,
       customerEmail: user.email,
       expiryDate: expiryDate,
-    });
+    };
+
+    if (isSlotIpPurchase) {
+      orderData.slotIpPackageId = slotIpPackageId;
+      orderData.provider = 'slotip';
+    } else {
+      orderData.ipStockId = ipStockId;
+    }
+    
+    const newOrder = await Order.create(orderData);
 
     console.log("[Payment] Order created in database:", newOrder._id);
     console.log("[Payment] Using payment method:", actualPaymentMethod);

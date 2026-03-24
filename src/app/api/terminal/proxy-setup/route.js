@@ -1,6 +1,38 @@
 import { NextResponse } from 'next/server';
 import { NodeSSH } from 'node-ssh';
 
+const SSH_PORTS = [22, 3052];
+
+async function connectWithFallback(ssh, ip, username, password) {
+  const attempts = [];
+
+  for (const port of SSH_PORTS) {
+    try {
+      console.log(`[PROXY-SETUP] Trying ${ip}:${port}...`);
+      await ssh.connect({
+        host: ip,
+        port: port,
+        username: username,
+        password: password,
+        readyTimeout: 15000,
+        tryKeyboard: true,
+      });
+      console.log(`[PROXY-SETUP] Connected on port ${port}`);
+      return { success: true, port, attempts };
+    } catch (err) {
+      const reason =
+        err.message.includes('ECONNREFUSED') ? 'Connection refused' :
+        err.message.includes('ETIMEDOUT') ? 'Timed out' :
+        err.message.includes('Authentication failed') ? 'Auth failed' :
+        err.message;
+      attempts.push({ port, error: reason });
+      console.log(`[PROXY-SETUP] Port ${port} failed: ${reason}`);
+    }
+  }
+
+  return { success: false, port: null, attempts };
+}
+
 // POST - Setup proxy on server via SSH
 export async function POST(request) {
   const ssh = new NodeSSH();
@@ -18,16 +50,25 @@ export async function POST(request) {
 
     console.log(`[PROXY-SETUP] Connecting to ${ip} as ${username}`);
 
-    // Connect to server via SSH
-    await ssh.connect({
-      host: ip,
-      username: username,
-      password: password,
-      readyTimeout: 30000,
-      tryKeyboard: true,
-    });
+    const conn = await connectWithFallback(ssh, ip, username, password);
 
-    console.log(`[PROXY-SETUP] Connected successfully to ${ip}`);
+    if (!conn.success) {
+      const allAuthFailed = conn.attempts.every(a => a.error === 'Auth failed');
+      let message;
+      if (allAuthFailed) {
+        message = 'Authentication failed. Check your username and password.';
+      } else {
+        message = `Could not connect to ${ip} on ports ${SSH_PORTS.join(' or ')}. Ensure SSH is running and the server is reachable.`;
+      }
+      return NextResponse.json({
+        success: false,
+        message,
+        portAttempts: conn.attempts,
+      }, { status: 500 });
+    }
+
+    const connectedPort = conn.port;
+    console.log(`[PROXY-SETUP] Connected successfully to ${ip}:${connectedPort}`);
 
     // Detect OS
     const osResult = await ssh.execCommand('cat /etc/os-release | grep -E "^ID=" | cut -d= -f2 | tr -d \'"\'');
@@ -37,7 +78,6 @@ export async function POST(request) {
     let result;
 
     if (action === 'detect') {
-      // Just detect OS and check if Squid is installed
       const squidCheck = await ssh.execCommand('which squid || which squid3 || echo "not_found"');
       const isSquidInstalled = !squidCheck.stdout.includes('not_found');
       
@@ -47,6 +87,8 @@ export async function POST(request) {
         success: true,
         os: osId,
         isSquidInstalled,
+        connectedPort,
+        portAttempts: conn.attempts,
         message: `Detected ${osId} - Squid ${isSquidInstalled ? 'is installed' : 'not installed'}`
       });
     }
@@ -323,6 +365,8 @@ EOF`);
     return NextResponse.json({
       success: true,
       os: osId,
+      connectedPort,
+      portAttempts: conn.attempts,
       ...result
     });
 

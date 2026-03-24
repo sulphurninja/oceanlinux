@@ -65,9 +65,11 @@ interface Order {
     password?: string;
     expiryDate?: Date;
     createdAt?: Date;
-    provider?: 'hostycare' | 'smartvps' | 'oceanlinux';
+    provider?: 'hostycare' | 'smartvps' | 'oceanlinux' | 'slotip';
     hostycareServiceId?: string;
     smartvpsServiceId?: string;
+    slotIpPackageId?: string;
+    slotIpId?: string;
     provisioningStatus?: string;
     provisioningError?: string;
     lastAction?: string;
@@ -174,9 +176,7 @@ const ViewLinux = () => {
     };
 
 
-    // Get provider display name
     const getProviderDisplayName = (order: Order): string => {
-        // Check explicit provider field first
         if (order.provider) {
             switch (order.provider) {
                 case 'smartvps':
@@ -185,6 +185,8 @@ const ViewLinux = () => {
                     return 'Hostycare';
                 case 'oceanlinux':
                     return 'OceanLinux';
+                case 'slotip':
+                    return 'Slot IP';
                 default:
                     return order.provider.charAt(0).toUpperCase() + order.provider.slice(1);
             }
@@ -229,11 +231,9 @@ const ViewLinux = () => {
             return 'pending'; // Always show fresh orders as pending
         }
 
-        // Check if this is a non-auto-provisioned service
         const provider = getProviderDisplayName(order);
-        const isAutoProvisionedProvider = provider === 'Hostycare' || provider === 'SmartVPS';
+        const isAutoProvisionedProvider = provider === 'Hostycare' || provider === 'SmartVPS' || provider === 'Slot IP';
 
-        // For non-auto-provisioned services, they should be pending unless explicitly active
         if (!isAutoProvisionedProvider) {
             // Only consider it failed if it's explicitly marked as terminated or has a real API failure
             if (currentStatus.toLowerCase() === 'terminated' ||
@@ -388,9 +388,8 @@ const getStatusBadge = (status: string, provisioningStatus?: string, lastAction?
         );
     }
 
-    // Check if this is a non-auto-provisioned service
     const provider = order ? getProviderDisplayName(order) : 'Unknown';
-    const isAutoProvisionedProvider = provider === 'Hostycare' || provider === 'SmartVPS';
+    const isAutoProvisionedProvider = provider === 'Hostycare' || provider === 'SmartVPS' || provider === 'Slot IP';
 
     // For non-auto-provisioned services, show appropriate pending status
     if (!isAutoProvisionedProvider) {

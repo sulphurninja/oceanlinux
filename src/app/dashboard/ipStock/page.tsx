@@ -95,8 +95,21 @@ interface IPStock {
   promoCodes?: PromoCode[];
 }
 
+interface SlotIPPackage {
+  _id: string;
+  name: string;
+  description: string;
+  price: number;
+  available: boolean;
+  totalCount: number;
+  availableCount: number;
+  allocatedCount: number;
+  promoCodes?: PromoCode[];
+}
+
 export default function IPStockPage() {
   const [ipStocks, setIpStocks] = useState<IPStock[]>([]);
+  const [slotPackages, setSlotPackages] = useState<SlotIPPackage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showDialog, setShowDialog] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<{
@@ -104,11 +117,12 @@ export default function IPStockPage() {
     memory: string;
     price: number;
     ipStockId: string;
+    slotIpPackageId?: string;
   } | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [paymentInitiating, setPaymentInitiating] = useState(false);
 
-  // NEW: Search and filter states
+  // Search and filter states
   const [searchTerm, setSearchTerm] = useState("");
   const [priceFilter, setPriceFilter] = useState<string>("all");
   const [sortBy, setSortBy] = useState<string>("name");
@@ -128,29 +142,33 @@ export default function IPStockPage() {
 
   const router = useRouter();
 
-  // Fetch available IP stocks on mount, then sync SmartVPS in background
+  // Fetch available IP stocks and Slot IP packages on mount
   useEffect(() => {
-    const fetchIPStocks = async () => {
+    const fetchAll = async () => {
       try {
         setIsLoading(true);
         
-        // First, load IP stocks immediately so users see available plans
-        const response = await fetch("/api/ipstock");
-        const data = await response.json();
-        // Filter out unavailable/out-of-stock items immediately
-        const availableStocks = data.filter((stock: IPStock) => stock.available);
+        const [ipRes, slotRes] = await Promise.all([
+          fetch("/api/ipstock"),
+          fetch("/api/slot-ips?view=customer"),
+        ]);
+
+        const ipData = await ipRes.json();
+        const slotData = await slotRes.json();
+
+        const availableStocks = ipData.filter((stock: IPStock) => stock.available);
         setIpStocks(availableStocks);
+
+        const availableSlots = (slotData || []).filter(
+          (pkg: SlotIPPackage) => pkg.available && pkg.availableCount > 0
+        );
+        setSlotPackages(availableSlots);
+
         setIsLoading(false);
         
-        // Then, sync SmartVPS in the background (don't block on this)
-        // This updates stock availability from the provider for next page load
         fetch("/api/smartvps/sync")
-          .then(() => {
-            console.log('[IPSTOCK] SmartVPS sync completed in background');
-          })
-          .catch((err) => {
-            console.warn('[IPSTOCK] SmartVPS sync failed in background (cached list already shown)', err);
-          });
+          .then(() => console.log('[IPSTOCK] SmartVPS sync completed in background'))
+          .catch((err) => console.warn('[IPSTOCK] SmartVPS sync failed in background', err));
           
       } catch (error) {
         toast.error("Failed to load plans");
@@ -158,7 +176,7 @@ export default function IPStockPage() {
         setIsLoading(false);
       }
     };
-    fetchIPStocks();
+    fetchAll();
   }, []);
 
   // NEW: Filter and sort logic
@@ -237,14 +255,14 @@ export default function IPStockPage() {
   // Get counts for each tab
   const getCounts = () => {
     const all = ipStocks.length;
-    // Count "Windows & Linux" in both Linux and VPS tabs
     const linux = ipStocks.filter(stock => 
       stock.serverType === 'Linux' || stock.serverType === 'Windows & Linux'
     ).length;
     const vps = ipStocks.filter(stock => 
       stock.serverType === 'VPS' || stock.serverType === 'Windows & Linux'
     ).length;
-    return { all, linux, vps };
+    const slot = slotPackages.length;
+    return { all, linux, vps, slot };
   };
 
   const counts = getCounts();
@@ -270,31 +288,36 @@ export default function IPStockPage() {
     return { grouped, untagged };
   };
 
-  // Handle buy now with ipStockId
-  const handleBuyNow = (productName: string, memory: string, price: number, ipStockId: string) => {
-    setSelectedProduct({ name: productName, memory, price, ipStockId });
+  // Handle buy now with ipStockId (regular) or slotIpPackageId (slot)
+  const handleBuyNow = (productName: string, memory: string, price: number, ipStockId: string, slotIpPackageId?: string) => {
+    setSelectedProduct({ name: productName, memory, price, ipStockId, slotIpPackageId });
     setShowDialog(true);
-    // Reset promo code states when opening dialog
     setPromoCode("");
     setPromoDiscount(0);
     setPromoMessage("");
     setPromoApplied(false);
   };
 
-  // Update the validatePromoCode function
   const validatePromoCode = async () => {
     if (!promoCode.trim() || !selectedProduct) return;
 
     setPromoValidating(true);
     try {
+      const body: Record<string, any> = {
+        promoCode: promoCode.trim(),
+        productPrice: selectedProduct.price,
+      };
+
+      if (selectedProduct.slotIpPackageId) {
+        body.slotIpPackageId = selectedProduct.slotIpPackageId;
+      } else {
+        body.ipStockId = selectedProduct.ipStockId;
+      }
+
       const response = await fetch("/api/validate-promo", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          promoCode: promoCode.trim(),
-          ipStockId: selectedProduct.ipStockId,
-          productPrice: selectedProduct.price // Add product price for calculation
-        })
+        body: JSON.stringify(body),
       });
 
       const data = await response.json();
@@ -351,19 +374,26 @@ export default function IPStockPage() {
     try {
       const finalPrice = getDiscountedPrice();
 
+      const paymentBody: Record<string, any> = {
+        productName: selectedProduct.name,
+        memory: selectedProduct.memory,
+        price: finalPrice,
+        originalPrice: selectedProduct.price,
+        promoCode: promoApplied ? promoCode : null,
+        promoDiscount: promoApplied ? promoDiscount : 0,
+        paymentMethod: paymentMethod,
+      };
+
+      if (selectedProduct.slotIpPackageId) {
+        paymentBody.slotIpPackageId = selectedProduct.slotIpPackageId;
+      } else {
+        paymentBody.ipStockId = selectedProduct.ipStockId;
+      }
+
       const res = await fetch("/api/payment/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          productName: selectedProduct.name,
-          memory: selectedProduct.memory,
-          price: finalPrice,
-          originalPrice: selectedProduct.price,
-          promoCode: promoApplied ? promoCode : null,
-          promoDiscount: promoApplied ? promoDiscount : 0,
-          ipStockId: selectedProduct.ipStockId,
-          paymentMethod: paymentMethod // Send selected payment method
-        })
+        body: JSON.stringify(paymentBody),
       });
 
       const data = await res.json();
@@ -419,20 +449,25 @@ export default function IPStockPage() {
         toast.info(`Switching to ${fallbackLabel}...`);
         
         try {
-          // Create new order with fallback method
-          const fallbackRes = await fetch("/api/payment/create", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
+          const fallbackBody: Record<string, any> = {
               productName: selectedProduct.name,
               memory: selectedProduct.memory,
               price: finalPrice,
               originalPrice: selectedProduct.price,
               promoCode: promoApplied ? promoCode : null,
               promoDiscount: promoApplied ? promoDiscount : 0,
-              ipStockId: selectedProduct.ipStockId,
-              paymentMethod: fallbackMethod
-            })
+              paymentMethod: fallbackMethod,
+            };
+            if (selectedProduct.slotIpPackageId) {
+              fallbackBody.slotIpPackageId = selectedProduct.slotIpPackageId;
+            } else {
+              fallbackBody.ipStockId = selectedProduct.ipStockId;
+            }
+
+          const fallbackRes = await fetch("/api/payment/create", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(fallbackBody),
           });
 
           const fallbackData = await fallbackRes.json();
@@ -770,7 +805,7 @@ export default function IPStockPage() {
           </div>
         ) : (
           <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-            <TabsList className="grid h-9 grid-cols-3 w-full max-w-sm mx-auto bg-muted border border-border">
+            <TabsList className="grid h-9 grid-cols-4 w-full max-w-md mx-auto bg-muted border border-border">
               <TabsTrigger value="all" className="flex items-center gap-1.5 text-xs">
                 <Grid3X3 className="h-3.5 w-3.5" />
                 All
@@ -792,10 +827,103 @@ export default function IPStockPage() {
                   {counts.vps}
                 </Badge>
               </TabsTrigger>
+              <TabsTrigger value="SlotIP" className="flex items-center gap-1.5 text-xs">
+                <Zap className="h-3.5 w-3.5" />
+                Slot IP
+                {counts.slot > 0 && (
+                  <Badge variant="secondary" className="ml-1 text-[10px] h-4 px-1.5">
+                    {counts.slot}
+                  </Badge>
+                )}
+              </TabsTrigger>
             </TabsList>
 
             <TabsContent value={activeTab} className="mt-4">
-              {filteredIpStocks.length === 0 ? (
+              {/* Slot IP Section */}
+              {(activeTab === 'all' || activeTab === 'SlotIP') && slotPackages.length > 0 && (
+                <div className="space-y-2 mb-6">
+                  <div className="flex items-center gap-2 px-1">
+                    <div className="w-1 h-6 bg-orange-500 rounded-full"></div>
+                    <h2 className="text-base font-semibold">Slot IP Proxies</h2>
+                    <Badge variant="outline" className="text-[10px] border-orange-500/30 bg-orange-500/5 text-orange-600 h-5 px-2">
+                      {slotPackages.length} {slotPackages.length === 1 ? 'package' : 'packages'}
+                    </Badge>
+                  </div>
+                  <div className="space-y-2">
+                    {slotPackages
+                      .filter(pkg => {
+                        if (!searchTerm.trim()) return true;
+                        return pkg.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                               pkg.description?.toLowerCase().includes(searchTerm.toLowerCase());
+                      })
+                      .map((pkg) => (
+                      <div key={pkg._id} className="border border-border rounded-lg bg-card hover:bg-muted/30 transition-colors overflow-hidden">
+                        <div className="flex items-center gap-3 p-3">
+                          <div className="w-8 h-8 rounded-lg bg-orange-500/10 flex items-center justify-center border border-orange-500/20 flex-shrink-0">
+                            <Zap className="h-4 w-4 text-orange-500" />
+                          </div>
+
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h3 className="font-semibold text-sm md:text-base">{pkg.name}</h3>
+                              <Badge variant="outline" className="text-[10px] border-orange-500/30 bg-orange-500/5 text-orange-600 px-1.5 py-0 h-5">
+                                Slot IP
+                              </Badge>
+                              {pkg.promoCodes && pkg.promoCodes.length > 0 && (
+                                <Badge variant="outline" className="text-[10px] gap-1 bg-primary/10 text-green-500 border-primary/20 px-1.5 py-0 h-5">
+                                  <Tag className="h-2.5 w-2.5" />
+                                  Promo
+                                </Badge>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-3 mt-0.5">
+                              {pkg.description && (
+                                <p className="text-xs text-muted-foreground">{pkg.description}</p>
+                              )}
+                              <Badge variant="secondary" className="text-[10px] h-5 px-1.5 gap-1">
+                                <Package className="h-3 w-3" />
+                                {pkg.availableCount} available
+                              </Badge>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-3 flex-shrink-0">
+                            <div className="text-right">
+                              <p className="font-bold text-base md:text-lg">₹{pkg.price}</p>
+                              <p className="text-[10px] text-muted-foreground">per IP</p>
+                            </div>
+                            <Button
+                              size="sm"
+                              onClick={() => handleBuyNow(pkg.name, 'Slot IP', pkg.price, '', pkg._id)}
+                              className="h-8 px-3 gap-1.5"
+                              disabled={pkg.availableCount === 0}
+                            >
+                              <Zap className="h-3 w-3" />
+                              Buy Now
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {activeTab === 'SlotIP' && slotPackages.length === 0 && (
+                <Card className="text-center py-12 border-border">
+                  <CardContent>
+                    <div className="w-16 h-16 bg-muted/50 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                      <Zap className="h-8 w-8 text-muted-foreground" />
+                    </div>
+                    <h3 className="text-lg font-semibold mb-2">No Slot IP Packages Available</h3>
+                    <p className="text-sm text-muted-foreground max-w-md mx-auto">
+                      Slot IP packages are currently unavailable. Check back soon!
+                    </p>
+                  </CardContent>
+                </Card>
+              )}
+
+              {activeTab !== 'SlotIP' && filteredIpStocks.length === 0 ? (
                 <Card className="text-center py-12 border-border">
                   <CardContent>
                     <div className="w-16 h-16 bg-muted/50 rounded-2xl flex items-center justify-center mx-auto mb-4">

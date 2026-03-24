@@ -51,12 +51,18 @@ import Footer from "@/components/landing/Footer";
 import FloatingSupport from "@/components/component/floating-support";
 
 type Step = 'credentials' | 'connecting' | 'proxy-setup' | 'complete';
-type LogType = 'info' | 'success' | 'error' | 'command' | 'output';
+type LogType = 'info' | 'success' | 'error' | 'command' | 'output' | 'warning';
 
 interface LogEntry {
     type: LogType;
     message: string;
     timestamp: Date;
+}
+
+interface PortAttempt {
+    port: number;
+    status: 'pending' | 'trying' | 'success' | 'failed';
+    error?: string;
 }
 
 const PublicProxySetupPage = () => {
@@ -67,6 +73,10 @@ const PublicProxySetupPage = () => {
     const [isConnecting, setIsConnecting] = useState(false);
     const [isSettingUp, setIsSettingUp] = useState(false);
     const [progress, setProgress] = useState(0);
+
+    // Port fallback tracking
+    const [portAttempts, setPortAttempts] = useState<PortAttempt[]>([]);
+    const [connectedPort, setConnectedPort] = useState<number | null>(null);
 
     // Server credentials
     const [serverIp, setServerIp] = useState('');
@@ -127,7 +137,7 @@ const PublicProxySetupPage = () => {
         }
     };
 
-    // Connect and detect OS
+    // Connect and detect OS with port fallback
     const handleConnect = async () => {
         if (!serverIp || !serverUsername || !serverPassword) {
             toast.error('Please fill in all server credentials');
@@ -136,9 +146,23 @@ const PublicProxySetupPage = () => {
 
         setIsConnecting(true);
         setStep('connecting');
+        setConnectedPort(null);
         clearLogs();
-        addLog('info', `Connecting to ${serverIp}...`);
-        addLog('command', `ssh ${serverUsername}@${serverIp}`);
+
+        const ports: PortAttempt[] = [
+            { port: 22, status: 'pending' },
+            { port: 3052, status: 'pending' },
+        ];
+        setPortAttempts(ports);
+
+        addLog('info', `Initiating connection to ${serverIp}...`);
+        addLog('info', `Will try SSH ports: 22 → 3052 (fallback)`);
+
+        // Simulate showing "trying port 22" before the actual request
+        const updatedPorts = [...ports];
+        updatedPorts[0] = { ...updatedPorts[0], status: 'trying' };
+        setPortAttempts([...updatedPorts]);
+        addLog('command', `ssh ${serverUsername}@${serverIp} -p 22`);
 
         try {
             const response = await fetch('/api/terminal/proxy-setup', {
@@ -155,19 +179,51 @@ const PublicProxySetupPage = () => {
             const data = await response.json();
 
             if (data.success) {
+                // Update port attempt statuses from the server response
+                const serverAttempts: { port: number; error: string }[] = data.portAttempts || [];
+                const finalPorts = ports.map(p => {
+                    const failed = serverAttempts.find((a: { port: number }) => a.port === p.port);
+                    if (p.port === data.connectedPort) return { ...p, status: 'success' as const };
+                    if (failed) return { ...p, status: 'failed' as const, error: failed.error };
+                    return { ...p, status: 'pending' as const };
+                });
+                setPortAttempts(finalPorts);
+                setConnectedPort(data.connectedPort);
+
+                // Log the port attempts
+                for (const attempt of serverAttempts) {
+                    addLog('warning', `✗ Port ${attempt.port} failed: ${attempt.error}`);
+                    addLog('command', `ssh ${serverUsername}@${serverIp} -p ${attempt.port === 22 ? 3052 : 22}`);
+                }
+
+                addLog('success', `✓ Connected via port ${data.connectedPort}!`);
+                
                 setDetectedOs(data.os);
                 setIsSquidInstalled(data.isSquidInstalled);
-                addLog('success', `✓ Connected successfully!`);
                 addLog('output', `Detected OS: ${data.os}`);
                 addLog('output', `Squid proxy: ${data.isSquidInstalled ? 'Installed' : 'Not installed'}`);
                 setStep('proxy-setup');
                 setTimeout(() => setShowProxyDialog(true), 500);
             } else {
+                // All ports failed
+                const serverAttempts: { port: number; error: string }[] = data.portAttempts || [];
+                const finalPorts = ports.map(p => {
+                    const failed = serverAttempts.find((a: { port: number }) => a.port === p.port);
+                    if (failed) return { ...p, status: 'failed' as const, error: failed.error };
+                    return { ...p, status: 'failed' as const, error: 'Unknown error' };
+                });
+                setPortAttempts(finalPorts);
+
+                for (const attempt of serverAttempts) {
+                    addLog('error', `✗ Port ${attempt.port}: ${attempt.error}`);
+                }
                 addLog('error', `✗ ${data.message}`);
                 toast.error(data.message);
                 setStep('credentials');
             }
         } catch (error: any) {
+            const failedPorts = ports.map(p => ({ ...p, status: 'failed' as const, error: error.message }));
+            setPortAttempts(failedPorts);
             addLog('error', `✗ Connection failed: ${error.message}`);
             toast.error('Failed to connect to server');
             setStep('credentials');
@@ -253,6 +309,8 @@ const PublicProxySetupPage = () => {
         setProxyPassword('');
         setProxyResult(null);
         setProgress(0);
+        setPortAttempts([]);
+        setConnectedPort(null);
         clearLogs();
     };
 
@@ -260,6 +318,7 @@ const PublicProxySetupPage = () => {
         switch (type) {
             case 'success': return <CheckCircle className="h-3.5 w-3.5 text-green-500" />;
             case 'error': return <AlertCircle className="h-3.5 w-3.5 text-red-500" />;
+            case 'warning': return <AlertCircle className="h-3.5 w-3.5 text-yellow-500" />;
             case 'command': return <Terminal className="h-3.5 w-3.5 text-blue-500" />;
             case 'output': return <ArrowRight className="h-3.5 w-3.5 text-gray-500" />;
             default: return <Info className="h-3.5 w-3.5 text-blue-400" />;
@@ -270,6 +329,7 @@ const PublicProxySetupPage = () => {
         switch (type) {
             case 'success': return 'text-green-400';
             case 'error': return 'text-red-400';
+            case 'warning': return 'text-yellow-400';
             case 'command': return 'text-yellow-400';
             case 'output': return 'text-gray-400';
             default: return 'text-blue-400';
@@ -537,6 +597,110 @@ const PublicProxySetupPage = () => {
 
                         {/* Right Column - Terminal */}
                         <div className="space-y-4">
+                            {/* Port Connection Status */}
+                            {portAttempts.length > 0 && (
+                                <Card className="border-border shadow-lg overflow-hidden">
+                                    <CardContent className="p-4">
+                                        <div className="flex items-center gap-2 mb-3">
+                                            <Wifi className="h-4 w-4 text-primary" />
+                                            <span className="text-sm font-semibold">SSH Connection</span>
+                                            {connectedPort && (
+                                                <Badge className="ml-auto bg-green-500/10 text-green-500 border-green-500/20 text-xs">
+                                                    Connected
+                                                </Badge>
+                                            )}
+                                            {!connectedPort && !isConnecting && portAttempts.some(p => p.status === 'failed') && portAttempts.every(p => p.status === 'failed') && (
+                                                <Badge className="ml-auto bg-red-500/10 text-red-500 border-red-500/20 text-xs">
+                                                    Failed
+                                                </Badge>
+                                            )}
+                                            {isConnecting && (
+                                                <Badge className="ml-auto bg-blue-500/10 text-blue-500 border-blue-500/20 text-xs gap-1">
+                                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                                    Connecting
+                                                </Badge>
+                                            )}
+                                        </div>
+                                        <div className="space-y-2">
+                                            {portAttempts.map((attempt) => (
+                                                <div
+                                                    key={attempt.port}
+                                                    className={cn(
+                                                        "flex items-center gap-3 p-2.5 rounded-lg border transition-all duration-300",
+                                                        attempt.status === 'success' && "bg-green-500/5 border-green-500/30",
+                                                        attempt.status === 'failed' && "bg-red-500/5 border-red-500/20",
+                                                        attempt.status === 'trying' && "bg-blue-500/5 border-blue-500/30 animate-pulse",
+                                                        attempt.status === 'pending' && "bg-muted/30 border-border"
+                                                    )}
+                                                >
+                                                    <div className={cn(
+                                                        "w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0",
+                                                        attempt.status === 'success' && "bg-green-500/10",
+                                                        attempt.status === 'failed' && "bg-red-500/10",
+                                                        attempt.status === 'trying' && "bg-blue-500/10",
+                                                        attempt.status === 'pending' && "bg-muted"
+                                                    )}>
+                                                        {attempt.status === 'success' && <CheckCircle className="h-4 w-4 text-green-500" />}
+                                                        {attempt.status === 'failed' && <AlertCircle className="h-4 w-4 text-red-500" />}
+                                                        {attempt.status === 'trying' && <Loader2 className="h-4 w-4 text-blue-500 animate-spin" />}
+                                                        {attempt.status === 'pending' && <Clock className="h-4 w-4 text-muted-foreground" />}
+                                                    </div>
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="text-sm font-medium font-mono">Port {attempt.port}</span>
+                                                            <span className="text-xs text-muted-foreground">
+                                                                {attempt.port === 22 ? '(Default SSH)' : '(Fallback)'}
+                                                            </span>
+                                                        </div>
+                                                        {attempt.status === 'trying' && (
+                                                            <p className="text-xs text-blue-400 mt-0.5">Attempting connection...</p>
+                                                        )}
+                                                        {attempt.status === 'failed' && attempt.error && (
+                                                            <p className="text-xs text-red-400 mt-0.5">{attempt.error}</p>
+                                                        )}
+                                                        {attempt.status === 'success' && (
+                                                            <p className="text-xs text-green-400 mt-0.5">Connected successfully</p>
+                                                        )}
+                                                        {attempt.status === 'pending' && (
+                                                            <p className="text-xs text-muted-foreground mt-0.5">Waiting...</p>
+                                                        )}
+                                                    </div>
+                                                    <div className={cn(
+                                                        "px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wider",
+                                                        attempt.status === 'success' && "bg-green-500/10 text-green-500",
+                                                        attempt.status === 'failed' && "bg-red-500/10 text-red-500",
+                                                        attempt.status === 'trying' && "bg-blue-500/10 text-blue-500",
+                                                        attempt.status === 'pending' && "bg-muted text-muted-foreground"
+                                                    )}>
+                                                        {attempt.status}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                        {!connectedPort && !isConnecting && portAttempts.every(p => p.status === 'failed') && (
+                                            <div className="mt-3 p-3 rounded-lg bg-red-500/5 border border-red-500/20">
+                                                <p className="text-sm text-red-400 font-medium flex items-center gap-2">
+                                                    <AlertCircle className="h-4 w-4" />
+                                                    Connection Failed
+                                                </p>
+                                                <p className="text-xs text-red-400/70 mt-1 ml-6">
+                                                    Could not connect on any port. Please verify your server IP, credentials, and ensure SSH is running.
+                                                </p>
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    className="mt-2 ml-6 gap-1.5 border-red-500/20 text-red-400 hover:bg-red-500/10"
+                                                    onClick={handleReset}
+                                                >
+                                                    <RefreshCw className="h-3.5 w-3.5" />
+                                                    Try Again
+                                                </Button>
+                                            </div>
+                                        )}
+                                    </CardContent>
+                                </Card>
+                            )}
+
                             <Card className="border-border overflow-hidden shadow-xl">
                                 <div className="bg-slate-900 dark:bg-slate-950">
                                     {/* Terminal Header */}
@@ -547,6 +711,11 @@ const PublicProxySetupPage = () => {
                                         <span className="ml-3 text-xs text-slate-400 font-mono flex items-center gap-2">
                                             <Terminal className="h-3.5 w-3.5" />
                                             OceanLinux Terminal
+                                            {connectedPort && (
+                                                <span className="text-green-400">
+                                                    [{serverIp}:{connectedPort}]
+                                                </span>
+                                            )}
                                         </span>
                                         {detectedOs && (
                                             <Badge variant="outline" className="ml-auto text-xs bg-slate-700 border-slate-600 text-slate-300">
@@ -584,7 +753,9 @@ const PublicProxySetupPage = () => {
                                                 {(isConnecting || isSettingUp) && (
                                                     <div className="flex items-center gap-2 text-blue-400">
                                                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                                        <span className="animate-pulse">Processing...</span>
+                                                        <span className="animate-pulse">
+                                                            {isConnecting ? 'Connecting to server...' : 'Processing...'}
+                                                        </span>
                                                     </div>
                                                 )}
                                             </div>

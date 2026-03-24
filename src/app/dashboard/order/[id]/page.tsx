@@ -75,9 +75,11 @@ interface Order {
   password?: string;
   expiryDate?: Date;
   createdAt?: Date;
-  provider?: 'hostycare' | 'smartvps' | 'oceanlinux';
+  provider?: 'hostycare' | 'smartvps' | 'oceanlinux' | 'slotip';
   hostycareServiceId?: string;
   smartvpsServiceId?: string;
+  slotIpPackageId?: string;
+  slotIpId?: string;
   provisioningStatus?: string;
   lastAction?: string;
   lastActionTime?: Date;
@@ -208,7 +210,7 @@ const OrderDetails = () => {
     setLoading(true);
     try {
       console.log('[ORDER-DETAILS] Fetching order:', orderId);
-      const response = await fetch(`/api/orders/${orderId}`);
+      const response = await fetch(`/api/orders/${orderId}`, { cache: 'no-store' });
       if (!response.ok) throw new Error('Failed to fetch order');
       const orderData = await response.json();
       console.log('[ORDER-DETAILS] Order data received:', {
@@ -254,7 +256,7 @@ const OrderDetails = () => {
   const fetchOrder = async () => {
     setLoading(true);
     try {
-      const response = await fetch(`/api/orders/${orderId}`);
+      const response = await fetch(`/api/orders/${orderId}`, { cache: 'no-store' });
       if (!response.ok) throw new Error('Failed to fetch order');
       const data = await response.json();
       setOrder(data);
@@ -903,7 +905,7 @@ const OrderDetails = () => {
         }
 
         // Then fetch the latest order data
-        const orderRes = await fetch(`/api/orders/${order!._id}`);
+        const orderRes = await fetch(`/api/orders/${order!._id}`, { cache: 'no-store' });
         if (!orderRes.ok) throw new Error('Failed to fetch order');
         const latestOrder = await orderRes.json();
 
