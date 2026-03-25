@@ -368,11 +368,6 @@ export async function POST(request) {
               } else {
                 powerState = statusLower;
               }
-            } else {
-              // Hostycare API failed to return status — when the server is online the
-              // API works fine, so a failure means the server is offline.
-              powerState = 'stopped';
-              console.log('[STATUS] Hostycare API returned no status — server is offline');
             }
 
             try {
@@ -393,11 +388,10 @@ export async function POST(request) {
             });
           } catch (statusError) {
             console.error('[STATUS] Error fetching status:', statusError);
-            console.log('[STATUS] API failed — server is offline');
             return NextResponse.json({
-              success: true,
+              success: false,
               error: statusError.message,
-              powerState: 'stopped'
+              powerState: 'unknown'
             });
           }
         } else {
