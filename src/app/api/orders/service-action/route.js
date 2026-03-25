@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 import { getDataFromToken } from '@/helper/getDataFromToken';
+import { execSync } from 'child_process';
 const HostycareAPI = require('@/services/hostycareApi');
 const SmartVpsAPI = require('@/services/smartvpsApi');
 // at top of /api/orders/service-action/route.js
@@ -73,6 +74,20 @@ function flattenOslist(oslist, virtFilter) {
   return out;
 }
 
+
+function isServerReachable(ip) {
+  const cleanIp = ip.split(':')[0];
+  const isWin = process.platform === 'win32';
+  const cmd = isWin
+    ? `ping -n 1 -w 3000 ${cleanIp}`
+    : `ping -c 1 -W 3 ${cleanIp}`;
+  try {
+    execSync(cmd, { stdio: 'ignore', timeout: 5000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function guessHostnameFromOrder(order) {
   return (
@@ -368,6 +383,12 @@ export async function POST(request) {
               } else {
                 powerState = statusLower;
               }
+            } else if (ipAddress) {
+              const cleanIp = ipAddress.split(':')[0];
+              console.log(`[STATUS] Hostycare API returned no status, pinging ${cleanIp}...`);
+              const isReachable = isServerReachable(ipAddress);
+              powerState = isReachable ? 'running' : 'stopped';
+              console.log(`[STATUS] Ping result: ${cleanIp} is ${isReachable ? 'reachable → running' : 'unreachable → stopped'}`);
             }
 
             try {
@@ -388,10 +409,16 @@ export async function POST(request) {
             });
           } catch (statusError) {
             console.error('[STATUS] Error fetching status:', statusError);
+            let fallbackState = 'stopped';
+            if (ipAddress) {
+              const isReachable = isServerReachable(ipAddress);
+              fallbackState = isReachable ? 'running' : 'stopped';
+              console.log(`[STATUS] Fallback ping ${ipAddress.split(':')[0]}: ${isReachable ? 'online' : 'offline'}`);
+            }
             return NextResponse.json({
-              success: false,
+              success: true,
               error: statusError.message,
-              powerState: 'unknown'
+              powerState: fallbackState
             });
           }
         } else {
