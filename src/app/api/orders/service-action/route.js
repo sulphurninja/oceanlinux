@@ -369,19 +369,10 @@ export async function POST(request) {
                 powerState = statusLower;
               }
             } else {
-              // Hostycare API couldn't give us a status (blocked, "Action not allowed", etc.)
-              // Fall back to the order's own provisioning status
-              const orderStatus = (order.provisioningStatus || order.status || '').toLowerCase();
-              if (['active', 'completed'].includes(orderStatus)) {
-                powerState = 'running';
-                console.log('[STATUS] Hostycare API unavailable, order is active — defaulting to running');
-              } else if (['suspended', 'terminated', 'failed'].includes(orderStatus)) {
-                powerState = 'stopped';
-                console.log('[STATUS] Hostycare API unavailable, order is', orderStatus, '— defaulting to stopped');
-              } else {
-                powerState = 'stopped';
-                console.log('[STATUS] Hostycare API unavailable, order status:', orderStatus, '— defaulting to stopped');
-              }
+              // Hostycare API failed to return status — when the server is online the
+              // API works fine, so a failure means the server is offline.
+              powerState = 'stopped';
+              console.log('[STATUS] Hostycare API returned no status — server is offline');
             }
 
             try {
@@ -401,15 +392,12 @@ export async function POST(request) {
               lastSync: new Date().toISOString()
             });
           } catch (statusError) {
-            // Complete failure — still don't show "unknown", use order status
             console.error('[STATUS] Error fetching status:', statusError);
-            const orderStatus = (order.provisioningStatus || order.status || '').toLowerCase();
-            const fallbackState = ['active', 'completed'].includes(orderStatus) ? 'running' : 'stopped';
-            console.log('[STATUS] Falling back to order status:', orderStatus, '→', fallbackState);
+            console.log('[STATUS] API failed — server is offline');
             return NextResponse.json({
               success: true,
               error: statusError.message,
-              powerState: fallbackState
+              powerState: 'stopped'
             });
           }
         } else {
