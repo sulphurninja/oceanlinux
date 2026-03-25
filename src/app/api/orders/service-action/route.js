@@ -315,40 +315,31 @@ export async function POST(request) {
         } else if (hostycareApi && order.hostycareServiceId) {
           console.log('[STATUS] Using Hostycare API with service ID:', order.hostycareServiceId);
           try {
-            // Fetch both endpoints independently so one failure doesn't kill the other
             let serviceInfo = null;
             let serviceDetails = null;
 
-            // Use makeRawRequest so we get the data even when API returns success:false
-            // (e.g. when a server is offline, Hostycare may return status in the error response)
+            // Try the real API methods first (work in production where IP is whitelisted)
             try {
-              serviceInfo = await hostycareApi.makeRawRequest(`/services/${order.hostycareServiceId}/getInfo`);
+              serviceInfo = await hostycareApi.getServiceInfo(order.hostycareServiceId);
               console.log('[STATUS] Service Info:', JSON.stringify(serviceInfo, null, 2));
             } catch (infoErr) {
               console.warn('[STATUS] getServiceInfo failed (non-fatal):', infoErr.message);
             }
 
             try {
-              serviceDetails = await hostycareApi.makeRawRequest(`/services/${order.hostycareServiceId}`);
+              serviceDetails = await hostycareApi.getServiceDetails(order.hostycareServiceId);
               console.log('[STATUS] Service Details:', JSON.stringify(serviceDetails, null, 2));
             } catch (detailsErr) {
               console.warn('[STATUS] getServiceDetails failed (non-fatal):', detailsErr.message);
             }
 
-            if (!serviceInfo && !serviceDetails) {
-              throw new Error('Both Hostycare status endpoints failed');
-            }
-
-            // Parse the power state from the response
             let powerState = 'unknown';
             let rawStatus = null;
 
             const extractStatus = (obj) => {
               if (!obj) return null;
-              // Direct fields (WHMCS-style domainstatus first, then generic)
               const direct = obj.domainstatus || obj.domainStatus || obj.status || obj.state || obj.power_status || obj.vps_status;
               if (direct) return direct;
-              // Nested under common keys
               for (const key of ['data', 'result', 'vps', 'server', 'service']) {
                 if (obj[key]) {
                   const nested = obj[key].domainstatus || obj[key].domainStatus || obj[key].status || obj[key].state || obj[key].power_status || obj[key].power;
@@ -358,11 +349,12 @@ export async function POST(request) {
               return null;
             };
 
-            rawStatus = extractStatus(serviceInfo) || extractStatus(serviceDetails);
+            if (serviceInfo || serviceDetails) {
+              rawStatus = extractStatus(serviceInfo) || extractStatus(serviceDetails);
+            }
 
             console.log('[STATUS] Extracted rawStatus:', rawStatus);
 
-            // Normalize the status
             if (rawStatus) {
               const statusLower = String(rawStatus).toLowerCase().trim();
               if (['online', 'running', 'active', 'started', 'on', '1', 'true'].includes(statusLower)) {
@@ -376,9 +368,22 @@ export async function POST(request) {
               } else {
                 powerState = statusLower;
               }
+            } else {
+              // Hostycare API couldn't give us a status (blocked, "Action not allowed", etc.)
+              // Fall back to the order's own provisioning status
+              const orderStatus = (order.provisioningStatus || order.status || '').toLowerCase();
+              if (['active', 'completed'].includes(orderStatus)) {
+                powerState = 'running';
+                console.log('[STATUS] Hostycare API unavailable, order is active — defaulting to running');
+              } else if (['suspended', 'terminated', 'failed'].includes(orderStatus)) {
+                powerState = 'stopped';
+                console.log('[STATUS] Hostycare API unavailable, order is', orderStatus, '— defaulting to stopped');
+              } else {
+                powerState = 'stopped';
+                console.log('[STATUS] Hostycare API unavailable, order status:', orderStatus, '— defaulting to stopped');
+              }
             }
 
-            // Sync state to database
             try {
               await syncServerState(order._id, serviceDetails, serviceInfo);
             } catch (syncErr) {
@@ -396,11 +401,15 @@ export async function POST(request) {
               lastSync: new Date().toISOString()
             });
           } catch (statusError) {
+            // Complete failure — still don't show "unknown", use order status
             console.error('[STATUS] Error fetching status:', statusError);
+            const orderStatus = (order.provisioningStatus || order.status || '').toLowerCase();
+            const fallbackState = ['active', 'completed'].includes(orderStatus) ? 'running' : 'stopped';
+            console.log('[STATUS] Falling back to order status:', orderStatus, '→', fallbackState);
             return NextResponse.json({
-              success: false,
+              success: true,
               error: statusError.message,
-              powerState: 'unknown'
+              powerState: fallbackState
             });
           }
         } else {

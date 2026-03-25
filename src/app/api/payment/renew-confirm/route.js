@@ -350,7 +350,8 @@ export async function POST(request) {
     logger.logInfo('Provider determined', { provider });
 
     // Calculate new expiry based on the number of days in the base month
-    const newExpiryDate = calculateRenewalExpiryDate(order.expiryDate);
+    const currentExpiry = order.expiryDate;
+    const newExpiryDate = calculateRenewalExpiryDate(currentExpiry);
 
     console.log(`Renewing order ${order._id}:`);
     console.log(`  Provider: ${provider}`);
