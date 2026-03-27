@@ -41,6 +41,8 @@ type SmartVpsIPs = { '4GB': string; '8GB': string; '16GB': string }
 type SmartVpsDefaultOS = { '4GB': string; '8GB': string; '16GB': string }
 type SmartVpsPIDs = { '4GB': string; '8GB': string; '16GB': string }
 
+type CompanyOption = { _id: string; name: string };
+
 const IPStockFormWithParams = () => {
     const searchParams = useSearchParams();
     const prefilledProductId = searchParams.get('hostycare_product_id');
@@ -48,6 +50,8 @@ const IPStockFormWithParams = () => {
     const [description, setDescription] = useState('');
     const [available, setAvailable] = useState('true');
     const [serverType, setServerType] = useState('Linux');
+    const [companyId, setCompanyId] = useState('');
+    const [companies, setCompanies] = useState<CompanyOption[]>([]);
     const [prices, setPrices] = useState<MemoryOptions>({
         '4GB': '',
         '8GB': '',
@@ -100,6 +104,13 @@ const IPStockFormWithParams = () => {
         setSmartvpsIPs(prev => ({ ...prev, [mem]: val }))
     const setSmartVpsOS = (mem: keyof SmartVpsDefaultOS, val: string) =>
         setSmartvpsDefaultOS(prev => ({ ...prev, [mem]: val }))
+
+    useEffect(() => {
+        fetch('/api/admin/companies')
+            .then(r => r.json())
+            .then(data => { if (Array.isArray(data)) setCompanies(data); })
+            .catch(() => {});
+    }, []);
 
     useEffect(() => {
         if (prefilledProductId) {
@@ -229,7 +240,8 @@ const IPStockFormWithParams = () => {
                 tags,
                 memoryOptions,
                 promoCodes,
-                defaultConfigurations, // includes smartvps only when you chose values
+                defaultConfigurations,
+                company: companyId || null,
             });
 
             console.log('Submission Successful:', response.data);
@@ -299,6 +311,24 @@ const IPStockFormWithParams = () => {
                                         <SelectItem value="VPS">VPS</SelectItem>
                                     </SelectContent>
                                 </Select>
+                            </div>
+
+                            <div className="mb-4">
+                                <Label className="block text-sm font-medium mb-1">Company (optional):</Label>
+                                <Select value={companyId} onValueChange={setCompanyId}>
+                                    <SelectTrigger>
+                                        <SelectValue placeholder="No company (managed by admin)" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="none">No company</SelectItem>
+                                        {companies.map(c => (
+                                            <SelectItem key={c._id} value={c._id}>{c.name}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                                <p className="text-xs text-gray-500 mt-1">
+                                    Assign to a company to let them manage availability and order credentials.
+                                </p>
                             </div>
 
                             <div className="mb-4">

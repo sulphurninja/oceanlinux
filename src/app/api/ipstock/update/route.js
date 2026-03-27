@@ -5,7 +5,7 @@ import IPStock from '../../../../models/ipStockModel';
 
 export async function PUT(req, res) {
     const reqBody = await req.json();
-    const { _id, name, available, serverType, tags, memoryOptions, promoCodes, defaultConfigurations  } = reqBody; // Add tags
+    const { _id, name, available, serverType, tags, memoryOptions, promoCodes, defaultConfigurations, company } = reqBody;
 
     await connectDB();
 
@@ -14,10 +14,11 @@ export async function PUT(req, res) {
             name,
             available,
             serverType,
-            tags, // Include tags
+            tags,
             memoryOptions,
             promoCodes,
-           ...(typeof defaultConfigurations !== 'undefined' ? { defaultConfigurations } : {})
+            ...(typeof defaultConfigurations !== 'undefined' ? { defaultConfigurations } : {}),
+            company: company && company !== 'none' ? company : null,
         }, { new: true });
         
         if (!updatedStock) {

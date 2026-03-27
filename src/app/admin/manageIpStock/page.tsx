@@ -43,6 +43,12 @@ interface IPStock {
     tags: string[];
     promoCodes: PromoCode[];
     defaultConfigurations?: Record<string, any>;
+    company?: string | null;
+}
+
+interface CompanyOption {
+    _id: string;
+    name: string;
 }
 
 const ManageIpStock = () => {
@@ -53,6 +59,7 @@ const ManageIpStock = () => {
     const [newPromoDiscount, setNewPromoDiscount] = useState('');
     const [newPromoDiscountType, setNewPromoDiscountType] = useState<'percentage' | 'fixed'>('fixed');
     const [newTag, setNewTag] = useState('');
+    const [companies, setCompanies] = useState<CompanyOption[]>([]);
 
     useEffect(() => {
         const fetchIPStocks = async () => {
@@ -61,6 +68,10 @@ const ManageIpStock = () => {
             setIpStocks(data);
         };
         fetchIPStocks();
+        fetch('/api/admin/companies')
+            .then(r => r.json())
+            .then(data => { if (Array.isArray(data)) setCompanies(data); })
+            .catch(() => {});
     }, []);
 
     const addTag = () => {
@@ -360,6 +371,24 @@ const ManageIpStock = () => {
                                         <SelectContent>
                                             <SelectItem value="Linux">Linux</SelectItem>
                                             <SelectItem value="VPS">VPS</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+
+                                <div>
+                                    <Label>Company (optional):</Label>
+                                    <Select
+                                        value={currentStock.company || 'none'}
+                                        onValueChange={(value) => setCurrentStock({ ...currentStock, company: value === 'none' ? null : value })}
+                                    >
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="No company" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="none">No company</SelectItem>
+                                            {companies.map(c => (
+                                                <SelectItem key={c._id} value={c._id}>{c.name}</SelectItem>
+                                            ))}
                                         </SelectContent>
                                     </Select>
                                 </div>

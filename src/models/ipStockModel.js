@@ -4,6 +4,7 @@ const IPStockSchema = new mongoose.Schema({
   name: { type: String, required: true },
   description: { type: String, default: "" },
   available: { type: Boolean, default: true },
+  company: { type: mongoose.Schema.Types.ObjectId, ref: 'Company', default: null },
   serverType: {
     type: String,
     enum: ['VPS', 'Linux'],

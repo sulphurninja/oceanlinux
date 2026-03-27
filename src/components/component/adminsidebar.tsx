@@ -25,7 +25,8 @@ import {
   Users,
   BarChart3,
   Megaphone,
-  ClipboardList
+  ClipboardList,
+  Building2
 } from 'lucide-react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../ui/collapsible';
 import { useRouter, usePathname } from 'next/navigation';
@@ -144,6 +145,11 @@ const AdminSidebar = () => {
       label: 'Resellers',
       icon: Users,
       badge: 'B2B'
+    },
+    {
+      href: '/admin/companies',
+      label: 'Companies',
+      icon: Building2,
     }
   ];
 
