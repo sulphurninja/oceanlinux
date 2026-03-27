@@ -85,6 +85,8 @@ interface Order {
   lastActionTime?: Date;
   lastSyncTime?: Date;
   ipStockId?: string;
+  panelUsername?: string;
+  panelPassword?: string;
   renewalPayments?: Array<{
     paymentId: string;
     amount: number;
@@ -2062,6 +2064,47 @@ const OrderDetails = () => {
                         <Clock className="h-3 w-3 mr-1.5" />
                         Est. setup time: 5-10 minutes
                       </Badge>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Panel Access */}
+                {order.panelUsername && order.panelPassword && (
+                  <Card className="border-border hover:shadow-md transition-shadow">
+                    <CardHeader className="pb-3">
+                      <CardTitle className="flex items-center gap-2 text-base lg:text-lg">
+                        <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                          <Globe className="h-4 w-4 text-primary" />
+                        </div>
+                        Panel Access
+                      </CardTitle>
+                      <CardDescription className="text-xs lg:text-sm">
+                        Use these credentials to access the server management panel
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg border border-border">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <User className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                            <span className="text-sm text-muted-foreground">Username:</span>
+                            <code className="font-mono text-sm font-medium">{order.panelUsername}</code>
+                          </div>
+                          <Button variant="ghost" size="icon" className="h-7 w-7 flex-shrink-0" onClick={() => { navigator.clipboard.writeText(order.panelUsername); toast.success('Username copied'); }}>
+                            <Copy className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                        <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg border border-border">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <Lock className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                            <span className="text-sm text-muted-foreground">Password:</span>
+                            <code className="font-mono text-sm font-medium">{order.panelPassword}</code>
+                          </div>
+                          <Button variant="ghost" size="icon" className="h-7 w-7 flex-shrink-0" onClick={() => { navigator.clipboard.writeText(order.panelPassword); toast.success('Password copied'); }}>
+                            <Copy className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </div>
                     </CardContent>
                   </Card>
                 )}

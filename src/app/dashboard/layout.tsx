@@ -33,10 +33,8 @@ import {
     Settings,
     Lock,
     FileText,
-    BarChart3,
-    Zap,
     ChevronRight,
-    Package
+    Store
 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
@@ -153,9 +151,8 @@ export default function DashboardLayout({
             },
             '/dashboard/ipStock': {
                 title: 'IP Stock',
-                description: 'Browse and purchase available servers',
-                icon: Package,
-                // breadcrumb: [{ name: 'Dashboard', href: '/dashboard' }]
+                description: 'Browse server plans and deploy instantly',
+                icon: Store,
             },
             '/dashboard/viewLinux': {
                 title: 'Manage Orders',
@@ -263,187 +260,87 @@ export default function DashboardLayout({
                     {/* Main Content Area */}
                     <div className="lg:pl-64">
                         {/* Top Navigation Bar */}
-                        <div className="sticky top-0 z-40 bg-background/95 backdrop-blur-sm border-b border-border shadow-sm lg:top-0">
-                            <div className="flex h-16 items-center justify-between px-4 lg:px-6">
+                        <div className="sticky top-0 z-40 bg-background/80 backdrop-blur-lg border-b border-border/60 lg:top-0">
+                            <div className="flex h-14 items-center justify-between px-4 lg:px-6">
                                 {/* Page Info */}
-                                <div className="flex items-center gap-3 min-w-0 flex-1">
-                                    <div className="flex items-center gap-2 min-w-0 flex-1">
-                                        {/* Page Icon */}
-                                        <div className="w-8 h-8 bg-primary /10 rounded-lg flex items-center justify-center flex-shrink-0">
-                                            <currentPage.icon className="h-4 w-4 text-white" />
-                                        </div>
+                                <div className="flex items-center gap-2.5 min-w-0">
+                                    <currentPage.icon className="h-4 w-4 text-muted-foreground shrink-0" />
 
-                                        {/* Page Title and Breadcrumb */}
-                                        <div className="min-w-0 flex-1">
-                                            {/* Breadcrumb */}
-                                            {currentPage.breadcrumb && currentPage.breadcrumb.length > 0 && (
-                                                <div className="flex items-center gap-1 text-xs text-muted-foreground mb-0.5">
-                                                    {currentPage.breadcrumb.map((crumb, index) => (
-                                                        <div key={crumb.href} className="flex items-center gap-1">
-                                                            <Link
-                                                                href={crumb.href}
-                                                                className="hover:text-foreground transition-colors"
-                                                            >
-                                                                {crumb.name}
-                                                            </Link>
-                                                            <ChevronRight className="h-3 w-3" />
-                                                        </div>
-                                                    ))}
-                                                    <span className="text-foreground">{currentPage.title}</span>
+                                    {/* Breadcrumb */}
+                                    {currentPage.breadcrumb && currentPage.breadcrumb.length > 0 ? (
+                                        <div className="flex items-center gap-1 text-sm">
+                                            {currentPage.breadcrumb.map((crumb) => (
+                                                <div key={crumb.href} className="flex items-center gap-1">
+                                                    <Link href={crumb.href} className="text-muted-foreground hover:text-foreground transition-colors">
+                                                        {crumb.name}
+                                                    </Link>
+                                                    <ChevronRight className="h-3 w-3 text-muted-foreground/50" />
                                                 </div>
-                                            )}
-
-                                            {/* Page Title */}
-                                            <div className="flex items-center gap-2">
-                                                <h1 className="text-lg font-semibold truncate">
-                                                    {currentPage.title}
-                                                </h1>
-
-                                                {/* Add badges for special pages */}
-                                                {pathname === '/dashboard/ipStock' && (
-                                                    <Badge variant="secondary" className="text-xs">
-                                                        <Zap className="h-3 w-3 mr-1" />
-                                                        Hot
-                                                    </Badge>
-                                                )}
-
-                                                {pathname === '/dashboard/activity' && (
-                                                    <Badge variant="outline" className="text-xs">
-                                                        New
-                                                    </Badge>
-                                                )}
-                                            </div>
-
-                                            {/* Page Description (hidden on mobile) */}
-                                            {currentPage.description && (
-                                                <p className="text-xs text-muted-foreground hidden sm:block truncate">
-                                                    {currentPage.description}
-                                                </p>
-                                            )}
+                                            ))}
+                                            <span className="font-medium truncate">{currentPage.title}</span>
                                         </div>
-                                    </div>
+                                    ) : (
+                                        <h1 className="text-sm font-medium truncate">{currentPage.title}</h1>
+                                    )}
                                 </div>
 
                                 {/* Right Side Actions */}
-                                <div className="flex items-center gap-3">
-                                    {/* Notifications */}
+                                <div className="flex items-center gap-2">
                                     <NotificationBell />
 
-                                    {/* User Dropdown */}
                                     <DropdownMenu>
                                         <DropdownMenuTrigger asChild>
-                                            <Button variant="ghost" className="relative h-10 w-10 rounded-full">
-                                                <Avatar className="h-10 w-10">
+                                            <Button variant="ghost" className="relative h-8 w-8 rounded-full">
+                                                <Avatar className="h-8 w-8">
                                                     <AvatarImage src={user?.avatar} alt={user?.name || 'User'} />
-                                                    <AvatarFallback className="bg-primary text-primary-foreground">
+                                                    <AvatarFallback className="bg-primary/10 text-primary text-xs font-medium">
                                                         {user?.name ? getUserInitials(user.name) : 'U'}
                                                     </AvatarFallback>
                                                 </Avatar>
                                             </Button>
                                         </DropdownMenuTrigger>
-                                        <DropdownMenuContent className="w-80" align="end" forceMount>
-                                            {/* User Info Header */}
-                                            <DropdownMenuLabel className="p-4 pb-2">
-                                                <div className="flex items-start gap-3">
-                                                    <Avatar className="h-12 w-12">
+                                        <DropdownMenuContent className="w-72" align="end" forceMount>
+                                            <DropdownMenuLabel className="p-3">
+                                                <div className="flex items-center gap-3">
+                                                    <Avatar className="h-10 w-10">
                                                         <AvatarImage src={user?.avatar} alt={user?.name || 'User'} />
-                                                        <AvatarFallback className="bg-primary text-primary-foreground text-lg">
+                                                        <AvatarFallback className="bg-primary/10 text-primary font-medium">
                                                             {user?.name ? getUserInitials(user.name) : 'U'}
                                                         </AvatarFallback>
                                                     </Avatar>
                                                     <div className="flex-1 min-w-0">
-                                                        <div className="flex items-center gap-2">
-                                                            <p className="font-semibold truncate">
+                                                        <div className="flex items-center gap-1.5">
+                                                            <p className="text-sm font-medium truncate">
                                                                 {loading ? 'Loading...' : (user?.name || 'User')}
                                                             </p>
                                                             {user?.isVerified && (
-                                                                <Shield className="h-4 w-4 text-green-500" title="Verified Account" />
+                                                                <Shield className="h-3.5 w-3.5 text-green-500 shrink-0" />
                                                             )}
                                                         </div>
-                                                        <p className="text-sm text-muted-foreground truncate">
-                                                            {user?.email}
-                                                        </p>
-                                                        <div className="flex items-center gap-4 mt-1 text-xs text-muted-foreground">
-                                                            {user?.phone && (
-                                                                <div className="flex items-center gap-1">
-                                                                    <Phone className="h-3 w-3" />
-                                                                    <span>{user.phone}</span>
-                                                                </div>
-                                                            )}
-                                                            <div className="flex items-center gap-1">
-                                                                <Calendar className="h-3 w-3" />
-                                                                <span>Joined {user?.createdAt ? formatJoinDate(user.createdAt) : 'Recently'}</span>
-                                                            </div>
-                                                        </div>
+                                                        <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
                                                     </div>
                                                 </div>
                                             </DropdownMenuLabel>
 
                                             <DropdownMenuSeparator />
 
-
-
-                                            <DropdownMenuSeparator />
-
-                                            {/* Menu Items */}
                                             <DropdownMenuGroup>
                                                 <DropdownMenuItem asChild>
                                                     <Link href="/dashboard/my-account" className="cursor-pointer">
-                                                        <UserCircle className="mr-3 h-4 w-4" />
-                                                        <div className="flex-1">
-                                                            <div>My Profile</div>
-                                                            <div className="text-xs text-muted-foreground">
-                                                                Manage your account settings
-                                                            </div>
-                                                        </div>
+                                                        <UserCircle className="mr-2.5 h-4 w-4 text-muted-foreground" />
+                                                        My Profile
                                                     </Link>
                                                 </DropdownMenuItem>
-
                                                 <DropdownMenuItem asChild>
                                                     <Link href="/dashboard/activity" className="cursor-pointer">
-                                                        <Activity className="mr-3 h-4 w-4" />
-                                                        <div className="flex-1">
-                                                            <div>Activity Log</div>
-                                                            <div className="text-xs text-muted-foreground">
-                                                                View your account activity
-                                                            </div>
-                                                        </div>
+                                                        <Activity className="mr-2.5 h-4 w-4 text-muted-foreground" />
+                                                        Activity Log
                                                     </Link>
                                                 </DropdownMenuItem>
-
                                                 <DropdownMenuItem asChild>
                                                     <Link href="/support/tickets" className="cursor-pointer">
-                                                        <MessageCircle className="mr-3 h-4 w-4" />
-                                                        <div className="flex-1">
-                                                            <div>Support Center</div>
-                                                            <div className="text-xs text-muted-foreground">
-                                                                Get help and create tickets
-                                                            </div>
-                                                        </div>
-                                                    </Link>
-                                                </DropdownMenuItem>
-
-                                                <DropdownMenuItem asChild>
-                                                    <Link href="/dashboard/api-keys" className="cursor-pointer">
-                                                        <Key className="mr-3 h-4 w-4" />
-                                                        <div className="flex-1">
-                                                            <div>API Keys</div>
-                                                            <div className="text-xs text-muted-foreground">
-                                                                Manage your API access
-                                                            </div>
-                                                        </div>
-                                                    </Link>
-                                                </DropdownMenuItem>
-
-                                                <DropdownMenuItem asChild>
-                                                    <Link href="/dashboard/billing" className="cursor-pointer">
-                                                        <CreditCard className="mr-3 h-4 w-4" />
-                                                        <div className="flex-1">
-                                                            <div>Billing & Usage</div>
-                                                            <div className="text-xs text-muted-foreground">
-                                                                View invoices and usage
-                                                            </div>
-                                                        </div>
+                                                        <MessageCircle className="mr-2.5 h-4 w-4 text-muted-foreground" />
+                                                        Support
                                                     </Link>
                                                 </DropdownMenuItem>
                                             </DropdownMenuGroup>
@@ -452,26 +349,27 @@ export default function DashboardLayout({
 
                                             <DropdownMenuGroup>
                                                 <DropdownMenuItem asChild>
-                                                    <Link href="/knowledge-base" className="cursor-pointer">
-                                                        <BookOpen className="mr-3 h-4 w-4" />
-                                                        <div className="flex-1">
-                                                            <div>Knowledge Base</div>
-                                                            <div className="text-xs text-muted-foreground">
-                                                                Documentation and guides
-                                                            </div>
-                                                        </div>
+                                                    <Link href="/dashboard/api-keys" className="cursor-pointer">
+                                                        <Key className="mr-2.5 h-4 w-4 text-muted-foreground" />
+                                                        API Keys
                                                     </Link>
                                                 </DropdownMenuItem>
-
+                                                <DropdownMenuItem asChild>
+                                                    <Link href="/dashboard/billing" className="cursor-pointer">
+                                                        <CreditCard className="mr-2.5 h-4 w-4 text-muted-foreground" />
+                                                        Billing
+                                                    </Link>
+                                                </DropdownMenuItem>
                                                 <DropdownMenuItem asChild>
                                                     <Link href="/dashboard/notifications" className="cursor-pointer">
-                                                        <Bell className="mr-3 h-4 w-4" />
-                                                        <div className="flex-1">
-                                                            <div>Notifications</div>
-                                                            <div className="text-xs text-muted-foreground">
-                                                                Manage notification settings
-                                                            </div>
-                                                        </div>
+                                                        <Bell className="mr-2.5 h-4 w-4 text-muted-foreground" />
+                                                        Notifications
+                                                    </Link>
+                                                </DropdownMenuItem>
+                                                <DropdownMenuItem asChild>
+                                                    <Link href="/knowledge-base" className="cursor-pointer">
+                                                        <BookOpen className="mr-2.5 h-4 w-4 text-muted-foreground" />
+                                                        Docs
                                                     </Link>
                                                 </DropdownMenuItem>
                                             </DropdownMenuGroup>
@@ -479,16 +377,11 @@ export default function DashboardLayout({
                                             <DropdownMenuSeparator />
 
                                             <DropdownMenuItem
-                                                className="text-red-600 focus:text-red-600 cursor-pointer"
+                                                className="text-red-500 focus:text-red-500 cursor-pointer"
                                                 onClick={handleLogout}
                                             >
-                                                <LogOut className="mr-3 h-4 w-4" />
-                                                <div className="flex-1">
-                                                    <div>Sign Out</div>
-                                                    <div className="text-xs text-muted-foreground">
-                                                        Logout from your account
-                                                    </div>
-                                                </div>
+                                                <LogOut className="mr-2.5 h-4 w-4" />
+                                                Sign Out
                                             </DropdownMenuItem>
                                         </DropdownMenuContent>
                                     </DropdownMenu>

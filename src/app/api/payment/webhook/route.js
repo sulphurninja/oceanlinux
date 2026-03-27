@@ -4,6 +4,7 @@ import Order from '@/models/orderModel';
 import IPStock from '@/models/ipStockModel';
 import crypto from 'crypto';
 import { calculateExpiryDate, calculateRenewalExpiryDate } from '@/lib/expiryHelper';
+import { assignPanelCredentials } from '@/lib/panelCredentials';
 const AutoProvisioningService = require('@/services/autoProvisioningService');
 const SlotIPPackage = require('@/models/slotIpPackageModel');
 const HostycareAPI = require('@/services/hostycareApi');
@@ -114,6 +115,7 @@ export async function POST(request) {
         webhookReceivedAt: new Date()
       };
 
+      await assignPanelCredentials(order);
       await order.save();
       const orderUpdateTime = Date.now() - orderUpdateStart;
       console.log(`[WEBHOOK] ✅ ORDER UPDATED to 'confirmed' in ${orderUpdateTime}ms`);

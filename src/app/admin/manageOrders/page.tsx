@@ -20,7 +20,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { 
     Eye, Settings, Play, RotateCcw, Loader2, AlertCircle, CheckCircle, 
     Wrench, Search, Filter, Calendar, X, ChevronLeft, ChevronRight, 
-    ChevronsLeft, ChevronsRight, Edit2, Save, XCircle, Download, RefreshCw
+    ChevronsLeft, ChevronsRight, Edit2, Save, XCircle, Download, RefreshCw, KeyRound
 } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -93,6 +93,7 @@ const ManageOrders = () => {
     });
     const [showFilters, setShowFilters] = useState(false);
     const [batchProvisioning, setBatchProvisioning] = useState(false);
+    const [generatingCreds, setGeneratingCreds] = useState(false);
     const [updating, setUpdating] = useState(false);
     
     // Pagination state
@@ -252,6 +253,26 @@ const ManageOrders = () => {
             toast.error('Failed to start batch provisioning');
         } finally {
             setBatchProvisioning(false);
+        }
+    };
+
+    const handleGeneratePanelCreds = async () => {
+        setGeneratingCreds(true);
+        try {
+            const response = await fetch('/api/admin/orders/generate-panel-creds', {
+                method: 'POST',
+            });
+            const result = await response.json();
+            if (result.success) {
+                toast.success(result.message);
+                if (result.generated > 0) fetchOrders();
+            } else {
+                toast.error(result.error || 'Failed to generate credentials');
+            }
+        } catch {
+            toast.error('Failed to generate panel credentials');
+        } finally {
+            setGeneratingCreds(false);
         }
     };
 
@@ -442,6 +463,25 @@ const ManageOrders = () => {
                             >
                                 <Download className="w-4 h-4" />
                                 Export CSV
+                            </Button>
+                            <Button
+                                variant="outline"
+                                onClick={handleGeneratePanelCreds}
+                                disabled={generatingCreds}
+                                className="gap-2"
+                                size="sm"
+                            >
+                                {generatingCreds ? (
+                                    <>
+                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                        Generating...
+                                    </>
+                                ) : (
+                                    <>
+                                        <KeyRound className="w-4 h-4" />
+                                        Generate Panel Creds
+                                    </>
+                                )}
                             </Button>
                             <Button
                                 variant="default"

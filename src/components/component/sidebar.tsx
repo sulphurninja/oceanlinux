@@ -11,7 +11,7 @@ import {
   Menu,
   NotebookText,
   ReceiptIndianRupee,
-  ServerIcon,
+  Store,
   ShoppingBag,
   Settings,
   Lock,
@@ -103,7 +103,7 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
     {
       href: '/dashboard/ipStock',
       label: 'IP Stock',
-      icon: ServerIcon,
+      icon: Store,
       badge: 'Buy Now'
     },
     {
@@ -172,7 +172,7 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
             src='/ol.png'
             className={cn(
               "transition-all duration-200 hover:scale-105",
-              isCollapsed && !isMobile ? "h-20 w-auto" : "h-16 w-auto"
+              isCollapsed && !isMobile ? "h-20 w-auto" : "h-12 w-auto"
             )}
             alt="OceanLinux"
           />

@@ -6,6 +6,7 @@ import { Cashfree } from 'cashfree-pg';
 import Razorpay from 'razorpay';
 import crypto from 'crypto';
 import { calculateRenewalExpiryDate } from '@/lib/expiryHelper';
+import { assignPanelCredentials } from '@/lib/panelCredentials';
 const HostycareAPI = require('@/services/hostycareApi');
 const SmartVPSAPI = require('@/services/smartvpsApi');
 const RenewalLogger = require('@/services/renewalLogger');
@@ -499,6 +500,12 @@ export async function POST(request) {
       ...renewalPayment,
       providerRenewalResult: providerRenewalResult ? '[RESULT_PRESENT]' : null
     });
+
+    // Backfill panel credentials for older orders that don't have them
+    if (!order.panelUsername) {
+      await assignPanelCredentials(order);
+      await order.save();
+    }
 
     // Update the order with new expiry date and payment info
     // IMPORTANT: Update main payment fields  to reflect the latest renewal transaction

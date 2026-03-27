@@ -5,6 +5,7 @@ import { Cashfree } from 'cashfree-pg';
 import Razorpay from 'razorpay';
 import NotificationService from '@/services/notificationService';
 import { calculateExpiryDate } from '@/lib/expiryHelper';
+import { assignPanelCredentials } from '@/lib/panelCredentials';
 const AutoProvisioningService = require('@/services/autoProvisioningService');
 
 // Initialize Cashfree
@@ -263,6 +264,7 @@ export async function POST(request) {
             bank_reference: payment.bank_reference,
             confirmedAt: new Date()
           };
+          await assignPanelCredentials(order);
           await order.save();
           
           console.log(`Order expiry set to: ${expiryDate.toISOString()}`);

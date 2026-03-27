@@ -112,6 +112,10 @@ const orderSchema = new mongoose.Schema({
         timestamp: Date
     },
 
+    // Panel access credentials (auto-generated on provisioning)
+    panelUsername: { type: String, unique: true, sparse: true },
+    panelPassword: { type: String },
+
     // API Order Tracking
     apiOrderId: String,  // Reseller's order ID
     apiMetadata: mongoose.Schema.Types.Mixed
@@ -127,5 +131,6 @@ orderSchema.index({ expiryDate: 1 });
 orderSchema.index({ provider: 1 });
 orderSchema.index({ 'pendingRenewal.renewalTxnId': 1 }); // For webhook lookup
 orderSchema.index({ 'renewalPayments.renewalTxnId': 1 }); // For idempotency check
+orderSchema.index({ panelUsername: 1 });
 
 export default mongoose.models.Order || mongoose.model('Order', orderSchema);

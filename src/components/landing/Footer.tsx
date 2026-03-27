@@ -81,7 +81,7 @@ export default function Footer() {
                   </div>
                   <div>
                     <div className="text-sm font-medium">A Product of</div>
-                    <Link href='https://backtick.app'>
+                    <Link href='https://backticklabs.io'>
                       <div className="text-lg font-bold text-green-500">Backtick Labs</div>
                     </Link>
                   </div>

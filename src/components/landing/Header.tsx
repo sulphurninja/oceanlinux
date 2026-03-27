@@ -34,7 +34,7 @@ export default function Header() {
                                 <img src='/backtick.png' className="  dark:filter-none" />
                             </div>
                             <span className="text-background/70 dark:text-muted-foreground">A Product of
-                                <Link href='https://backtick.app'>
+                                <Link href='https://backticklabs.io'>
                                     <span className="text-green-500  ml-1 font-medium">Backtick Labs</span>
                                 </Link></span>
                         </div>

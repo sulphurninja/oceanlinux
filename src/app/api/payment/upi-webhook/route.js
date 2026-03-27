@@ -3,6 +3,7 @@ import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 import NotificationService from '@/services/notificationService';
 import { calculateExpiryDate } from '@/lib/expiryHelper';
+import { assignPanelCredentials } from '@/lib/panelCredentials';
 const AutoProvisioningService = require('@/services/autoProvisioningService');
 
 /**
@@ -151,6 +152,7 @@ export async function POST(request) {
         verified: true,
         verifiedAmount: paidAmount
       };
+      await assignPanelCredentials(order);
       await order.save();
 
       console.log(`[UPI Webhook] Order ${order._id} confirmed with UPI txn ${upi_txn_id}`);

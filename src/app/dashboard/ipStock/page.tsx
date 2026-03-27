@@ -24,11 +24,6 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
-import {
   Select,
   SelectContent,
   SelectItem,
@@ -36,7 +31,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  ServerIcon,
   Check,
   AlertCircle,
   Loader2,
@@ -48,20 +42,15 @@ import {
   Cloud,
   Grid3X3,
   Zap,
-  Clock,
-  Shield,
   ChevronDown,
   ChevronRight,
   Package,
   Search,
-  Filter,
-  SlidersHorizontal,
   Copy
 } from "lucide-react";
 import { z } from "zod";
 import { cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 // Keep all existing interfaces and global declarations unchanged...
 
@@ -184,9 +173,8 @@ export default function IPStockPage() {
     let filtered = ipStocks;
 
     // Filter by tab
-    if (activeTab !== 'all') {
+    if (activeTab && activeTab !== 'all') {
       filtered = filtered.filter(stock => {
-        // Handle "Windows & Linux" - show in both Linux and VPS tabs
         if (stock.serverType === 'Windows & Linux') {
           return activeTab === 'Linux' || activeTab === 'VPS';
         }
@@ -695,150 +683,128 @@ export default function IPStockPage() {
     }
   };
 
+  const categoryCards = [
+    { id: 'all', icon: <Grid3X3 className="h-6 w-6" />, label: 'All Plans', count: counts.all + counts.slot, desc: 'Browse every available server and proxy plan' },
+    { id: 'Linux', icon: <Server className="h-6 w-6" />, label: 'Linux Servers', count: counts.linux, desc: 'Ubuntu, CentOS, Debian & more' },
+    { id: 'VPS', icon: <Cloud className="h-6 w-6" />, label: 'Windows VPS', count: counts.vps, desc: 'Windows RDP & VPS servers' },
+    { id: 'SlotIP', icon: <Zap className="h-6 w-6" />, label: 'Slot IP Proxies', count: counts.slot, desc: 'Rotating & dedicated proxy IPs' },
+  ];
+
   return (
     <div className="min-h-screen bg-background">
-      {/* Modern Compact Header */}
-         {/* Promo Banner */}
-         <div className="bg-gradient-to-r from-primary/10 via-primary/5 to-primary/10 border-y border-primary/20">
-        <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center border border-primary/30">
-                <Percent className="h-5 w-5 text-primary" />
-              </div>
-              <div>
-                <p className="text-sm font-semibold">Special Discount Available</p>
-                <p className="text-xs text-muted-foreground">Save on all server plans with our exclusive offer</p>
-              </div>
+      {/* Promo Banner */}
+      <div className="relative overflow-hidden border-b mt-6 md:mt-0 border-primary/10">
+        <div className="absolute inset-0 bg-gradient-to-r from-primary/[0.07] via-transparent to-primary/[0.07]" />
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-primary/10 via-transparent to-transparent" />
+        <div className="container relative mx-auto px-4 sm:px-6 lg:px-8 py-3">
+          <div className="flex items-center justify-center gap-3 sm:gap-6 flex-wrap">
+            <div className="flex items-center gap-2 text-sm">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+              </span>
+              <span className="text-muted-foreground">Limited offer</span>
+              <span className="font-medium">Save on every plan</span>
             </div>
-            <div className="flex items-center gap-2">
-              <div className="px-4 py-2 rounded-lg bg-background border border-border">
-                <div className="flex items-center gap-2">
-                  <Tag className="h-4 w-4 text-primary" />
-                  <code className="text-sm font-bold tracking-wider">OCEAN50</code>
-                </div>
-              </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  navigator.clipboard.writeText('OCEAN50');
-                  toast.success('Promo code copied to clipboard!');
-                }}
-                className="h-9 gap-1.5"
-              >
-                <Copy className="h-3.5 w-3.5" />
-                Copy
-              </Button>
-            </div>
-          </div>
-        </div>
-      </div>
-      {/* Search & Filters Bar */}
-      <div className="sticky sm:static top-[64px] sm:top-0 z-30 sm:z-0 bg-card/95 sm:bg-transparent backdrop-blur-sm sm:backdrop-blur-none border-b border-border">
-        <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-3">
-          <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
-            {/* Search */}
-            <div className="relative flex-1 max-w-full sm:max-w-md">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search servers..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-9 h-9 bg-background border-border"
-              />
-            </div>
-
-            {/* Filters */}
-            <div className="flex gap-2 flex-wrap sm:items-center">
-              <Select value={priceFilter} onValueChange={setPriceFilter}>
-                <SelectTrigger className="w-[calc(50%-4px)] sm:w-32 h-9 text-xs border-border bg-background">
-                  <SelectValue placeholder="Price" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Prices</SelectItem>
-                  <SelectItem value="under-500">&lt; ₹500</SelectItem>
-                  <SelectItem value="500-1000">₹500-1K</SelectItem>
-                  <SelectItem value="1000-2000">₹1K-2K</SelectItem>
-                  <SelectItem value="above-2000">&gt; ₹2K</SelectItem>
-                </SelectContent>
-              </Select>
-
-              <Select value={sortBy} onValueChange={setSortBy}>
-                <SelectTrigger className="w-[calc(50%-4px)] sm:w-28 h-9 text-xs border-border bg-background">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="name">Name</SelectItem>
-                  <SelectItem value="price-low">Low Price</SelectItem>
-                  <SelectItem value="price-high">High Price</SelectItem>
-                </SelectContent>
-              </Select>
-
-              {(searchTerm || priceFilter !== 'all' || sortBy !== 'name') && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setSearchTerm("");
-                    setPriceFilter("all");
-                    setSortBy("name");
-                  }}
-                  className="h-9 px-3 text-xs w-full sm:w-auto"
-                >
-                  Clear All
-                </Button>
-              )}
-            </div>
+            <div className="h-4 w-px bg-border hidden sm:block" />
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText('OCEAN50');
+                toast.success('Promo code copied!');
+              }}
+              className="group flex items-center gap-2 px-3 py-1.5 rounded-full bg-primary/10 border border-primary/20 hover:border-primary/40 hover:bg-primary/15 transition-all cursor-pointer"
+            >
+              <code className="text-xs font-bold tracking-widest text-primary">OCEAN50</code>
+              <Copy className="h-3 w-3 text-primary/60 group-hover:text-primary transition-colors" />
+            </button>
           </div>
         </div>
       </div>
 
-   
-
-      {/* Main Content - Keep everything else exactly the same */}
-      <div className="container mx-auto px-4 sm:px-6 lg:px-8 md:py-6 ">
+      <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-4">
         {isLoading ? (
           <div className="flex flex-col items-center justify-center py-16">
             <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
             <p className="text-muted-foreground">Loading server plans...</p>
           </div>
         ) : (
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-            <TabsList className="grid h-9 grid-cols-4 w-full max-w-md mx-auto bg-muted border border-border">
-              <TabsTrigger value="all" className="flex items-center gap-1.5 text-xs">
-                <Grid3X3 className="h-3.5 w-3.5" />
-                All
-                <Badge variant="secondary" className="ml-1 text-[10px] h-4 px-1.5">
-                  {counts.all}
-                </Badge>
-              </TabsTrigger>
-              <TabsTrigger value="Linux" className="flex items-center gap-1.5 text-xs">
-                <Server className="h-3.5 w-3.5" />
-                Linux
-                <Badge variant="secondary" className="ml-1 text-[10px] h-4 px-1.5">
-                  {counts.linux}
-                </Badge>
-              </TabsTrigger>
-              <TabsTrigger value="VPS" className="flex items-center gap-1.5 text-xs">
-                <Cloud className="h-3.5 w-3.5" />
-                VPS
-                <Badge variant="secondary" className="ml-1 text-[10px] h-4 px-1.5">
-                  {counts.vps}
-                </Badge>
-              </TabsTrigger>
-              <TabsTrigger value="SlotIP" className="flex items-center gap-1.5 text-xs">
-                <Zap className="h-3.5 w-3.5" />
-                Slot IP
-                {counts.slot > 0 && (
-                  <Badge variant="secondary" className="ml-1 text-[10px] h-4 px-1.5">
-                    {counts.slot}
-                  </Badge>
-                )}
-              </TabsTrigger>
-            </TabsList>
+          <div>
+            {/* Category Filter */}
+            <div className="md:flex grid-cols-2 grid items-center gap-2 mb-5 overflow-x-auto pb-1 scrollbar-hide">
+              {categoryCards.map((cat) => (
+                <button
+                  key={cat.id}
+                  onClick={() => setActiveTab(cat.id)}
+                  className={cn(
+                    "flex items-center gap-2 px-3 py-2 rounded-lg border text-sm whitespace-nowrap transition-all shrink-0",
+                    activeTab === cat.id
+                      ? "border-primary bg-primary/5 text-foreground"
+                      : "border-border bg-card text-muted-foreground hover:border-primary/30 hover:text-foreground"
+                  )}
+                >
+                  <span className={cn(
+                    "h-7 w-7 rounded-md flex items-center justify-center transition-colors [&>svg]:h-4 [&>svg]:w-4",
+                    activeTab === cat.id
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-muted text-muted-foreground"
+                  )}>
+                    {cat.icon}
+                  </span>
+                  <span className="font-medium">{cat.label}</span>
+                  <Badge variant="secondary" className="text-[10px] h-4 px-1.5 ml-0.5">{cat.count}</Badge>
+                </button>
+              ))}
+            </div>
 
-            <TabsContent value={activeTab} className="mt-4">
+            {/* Search & Filters */}
+            <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 mb-5">
+              <div className="relative flex-1 max-w-full sm:max-w-md">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search servers..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-9 h-9 bg-background border-border"
+                />
+              </div>
+              <div className="flex gap-2 flex-wrap sm:items-center">
+                <Select value={priceFilter} onValueChange={setPriceFilter}>
+                  <SelectTrigger className="w-[calc(50%-4px)] sm:w-32 h-9 text-xs border-border bg-background">
+                    <SelectValue placeholder="Price" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Prices</SelectItem>
+                    <SelectItem value="under-500">&lt; ₹500</SelectItem>
+                    <SelectItem value="500-1000">₹500-1K</SelectItem>
+                    <SelectItem value="1000-2000">₹1K-2K</SelectItem>
+                    <SelectItem value="above-2000">&gt; ₹2K</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={sortBy} onValueChange={setSortBy}>
+                  <SelectTrigger className="w-[calc(50%-4px)] sm:w-28 h-9 text-xs border-border bg-background">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="name">Name</SelectItem>
+                    <SelectItem value="price-low">Low Price</SelectItem>
+                    <SelectItem value="price-high">High Price</SelectItem>
+                  </SelectContent>
+                </Select>
+                {(searchTerm || priceFilter !== 'all' || sortBy !== 'name') && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => { setSearchTerm(""); setPriceFilter("all"); setSortBy("name"); }}
+                    className="h-9 px-3 text-xs w-full sm:w-auto"
+                  >
+                    Clear
+                  </Button>
+                )}
+              </div>
+            </div>
+
+            {/* Plan listings */}
+            <div>
               {/* Slot IP Section */}
               {(activeTab === 'all' || activeTab === 'SlotIP') && slotPackages.length > 0 && (
                 <div className="space-y-2 mb-6">
@@ -862,7 +828,6 @@ export default function IPStockPage() {
                           <div className="w-8 h-8 rounded-lg bg-orange-500/10 flex items-center justify-center border border-orange-500/20 flex-shrink-0">
                             <Zap className="h-4 w-4 text-orange-500" />
                           </div>
-
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
                               <h3 className="font-semibold text-sm md:text-base">{pkg.name}</h3>
@@ -886,7 +851,6 @@ export default function IPStockPage() {
                               </Badge>
                             </div>
                           </div>
-
                           <div className="flex items-center gap-3 flex-shrink-0">
                             <div className="text-right">
                               <p className="font-bold text-base md:text-lg">₹{pkg.price}</p>
@@ -942,11 +906,7 @@ export default function IPStockPage() {
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => {
-                          setSearchTerm("");
-                          setPriceFilter("all");
-                          setSortBy("name");
-                        }}
+                        onClick={() => { setSearchTerm(""); setPriceFilter("all"); setSortBy("name"); }}
                         className="mt-4"
                       >
                         Clear Filters
@@ -961,7 +921,6 @@ export default function IPStockPage() {
 
                   return (
                     <div className="space-y-6">
-                      {/* Tagged Groups */}
                       {tagKeys.map(tag => (
                         <div key={tag} className="space-y-2">
                           <div className="flex items-center gap-2 px-1">
@@ -983,7 +942,6 @@ export default function IPStockPage() {
                         </div>
                       ))}
 
-                      {/* Untagged Plans */}
                       {untagged.length > 0 && (
                         <div className="space-y-2">
                           {tagKeys.length > 0 && (
@@ -1010,8 +968,8 @@ export default function IPStockPage() {
                   );
                 })()
               )}
-            </TabsContent>
-          </Tabs>
+            </div>
+          </div>
         )}
       </div>
 

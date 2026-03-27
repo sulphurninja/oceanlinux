@@ -75,6 +75,8 @@ interface Order {
     lastAction?: string;
     lastActionTime?: Date;
     lastSyncTime?: Date;
+    panelUsername?: string;
+    panelPassword?: string;
     ipStockId?: string;
     renewalPayments?: Array<{
         paymentId: string;
@@ -340,6 +342,21 @@ const ViewLinux = () => {
 
 
 
+
+    const copyHosthellCreds = (e: React.MouseEvent, order: Order) => {
+        e.stopPropagation();
+        if (!order.panelUsername || !order.panelPassword) {
+            toast.error('Panel credentials not generated yet for this order.');
+            return;
+        }
+        const ip = order.ipAddress ? order.ipAddress.split(':')[0] : 'N/A';
+        const text = `*VPS LOGIN DETAILS*\nUsername: ${order.panelUsername}\nPassword: ${order.panelPassword}\nRAM: ${order.memory}\nIP: ${ip}\nhttps://hosthell.com/access-server`;
+        navigator.clipboard.writeText(text).then(() => {
+            toast.success('Hosthell credentials copied!');
+        }).catch(() => {
+            toast.error('Failed to copy');
+        });
+    };
 
     const isRenewalEligible = (order: Order | null) => {
         if (!order || !order.expiryDate) return false;
@@ -860,7 +877,18 @@ const getStatusBadge = (status: string, provisioningStatus?: string, lastAction?
                                                                 <span className="text-xs">Manage</span>
                                                             </Button>
 
-                                                            {/* Special button for failed servers */}
+                                                            {order.panelUsername && (
+                                                                <Button
+                                                                    variant="outline"
+                                                                    size="sm"
+                                                                    onClick={(e) => copyHosthellCreds(e, order)}
+                                                                    className="gap-1 sm:gap-2 h-8 sm:h-9 px-2 sm:px-3 border-red-500/30 text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30"
+                                                                >
+                                                                    <Copy className="h-3 w-3" />
+                                                                    <span className="text-xs">Copy Panel Credentials</span>
+                                                                </Button>
+                                                            )}
+
                                                             {getServerStatus(order) === 'failed' && (
                                                                 <Button
                                                                     variant="destructive"
@@ -939,6 +967,17 @@ const getStatusBadge = (status: string, provisioningStatus?: string, lastAction?
                                                     <div className="flex items-center gap-2 xl:gap-3 ml-4 flex-shrink-0">
                                                         {getStatusBadge(order.status, order.provisioningStatus, order.lastAction, order)}
                                                         <div className="flex gap-2">
+                                                            {order.panelUsername && (
+                                                                <Button
+                                                                    variant="outline"
+                                                                    size="sm"
+                                                                    onClick={(e) => copyHosthellCreds(e, order)}
+                                                                    className="gap-2 h-9 xl:h-10 px-3 xl:px-4 border-red-500/30 text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30"
+                                                                >
+                                                                    <Copy className="h-4 w-4" />
+                                                                    Copy Panel Credentials
+                                                                </Button>
+                                                            )}
                                                             <Button
                                                                 variant="outline"
                                                                 size="sm"
@@ -949,26 +988,8 @@ const getStatusBadge = (status: string, provisioningStatus?: string, lastAction?
                                                                 className="gap-2 h-9 xl:h-10 px-3 xl:px-4"
                                                             >
                                                                 <Settings className="h-4 w-4" />
-                                                                <span className="hidden xl:inline">Manage</span>
-                                                                <span className="xl:hidden">Manage</span>
+                                                                Manage
                                                             </Button>
-
-                                                            {/* Special button for failed servers */}
-                                                            {/* {getServerStatus(order) === 'failed' && (
-                                                                <Button
-                                                                    variant="destructive"
-                                                                    size="sm"
-                                                                    onClick={(e) => {
-                                                                        e.stopPropagation();
-                                                                        router.push('/support/tickets');
-                                                                    }}
-                                                                    className="gap-2 h-9 xl:h-10 px-3 xl:px-4"
-                                                                >
-                                                                    <LifeBuoy className="h-4 w-4" />
-                                                                    <span className="hidden xl:inline">Create Support Ticket</span>
-                                                                    <span className="xl:hidden">Support</span>
-                                                                </Button>
-                                                            )} */}
                                                         </div>
                                                     </div>
                                                 </div>

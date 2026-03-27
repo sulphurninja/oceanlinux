@@ -6,6 +6,7 @@ import Razorpay from 'razorpay';
 import crypto from 'crypto';
 import NotificationService from '@/services/notificationService';
 import { calculateExpiryDate } from '@/lib/expiryHelper';
+import { assignPanelCredentials } from '@/lib/panelCredentials';
 const AutoProvisioningService = require('@/services/autoProvisioningService');
 const SlotIPPackage = require('@/models/slotIpPackageModel');
 
@@ -129,6 +130,7 @@ export async function POST(request) {
         razorpay_signature: razorpay_signature,
         confirmedAt: new Date()
       };
+      await assignPanelCredentials(order);
       await order.save();
 
       console.log(`Order ${order._id} confirmed with Razorpay payment ${razorpay_payment_id} (order: ${razorpay_order_id})`);
@@ -179,6 +181,7 @@ export async function POST(request) {
           bank_reference: payment.bank_reference,
           confirmedAt: new Date()
         };
+        await assignPanelCredentials(order);
         await order.save();
 
         console.log(`Order ${order._id} confirmed with Cashfree payment ${payment.cf_payment_id} (order: ${order.clientTxnId})`);
