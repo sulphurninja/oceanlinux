@@ -299,10 +299,21 @@ const ManageOrders = () => {
             });
 
             if (response.ok) {
+                const data = await response.json();
+                const updatedOrder = data.order || editingOrder;
                 setOrders(prev => prev.map(order =>
-                    order._id === editingOrder._id ? editingOrder : order
+                    order._id === editingOrder._id ? { ...editingOrder, ...updatedOrder } : order
                 ));
                 toast.success('Order updated successfully!');
+                if (data.advpsNotes && data.advpsNotes.length > 0) {
+                    data.advpsNotes.forEach((note: string) => {
+                        if (note.includes('Failed') || note.includes('manually')) {
+                            toast.warning(`ADVPS: ${note}`, { duration: 8000 });
+                        } else {
+                            toast.info(`ADVPS: ${note}`, { duration: 5000 });
+                        }
+                    });
+                }
                 setIsDialogOpen(false);
                 setCurrentOrder(null);
                 setEditingOrder(null);

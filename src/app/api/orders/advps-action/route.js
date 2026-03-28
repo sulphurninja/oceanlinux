@@ -125,16 +125,30 @@ export async function POST(request) {
       }
 
       case 'generatepassword': {
-        const passRes = await api.generatePassword(serviceId);
-        const newPassword = passRes?.data?.password;
-        if (newPassword) {
-          await Order.findByIdAndUpdate(orderId, {
-            password: newPassword,
-            lastAction: 'changepassword',
-            lastActionTime: new Date(),
-          });
+        try {
+          const passRes = await api.generatePassword(serviceId);
+          const newPassword = passRes?.data?.password;
+          if (newPassword) {
+            await Order.findByIdAndUpdate(orderId, {
+              password: newPassword,
+              lastAction: 'changepassword',
+              lastActionTime: new Date(),
+            });
+            result = { ...passRes, passwordSaved: true };
+          } else {
+            result = passRes;
+          }
+        } catch (passErr) {
+          const msg = passErr.message || '';
+          if (msg.includes('already exists') || msg.includes('Password already')) {
+            return NextResponse.json({
+              success: false,
+              error: 'Password was already generated for this service and cannot be regenerated. The existing password is stored on your server.',
+              code: 'PASSWORD_ALREADY_EXISTS',
+            }, { status: 400 });
+          }
+          throw passErr;
         }
-        result = passRes;
         break;
       }
 
