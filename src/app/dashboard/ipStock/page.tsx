@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
@@ -97,6 +97,14 @@ interface SlotIPPackage {
 }
 
 export default function IPStockPage() {
+  return (
+    <Suspense>
+      <IPStockContent />
+    </Suspense>
+  );
+}
+
+function IPStockContent() {
   const [ipStocks, setIpStocks] = useState<IPStock[]>([]);
   const [slotPackages, setSlotPackages] = useState<SlotIPPackage[]>([]);
   const [isLoading, setIsLoading] = useState(true);

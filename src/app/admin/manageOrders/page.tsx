@@ -44,6 +44,7 @@ interface Order {
     provisioningError?: string;
     hostycareServiceId?: string;
     smartvpsServiceId?: string;
+    advpsServiceId?: string;
     provider?: string;
     autoProvisioned?: boolean;
     ipAddress?: string;
@@ -672,6 +673,7 @@ const ManageOrders = () => {
                                                     <SelectItem value="All">All providers</SelectItem>
                                                     <SelectItem value="hostycare">Hostycare</SelectItem>
                                                     <SelectItem value="smartvps">SmartVPS</SelectItem>
+                                                    <SelectItem value="advps">ADVPS</SelectItem>
                                                 </SelectContent>
                                             </Select>
                                         </div>
@@ -1041,6 +1043,8 @@ const ManageOrders = () => {
                                             <SelectContent>
                                                 <SelectItem value="hostycare">Hostycare</SelectItem>
                                                 <SelectItem value="smartvps">SmartVPS</SelectItem>
+                                                <SelectItem value="advps">ADVPS</SelectItem>
+                                                <SelectItem value="slotip">Slot IP</SelectItem>
                                             </SelectContent>
                                         </Select>
                                     </div>
@@ -1135,7 +1139,12 @@ const ManageOrders = () => {
                                         <Label>ADVPS Service ID</Label>
                                         <Input
                                             value={editingOrder.advpsServiceId || ''}
-                                            onChange={(e) => setEditingOrder({ ...editingOrder, advpsServiceId: e.target.value })}
+                                            onChange={(e) => {
+                                                const val = e.target.value;
+                                                const updates: any = { advpsServiceId: val };
+                                                if (val && editingOrder.provider !== 'advps') updates.provider = 'advps';
+                                                setEditingOrder({ ...editingOrder, ...updates });
+                                            }}
                                             placeholder="Enter ADVPS service ID (e.g. vps_service_1)"
                                             className="font-mono text-sm"
                                         />

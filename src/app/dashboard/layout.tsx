@@ -38,7 +38,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { toast } from 'sonner';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { SessionAlertProvider } from '@/components/session-alert';
@@ -255,7 +255,9 @@ export default function DashboardLayout({
                 <div className="min-h-screen bg-background">
                     <LoginNewsPopup />
                     {/* Sidebar */}
-                    <ResponsiveSidebar user={user} />
+                    <Suspense>
+                      <ResponsiveSidebar user={user} />
+                    </Suspense>
 
                     {/* Main Content Area */}
                     <div className="lg:pl-64">
