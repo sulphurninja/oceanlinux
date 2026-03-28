@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
   Card,
@@ -50,7 +51,6 @@ import {
 } from "lucide-react";
 import { z } from "zod";
 import { cn } from "@/lib/utils";
-import { useRouter } from "next/navigation";
 
 // Keep all existing interfaces and global declarations unchanged...
 
@@ -126,10 +126,25 @@ export default function IPStockPage() {
   // Payment method selection
   const [paymentMethod, setPaymentMethod] = useState<'cashfree' | 'razorpay' | 'upi'>('razorpay');
 
-  // Tab filter state
-  const [activeTab, setActiveTab] = useState<string>('all');
+  // Tab filter state — read initial category from URL
+  const searchParams = useSearchParams();
+  const categoryParam = searchParams.get('category');
+  const [activeTab, setActiveTab] = useState<string>(categoryParam || 'all');
 
   const router = useRouter();
+
+  useEffect(() => {
+    setActiveTab(categoryParam || 'all');
+  }, [categoryParam]);
+
+  const handleTabChange = (tabId: string) => {
+    setActiveTab(tabId);
+    if (tabId === 'all') {
+      router.push('/dashboard/ipStock', { scroll: false });
+    } else {
+      router.push(`/dashboard/ipStock?category=${tabId}`, { scroll: false });
+    }
+  };
 
   // Fetch available IP stocks and Slot IP packages on mount
   useEffect(() => {
@@ -178,6 +193,9 @@ export default function IPStockPage() {
     if (activeTab && activeTab !== 'all') {
       filtered = filtered.filter(stock => {
         if (stock.serverType === 'Windows & Linux') {
+          return activeTab === 'Linux' || activeTab === 'VPS';
+        }
+        if (stock.tags.includes('ocean linux')) {
           return activeTab === 'Linux' || activeTab === 'VPS';
         }
         return stock.serverType === activeTab;
@@ -246,7 +264,7 @@ export default function IPStockPage() {
   const getCounts = () => {
     const all = ipStocks.length;
     const linux = ipStocks.filter(stock => 
-      stock.serverType === 'Linux' || stock.serverType === 'Windows & Linux'
+      stock.serverType === 'Linux' || stock.serverType === 'Windows & Linux' || stock.tags.includes('ocean linux')
     ).length;
     const vps = ipStocks.filter(stock => 
       stock.serverType === 'VPS' || stock.serverType === 'Windows & Linux'
@@ -736,7 +754,7 @@ export default function IPStockPage() {
               {categoryCards.map((cat) => (
                 <button
                   key={cat.id}
-                  onClick={() => setActiveTab(cat.id)}
+                  onClick={() => handleTabChange(cat.id)}
                   className={cn(
                     "flex items-center gap-2 px-3 py-2 rounded-lg border text-sm whitespace-nowrap transition-all shrink-0",
                     activeTab === cat.id

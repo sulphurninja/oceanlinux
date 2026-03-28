@@ -18,9 +18,12 @@ import {
   HelpCircle,
   PanelLeftClose,
   PanelLeft,
-  FileCode
+  FileCode,
+  Server,
+  Cloud,
+  Zap,
 } from 'lucide-react';
-import { useRouter, usePathname } from 'next/navigation';
+import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
 import { toast } from 'sonner';
@@ -102,9 +105,24 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
     },
     {
       href: '/dashboard/ipStock',
-      label: 'IP Stock',
+      label: 'All Plans',
       icon: Store,
       badge: 'Buy Now'
+    },
+    {
+      href: '/dashboard/ipStock?category=Linux',
+      label: 'Linux Servers',
+      icon: Server,
+    },
+    {
+      href: '/dashboard/ipStock?category=VPS',
+      label: 'Windows VPS',
+      icon: Cloud,
+    },
+    {
+      href: '/dashboard/ipStock?category=SlotIP',
+      label: 'Slot IP Proxies',
+      icon: Zap,
     },
     {
       href: '/dashboard/viewLinux',
@@ -150,8 +168,19 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
     }
   ];
 
+  const currentSearchParams = useSearchParams();
+
   const isActive = (href: string) => {
-    return pathname === href;
+    const [hrefPath, hrefQuery] = href.split('?');
+    if (hrefQuery) {
+      const hrefParams = new URLSearchParams(hrefQuery);
+      const categoryParam = hrefParams.get('category');
+      return pathname === hrefPath && currentSearchParams.get('category') === categoryParam;
+    }
+    if (hrefPath === '/dashboard/ipStock') {
+      return pathname === hrefPath && !currentSearchParams.get('category');
+    }
+    return pathname === hrefPath;
   };
 
   const SidebarContent = ({ isMobile = false, isCollapsed = false }: { isMobile?: boolean; isCollapsed?: boolean }) => (

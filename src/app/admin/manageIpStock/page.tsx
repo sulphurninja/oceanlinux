@@ -59,6 +59,8 @@ const ManageIpStock = () => {
     const [newPromoDiscount, setNewPromoDiscount] = useState('');
     const [newPromoDiscountType, setNewPromoDiscountType] = useState<'percentage' | 'fixed'>('fixed');
     const [newTag, setNewTag] = useState('');
+    const [newMemorySize, setNewMemorySize] = useState('');
+    const [newMemoryPrice, setNewMemoryPrice] = useState('');
     const [companies, setCompanies] = useState<CompanyOption[]>([]);
 
     useEffect(() => {
@@ -73,6 +75,31 @@ const ManageIpStock = () => {
             .then(data => { if (Array.isArray(data)) setCompanies(data); })
             .catch(() => {});
     }, []);
+
+    const addMemoryOption = () => {
+        if (!currentStock || !newMemorySize.trim()) return;
+        const size = newMemorySize.trim().toUpperCase();
+        if (currentStock.memoryOptions[size]) {
+            toast.error(`${size} already exists`);
+            return;
+        }
+        setCurrentStock({
+            ...currentStock,
+            memoryOptions: {
+                ...currentStock.memoryOptions,
+                [size]: { price: parseFloat(newMemoryPrice) || 0 },
+            },
+        });
+        setNewMemorySize('');
+        setNewMemoryPrice('');
+    };
+
+    const removeMemoryOption = (size: string) => {
+        if (!currentStock) return;
+        const updated = { ...currentStock.memoryOptions };
+        delete updated[size];
+        setCurrentStock({ ...currentStock, memoryOptions: updated });
+    };
 
     const addTag = () => {
         if (currentStock && newTag.trim() && !currentStock.tags.includes(newTag.trim().toLowerCase())) {
@@ -399,7 +426,12 @@ const ManageIpStock = () => {
                                     <div className="bg--50 p-4 rounded-lg border dark:border-none space-y-4">
                                         {Object.keys(currentStock.memoryOptions).map((size) => (
                                             <div key={size} className="border dark:border-none-b pb-3 last:border dark:border-none-b-0 last:pb-0">
-                                                <h4 className="font-medium mb-2">{size} Configuration</h4>
+                                                <div className="flex items-center justify-between mb-2">
+                                                    <h4 className="font-medium">{size} Configuration</h4>
+                                                    <Button type="button" variant="ghost" size="sm" className="h-6 w-6 p-0 text-red-500 hover:text-red-700" onClick={() => removeMemoryOption(size)}>
+                                                        <X className="h-3.5 w-3.5" />
+                                                    </Button>
+                                                </div>
                                                 <div className="grid grid-cols-2 gap-3">
                                                     <div>
                                                         <Label className="text-sm">{size} Price (₹):</Label>
@@ -424,6 +456,33 @@ const ManageIpStock = () => {
                                                 </div>
                                             </div>
                                         ))}
+
+                                        {/* Add new memory option */}
+                                        <div className="border-t pt-3">
+                                            <h4 className="font-medium mb-2 text-sm">Add Memory Option</h4>
+                                            <div className="flex gap-2 items-end">
+                                                <div className="flex-1">
+                                                    <Label className="text-xs">Size</Label>
+                                                    <Select value={newMemorySize} onValueChange={setNewMemorySize}>
+                                                        <SelectTrigger className="h-9">
+                                                            <SelectValue placeholder="Select RAM" />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            {['1GB', '2GB', '4GB', '6GB', '8GB', '12GB', '16GB', '32GB'].filter(s => !currentStock.memoryOptions[s]).map(s => (
+                                                                <SelectItem key={s} value={s}>{s}</SelectItem>
+                                                            ))}
+                                                        </SelectContent>
+                                                    </Select>
+                                                </div>
+                                                <div className="flex-1">
+                                                    <Label className="text-xs">Price (₹)</Label>
+                                                    <Input type="number" placeholder="e.g. 699" value={newMemoryPrice} onChange={(e) => setNewMemoryPrice(e.target.value)} className="h-9" />
+                                                </div>
+                                                <Button type="button" size="sm" className="h-9" onClick={addMemoryOption} disabled={!newMemorySize}>
+                                                    Add
+                                                </Button>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
 
