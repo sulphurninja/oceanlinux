@@ -37,7 +37,7 @@ const orderSchema = new mongoose.Schema({
     // Provider identification
     provider: {
         type: String,
-        enum: ['hostycare', 'smartvps', 'slotip'],
+        enum: ['hostycare', 'smartvps', 'slotip', 'advps'],
         default: 'hostycare'
     },
 
@@ -48,6 +48,10 @@ const orderSchema = new mongoose.Schema({
     // SmartVPS integration fields
     smartvpsServiceId: { type: String },
     smartvpsProductId: { type: String },
+
+    // ADVPS integration fields
+    advpsServiceId: { type: String },
+    advpsProductId: { type: String },
 
     provisioningStatus: {
         type: String,
@@ -126,6 +130,7 @@ orderSchema.index({ createdAt: -1 });
 orderSchema.index({ user: 1 });
 orderSchema.index({ hostycareServiceId: 1 });
 orderSchema.index({ smartvpsServiceId: 1 });
+orderSchema.index({ advpsServiceId: 1 });
 orderSchema.index({ lastSyncTime: -1 });
 orderSchema.index({ expiryDate: 1 });
 orderSchema.index({ provider: 1 });

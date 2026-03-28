@@ -53,7 +53,8 @@ export async function POST(request) {
         // Orders with provider='oceanlinux' OR orders without hostycareServiceId/smartvpsServiceId are manual
         const isAutoProvisioned = (
             (order.provider === 'hostycare' && order.hostycareServiceId) ||
-            (order.provider === 'smartvps' && (order.smartvpsServiceId || order.ipAddress))
+            (order.provider === 'smartvps' && (order.smartvpsServiceId || order.ipAddress)) ||
+            (order.provider === 'advps' && order.advpsServiceId)
         );
 
         if (isAutoProvisioned) {

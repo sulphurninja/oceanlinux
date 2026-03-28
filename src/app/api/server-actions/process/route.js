@@ -16,7 +16,7 @@ export async function POST(request) {
         // Check if user is admin
         const admin = await User.findById(userId);
 
-        const { requestId, action, adminNotes } = await request.json();
+        const { requestId, action, adminNotes, newPassword } = await request.json();
 
         if (!requestId || !action) {
             return NextResponse.json(
@@ -61,12 +61,15 @@ export async function POST(request) {
 
         console.log(`[SERVER-ACTION-PROCESS] Request ${requestId} ${newStatus} by admin ${admin.email}`);
 
-        // If approved, update the order's lastAction
         if (action === 'approve') {
-            await Order.findByIdAndUpdate(actionRequest.orderId, {
+            const updateFields = {
                 lastAction: actionRequest.action,
                 lastActionTime: new Date()
-            });
+            };
+            if (actionRequest.action === 'format' && newPassword) {
+                updateFields.password = newPassword;
+            }
+            await Order.findByIdAndUpdate(actionRequest.orderId, updateFields);
             console.log(`[SERVER-ACTION-PROCESS] Updated order ${actionRequest.orderId} with action: ${actionRequest.action}`);
         }
 

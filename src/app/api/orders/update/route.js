@@ -9,7 +9,7 @@ export async function POST(request) {
   try {
     // requireAdmin(); // If you have an admin check, do it here
 
-    const { orderId, ipAddress, username, password, status, os } = await request.json();
+    const { orderId, ipAddress, username, password, status, os, provider, provisioningStatus, advpsServiceId } = await request.json();
     if (!orderId) {
       return NextResponse.json(
         { message: 'Missing orderId' },
@@ -17,15 +17,20 @@ export async function POST(request) {
       );
     }
 
+    const updateFields = {
+      ipAddress: ipAddress || '',
+      username: username || '',
+      password: password || '',
+      os: os || 'CentOS 7',
+      status: status || 'pending',
+    };
+    if (provider) updateFields.provider = provider;
+    if (provisioningStatus) updateFields.provisioningStatus = provisioningStatus;
+    if (advpsServiceId !== undefined) updateFields.advpsServiceId = advpsServiceId || '';
+
     const updatedOrder = await Order.findByIdAndUpdate(
       orderId,
-      {
-        ipAddress: ipAddress || '',
-        username: username || '',
-        password: password || '',
-        os: os || 'CentOS 7',
-        status: status || 'pending'
-      },
+      updateFields,
       { new: true }
     );
 

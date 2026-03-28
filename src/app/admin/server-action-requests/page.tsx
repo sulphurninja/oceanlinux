@@ -76,6 +76,7 @@ export default function ServerActionRequestsPage() {
     const [selectedRequest, setSelectedRequest] = useState<ActionRequest | null>(null);
     const [dialogAction, setDialogAction] = useState<'approve' | 'reject'>('approve');
     const [adminNotes, setAdminNotes] = useState('');
+    const [newPassword, setNewPassword] = useState('');
 
     useEffect(() => {
         fetchRequests();
@@ -104,6 +105,7 @@ export default function ServerActionRequestsPage() {
         setSelectedRequest(request);
         setDialogAction(action);
         setAdminNotes('');
+        setNewPassword('');
         setDialogOpen(true);
     };
 
@@ -118,7 +120,8 @@ export default function ServerActionRequestsPage() {
                 body: JSON.stringify({
                     requestId: selectedRequest._id,
                     action: dialogAction,
-                    adminNotes: adminNotes || undefined
+                    adminNotes: adminNotes || undefined,
+                    newPassword: (selectedRequest.action === 'format' && dialogAction === 'approve' && newPassword) ? newPassword : undefined,
                 })
             });
 
@@ -325,6 +328,19 @@ export default function ServerActionRequestsPage() {
                     </DialogHeader>
 
                     <div className="space-y-4">
+                        {selectedRequest?.action === 'format' && dialogAction === 'approve' && (
+                            <div>
+                                <Label>New Server Password</Label>
+                                <p className="text-xs text-muted-foreground mb-1.5">
+                                    Enter the new password after formatting. This will update the order&apos;s server password.
+                                </p>
+                                <Input
+                                    value={newPassword}
+                                    onChange={(e) => setNewPassword(e.target.value)}
+                                    placeholder="Enter new server password"
+                                />
+                            </div>
+                        )}
                         <div>
                             <Label>Admin Notes {dialogAction === 'reject' && '(Required)'}</Label>
                             <Textarea

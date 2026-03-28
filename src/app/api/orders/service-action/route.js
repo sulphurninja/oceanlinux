@@ -77,6 +77,9 @@ function flattenOslist(oslist, virtFilter) {
 
 function isServerReachable(ip) {
   const cleanIp = ip.split(':')[0];
+  const port = ip.includes(':') ? parseInt(ip.split(':')[1]) : null;
+
+  // Try ICMP ping first
   const isWin = process.platform === 'win32';
   const cmd = isWin
     ? `ping -n 1 -w 3000 ${cleanIp}`
@@ -85,8 +88,23 @@ function isServerReachable(ip) {
     execSync(cmd, { stdio: 'ignore', timeout: 5000 });
     return true;
   } catch {
-    return false;
+    // Ping failed — try TCP connect to the port (handles Windows servers that block ICMP)
   }
+
+  const portsToTry = port ? [port] : [22, 3389];
+  for (const p of portsToTry) {
+    try {
+      execSync(
+        `node -e "const s=require('net').createConnection(${p},'${cleanIp}',()=>{process.exit(0)});s.setTimeout(3000);s.on('timeout',()=>process.exit(1));s.on('error',()=>process.exit(1))"`,
+        { stdio: 'ignore', timeout: 5000 }
+      );
+      return true;
+    } catch {
+      continue;
+    }
+  }
+
+  return false;
 }
 
 function guessHostnameFromOrder(order) {

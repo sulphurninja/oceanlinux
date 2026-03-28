@@ -70,10 +70,10 @@ export default function LoginNewsPopup() {
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-2xl w-[95vw] p-0 gap-0 overflow-hidden rounded-2xl border-0 shadow-2xl [&>button[class*='absolute']]:hidden">
+      <DialogContent className="max-w-2xl w-[95vw] max-h-[90dvh] p-0 gap-0 overflow-y-auto rounded-2xl border-0 shadow-2xl [&>button[class*='absolute']]:hidden">
         {/* Header banner */}
-        <div className="relative bg-gradient-to-br from-primary via-primary/90 to-primary/80 px-8 py-8 text-primary-foreground">
-          <div className="absolute top-4 right-4">
+        <div className="relative bg-gradient-to-br from-primary via-primary/90 to-primary/80 px-6 sm:px-8 py-6 sm:py-8 text-primary-foreground">
+          <div className="sticky top-2 float-right z-10">
             <button
               onClick={() => handleOpenChange(false)}
               className="rounded-full bg-white/20 p-1.5 backdrop-blur-sm transition-colors hover:bg-white/30"
@@ -95,7 +95,7 @@ export default function LoginNewsPopup() {
         </div>
 
         {/* Body */}
-        <div className="px-8 py-6 space-y-5">
+        <div className="px-6 sm:px-8 py-5 sm:py-6 space-y-4 sm:space-y-5">
           <p className="text-[15px] leading-relaxed text-muted-foreground whitespace-pre-line">
             {popup.content}
           </p>

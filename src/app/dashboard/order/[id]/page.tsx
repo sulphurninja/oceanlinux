@@ -75,9 +75,10 @@ interface Order {
   password?: string;
   expiryDate?: Date;
   createdAt?: Date;
-  provider?: 'hostycare' | 'smartvps' | 'oceanlinux' | 'slotip';
+  provider?: 'hostycare' | 'smartvps' | 'oceanlinux' | 'slotip' | 'advps';
   hostycareServiceId?: string;
   smartvpsServiceId?: string;
+  advpsServiceId?: string;
   slotIpPackageId?: string;
   slotIpId?: string;
   provisioningStatus?: string;
@@ -196,17 +197,16 @@ const OrderDetails = () => {
   useEffect(() => {
     if (order && !loading) {
       const provider = getProviderFromOrder(order, ipStock);
-      // Fetch power state for both Hostycare and SmartVPS
       if ((provider === 'hostycare' && order.hostycareServiceId) ||
-        (provider === 'smartvps' && (order.smartvpsServiceId || order.ipAddress))) {
+        (provider === 'smartvps' && (order.smartvpsServiceId || order.ipAddress)) ||
+        (provider === 'advps' && order.advpsServiceId)) {
         fetchServerPowerState();
       }
-      // Fetch pending request for manual products
       if (provider === 'oceanlinux') {
         fetchPendingRequest();
       }
     }
-  }, [order?.hostycareServiceId, order?.smartvpsServiceId, order?.ipAddress, ipStock, loading]);
+  }, [order?.hostycareServiceId, order?.smartvpsServiceId, order?.advpsServiceId, order?.ipAddress, ipStock, loading]);
 
   const fetchOrderAndIPStock = async () => {
     setLoading(true);
@@ -220,6 +220,7 @@ const OrderDetails = () => {
         ipStockId: orderData.ipStockId,
         hostycareServiceId: orderData.hostycareServiceId,
         smartvpsServiceId: orderData.smartvpsServiceId,
+        advpsServiceId: orderData.advpsServiceId,
         provider: orderData.provider
       });
       setOrder(orderData);
@@ -272,54 +273,38 @@ const OrderDetails = () => {
   };
 
   // Determine provider based on order data and ipStock
-  const getProviderFromOrder = (order: Order, ipStock: IPStock | null): 'hostycare' | 'smartvps' | 'oceanlinux' => {
+  const getProviderFromOrder = (order: Order, ipStock: IPStock | null): 'hostycare' | 'smartvps' | 'oceanlinux' | 'advps' => {
     console.log('[ORDER-DETAILS] Determining provider for order:', {
       explicitProvider: order.provider,
       hostycareServiceId: order.hostycareServiceId,
       smartvpsServiceId: order.smartvpsServiceId,
+      advpsServiceId: order.advpsServiceId,
       ipStockId: order.ipStockId,
       ipStockTags: ipStock?.tags || 'No IPStock data',
       productName: order.productName
     });
 
-    // Check explicit provider field first
-    if (order.provider === 'smartvps') {
-      console.log('[ORDER-DETAILS] Detected SmartVPS via explicit provider field');
-      return 'smartvps';
-    }
+    if (order.provider === 'advps') return 'advps';
+    if (order.provider === 'smartvps') return 'smartvps';
 
-    // Check if order has hostycare service ID
-    if (order.hostycareServiceId) {
-      console.log('[ORDER-DETAILS] Detected Hostycare via serviceId');
-      return 'hostycare';
-    }
+    if (order.advpsServiceId) return 'advps';
+    if (order.hostycareServiceId) return 'hostycare';
+    if (order.smartvpsServiceId) return 'smartvps';
 
-    // Check smartvps service ID
-    if (order.smartvpsServiceId) {
-      console.log('[ORDER-DETAILS] Detected SmartVPS via serviceId');
-      return 'smartvps';
-    }
-
-    // Check if ipStock has smartvps or ocean linux tag (SmartVPS uses 'ocean linux' tag)
     if (ipStock && ipStock.tags) {
       const tagsLower = ipStock.tags.map((t: string) => t.toLowerCase());
-      if (tagsLower.includes('smartvps') || tagsLower.includes('ocean linux')) {
-        console.log('[ORDER-DETAILS] Detected SmartVPS via ipStock tags:', ipStock.tags);
-        return 'smartvps';
-      }
+      if (tagsLower.includes('advps') || tagsLower.includes('flex')) return 'advps';
+      if (tagsLower.includes('smartvps') || tagsLower.includes('ocean linux')) return 'smartvps';
     }
 
-    // Check product name patterns for SmartVPS (🌊 emoji indicates SmartVPS)
+    if (order.productName?.includes('⚡')) return 'advps';
     if (order.productName?.includes('🌊') ||
       order.productName?.includes('103.195') ||
       order.ipAddress?.startsWith('103.195') ||
       order.productName?.includes('🏅')) {
-      console.log('[ORDER-DETAILS] Detected SmartVPS via product name patterns');
       return 'smartvps';
     }
 
-    // Default to oceanlinux
-    console.log('[ORDER-DETAILS] Defaulting to OceanLinux');
     return 'oceanlinux';
   };
 
@@ -332,6 +317,8 @@ const OrderDetails = () => {
         return 'Hostycare';
       case 'oceanlinux':
         return 'OceanLinux';
+      case 'advps':
+        return 'ADVPS';
       default:
         return provider.charAt(0).toUpperCase() + provider.slice(1);
     }
@@ -365,19 +352,19 @@ const OrderDetails = () => {
     };
   }, []);
 
-  const openOsDialog = async (provider: 'hostycare' | 'smartvps') => {
+  const openOsDialog = async (provider: 'hostycare' | 'smartvps' | 'advps') => {
     if (osAutoCloseTimer.current) {
       clearTimeout(osAutoCloseTimer.current);
       osAutoCloseTimer.current = null;
     }
-    setOsMode(provider === 'smartvps' ? 'format' : 'reinstall');
+    setOsMode((provider === 'smartvps' || provider === 'advps') ? 'format' : 'reinstall');
     setOsProgress('Loading available operating systems...');
     setOsDialogOpen(true);
     setOsLoading(true);
     setSelectedOs('');
 
     try {
-      const endpoint = provider === 'smartvps' ? 'smartvps-action' : 'service-action';
+      const endpoint = provider === 'smartvps' ? 'smartvps-action' : provider === 'advps' ? 'advps-action' : 'service-action';
       const templatesRes = await fetch(`/api/orders/${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -409,8 +396,8 @@ const OrderDetails = () => {
     setOsProgress(osMode === 'format' ? 'Initiating server format...' : 'Submitting reinstall...');
 
     try {
-      const endpoint = provider === 'smartvps' ? 'smartvps-action' : 'service-action';
-      const action = provider === 'smartvps' ? 'format' : 'reinstall';
+      const endpoint = provider === 'smartvps' ? 'smartvps-action' : provider === 'advps' ? 'advps-action' : 'service-action';
+      const action = (provider === 'smartvps' || provider === 'advps') ? 'format' : 'reinstall';
 
       const res = await fetch(`/api/orders/${endpoint}`, {
         method: 'POST',
@@ -503,7 +490,8 @@ const OrderDetails = () => {
       provider,
       hostycareServiceId: order.hostycareServiceId,
       ipAddress: order.ipAddress,
-      smartvpsServiceId: order.smartvpsServiceId
+      smartvpsServiceId: order.smartvpsServiceId,
+      advpsServiceId: order.advpsServiceId,
     });
 
     if (provider === 'hostycare') {
@@ -513,13 +501,17 @@ const OrderDetails = () => {
     }
 
     if (provider === 'smartvps') {
-      // For SmartVPS, we need either smartvpsServiceId OR ipAddress
       const available = !!(order.smartvpsServiceId || order.ipAddress);
       console.log('[ORDER-DETAILS] SmartVPS management available:', available);
       return available;
     }
 
-    // OceanLinux managed services don't have external management
+    if (provider === 'advps') {
+      const available = !!order.advpsServiceId;
+      console.log('[ORDER-DETAILS] ADVPS management available:', available);
+      return available;
+    }
+
     if (provider === 'oceanlinux') {
       console.log('[ORDER-DETAILS] OceanLinux - no external management');
       return false;
@@ -533,11 +525,11 @@ const OrderDetails = () => {
 
     const provider = getProviderFromOrder(order, ipStock);
 
-    // Check if this provider supports power state fetching
     const isHostycare = provider === 'hostycare' && order.hostycareServiceId;
     const isSmartVPS = provider === 'smartvps' && (order.smartvpsServiceId || order.ipAddress);
+    const isAdvps = provider === 'advps' && order.advpsServiceId;
 
-    if (!isHostycare && !isSmartVPS) {
+    if (!isHostycare && !isSmartVPS && !isAdvps) {
       return;
     }
 
@@ -550,7 +542,7 @@ const OrderDetails = () => {
       console.log('[ORDER-DETAILS] Fetching server power state for provider:', provider);
 
       // Use the appropriate endpoint based on provider
-      const endpoint = provider === 'smartvps' ? 'smartvps-action' : 'service-action';
+      const endpoint = provider === 'smartvps' ? 'smartvps-action' : provider === 'advps' ? 'advps-action' : 'service-action';
 
       const res = await fetch(`/api/orders/${endpoint}`, {
         method: 'POST',
@@ -586,7 +578,7 @@ const OrderDetails = () => {
 
     setServiceLoading(true);
     try {
-      const endpoint = provider === 'smartvps' ? 'smartvps-action' : 'service-action';
+      const endpoint = provider === 'smartvps' ? 'smartvps-action' : provider === 'advps' ? 'advps-action' : 'service-action';
       console.log('[ORDER-DETAILS] Loading service details from:', endpoint);
 
       const res = await fetch(`/api/orders/${endpoint}?orderId=${order._id}`);
@@ -604,8 +596,7 @@ const OrderDetails = () => {
         // Refresh order data to get latest synced information
         await fetchOrder();
 
-        // Also fetch power state for Hostycare and SmartVPS
-        if (provider === 'hostycare' || provider === 'smartvps') {
+        if (provider === 'hostycare' || provider === 'smartvps' || provider === 'advps') {
           await fetchServerPowerState();
         }
 
@@ -634,7 +625,7 @@ const OrderDetails = () => {
 
     try {
       const provider = getProviderFromOrder(order, ipStock);
-      const endpoint = provider === 'smartvps' ? 'smartvps-action' : 'service-action';
+      const endpoint = provider === 'smartvps' ? 'smartvps-action' : provider === 'advps' ? 'advps-action' : 'service-action';
 
       const res = await fetch(`/api/orders/${endpoint}`, {
         method: 'POST',
@@ -682,7 +673,7 @@ const OrderDetails = () => {
       toast.error(e.message || `Failed to execute "${action}"`);
       // Refresh power state on error
       const provider = getProviderFromOrder(order, ipStock);
-      if (['start', 'stop', 'restart'].includes(action) && (provider === 'hostycare' || provider === 'smartvps')) {
+      if (['start', 'stop', 'restart'].includes(action) && (provider === 'hostycare' || provider === 'smartvps' || provider === 'advps')) {
         await fetchServerPowerState();
       }
     } finally {
@@ -704,6 +695,7 @@ const OrderDetails = () => {
 
     // NEW
     if ((provider === 'smartvps' && action === 'format') ||
+      (provider === 'advps' && action === 'format') ||
       (provider === 'hostycare' && action === 'reinstall')) {
       await openOsDialog(provider);
       return;
@@ -715,7 +707,7 @@ const OrderDetails = () => {
       setActionBusy(action);
 
       // Get available templates
-      const endpoint = provider === 'smartvps' ? 'smartvps-action' : 'service-action';
+      const endpoint = provider === 'smartvps' ? 'smartvps-action' : provider === 'advps' ? 'advps-action' : 'service-action';
       const templatesRes = await fetch(`/api/orders/${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2492,7 +2484,7 @@ const OrderDetails = () => {
 
                         <Button
                           variant="destructive"
-                          onClick={() => handleAdvancedAction(provider === 'smartvps' ? 'format' : 'reinstall')}
+                          onClick={() => handleAdvancedAction((provider === 'smartvps' || provider === 'advps') ? 'format' : 'reinstall')}
                           disabled={!!actionBusy}
                           className="w-full h-10 gap-2 text-sm"
                         >
@@ -2826,6 +2818,12 @@ const OrderDetails = () => {
                         <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1 sm:gap-2 py-2">
                           <span className="text-xs text-muted-foreground">SmartVPS ID</span>
                           <span className="font-mono text-xs bg-muted/50 px-2 py-0.5 rounded break-all">{order.smartvpsServiceId}</span>
+                        </div>
+                      )}
+                      {provider === 'advps' && order.advpsServiceId && (
+                        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1 sm:gap-2 py-2">
+                          <span className="text-xs text-muted-foreground">ADVPS Service ID</span>
+                          <span className="font-mono text-xs bg-muted/50 px-2 py-0.5 rounded break-all">{order.advpsServiceId}</span>
                         </div>
                       )}
                     </div>

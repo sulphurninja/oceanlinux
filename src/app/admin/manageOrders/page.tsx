@@ -292,7 +292,8 @@ const ManageOrders = () => {
                     os: editingOrder.os,
                     status: editingOrder.status,
                     provider: editingOrder.provider,
-                    provisioningStatus: editingOrder.provisioningStatus
+                    provisioningStatus: editingOrder.provisioningStatus,
+                    advpsServiceId: editingOrder.advpsServiceId || undefined,
                 })
             });
 
@@ -1130,6 +1131,18 @@ const ManageOrders = () => {
                                             />
                                         </div>
                                     )}
+                                    <div className="space-y-2">
+                                        <Label>ADVPS Service ID</Label>
+                                        <Input
+                                            value={editingOrder.advpsServiceId || ''}
+                                            onChange={(e) => setEditingOrder({ ...editingOrder, advpsServiceId: e.target.value })}
+                                            placeholder="Enter ADVPS service ID (e.g. vps_service_1)"
+                                            className="font-mono text-sm"
+                                        />
+                                        <p className="text-xs text-muted-foreground">
+                                            Set this to enable ADVPS server actions for this order
+                                        </p>
+                                    </div>
                                     {editingOrder.expiryDate && (
                                         <div className="space-y-2">
                                             <Label>Expiry Date</Label>
