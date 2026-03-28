@@ -137,6 +137,8 @@ export default function IPStockPage() {
       try {
         setIsLoading(true);
         
+        await fetch("/api/advps/stock-check").catch(() => null);
+
         const [ipRes, slotRes] = await Promise.all([
           fetch("/api/ipstock"),
           fetch("/api/slot-ips?view=customer"),
