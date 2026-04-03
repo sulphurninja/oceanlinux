@@ -928,11 +928,11 @@ const ManageOrders = () => {
                                                             Edit
                                                         </Button>
 
-                                                        {/* Show provision button for: 1) Non-provisioned orders 2) Failed SmartVPS orders that need retry */}
+                                                        {/* Show provision button for: 1) Non-provisioned orders 2) Failed orders that need retry 3) Confirmed orders without IP */}
                                                         {(
                                                             ((order.status === 'paid' || order.status === 'confirmed') && !order.autoProvisioned) ||
-                                                            (order.provider === 'smartvps' && order.provisioningStatus === 'failed') ||
-                                                            (order.provider === 'smartvps' && order.status === 'confirmed' && !order.ipAddress)
+                                                            (order.provisioningStatus === 'failed') ||
+                                                            ((order.provider === 'hostycare' || order.provider === 'smartvps') && order.status === 'confirmed' && !order.ipAddress)
                                                         ) && (
                                                             <Button
                                                                 size="sm"
