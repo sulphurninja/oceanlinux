@@ -190,12 +190,17 @@ const ViewLinux = () => {
                     return 'OceanLinux';
                 case 'slotip':
                     return 'Slot IP';
+                case 'advps':
+                    return 'ADVPS';
                 default:
                     return order.provider.charAt(0).toUpperCase() + order.provider.slice(1);
             }
         }
 
         // Fallback logic based on service IDs or patterns
+        if (order.advpsServiceId) {
+            return 'ADVPS';
+        }
         if (order.hostycareServiceId) {
             return 'Hostycare';
         }
@@ -235,7 +240,7 @@ const ViewLinux = () => {
         }
 
         const provider = getProviderDisplayName(order);
-        const isAutoProvisionedProvider = provider === 'Hostycare' || provider === 'SmartVPS' || provider === 'Slot IP';
+        const isAutoProvisionedProvider = provider === 'Hostycare' || provider === 'SmartVPS' || provider === 'Slot IP' || provider === 'ADVPS';
 
         if (!isAutoProvisionedProvider) {
             // Only consider it failed if it's explicitly marked as terminated or has a real API failure
@@ -407,7 +412,7 @@ const getStatusBadge = (status: string, provisioningStatus?: string, lastAction?
     }
 
     const provider = order ? getProviderDisplayName(order) : 'Unknown';
-    const isAutoProvisionedProvider = provider === 'Hostycare' || provider === 'SmartVPS' || provider === 'Slot IP';
+    const isAutoProvisionedProvider = provider === 'Hostycare' || provider === 'SmartVPS' || provider === 'Slot IP' || provider === 'ADVPS';
 
     // For non-auto-provisioned services, show appropriate pending status
     if (!isAutoProvisionedProvider) {
