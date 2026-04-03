@@ -65,9 +65,10 @@ interface Order {
     password?: string;
     expiryDate?: Date;
     createdAt?: Date;
-    provider?: 'hostycare' | 'smartvps' | 'oceanlinux' | 'slotip';
+    provider?: 'hostycare' | 'smartvps' | 'oceanlinux' | 'slotip' | 'advps';
     hostycareServiceId?: string;
     smartvpsServiceId?: string;
+    advpsServiceId?: string;
     slotIpPackageId?: string;
     slotIpId?: string;
     provisioningStatus?: string;

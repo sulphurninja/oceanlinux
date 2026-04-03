@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
+import { assignPanelCredentials } from '@/lib/panelCredentials';
 const AdvpsAPI = require('@/services/advpsApi');
 
 export async function POST(request) {
@@ -23,7 +24,7 @@ export async function POST(request) {
       status: status || 'pending',
     };
     if (provider) updateFields.provider = provider;
-    if (provisioningStatus) updateFields.provisioningStatus = provisioningStatus;
+    if (provisioningStatus !== undefined) updateFields.provisioningStatus = provisioningStatus || 'pending';
     if (advpsServiceId !== undefined) updateFields.advpsServiceId = advpsServiceId || '';
 
     // Auto-provision ADVPS when a service ID is set/changed
@@ -58,19 +59,14 @@ export async function POST(request) {
               updateFields.os = 'CentOS 7';
             }
 
-            // Username comes in parentheses in the OS name, e.g. "WINDOWS SERVER 2022 (GHOST)" → "GHOST"
-            const usernameMatch = osName.match(/\(([^)]+)\)/);
-            if (usernameMatch) {
-              updateFields.username = usernameMatch[1];
-              advpsNotes.push(`Username: ${usernameMatch[1]}`);
+            if (osName.toLowerCase().includes('windows')) {
+              // For Windows, username is in parentheses e.g. "WINDOWS SERVER 2022 (GHOST)" → "GHOST"
+              const usernameMatch = osName.match(/\(([^)]+)\)/);
+              updateFields.username = usernameMatch ? usernameMatch[1] : 'administrator';
             } else {
-              updateFields.username = osName.toLowerCase().includes('windows') ? 'administrator' : 'root';
+              updateFields.username = 'root';
             }
-          }
-
-          // Also check for username directly in the status response
-          if (svc?.username || svcData?.username) {
-            updateFields.username = svc.username || svcData.username;
+            advpsNotes.push(`Username: ${updateFields.username}`);
           }
 
           if (svc?.expiryDate) {
@@ -88,6 +84,14 @@ export async function POST(request) {
         updateFields.lastSyncTime = new Date();
         advpsProvisioningStarted = true;
         advpsNotes.push('Server provisioning started. Starting server → generating password (takes ~2 min).');
+
+        // Assign panel credentials if missing
+        if (!existingOrder.panelUsername) {
+          await assignPanelCredentials(existingOrder);
+          updateFields.panelUsername = existingOrder.panelUsername;
+          updateFields.panelPassword = existingOrder.panelPassword;
+          advpsNotes.push(`Panel credentials generated: ${existingOrder.panelUsername}`);
+        }
 
         // Background: start server → wait 60s → attempt password gen with retries
         const bgOrderId = orderId;

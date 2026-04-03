@@ -1020,18 +1020,19 @@ const ManageOrders = () => {
                                     <div className="space-y-2">
                                         <Label>Provisioning Status *</Label>
                                         <Select
-                                            value={editingOrder.provisioningStatus || 'none'}
-                                            onValueChange={(value) => setEditingOrder({ ...editingOrder, provisioningStatus: value === 'none' ? undefined : value })}
+                                            value={editingOrder.provisioningStatus || 'pending'}
+                                            onValueChange={(value) => setEditingOrder({ ...editingOrder, provisioningStatus: value })}
                                         >
                                             <SelectTrigger>
                                                 <SelectValue />
                                             </SelectTrigger>
                                             <SelectContent>
-                                                <SelectItem value="none">Not Set</SelectItem>
                                                 <SelectItem value="pending">Pending</SelectItem>
                                                 <SelectItem value="provisioning">Provisioning</SelectItem>
                                                 <SelectItem value="active">Active</SelectItem>
                                                 <SelectItem value="failed">Failed</SelectItem>
+                                                <SelectItem value="suspended">Suspended</SelectItem>
+                                                <SelectItem value="terminated">Terminated</SelectItem>
                                             </SelectContent>
                                         </Select>
                                     </div>
