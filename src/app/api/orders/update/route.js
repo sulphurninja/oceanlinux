@@ -57,6 +57,20 @@ export async function POST(request) {
             } else if (osName.toLowerCase().includes('centos')) {
               updateFields.os = 'CentOS 7';
             }
+
+            // Username comes in parentheses in the OS name, e.g. "WINDOWS SERVER 2022 (GHOST)" → "GHOST"
+            const usernameMatch = osName.match(/\(([^)]+)\)/);
+            if (usernameMatch) {
+              updateFields.username = usernameMatch[1];
+              advpsNotes.push(`Username: ${usernameMatch[1]}`);
+            } else {
+              updateFields.username = osName.toLowerCase().includes('windows') ? 'administrator' : 'root';
+            }
+          }
+
+          // Also check for username directly in the status response
+          if (svc?.username || svcData?.username) {
+            updateFields.username = svc.username || svcData.username;
           }
 
           if (svc?.expiryDate) {
@@ -127,9 +141,9 @@ export async function POST(request) {
 
               try {
                 const passRes = await bgApi.generatePassword(bgServiceId);
-                const newPassword = passRes?.data?.password;
+                const d = passRes?.data || {};
+                const newPassword = d.password || d.newPassword || d.existingPassword;
                 if (newPassword) {
-                  // CRITICAL: Log password immediately — ADVPS only returns it once
                   console.log(`[ADVPS-PROVISION] 🔑 PASSWORD GENERATED for service=${bgServiceId} order=${bgOrderId}: ${newPassword}`);
 
                   const saved = await savePasswordToDB(newPassword, bgServiceId, bgOrderId);

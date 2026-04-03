@@ -127,12 +127,11 @@ export async function POST(request) {
       case 'generatepassword': {
         try {
           const passRes = await api.generatePassword(serviceId);
-          const newPassword = passRes?.data?.password;
+          const d = passRes?.data || {};
+          const newPassword = d.password || d.newPassword || d.existingPassword;
           if (newPassword) {
-            // CRITICAL: Log immediately — ADVPS only returns password once, ever
-            console.log(`[ADVPS-ACTION] 🔑 PASSWORD GENERATED for service=${serviceId} order=${orderId}: ${newPassword}`);
+            console.log(`[ADVPS-ACTION] 🔑 PASSWORD for service=${serviceId} order=${orderId}: ${newPassword}`);
 
-            // Save with retries — cannot afford to lose this
             let saved = false;
             for (let dbAttempt = 0; dbAttempt < 5; dbAttempt++) {
               try {
@@ -150,7 +149,7 @@ export async function POST(request) {
               }
             }
             if (!saved) {
-              console.error(`[ADVPS-ACTION] 🚨 CRITICAL: Password generated but ALL DB saves failed! service=${serviceId} order=${orderId} password=${newPassword}`);
+              console.error(`[ADVPS-ACTION] 🚨 CRITICAL: Password but ALL DB saves failed! service=${serviceId} order=${orderId} password=${newPassword}`);
             }
             result = { ...passRes, passwordSaved: saved };
           } else {
@@ -206,7 +205,8 @@ export async function POST(request) {
                     if (attempt > 0) await new Promise(r => setTimeout(r, passRetryDelays[attempt]));
                     try {
                       const passRes = await api.generatePassword(rebuildServiceId);
-                      const newPass = passRes?.data?.password;
+                      const pd = passRes?.data || {};
+                      const newPass = pd.password || pd.newPassword || pd.existingPassword;
                       if (newPass) {
                         console.log(`[ADVPS-ACTION] 🔑 POST-REBUILD PASSWORD for service=${rebuildServiceId} order=${rebuildOrderId}: ${newPass}`);
 
