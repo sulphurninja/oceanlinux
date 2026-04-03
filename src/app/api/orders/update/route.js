@@ -26,17 +26,18 @@ export async function POST(request) {
     if (provisioningStatus) updateFields.provisioningStatus = provisioningStatus;
     if (advpsServiceId !== undefined) updateFields.advpsServiceId = advpsServiceId || '';
 
-    // Auto-fetch IP and password from ADVPS when a service ID is set/changed
+    // Auto-provision ADVPS when a service ID is set/changed
     const advpsNotes = [];
+    let advpsProvisioningStarted = false;
     if (advpsServiceId) {
       const existingOrder = await Order.findById(orderId);
       const isNewServiceId = !existingOrder?.advpsServiceId || existingOrder.advpsServiceId !== advpsServiceId;
 
       if (isNewServiceId) {
-        console.log('[ORDER-UPDATE] New ADVPS serviceId detected, fetching IP and password from ADVPS...');
+        console.log('[ORDER-UPDATE] New ADVPS serviceId detected, starting provisioning flow...');
         const api = new AdvpsAPI();
-        let advpsSynced = false;
 
+        // Immediately fetch IP and service info
         try {
           const statusRes = await api.status(advpsServiceId);
           const svcData = statusRes?.data || statusRes;
@@ -61,37 +62,119 @@ export async function POST(request) {
           if (svc?.expiryDate) {
             updateFields.expiryDate = new Date(svc.expiryDate);
           }
-
-          advpsSynced = true;
         } catch (err) {
           console.error('[ORDER-UPDATE] ADVPS status fetch failed:', err.message);
           advpsNotes.push('Failed to fetch service status from ADVPS');
         }
 
-        try {
-          const passRes = await api.generatePassword(advpsServiceId);
-          const newPassword = passRes?.data?.password;
-          if (newPassword) {
-            updateFields.password = newPassword;
-            advpsNotes.push('Password generated and saved');
+        // Set order to provisioning state — customer sees a loader
+        updateFields.provider = 'advps';
+        updateFields.provisioningStatus = 'provisioning';
+        updateFields.status = 'active';
+        updateFields.lastSyncTime = new Date();
+        advpsProvisioningStarted = true;
+        advpsNotes.push('Server provisioning started. Starting server → generating password (takes ~2 min).');
+
+        // Background: start server → wait 60s → attempt password gen with retries
+        const bgOrderId = orderId;
+        const bgServiceId = advpsServiceId;
+
+        // Helper: save password to DB with retries (password is one-shot from ADVPS, cannot be retrieved again)
+        async function savePasswordToDB(password, svcId, oId) {
+          for (let dbAttempt = 0; dbAttempt < 5; dbAttempt++) {
+            try {
+              await Order.findByIdAndUpdate(oId, {
+                password: password,
+                provisioningStatus: 'active',
+                lastAction: 'provision',
+                lastActionTime: new Date(),
+              });
+              console.log(`[ADVPS-PROVISION] ✅ Password SAVED to DB for ${svcId} (attempt ${dbAttempt + 1})`);
+              return true;
+            } catch (dbErr) {
+              console.error(`[ADVPS-PROVISION] ❌ DB save attempt ${dbAttempt + 1}/5 FAILED for ${svcId}:`, dbErr.message);
+              if (dbAttempt < 4) await new Promise(r => setTimeout(r, 2000));
+            }
           }
-        } catch (err) {
-          const msg = err.message || '';
-          if (msg.includes('already exists') || msg.includes('Password already')) {
-            advpsNotes.push('Password was already generated for this service. Enter it manually if not saved.');
-            console.log('[ORDER-UPDATE] ADVPS password already exists, admin must enter manually');
-          } else {
-            advpsNotes.push(`Password generation failed: ${msg}`);
-            console.error('[ORDER-UPDATE] ADVPS password generation failed:', msg);
-          }
+          return false;
         }
 
-        if (advpsSynced) {
-          updateFields.provider = 'advps';
-          updateFields.provisioningStatus = 'active';
-          updateFields.status = 'active';
-          updateFields.lastSyncTime = new Date();
-        }
+        (async () => {
+          const bgApi = new AdvpsAPI();
+          try {
+            // Step 1: Start the server
+            console.log(`[ADVPS-PROVISION] Starting server ${bgServiceId}...`);
+            try {
+              await bgApi.start(bgServiceId);
+              console.log(`[ADVPS-PROVISION] Start command sent for ${bgServiceId}`);
+            } catch (startErr) {
+              console.log(`[ADVPS-PROVISION] Start response: ${startErr.message} (may already be running)`);
+            }
+
+            // Step 2: Wait 60 seconds for the server to boot
+            console.log(`[ADVPS-PROVISION] Waiting 60s for server to boot...`);
+            await new Promise(resolve => setTimeout(resolve, 60000));
+
+            // Step 3: Try generating password with retries (server may need more time)
+            const retryDelays = [0, 30000, 30000, 60000]; // immediate, then 30s, 30s, 60s
+            let passwordSaved = false;
+
+            for (let attempt = 0; attempt < retryDelays.length; attempt++) {
+              if (attempt > 0) {
+                console.log(`[ADVPS-PROVISION] Password retry ${attempt}, waiting ${retryDelays[attempt] / 1000}s...`);
+                await new Promise(resolve => setTimeout(resolve, retryDelays[attempt]));
+              }
+
+              try {
+                const passRes = await bgApi.generatePassword(bgServiceId);
+                const newPassword = passRes?.data?.password;
+                if (newPassword) {
+                  // CRITICAL: Log password immediately — ADVPS only returns it once
+                  console.log(`[ADVPS-PROVISION] 🔑 PASSWORD GENERATED for service=${bgServiceId} order=${bgOrderId}: ${newPassword}`);
+
+                  const saved = await savePasswordToDB(newPassword, bgServiceId, bgOrderId);
+                  if (!saved) {
+                    console.error(`[ADVPS-PROVISION] 🚨 CRITICAL: Password generated but ALL DB saves failed! service=${bgServiceId} order=${bgOrderId} password=${newPassword}`);
+                  }
+                  passwordSaved = true;
+                  break;
+                }
+              } catch (passErr) {
+                const msg = passErr.message || '';
+                if (msg.includes('already exists') || msg.includes('Password already')) {
+                  console.log(`[ADVPS-PROVISION] Password already exists for ${bgServiceId}, marking as active`);
+                  await Order.findByIdAndUpdate(bgOrderId, {
+                    provisioningStatus: 'active',
+                    provisioningError: 'Password was generated previously but not captured. Check ADVPS dashboard or rebuild the server to get a new password.',
+                    lastAction: 'provision',
+                    lastActionTime: new Date(),
+                  });
+                  passwordSaved = true;
+                  break;
+                }
+                if (msg.includes('must be running')) {
+                  console.log(`[ADVPS-PROVISION] Server not ready yet (attempt ${attempt + 1}/${retryDelays.length})`);
+                  continue;
+                }
+                console.error(`[ADVPS-PROVISION] Password gen attempt ${attempt + 1} failed:`, msg);
+              }
+            }
+
+            if (!passwordSaved) {
+              console.error(`[ADVPS-PROVISION] All password attempts failed for ${bgServiceId}`);
+              await Order.findByIdAndUpdate(bgOrderId, {
+                provisioningStatus: 'failed',
+                provisioningError: 'Password generation failed after multiple attempts. Try "Generate Password" from the order page when server is running.',
+              });
+            }
+          } catch (bgErr) {
+            console.error(`[ADVPS-PROVISION] Background provisioning failed for ${bgServiceId}:`, bgErr.message);
+            await Order.findByIdAndUpdate(bgOrderId, {
+              provisioningStatus: 'failed',
+              provisioningError: `Provisioning failed: ${bgErr.message}`,
+            });
+          }
+        })();
       }
     }
 

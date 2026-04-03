@@ -208,6 +208,35 @@ const OrderDetails = () => {
     }
   }, [order?.hostycareServiceId, order?.smartvpsServiceId, order?.advpsServiceId, order?.ipAddress, ipStock, loading]);
 
+  // Auto-refresh while ADVPS is provisioning (poll every 15s)
+  useEffect(() => {
+    if (!order) return;
+    const isProvisioning = order.provisioningStatus === 'provisioning' && getProviderFromOrder(order, ipStock) === 'advps';
+    if (!isProvisioning) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/orders/${orderId}`, { cache: 'no-store' });
+        if (res.ok) {
+          const updated = await res.json();
+          setOrder(updated);
+          if (updated.provisioningStatus !== 'provisioning') {
+            clearInterval(interval);
+            if (updated.provisioningStatus === 'active' && updated.password) {
+              toast.success('Server is ready! Credentials are now available.');
+            } else if (updated.provisioningStatus === 'failed') {
+              toast.error('Provisioning failed. Check the order details.');
+            }
+          }
+        }
+      } catch (e) {
+        console.error('[ORDER-DETAILS] Auto-refresh failed:', e);
+      }
+    }, 15000);
+
+    return () => clearInterval(interval);
+  }, [order?.provisioningStatus, order?._id]);
+
   const fetchOrderAndIPStock = async () => {
     setLoading(true);
     try {
@@ -1764,6 +1793,37 @@ const OrderDetails = () => {
             </div>
           ) : (
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 lg:gap-6">
+              {/* ADVPS Provisioning Banner */}
+              {provider === 'advps' && order.provisioningStatus === 'provisioning' && (
+                <div className="xl:col-span-3">
+                  <Card className="border-primary/30 bg-primary/5">
+                    <CardContent className="p-4 sm:p-6">
+                      <div className="flex items-center gap-4">
+                        <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                          <Loader2 className="h-6 w-6 text-primary animate-spin" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <h3 className="font-semibold text-base mb-1">Setting up your server...</h3>
+                          <p className="text-sm text-muted-foreground">
+                            Your ADVPS server is being started and credentials are being generated. This usually takes 1-3 minutes. This page will update automatically.
+                          </p>
+                          <div className="flex items-center gap-3 mt-3">
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                              <div className="h-2 w-2 rounded-full bg-green-500"></div>
+                              <span>IP Address fetched</span>
+                            </div>
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                              <Loader2 className="h-3 w-3 animate-spin text-primary" />
+                              <span>Starting server & generating password...</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+              )}
+
               {/* Left Column - Server Info & Connection */}
               <div className="xl:col-span-2 space-y-4 lg:space-y-6">
                 {/* Server Overview */}

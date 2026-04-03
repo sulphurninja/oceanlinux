@@ -129,12 +129,30 @@ export async function POST(request) {
           const passRes = await api.generatePassword(serviceId);
           const newPassword = passRes?.data?.password;
           if (newPassword) {
-            await Order.findByIdAndUpdate(orderId, {
-              password: newPassword,
-              lastAction: 'changepassword',
-              lastActionTime: new Date(),
-            });
-            result = { ...passRes, passwordSaved: true };
+            // CRITICAL: Log immediately — ADVPS only returns password once, ever
+            console.log(`[ADVPS-ACTION] 🔑 PASSWORD GENERATED for service=${serviceId} order=${orderId}: ${newPassword}`);
+
+            // Save with retries — cannot afford to lose this
+            let saved = false;
+            for (let dbAttempt = 0; dbAttempt < 5; dbAttempt++) {
+              try {
+                await Order.findByIdAndUpdate(orderId, {
+                  password: newPassword,
+                  lastAction: 'changepassword',
+                  lastActionTime: new Date(),
+                });
+                console.log(`[ADVPS-ACTION] ✅ Password SAVED to DB (attempt ${dbAttempt + 1})`);
+                saved = true;
+                break;
+              } catch (dbErr) {
+                console.error(`[ADVPS-ACTION] ❌ DB save attempt ${dbAttempt + 1}/5 FAILED:`, dbErr.message);
+                if (dbAttempt < 4) await new Promise(r => setTimeout(r, 2000));
+              }
+            }
+            if (!saved) {
+              console.error(`[ADVPS-ACTION] 🚨 CRITICAL: Password generated but ALL DB saves failed! service=${serviceId} order=${orderId} password=${newPassword}`);
+            }
+            result = { ...passRes, passwordSaved: saved };
           } else {
             result = passRes;
           }
@@ -143,7 +161,7 @@ export async function POST(request) {
           if (msg.includes('already exists') || msg.includes('Password already')) {
             return NextResponse.json({
               success: false,
-              error: 'Password was already generated for this service and cannot be regenerated. The existing password is stored on your server.',
+              error: 'Password was already generated for this service and cannot be regenerated. If it was not saved, rebuild the server to get a new password.',
               code: 'PASSWORD_ALREADY_EXISTS',
             }, { status: 400 });
           }
@@ -167,34 +185,69 @@ export async function POST(request) {
         });
 
         if (taskId) {
-          const pollDelays = [5000, 10000, 20000, 40000, 60000];
-          pollDelays.forEach((delay, i) => {
-            setTimeout(async () => {
+          const rebuildOrderId = orderId;
+          const rebuildServiceId = serviceId;
+
+          (async () => {
+            const pollDelays = [10000, 15000, 20000, 30000, 60000, 60000];
+            for (let i = 0; i < pollDelays.length; i++) {
+              await new Promise(r => setTimeout(r, pollDelays[i]));
               try {
                 const taskRes = await api.taskStatus(taskId);
                 const taskData = taskRes?.data || taskRes;
                 console.log(`[ADVPS-ACTION] Rebuild poll ${i + 1}: status=${taskData.status}, progress=${taskData.progress}`);
 
                 if (taskData.status === 'COMPLETED') {
-                  try {
-                    const passRes = await api.generatePassword(serviceId);
-                    const newPass = passRes?.data?.password;
-                    if (newPass) {
-                      await Order.findByIdAndUpdate(orderId, {
-                        password: newPass,
-                        provisioningStatus: 'active',
-                      });
-                      console.log('[ADVPS-ACTION] Post-rebuild password updated');
+                  // Wait a bit for the server to fully boot before password gen
+                  await new Promise(r => setTimeout(r, 30000));
+
+                  const passRetryDelays = [0, 20000, 30000, 60000];
+                  for (let attempt = 0; attempt < passRetryDelays.length; attempt++) {
+                    if (attempt > 0) await new Promise(r => setTimeout(r, passRetryDelays[attempt]));
+                    try {
+                      const passRes = await api.generatePassword(rebuildServiceId);
+                      const newPass = passRes?.data?.password;
+                      if (newPass) {
+                        console.log(`[ADVPS-ACTION] 🔑 POST-REBUILD PASSWORD for service=${rebuildServiceId} order=${rebuildOrderId}: ${newPass}`);
+
+                        for (let dbAttempt = 0; dbAttempt < 5; dbAttempt++) {
+                          try {
+                            await Order.findByIdAndUpdate(rebuildOrderId, {
+                              password: newPass,
+                              provisioningStatus: 'active',
+                            });
+                            console.log(`[ADVPS-ACTION] ✅ Post-rebuild password SAVED (attempt ${dbAttempt + 1})`);
+                            return;
+                          } catch (dbErr) {
+                            console.error(`[ADVPS-ACTION] ❌ DB save attempt ${dbAttempt + 1}/5 FAILED:`, dbErr.message);
+                            if (dbAttempt < 4) await new Promise(r => setTimeout(r, 2000));
+                          }
+                        }
+                        console.error(`[ADVPS-ACTION] 🚨 CRITICAL: Post-rebuild password ALL DB saves failed! service=${rebuildServiceId} order=${rebuildOrderId} password=${newPass}`);
+                        return;
+                      }
+                    } catch (passErr) {
+                      const msg = passErr.message || '';
+                      if (msg.includes('must be running')) {
+                        console.log(`[ADVPS-ACTION] Server not ready for password gen (attempt ${attempt + 1})`);
+                        continue;
+                      }
+                      console.error(`[ADVPS-ACTION] Post-rebuild password attempt ${attempt + 1} failed:`, msg);
                     }
-                  } catch (passErr) {
-                    console.error('[ADVPS-ACTION] Post-rebuild password gen failed:', passErr.message);
                   }
+                  console.error(`[ADVPS-ACTION] Post-rebuild password gen exhausted all retries for ${rebuildServiceId}`);
+                  return;
+                }
+                if (taskData.status === 'FAILED') {
+                  console.error(`[ADVPS-ACTION] Rebuild task FAILED for ${rebuildServiceId}`);
+                  await Order.findByIdAndUpdate(rebuildOrderId, { provisioningStatus: 'failed', provisioningError: 'Rebuild task failed' });
+                  return;
                 }
               } catch (pollErr) {
                 console.error(`[ADVPS-ACTION] Rebuild poll ${i + 1} error:`, pollErr.message);
               }
-            }, delay);
-          });
+            }
+          })();
         }
 
         result = rebuildRes;
