@@ -194,11 +194,22 @@ export async function POST(request) {
               try {
                 const taskRes = await api.taskStatus(taskId);
                 const taskData = taskRes?.data || taskRes;
-                console.log(`[ADVPS-ACTION] Rebuild poll ${i + 1}: status=${taskData.status}, progress=${taskData.progress}`);
+                const taskStatus = (taskData.status || '').toUpperCase();
+                console.log(`[ADVPS-ACTION] Rebuild poll ${i + 1}: status=${taskStatus}, progress=${taskData.progress}`);
 
-                if (taskData.status === 'COMPLETED') {
-                  // Wait a bit for the server to fully boot before password gen
-                  await new Promise(r => setTimeout(r, 30000));
+                if (taskStatus === 'COMPLETED' || taskStatus === 'SUCCESS' || taskStatus === 'DONE') {
+                  console.log(`[ADVPS-ACTION] Rebuild task completed for ${rebuildServiceId}, starting post-rebuild password flow...`);
+
+                  // Start the server first (LXC may be stopped after rebuild)
+                  try {
+                    await api.start(rebuildServiceId);
+                    console.log(`[ADVPS-ACTION] Post-rebuild start command sent for ${rebuildServiceId}`);
+                  } catch (startErr) {
+                    console.log(`[ADVPS-ACTION] Post-rebuild start: ${startErr.message} (may already be running)`);
+                  }
+
+                  // Wait for the server to fully boot
+                  await new Promise(r => setTimeout(r, 45000));
 
                   const passRetryDelays = [0, 20000, 30000, 60000];
                   for (let attempt = 0; attempt < passRetryDelays.length; attempt++) {
@@ -207,6 +218,7 @@ export async function POST(request) {
                       const passRes = await api.generatePassword(rebuildServiceId);
                       const pd = passRes?.data || {};
                       const newPass = pd.password || pd.newPassword || pd.existingPassword;
+                      console.log(`[ADVPS-ACTION] generate-password response: status=${pd.status}, hasPassword=${!!pd.password}, hasNewPassword=${!!pd.newPassword}, hasExistingPassword=${!!pd.existingPassword}`);
                       if (newPass) {
                         console.log(`[ADVPS-ACTION] 🔑 POST-REBUILD PASSWORD for service=${rebuildServiceId} order=${rebuildOrderId}: ${newPass}`);
 
@@ -228,17 +240,31 @@ export async function POST(request) {
                       }
                     } catch (passErr) {
                       const msg = passErr.message || '';
+                      console.log(`[ADVPS-ACTION] generate-password error (attempt ${attempt + 1}): ${msg}`);
+
+                      // Extract password from error response if available (e.g. "already exists" with existingPassword)
+                      const existingMatch = msg.match(/existingPassword[:\s]+"?([^"}\s,]+)/);
+                      if (existingMatch) {
+                        const extractedPass = existingMatch[1];
+                        console.log(`[ADVPS-ACTION] 🔑 Extracted existingPassword from error: ${extractedPass}`);
+                        await Order.findByIdAndUpdate(rebuildOrderId, { password: extractedPass, provisioningStatus: 'active' });
+                        return;
+                      }
+
                       if (msg.includes('must be running')) {
                         console.log(`[ADVPS-ACTION] Server not ready for password gen (attempt ${attempt + 1})`);
                         continue;
                       }
-                      console.error(`[ADVPS-ACTION] Post-rebuild password attempt ${attempt + 1} failed:`, msg);
                     }
                   }
                   console.error(`[ADVPS-ACTION] Post-rebuild password gen exhausted all retries for ${rebuildServiceId}`);
+                  await Order.findByIdAndUpdate(rebuildOrderId, {
+                    provisioningStatus: 'active',
+                    provisioningError: 'Rebuild completed but password could not be retrieved. Check ADVPS dashboard for the new password.',
+                  });
                   return;
                 }
-                if (taskData.status === 'FAILED') {
+                if (taskStatus === 'FAILED' || taskStatus === 'ERROR') {
                   console.error(`[ADVPS-ACTION] Rebuild task FAILED for ${rebuildServiceId}`);
                   await Order.findByIdAndUpdate(rebuildOrderId, { provisioningStatus: 'failed', provisioningError: 'Rebuild task failed' });
                   return;

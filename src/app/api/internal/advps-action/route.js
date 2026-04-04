@@ -17,7 +17,7 @@ export async function POST(request) {
 
   try {
     await connectDB();
-    const { orderId, action } = await request.json();
+    const { orderId, action, payload } = await request.json();
     if (!orderId || !action) {
       return NextResponse.json({ success: false, error: 'orderId and action required' }, { status: 400 });
     }
@@ -68,11 +68,23 @@ export async function POST(request) {
         }
       }
 
+      case 'templates': {
+        return NextResponse.json({
+          success: true,
+          result: {
+            'ubuntu-22.04': 'Ubuntu 22.04',
+            'centos-7': 'CentOS 7',
+            'windows-2022': 'Windows Server 2022',
+          },
+        });
+      }
+
       case 'format': {
-        const os = order.os?.toLowerCase().includes('ubuntu') ? 'ubuntu-22.04'
+        const os = payload?.templateId || payload?.os
+          || (order.os?.toLowerCase().includes('ubuntu') ? 'ubuntu-22.04'
           : order.os?.toLowerCase().includes('centos') ? 'centos-7'
           : order.os?.toLowerCase().includes('windows') ? 'windows-2022'
-          : 'ubuntu-22.04';
+          : 'ubuntu-22.04');
 
         const rebuildRes = await api.rebuild(serviceId, os);
         const taskId = rebuildRes?.data?.taskId;
@@ -87,10 +99,22 @@ export async function POST(request) {
               try {
                 const taskRes = await api.taskStatus(taskId);
                 const taskData = taskRes?.data || taskRes;
-                console.log(`[INTERNAL-ADVPS] Rebuild poll ${i + 1}: status=${taskData.status}`);
+                const taskStatus = (taskData.status || '').toUpperCase();
+                console.log(`[INTERNAL-ADVPS] Rebuild poll ${i + 1}: status=${taskStatus}`);
 
-                if (taskData.status === 'COMPLETED') {
-                  await new Promise(r => setTimeout(r, 30000));
+                if (taskStatus === 'COMPLETED' || taskStatus === 'SUCCESS' || taskStatus === 'DONE') {
+                  console.log(`[INTERNAL-ADVPS] Rebuild completed for ${serviceId}, starting post-rebuild password flow...`);
+
+                  // Start the server first (LXC may be stopped after rebuild)
+                  try {
+                    await api.start(serviceId);
+                    console.log(`[INTERNAL-ADVPS] Post-rebuild start command sent for ${serviceId}`);
+                  } catch (startErr) {
+                    console.log(`[INTERNAL-ADVPS] Post-rebuild start: ${startErr.message} (may already be running)`);
+                  }
+
+                  await new Promise(r => setTimeout(r, 45000));
+
                   const passRetryDelays = [0, 20000, 30000, 60000];
                   for (let attempt = 0; attempt < passRetryDelays.length; attempt++) {
                     if (attempt > 0) await new Promise(r => setTimeout(r, passRetryDelays[attempt]));
@@ -98,6 +122,7 @@ export async function POST(request) {
                       const passRes = await api.generatePassword(serviceId);
                       const pd = passRes?.data || {};
                       const newPass = pd.password || pd.newPassword || pd.existingPassword;
+                      console.log(`[INTERNAL-ADVPS] generate-password response: status=${pd.status}, hasPassword=${!!pd.password}, hasNewPassword=${!!pd.newPassword}, hasExistingPassword=${!!pd.existingPassword}`);
                       if (newPass) {
                         console.log(`[INTERNAL-ADVPS] 🔑 POST-REBUILD PASSWORD: ${newPass}`);
                         for (let db = 0; db < 5; db++) {
@@ -112,13 +137,26 @@ export async function POST(request) {
                         return;
                       }
                     } catch (passErr) {
-                      if (passErr.message?.includes('must be running')) continue;
-                      console.error(`[INTERNAL-ADVPS] Password attempt ${attempt + 1} failed:`, passErr.message);
+                      const msg = passErr.message || '';
+                      console.log(`[INTERNAL-ADVPS] generate-password error (attempt ${attempt + 1}): ${msg}`);
+
+                      const existingMatch = msg.match(/existingPassword[:\s]+"?([^"}\s,]+)/);
+                      if (existingMatch) {
+                        console.log(`[INTERNAL-ADVPS] 🔑 Extracted existingPassword from error: ${existingMatch[1]}`);
+                        await Order.findByIdAndUpdate(orderId, { password: existingMatch[1], provisioningStatus: 'active' });
+                        return;
+                      }
+
+                      if (msg.includes('must be running')) continue;
                     }
                   }
+                  await Order.findByIdAndUpdate(orderId, {
+                    provisioningStatus: 'active',
+                    provisioningError: 'Rebuild completed but password could not be retrieved. Check ADVPS dashboard.',
+                  });
                   return;
                 }
-                if (taskData.status === 'FAILED') {
+                if (taskStatus === 'FAILED' || taskStatus === 'ERROR') {
                   await Order.findByIdAndUpdate(orderId, { provisioningStatus: 'failed', provisioningError: 'Rebuild task failed' });
                   return;
                 }
