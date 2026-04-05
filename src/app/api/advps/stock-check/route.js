@@ -6,6 +6,7 @@ const {
   applyStockMapToAdvpsBlock,
   toPlainConfigurations,
   cloneAdvpsForMutation,
+  deepMapToPlain,
 } = require('@/lib/advpsLiveStock');
 
 const LOG = '[ADVPS-STOCK-CHECK]';
@@ -39,8 +40,27 @@ async function runAdvpsStockCheck() {
   let missingAdvpsBlock = 0;
 
   for (const doc of entries) {
-    const defaults = toPlainConfigurations(doc.defaultConfigurations);
-    const advpsRaw = defaults?.advps;
+    let defaults = toPlainConfigurations(doc.defaultConfigurations);
+    let advpsRaw = defaults?.advps;
+
+    if (advpsRaw == null && typeof doc.toObject === 'function') {
+      try {
+        const loose = doc.toObject({ flattenMaps: true, minimize: false });
+        const dc = loose.defaultConfigurations;
+        if (dc && typeof dc === 'object' && dc.advps != null) {
+          advpsRaw = deepMapToPlain(dc.advps);
+          defaults = { ...defaults, advps: advpsRaw };
+          console.warn(`${LOG} recovered advps via doc.toObject fallback`, {
+            runId,
+            ipStockId: String(doc._id),
+            name: doc.name,
+          });
+        }
+      } catch (e) {
+        console.warn(`${LOG} doc.toObject fallback failed`, { name: doc.name, err: e.message });
+      }
+    }
+
     if (!advpsRaw) {
       missingAdvpsBlock += 1;
       console.warn(`${LOG} skip: no advps in defaultConfigurations`, {

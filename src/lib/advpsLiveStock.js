@@ -2,11 +2,42 @@ const AdvpsAPI = require('@/services/advpsApi');
 
 const LOG = '[ADVPS-LIVE-STOCK]';
 
+/**
+ * IPStock.defaultConfigurations is SchemaTypes.Map (Mixed values).
+ * Never call .toObject({ minimize: true }) on that Map first — it often drops `advps` / Mixed payloads.
+ * Also handle Mongoose map-like objects that are not `instanceof globalThis.Map`.
+ */
+function tryReadConfigurationsAsMap(maybe) {
+  if (maybe == null || Array.isArray(maybe)) return null;
+  if (typeof maybe.forEach !== 'function' || typeof maybe.get !== 'function') return null;
+  const out = {};
+  maybe.forEach((v, k) => {
+    out[k] = deepMapToPlain(v);
+  });
+  return out;
+}
+
 function toPlainConfigurations(maybeMap) {
-  if (!maybeMap) return {};
-  if (typeof maybeMap.toObject === 'function') return maybeMap.toObject({ minimize: true });
-  if (maybeMap instanceof Map) return Object.fromEntries(maybeMap);
-  return { ...maybeMap };
+  if (maybeMap == null) return {};
+
+  const fromMap = tryReadConfigurationsAsMap(maybeMap);
+  if (fromMap) return fromMap;
+
+  if (typeof maybeMap === 'object' && typeof maybeMap.toObject === 'function') {
+    try {
+      return deepMapToPlain(
+        maybeMap.toObject({ flattenMaps: true, minimize: false, depopulate: true })
+      );
+    } catch (e) {
+      console.warn(`${LOG} toPlainConfigurations toObject failed:`, e.message);
+    }
+  }
+
+  if (typeof maybeMap === 'object' && !Array.isArray(maybeMap)) {
+    return deepMapToPlain({ ...maybeMap });
+  }
+
+  return {};
 }
 
 /** Merge incoming defaultConfigurations without wiping keys with undefined (fixes lost advps from client JSON). */
@@ -26,21 +57,49 @@ function mergeDefaultConfigurationsPlain(existingPlain, incomingPlain) {
  */
 function deepMapToPlain(obj) {
   if (obj == null) return obj;
+  if (obj instanceof Date) return obj;
+  if (typeof Buffer !== 'undefined' && Buffer.isBuffer(obj)) return obj;
+
   if (obj instanceof Map) {
     const plain = {};
-    for (const [k, v] of obj.entries()) {
+    obj.forEach((v, k) => {
       plain[k] = deepMapToPlain(v);
-    }
+    });
     return plain;
   }
-  if (Array.isArray(obj)) return obj.map((x) => deepMapToPlain(x));
-  if (typeof obj === 'object' && obj.constructor === Object) {
+
+  if (typeof obj === 'object' && typeof obj.forEach === 'function' && typeof obj.get === 'function' && !Array.isArray(obj)) {
     const plain = {};
-    for (const [k, v] of Object.entries(obj)) {
+    obj.forEach((v, k) => {
       plain[k] = deepMapToPlain(v);
-    }
+    });
     return plain;
   }
+
+  if (Array.isArray(obj)) return obj.map((x) => deepMapToPlain(x));
+
+  if (typeof obj === 'object') {
+    if (typeof obj.toObject === 'function') {
+      try {
+        return deepMapToPlain(obj.toObject({ flattenMaps: true, minimize: false, depopulate: true }));
+      } catch (_) {
+        /* fall through */
+      }
+    }
+    if (obj.constructor === Object || Object.getPrototypeOf(obj) === null) {
+      const plain = {};
+      for (const [k, v] of Object.entries(obj)) {
+        plain[k] = deepMapToPlain(v);
+      }
+      return plain;
+    }
+    try {
+      return deepMapToPlain({ ...obj });
+    } catch (_) {
+      return obj;
+    }
+  }
+
   return obj;
 }
 
