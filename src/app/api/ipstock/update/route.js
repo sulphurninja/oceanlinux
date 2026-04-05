@@ -5,9 +5,11 @@ import IPStock from '../../../../models/ipStockModel';
 
 const {
   toPlainConfigurations,
+  mergeDefaultConfigurationsPlain,
   isAdvpsIpStockName,
   fetchAdvpsStockMap,
   applyStockMapToAdvpsBlock,
+  cloneAdvpsForMutation,
 } = require('@/lib/advpsLiveStock');
 
 export async function PUT(req, res) {
@@ -25,7 +27,7 @@ export async function PUT(req, res) {
     const mergedName = name !== undefined ? name : existing.name;
     const plainExisting = toPlainConfigurations(existing.defaultConfigurations);
     const plainIncoming = defaultConfigurations !== undefined ? toPlainConfigurations(defaultConfigurations) : {};
-    const mergedDefaults = { ...plainExisting, ...plainIncoming };
+    const mergedDefaults = mergeDefaultConfigurationsPlain(plainExisting, plainIncoming);
     const advps = mergedDefaults.advps;
 
     let finalAvailable = available;
@@ -33,12 +35,31 @@ export async function PUT(req, res) {
 
     if (isAdvpsIpStockName(String(mergedName)) && advps && typeof advps === 'object') {
       try {
-        const stockMap = await fetchAdvpsStockMap(advps);
-        const advpsLive = JSON.parse(JSON.stringify(advps));
-        finalAvailable = applyStockMapToAdvpsBlock(advpsLive, stockMap);
-        finalDefaults = { ...mergedDefaults, advps: advpsLive };
+        console.log('[IPSTOCK-UPDATE][ADVPS] resolving availability from API', {
+          _id,
+          name: mergedName,
+          clientSentAvailable: available,
+        });
+        const advpsLive = cloneAdvpsForMutation(advps);
+        if (advpsLive) {
+          const stockMap = await fetchAdvpsStockMap(advpsLive, { verbose: false });
+          finalAvailable = applyStockMapToAdvpsBlock(advpsLive, stockMap, {
+            verbose: true,
+            label: mergedName,
+            ipStockId: _id,
+          });
+          finalDefaults = { ...mergedDefaults, advps: advpsLive };
+          console.log('[IPSTOCK-UPDATE][ADVPS] resolved', {
+            _id,
+            name: mergedName,
+            finalAvailable,
+            clientSentAvailable: available,
+          });
+        } else {
+          console.warn('[IPSTOCK-UPDATE][ADVPS] cloneAdvpsForMutation returned null', { _id, name: mergedName });
+        }
       } catch (e) {
-        console.error('[IPSTOCK-UPDATE] ADVPS availability fetch failed:', e.message);
+        console.error('[IPSTOCK-UPDATE][ADVPS] availability fetch failed:', e.message, e.stack);
         finalAvailable = available;
         finalDefaults = mergedDefaults;
       }

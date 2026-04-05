@@ -8,6 +8,7 @@ const {
   isAdvpsIpStockName,
   fetchAdvpsStockMap,
   applyStockMapToAdvpsBlock,
+  cloneAdvpsForMutation,
 } = require('@/lib/advpsLiveStock');
 
 async function getCompanySession() {
@@ -45,12 +46,31 @@ export async function PUT(request) {
 
   if (isAdvpsIpStockName(String(stock.name)) && advps && typeof advps === 'object') {
     try {
-      const stockMap = await fetchAdvpsStockMap(advps);
-      const advpsLive = JSON.parse(JSON.stringify(advps));
-      stock.available = applyStockMapToAdvpsBlock(advpsLive, stockMap);
-      stock.defaultConfigurations = { ...plain, advps: advpsLive };
+      console.log('[COMPANY-STOCKS][ADVPS] resolving availability', {
+        stockId: String(stock._id),
+        name: stock.name,
+        clientSentAvailable: available,
+      });
+      const advpsLive = cloneAdvpsForMutation(advps);
+      if (advpsLive) {
+        const stockMap = await fetchAdvpsStockMap(advpsLive, { verbose: false });
+        stock.available = applyStockMapToAdvpsBlock(advpsLive, stockMap, {
+          verbose: true,
+          label: stock.name,
+          ipStockId: stock._id,
+        });
+        stock.defaultConfigurations = { ...plain, advps: advpsLive };
+        console.log('[COMPANY-STOCKS][ADVPS] resolved', {
+          stockId: String(stock._id),
+          name: stock.name,
+          finalAvailable: stock.available,
+        });
+      } else {
+        stock.available = available;
+        console.warn('[COMPANY-STOCKS][ADVPS] clone null, using client available', { stockId: String(stock._id) });
+      }
     } catch (e) {
-      console.error('[COMPANY-STOCKS] ADVPS availability fetch failed:', e.message);
+      console.error('[COMPANY-STOCKS][ADVPS] fetch failed:', e.message, e.stack);
       stock.available = available;
     }
   } else {

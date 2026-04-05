@@ -1,5 +1,7 @@
 const AdvpsAPI = require('@/services/advpsApi');
 
+const LOG = '[ADVPS-LIVE-STOCK]';
+
 function toPlainConfigurations(maybeMap) {
   if (!maybeMap) return {};
   if (typeof maybeMap.toObject === 'function') return maybeMap.toObject({ minimize: true });
@@ -7,20 +9,68 @@ function toPlainConfigurations(maybeMap) {
   return { ...maybeMap };
 }
 
+/** Merge incoming defaultConfigurations without wiping keys with undefined (fixes lost advps from client JSON). */
+function mergeDefaultConfigurationsPlain(existingPlain, incomingPlain) {
+  const e = existingPlain && typeof existingPlain === 'object' ? { ...existingPlain } : {};
+  const inc = incomingPlain && typeof incomingPlain === 'object' ? incomingPlain : {};
+  const out = { ...e };
+  for (const [k, v] of Object.entries(inc)) {
+    if (v !== undefined) out[k] = v;
+  }
+  return out;
+}
+
+/**
+ * Mongoose Map inside Mixed does not JSON.stringify correctly (becomes {}).
+ * Convert Maps to plain objects recursively before clone / iteration.
+ */
+function deepMapToPlain(obj) {
+  if (obj == null) return obj;
+  if (obj instanceof Map) {
+    const plain = {};
+    for (const [k, v] of obj.entries()) {
+      plain[k] = deepMapToPlain(v);
+    }
+    return plain;
+  }
+  if (Array.isArray(obj)) return obj.map((x) => deepMapToPlain(x));
+  if (typeof obj === 'object' && obj.constructor === Object) {
+    const plain = {};
+    for (const [k, v] of Object.entries(obj)) {
+      plain[k] = deepMapToPlain(v);
+    }
+    return plain;
+  }
+  return obj;
+}
+
+function cloneAdvpsForMutation(advps) {
+  if (!advps || typeof advps !== 'object') return null;
+  return deepMapToPlain(advps);
+}
+
 function isAdvpsIpStockName(name) {
   return typeof name === 'string' && /^⚡/.test(name.trimStart());
 }
 
+function normalizeProductId(id) {
+  if (id == null) return '';
+  return String(id).trim();
+}
+
 /** All ADVPS catalog ids referenced by an advps config block. */
 function collectAdvpsProductIds(advps) {
+  const a = deepMapToPlain(advps);
+  if (!a || typeof a !== 'object') return [];
   const ids = [];
-  if (!advps || typeof advps !== 'object') return ids;
-  if (advps.variants && typeof advps.variants === 'object') {
-    for (const [, variant] of Object.entries(advps.variants)) {
-      if (variant?.productId != null) ids.push(String(variant.productId));
+  if (a.variants && typeof a.variants === 'object') {
+    for (const [, variant] of Object.entries(a.variants)) {
+      const pid = normalizeProductId(variant?.productId);
+      if (pid) ids.push(pid);
     }
-  } else if (advps.productId != null) {
-    ids.push(String(advps.productId));
+  } else {
+    const pid = normalizeProductId(a.productId);
+    if (pid) ids.push(pid);
   }
   return ids;
 }
@@ -29,59 +79,82 @@ function normalizeStockStatus(st) {
   return String(st ?? '').toUpperCase().replace(/-/g, '_');
 }
 
-/** Treat as sellable if quantity > 0 and not explicitly out of stock. */
+/** In stock: quantity > 0, or ADVPS says IN_STOCK / LOW_STOCK (some APIs keep stock at 0 briefly). */
 function rowLooksInStock(row) {
   const stock = Number(row?.stock ?? 0);
   const st = normalizeStockStatus(row?.stockStatus);
   if (st === 'OUT_OF_STOCK') return false;
-  return stock > 0;
+  if (stock > 0) return true;
+  return st === 'IN_STOCK' || st === 'LOW_STOCK';
 }
 
-async function buildListStockMap(api) {
+async function buildListStockMap(api, verbose) {
+  const t0 = Date.now();
   const [linuxList, vpsList] = await Promise.all([
     api.productStockAll({ type: 'linux' }),
     api.productStockAll({ type: 'vps' }),
   ]);
   const stockMap = {};
   for (const p of [...linuxList, ...vpsList]) {
-    stockMap[String(p.id)] = {
+    const id = normalizeProductId(p.id);
+    if (!id) continue;
+    stockMap[id] = {
       stock: Number(p.stock || 0),
       stockStatus: p.stockStatus,
     };
   }
+  if (verbose) {
+    console.log(`${LOG} list merge`, {
+      ms: Date.now() - t0,
+      linuxRows: linuxList.length,
+      vpsRows: vpsList.length,
+      uniqueProductKeys: Object.keys(stockMap).length,
+    });
+  }
   return stockMap;
 }
 
-/**
- * For any id we care about but that did not appear in list endpoints, GET /products/stock/{id}.
- * Fixes missing rows (pagination edge cases, visibility filters, id drift).
- */
-async function enrichMissingProductIds(api, stockMap, productIds) {
-  const unique = [...new Set((productIds || []).map(String).filter(Boolean))].filter((id) => !stockMap[id]);
+async function enrichMissingProductIds(api, stockMap, productIds, verbose) {
+  const unique = [...new Set((productIds || []).map(normalizeProductId).filter(Boolean))].filter((id) => !stockMap[id]);
+  if (verbose && unique.length > 0) {
+    console.log(`${LOG} enrich by id: ${unique.length} product id(s) not in list map`, { ids: unique });
+  }
   for (const id of unique) {
     try {
       const res = await api.productStockById(id);
       const row = res?.data?.stock ?? res?.data;
       if (row && (row.id != null || row.stock != null || row.stockStatus != null)) {
-        const rid = String(row.id ?? id);
+        const rid = normalizeProductId(row.id ?? id);
         stockMap[rid] = {
           stock: Number(row.stock ?? 0),
           stockStatus: row.stockStatus,
         };
+        if (verbose) {
+          console.log(`${LOG} enrich OK`, {
+            productId: rid,
+            stock: stockMap[rid].stock,
+            stockStatus: stockMap[rid].stockStatus,
+            rowLooksInStock: rowLooksInStock(stockMap[rid]),
+          });
+        }
+      } else if (verbose) {
+        console.warn(`${LOG} enrich empty body for productId=${id}`, { preview: JSON.stringify(res)?.slice(0, 200) });
       }
     } catch (e) {
-      console.warn(`[ADVPS-LIVE-STOCK] productStockById(${id}):`, e.message);
+      console.warn(`${LOG} enrich FAILED productId=${id}:`, e.message);
     }
   }
 }
 
 /**
- * Build stock map from list APIs, then ensure every productId used by your IPStock advps blocks is present.
- * @param {object|object[]|null} advpsBlocks — single advps block, array of blocks, or null/omit for list-only
+ * @param {object|object[]|null} advpsBlocks
+ * @param {{ verbose?: boolean }} opts — verbose logs for stock-check / debugging
  */
-async function fetchAdvpsStockMap(advpsBlocks) {
+async function fetchAdvpsStockMap(advpsBlocks, opts = {}) {
+  const verbose = opts.verbose === true;
+  const t0 = Date.now();
   const api = new AdvpsAPI();
-  const stockMap = await buildListStockMap(api);
+  const stockMap = await buildListStockMap(api, verbose);
 
   const blocks = Array.isArray(advpsBlocks)
     ? advpsBlocks
@@ -93,36 +166,103 @@ async function fetchAdvpsStockMap(advpsBlocks) {
   for (const block of blocks) {
     allIds.push(...collectAdvpsProductIds(block));
   }
-  await enrichMissingProductIds(api, stockMap, allIds);
+  const uniqueRef = [...new Set(allIds)];
+  if (verbose) {
+    console.log(`${LOG} fetchAdvpsStockMap start`, {
+      advpsBlocksCount: blocks.length,
+      referencedProductIds: allIds.length,
+      uniqueReferencedIds: uniqueRef.length,
+      sampleIds: uniqueRef.slice(0, 12),
+    });
+  }
+
+  await enrichMissingProductIds(api, stockMap, allIds, verbose);
+
+  if (verbose) {
+    console.log(`${LOG} fetchAdvpsStockMap complete`, {
+      ms: Date.now() - t0,
+      finalMapKeys: Object.keys(stockMap).length,
+    });
+  }
   return stockMap;
 }
 
 /**
- * Mutates `advps` in place (variant / single-product stock fields).
+ * Mutates plain `advps` in place (variant / single-product stock fields).
+ * @param {object} logCtx — optional { label, ipStockId, verbose }
  * @returns {boolean} hasStock
  */
-function applyStockMapToAdvpsBlock(advps, stockMap) {
+function applyStockMapToAdvpsBlock(advps, stockMap, logCtx) {
   if (!advps || typeof advps !== 'object') return false;
+
+  const verbose = logCtx && logCtx.verbose === true;
+  const label = logCtx?.label || '';
+  const ipStockId = logCtx?.ipStockId != null ? String(logCtx.ipStockId) : '';
+
+  if (advps.variants instanceof Map) {
+    if (verbose) {
+      console.log(`${LOG} apply: variants was Map → converted to plain object`, { label, ipStockId });
+    }
+    advps.variants = Object.fromEntries(advps.variants);
+  }
+
   let hasStock = false;
+  const variantTrace = [];
 
   if (advps.variants && typeof advps.variants === 'object') {
-    for (const [, variant] of Object.entries(advps.variants)) {
-      const pid = variant?.productId != null ? String(variant.productId) : '';
-      if (pid && stockMap[pid]) {
+    const ramKeys = Object.keys(advps.variants);
+    for (const ramKey of ramKeys) {
+      const variant = advps.variants[ramKey];
+      const pid = normalizeProductId(variant?.productId);
+      if (!pid) {
+        variantTrace.push({ ramKey, productId: null, note: 'no productId on variant' });
+        continue;
+      }
+      if (stockMap[pid]) {
         const s = stockMap[pid];
         variant.stock = s.stock;
         variant.stockStatus = s.stockStatus;
-        if (rowLooksInStock(s)) hasStock = true;
+        const inStock = rowLooksInStock(s);
+        if (inStock) hasStock = true;
+        variantTrace.push({
+          ramKey,
+          productId: pid,
+          stock: s.stock,
+          stockStatus: s.stockStatus,
+          countsAsInStock: inStock,
+        });
+      } else {
+        variantTrace.push({
+          ramKey,
+          productId: pid,
+          stockMapHit: false,
+          note: 'no entry in stockMap (list + enrich)',
+        });
       }
     }
   } else {
-    const pid = advps.productId != null ? String(advps.productId) : '';
+    const pid = normalizeProductId(advps.productId);
     if (pid && stockMap[pid]) {
       const s = stockMap[pid];
       advps.availableStock = s.stock;
       advps.stockStatus = s.stockStatus;
-      if (rowLooksInStock(s)) hasStock = true;
+      const inStock = rowLooksInStock(s);
+      if (inStock) hasStock = true;
+      variantTrace.push({ mode: 'single', productId: pid, stock: s.stock, stockStatus: s.stockStatus, countsAsInStock: inStock });
+    } else if (pid) {
+      variantTrace.push({ mode: 'single', productId: pid, stockMapHit: false });
+    } else {
+      variantTrace.push({ mode: 'single', note: 'no advps.productId' });
     }
+  }
+
+  if (verbose) {
+    console.log(`${LOG} apply result`, {
+      label,
+      ipStockId,
+      hasStock,
+      variantTrace,
+    });
   }
 
   return hasStock;
@@ -130,8 +270,12 @@ function applyStockMapToAdvpsBlock(advps, stockMap) {
 
 module.exports = {
   toPlainConfigurations,
+  mergeDefaultConfigurationsPlain,
+  deepMapToPlain,
+  cloneAdvpsForMutation,
   isAdvpsIpStockName,
   collectAdvpsProductIds,
   fetchAdvpsStockMap,
   applyStockMapToAdvpsBlock,
+  rowLooksInStock,
 };
