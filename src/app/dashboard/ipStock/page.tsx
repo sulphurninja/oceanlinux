@@ -159,8 +159,19 @@ function IPStockContent() {
     const fetchAll = async () => {
       try {
         setIsLoading(true);
-        
-        await fetch("/api/advps/stock-check").catch(() => null);
+
+        console.log("[IP Stock] ADVPS stock-check…");
+        try {
+          const scRes = await fetch("/api/advps/stock-check");
+          const scBody = await scRes.json().catch(() => ({}));
+          if (scRes.ok) {
+            console.log("[IP Stock] ADVPS stock-check OK", scBody);
+          } else {
+            console.warn("[IP Stock] ADVPS stock-check failed", scRes.status, scBody);
+          }
+        } catch (e) {
+          console.warn("[IP Stock] ADVPS stock-check error", e);
+        }
 
         const [ipRes, slotRes] = await Promise.all([
           fetch("/api/ipstock"),
@@ -169,8 +180,20 @@ function IPStockContent() {
 
         const ipData = await ipRes.json();
         const slotData = await slotRes.json();
+        const ipRows: IPStock[] = Array.isArray(ipData) ? ipData : [];
 
-        const availableStocks = ipData.filter((stock: IPStock) => stock.available);
+        if (!ipRes.ok) {
+          console.warn("[IP Stock] /api/ipstock HTTP", ipRes.status, ipData);
+        } else {
+          const advpsRows = ipRows.filter((s) => /^⚡/.test(String(s.name || "").trimStart())).length;
+          console.log("[IP Stock] Loaded IP stocks", {
+            total: ipRows.length,
+            advpsRows,
+            availableCount: ipRows.filter((s) => s.available).length,
+          });
+        }
+
+        const availableStocks = ipRows.filter((stock: IPStock) => stock.available);
         setIpStocks(availableStocks);
 
         const availableSlots = (slotData || []).filter(
@@ -715,7 +738,7 @@ function IPStockContent() {
     { id: 'all', icon: <Grid3X3 className="h-6 w-6" />, label: 'All Plans', count: counts.all + counts.slot, desc: 'Browse every available server and proxy plan' },
     { id: 'Linux', icon: <Server className="h-6 w-6" />, label: 'Linux Servers', count: counts.linux, desc: 'Ubuntu, CentOS, Debian & more' },
     { id: 'VPS', icon: <Cloud className="h-6 w-6" />, label: 'Windows VPS', count: counts.vps, desc: 'Windows RDP & VPS servers' },
-    { id: 'SlotIP', icon: <Zap className="h-6 w-6" />, label: 'Slot IP Proxies', count: counts.slot, desc: 'Rotating & dedicated proxy IPs' },
+    { id: 'SlotIP', icon: <Zap className="h-6 w-6" />, label: 'Premium IP Proxies', count: counts.slot, desc: 'Rotating & dedicated proxy IPs' },
   ];
 
   return (
@@ -838,7 +861,7 @@ function IPStockContent() {
                 <div className="space-y-2 mb-6">
                   <div className="flex items-center gap-2 px-1">
                     <div className="w-1 h-6 bg-orange-500 rounded-full"></div>
-                    <h2 className="text-base font-semibold">Slot IP Proxies</h2>
+                    <h2 className="text-base font-semibold">Premium IP Proxies</h2>
                     <Badge variant="outline" className="text-[10px] border-orange-500/30 bg-orange-500/5 text-orange-600 h-5 px-2">
                       {slotPackages.length} {slotPackages.length === 1 ? 'package' : 'packages'}
                     </Badge>
@@ -860,7 +883,7 @@ function IPStockContent() {
                             <div className="flex items-center gap-2 flex-wrap">
                               <h3 className="font-semibold text-sm md:text-base">{pkg.name}</h3>
                               <Badge variant="outline" className="text-[10px] border-orange-500/30 bg-orange-500/5 text-orange-600 px-1.5 py-0 h-5">
-                                Slot IP
+                                Premium IP
                               </Badge>
                               {pkg.promoCodes && pkg.promoCodes.length > 0 && (
                                 <Badge variant="outline" className="text-[10px] gap-1 bg-primary/10 text-green-500 border-primary/20 px-1.5 py-0 h-5">
@@ -886,7 +909,7 @@ function IPStockContent() {
                             </div>
                             <Button
                               size="sm"
-                              onClick={() => handleBuyNow(pkg.name, 'Slot IP', pkg.price, '', pkg._id)}
+                              onClick={() => handleBuyNow(pkg.name, 'Premium IP Proxies', pkg.price, '', pkg._id)}
                               className="h-8 px-3 gap-1.5"
                               disabled={pkg.availableCount === 0}
                             >
@@ -907,9 +930,9 @@ function IPStockContent() {
                     <div className="w-16 h-16 bg-muted/50 rounded-2xl flex items-center justify-center mx-auto mb-4">
                       <Zap className="h-8 w-8 text-muted-foreground" />
                     </div>
-                    <h3 className="text-lg font-semibold mb-2">No Slot IP Packages Available</h3>
+                    <h3 className="text-lg font-semibold mb-2">No Premium IP Proxies Available</h3>
                     <p className="text-sm text-muted-foreground max-w-md mx-auto">
-                      Slot IP packages are currently unavailable. Check back soon!
+                      Premium IP proxy packages are currently unavailable. Check back soon!
                     </p>
                   </CardContent>
                 </Card>

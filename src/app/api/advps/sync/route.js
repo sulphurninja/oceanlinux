@@ -31,17 +31,17 @@ async function runSync() {
   await connectDB();
   const api = new AdvpsAPI();
 
-  const linuxRes = await api.productStock({ type: 'linux' });
-  const vpsRes = await api.productStock({ type: 'vps' });
-
-  const linuxProducts = linuxRes?.data?.stock || [];
-  const vpsProducts = vpsRes?.data?.stock || [];
+  const [linuxProducts, vpsProducts] = await Promise.all([
+    api.productStockAll({ type: 'linux' }),
+    api.productStockAll({ type: 'vps' }),
+  ]);
   const allProducts = [...linuxProducts, ...vpsProducts];
 
   const seen = new Set();
   const deduped = allProducts.filter(p => {
-    if (seen.has(p.id)) return false;
-    seen.add(p.id);
+    const id = String(p.id);
+    if (seen.has(id)) return false;
+    seen.add(id);
     return true;
   });
 
@@ -162,8 +162,8 @@ async function runSync() {
     }
   }
 
-  // Disable ADVPS entries no longer in API
-  const allAdvpsEntries = await IPStock.find({ tags: 'flex', name: /^⚡ / });
+  // Disable ADVPS entries no longer returned by API (name prefix is the source of truth)
+  const allAdvpsEntries = await IPStock.find({ name: /^⚡/ });
 
   for (const doc of allAdvpsEntries) {
     const docBaseName = doc.name.replace(/^⚡ /, '').trim();

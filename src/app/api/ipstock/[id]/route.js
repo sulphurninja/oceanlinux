@@ -1,6 +1,12 @@
 import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 const IPStock = require('@/models/ipStockModel');
+const {
+  toPlainConfigurations,
+  isAdvpsIpStockName,
+  fetchAdvpsStockMap,
+  applyStockMapToAdvpsBlock,
+} = require('@/lib/advpsLiveStock');
 
 export async function GET(request, { params }) {
     console.log('[IPSTOCK-ID][GET] === REQUEST START ===');
@@ -73,9 +79,45 @@ export async function PUT(request, { params }) {
             hasDefaultConfigurations: !!updateData.defaultConfigurations
         });
 
+        const existing = await IPStock.findById(ipStockId).lean();
+        if (!existing) {
+            console.log('[IPSTOCK-ID][PUT] IPStock not found for update');
+            return NextResponse.json({ message: 'IP Stock not found' }, { status: 404 });
+        }
+
+        const mergedName = updateData.name !== undefined ? updateData.name : existing.name;
+        const plainExisting = toPlainConfigurations(existing.defaultConfigurations);
+        const plainIncoming = updateData.defaultConfigurations !== undefined
+          ? toPlainConfigurations(updateData.defaultConfigurations)
+          : {};
+        const mergedDefaults = { ...plainExisting, ...plainIncoming };
+
+        let finalAvailable = updateData.available;
+        let finalDefaults = mergedDefaults;
+
+        if (isAdvpsIpStockName(String(mergedName)) && mergedDefaults.advps && typeof mergedDefaults.advps === 'object') {
+          try {
+            const stockMap = await fetchAdvpsStockMap(mergedDefaults.advps);
+            const advpsLive = JSON.parse(JSON.stringify(mergedDefaults.advps));
+            finalAvailable = applyStockMapToAdvpsBlock(advpsLive, stockMap);
+            finalDefaults = { ...mergedDefaults, advps: advpsLive };
+          } catch (e) {
+            console.error('[IPSTOCK-ID][PUT] ADVPS availability fetch failed:', e.message);
+            finalAvailable = updateData.available;
+            finalDefaults = mergedDefaults;
+          }
+        }
+
+        const mergedUpdate = {
+          ...updateData,
+          name: mergedName,
+          available: finalAvailable,
+          defaultConfigurations: finalDefaults,
+        };
+
         const updatedIPStock = await IPStock.findByIdAndUpdate(
             ipStockId,
-            updateData,
+            mergedUpdate,
             { new: true, runValidators: true }
         ).lean();
 

@@ -121,7 +121,7 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
     },
     {
       href: '/dashboard/ipStock?category=SlotIP',
-      label: 'Slot IP Proxies',
+      label: 'Premium IP Proxies',
       icon: Zap,
     },
     {

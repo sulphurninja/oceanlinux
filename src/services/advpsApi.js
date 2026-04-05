@@ -88,6 +88,29 @@ class AdvpsAPI {
     return httpFetch(path, { method: 'GET' });
   }
 
+  /**
+   * Fetch every product row for a type (ADVPS paginates; callers must merge pages or OOS/sync will be wrong).
+   */
+  async productStockAll({ type, limit = 100 } = {}) {
+    const all = [];
+    let page = 1;
+    while (true) {
+      const res = await this.productStock({ type, page, limit });
+      const batch = res?.data?.stock || [];
+      all.push(...batch);
+      const p = res?.data?.pagination;
+      const lastPage =
+        batch.length === 0 ||
+        batch.length < limit ||
+        p?.hasNext === false ||
+        (typeof p?.totalPages === 'number' && page >= p.totalPages);
+      if (lastPage) break;
+      page += 1;
+      if (page > 500) break;
+    }
+    return all;
+  }
+
   productStockById(id) {
     return httpFetch(`/api/v1/products/stock/${id}`, { method: 'GET' });
   }
