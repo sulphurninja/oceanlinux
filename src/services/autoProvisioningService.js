@@ -1021,15 +1021,16 @@ class AutoProvisioningService {
 
     // --- Update order ---
     const fullyProvisioned = !!(ipAddress && advpsServiceId);
+    const resolvedUsername = username || (isWindowsProduct ? 'Administrator' : 'root');
     const updateData = {
       status: fullyProvisioned ? 'active' : 'confirmed',
-      provisioningStatus: fullyProvisioned ? 'active' : 'failed',
-      provisioningError: fullyProvisioned ? '' : `ADVPS_PENDING: Order ${advpsOrderId} placed but not yet assigned. Cron will retry.`,
+      provisioningStatus: fullyProvisioned ? 'active' : 'provisioning',
+      provisioningError: fullyProvisioned ? '' : `ADVPS_PENDING: Order ${advpsOrderId} placed, awaiting assignment. Cron will check.`,
       provider: 'advps',
       advpsServiceId: advpsServiceId || undefined,
       advpsOrderId,
       advpsProductId,
-      username: username || (isWindowsProduct ? 'Administrator' : 'root'),
+      username: resolvedUsername,
       password,
       ipAddress: ipAddress || '',
       autoProvisioned: true,
@@ -1037,29 +1038,35 @@ class AutoProvisioningService {
       expiryDate,
     };
 
+    if (!fullyProvisioned) {
+      updateData.provisioningLockId = undefined;
+      updateData.lastProvisionAttempt = new Date();
+    }
+
     await Order.findByIdAndUpdate(order._id, updateData);
 
     const totalTime = Date.now() - startTime;
     console.log("\n" + "✅".repeat(80));
-    console.log(`[ADVPS] ✅ PROVISIONING ${fullyProvisioned ? 'COMPLETED' : 'PENDING — cron will retry'}`);
+    console.log(`[ADVPS] ✅ PROVISIONING ${fullyProvisioned ? 'COMPLETED' : 'PENDING — cron will check'}`);
     console.log(`   - Order ID: ${order._id}`);
     console.log(`   - ADVPS Order: ${advpsOrderId}`);
     console.log(`   - ADVPS Service: ${advpsServiceId || 'pending'}`);
     console.log(`   - IP: ${ipAddress || 'pending'}`);
-    console.log(`   - Username: ${updateData.username}`);
+    console.log(`   - Username: ${resolvedUsername}`);
     console.log(`   - OS: ${targetOS}`);
     console.log(`   - Total Time: ${totalTime}ms`);
     console.log("✅".repeat(80));
 
     return {
       success: fullyProvisioned,
+      advpsPending: !fullyProvisioned,
       serviceId: advpsServiceId || null,
       ipAddress: ipAddress || null,
-      credentials: { username: updateData.username, password },
+      credentials: { username: resolvedUsername, password },
       hostname: null,
       productId: advpsProductId,
       totalTime,
-      ...(fullyProvisioned ? {} : { error: `ADVPS order ${advpsOrderId} pending assignment, cron will retry` }),
+      ...(fullyProvisioned ? {} : { error: `ADVPS order ${advpsOrderId} pending assignment, cron will check` }),
     };
   }
 

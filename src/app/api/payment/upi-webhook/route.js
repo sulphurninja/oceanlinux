@@ -199,13 +199,17 @@ export async function POST(request) {
                   username: result.username || 'root',
                   password: result.password || 'Check dashboard'
                 });
-              } else if (!result.success && !result.alreadyProvisioning) {
+              } else if (!result.success && !result.alreadyProvisioning && !result.advpsPending) {
                 await NotificationService.notifyOrderFailed(order.user, order, result.error);
+              } else if (result.advpsPending) {
+                console.log(`[UPI Webhook] ADVPS order pending assignment — skipping failure notification`);
               }
             })
             .catch(async error => {
               console.error(`[UPI Webhook] Auto-provisioning failed for order ${order._id}:`, error);
-              await NotificationService.notifyOrderFailed(order.user, order, error.message);
+              if (!String(error.message).startsWith('ADVPS_PENDING')) {
+                await NotificationService.notifyOrderFailed(order.user, order, error.message);
+              }
             });
 
           console.log("[UPI Webhook] Auto-provisioning initiated");
