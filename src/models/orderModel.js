@@ -52,6 +52,7 @@ const orderSchema = new mongoose.Schema({
     // ADVPS integration fields
     advpsServiceId: { type: String },
     advpsProductId: { type: String },
+    advpsOrderId: { type: String },
 
     provisioningStatus: {
         type: String,

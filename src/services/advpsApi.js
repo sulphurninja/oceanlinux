@@ -114,6 +114,30 @@ class AdvpsAPI {
   productStockById(id) {
     return httpFetch(`/api/v1/products/stock/${id}`, { method: 'GET' });
   }
+
+  listOs() {
+    return httpFetch('/api/v1/os', { method: 'GET' });
+  }
+
+  purchaseLinux({ productId, ram, osId, quantity = 1, validity = 30, remark }) {
+    return httpFetch('/api/v1/purchase/linux', {
+      method: 'POST',
+      jsonBody: { productId, ram, osId, quantity, validity, remark },
+      timeoutMs: 120_000,
+    });
+  }
+
+  purchaseVps({ productId, ram, osId, quantity = 1, name, email, validity = 30, remark }) {
+    return httpFetch('/api/v1/purchase/vps', {
+      method: 'POST',
+      jsonBody: { productId, ram, osId, quantity, name, email, validity, remark },
+      timeoutMs: 120_000,
+    });
+  }
+
+  getOrderDetails(orderId) {
+    return httpFetch(`/api/v1/purchase/${encodeURIComponent(orderId)}`, { method: 'GET' });
+  }
 }
 
 module.exports = AdvpsAPI;
