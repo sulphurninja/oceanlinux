@@ -801,57 +801,52 @@ class AutoProvisioningService {
     L.kv('[ADVPS] vmType', vmType);
     L.kv('[ADVPS] isVps', isVps);
 
-    // --- Find the matching variant by RAM ---
+    // --- Resolve ADVPS product ID ---
+    // ADVPS products are NOT named with RAM (e.g. "Turbo VPS (103.109.XX.X)").
+    // Each product ID supports multiple RAM sizes — the purchase API's `ram`
+    // parameter selects the variation internally. So we just need ANY variant's
+    // productId from the config, then pass the customer's requested RAM to the API.
     const variants = advpsConfig.variants instanceof Map
       ? Object.fromEntries(advpsConfig.variants)
       : (advpsConfig.variants || {});
 
     const ram = order.memory;
+    const availableRams = Object.keys(variants);
+    L.kv('[ADVPS] Order RAM', ram);
+    L.kv('[ADVPS] Synced variant keys', availableRams);
+
+    // Try exact RAM key match first, then fall back to ANY variant's productId
+    let advpsProductId;
     const ramVariations = [
-      ram,
-      ram?.toLowerCase(),
-      ram?.toUpperCase(),
-      ram?.replace('GB', 'gb'),
-      ram?.replace('gb', 'GB'),
+      ram, ram?.toLowerCase(), ram?.toUpperCase(),
+      ram?.replace('GB', 'gb'), ram?.replace('gb', 'GB'),
     ].filter(Boolean);
 
-    let matchedVariant = null;
-    let matchedRam = ram;
     for (const v of ramVariations) {
-      if (variants[v]) {
-        matchedVariant = variants[v];
-        matchedRam = v;
+      if (variants[v]?.productId) {
+        advpsProductId = String(variants[v].productId);
+        L.kv('[ADVPS] Exact RAM match', { ram: v, productId: advpsProductId });
         break;
       }
     }
 
-    let advpsProductId;
-
-    if (matchedVariant && matchedVariant.productId) {
-      advpsProductId = String(matchedVariant.productId);
-      L.kv('[ADVPS] Matched variant RAM', matchedRam);
-      L.kv('[ADVPS] ADVPS productId', advpsProductId);
-      L.kv('[ADVPS] Product name', matchedVariant.productName || '(unknown)');
-    } else {
-      // Fallback: variant not in pre-synced config — search ADVPS API directly
-      const availableRams = Object.keys(variants);
-      L.line(`[ADVPS] ⚠️ RAM "${ram}" not in synced variants [${availableRams.join(', ')}], searching ADVPS API...`);
-
-      const baseName = advpsConfig.baseName || ipStock.name?.replace(/^⚡\s*/, '').trim() || '';
-      const fallbackProduct = await this.findAdvpsProductByRam(baseName, ram, vmType);
-
-      if (!fallbackProduct) {
-        throw new Error(
-          `ADVPS product not found for RAM "${ram}". ` +
-          `Synced variants: [${availableRams.join(', ')}]. ` +
-          `API fallback also found no match for baseName="${baseName}". ` +
-          `Run /api/advps/sync to refresh product catalog.`
-        );
+    if (!advpsProductId) {
+      // Use ANY variant's productId — ADVPS products have a single ID for all RAM sizes
+      const anyVariant = Object.values(variants).find(v => v?.productId);
+      if (anyVariant) {
+        advpsProductId = String(anyVariant.productId);
+        L.line(`[ADVPS] RAM "${ram}" not a synced key [${availableRams.join(', ')}] — using product ID from existing variant (same product handles all RAM sizes)`);
+        L.kv('[ADVPS] Product ID (from variant)', advpsProductId);
+        L.kv('[ADVPS] Product name', anyVariant.productName || '(unknown)');
       }
+    }
 
-      advpsProductId = fallbackProduct.productId;
-      L.kv('[ADVPS] Fallback product ID', advpsProductId);
-      L.kv('[ADVPS] Fallback product name', fallbackProduct.productName);
+    if (!advpsProductId) {
+      throw new Error(
+        `ADVPS config has no variants with a productId. ` +
+        `IPStock: ${ipStock.name} (${ipStock._id}). ` +
+        `Run /api/advps/sync to refresh product catalog.`
+      );
     }
 
     // --- Resolve OS ID ---
