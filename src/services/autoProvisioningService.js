@@ -853,96 +853,97 @@ class AutoProvisioningService {
     const osId = await this.resolveAdvpsOsId(targetOS, vmType);
     L.kv('[ADVPS] Resolved osId', osId || '(none — will let API pick default)');
 
-    // --- Build purchase params ---
-    const ramFormatted = String(ram).replace(/(\d+)\s*gb/i, '$1 GB');
-    const remark = `Auto-provisioned order ${order._id}`;
+    // --- Check if purchase was already made (idempotent re-entry from cron) ---
+    const existingAdvpsOrderId = order.advpsOrderId;
+    let advpsOrderId;
+    let initialPassword = '';
 
-    let purchaseRes;
-
-    if (isVps) {
-      // VPS requires customer name and email
-      let customerName = order.customerName || order.webhookCustomerName || '';
-      let customerEmail = order.customerEmail || order.webhookCustomerEmail || '';
-
-      // Fallback: load user if customer info is missing
-      if (!customerName || !customerEmail) {
-        try {
-          const User = require('@/models/userModel').default;
-          const user = await User.findById(order.user).select('name email').lean();
-          if (user) {
-            customerName = customerName || user.name || 'Customer';
-            customerEmail = customerEmail || user.email || '';
-          }
-        } catch (e) {
-          L.line(`[ADVPS] Could not load user for customer info: ${e.message}`);
-        }
-      }
-
-      if (!customerEmail) {
-        throw new Error('Cannot purchase ADVPS VPS: no customer email available on order or user');
-      }
-
-      L.line(`[ADVPS] Purchasing VPS: productId=${advpsProductId}, ram=${ramFormatted}, osId=${osId}, name=${customerName}, email=${customerEmail}`);
-      purchaseRes = await this.advpsApi.purchaseVps({
-        productId: advpsProductId,
-        ram: ramFormatted,
-        osId,
-        quantity: 1,
-        name: customerName,
-        email: customerEmail,
-        validity: 30,
-        remark,
-      });
+    if (existingAdvpsOrderId) {
+      L.line(`[ADVPS] Purchase already made — advpsOrderId=${existingAdvpsOrderId}, skipping purchase`);
+      advpsOrderId = existingAdvpsOrderId;
+      initialPassword = order.password || '';
     } else {
-      L.line(`[ADVPS] Purchasing Linux: productId=${advpsProductId}, ram=${ramFormatted}, osId=${osId}`);
-      purchaseRes = await this.advpsApi.purchaseLinux({
-        productId: advpsProductId,
-        ram: ramFormatted,
-        osId,
-        quantity: 1,
-        validity: 30,
-        remark,
+      // --- Place the purchase ---
+      const ramFormatted = String(ram).replace(/(\d+)\s*gb/i, '$1 GB');
+      const remark = `Auto-provisioned order ${order._id}`;
+      let purchaseRes;
+
+      if (isVps) {
+        let customerName = order.customerName || order.webhookCustomerName || '';
+        let customerEmail = order.customerEmail || order.webhookCustomerEmail || '';
+
+        if (!customerName || !customerEmail) {
+          try {
+            const User = require('@/models/userModel').default;
+            const user = await User.findById(order.user).select('name email').lean();
+            if (user) {
+              customerName = customerName || user.name || 'Customer';
+              customerEmail = customerEmail || user.email || '';
+            }
+          } catch (e) {
+            L.line(`[ADVPS] Could not load user for customer info: ${e.message}`);
+          }
+        }
+
+        if (!customerEmail) {
+          throw new Error('Cannot purchase ADVPS VPS: no customer email available on order or user');
+        }
+
+        L.line(`[ADVPS] Purchasing VPS: productId=${advpsProductId}, ram=${ramFormatted}, osId=${osId}, name=${customerName}, email=${customerEmail}`);
+        purchaseRes = await this.advpsApi.purchaseVps({
+          productId: advpsProductId, ram: ramFormatted, osId,
+          quantity: 1, name: customerName, email: customerEmail,
+          validity: 30, remark,
+        });
+      } else {
+        L.line(`[ADVPS] Purchasing Linux: productId=${advpsProductId}, ram=${ramFormatted}, osId=${osId}`);
+        purchaseRes = await this.advpsApi.purchaseLinux({
+          productId: advpsProductId, ram: ramFormatted, osId,
+          quantity: 1, validity: 30, remark,
+        });
+      }
+
+      L.kv('[ADVPS] Purchase response status', purchaseRes?.status);
+      const purchaseData = purchaseRes?.data || purchaseRes;
+      const advpsOrder = purchaseData?.order;
+
+      if (!advpsOrder || !advpsOrder.orderId) {
+        throw new Error(`ADVPS purchase did not return an order ID. Response: ${JSON.stringify(purchaseRes).slice(0, 500)}`);
+      }
+
+      advpsOrderId = advpsOrder.orderId;
+      initialPassword = purchaseData?.password || '';
+
+      L.kv('[ADVPS] Purchase order ID', advpsOrderId);
+      L.kv('[ADVPS] Purchase status', advpsOrder.status);
+      L.kv('[ADVPS] Total amount', advpsOrder.totalAmount);
+      if (initialPassword) {
+        L.kv('[ADVPS] Initial password from purchase', initialPassword.substring(0, 4) + '****');
+      }
+
+      // Persist immediately so cron can resume without re-purchasing
+      await Order.findByIdAndUpdate(order._id, {
+        advpsOrderId,
+        advpsProductId,
+        provider: 'advps',
+        autoProvisioned: true,
+        ...(initialPassword ? { password: initialPassword } : {}),
       });
     }
 
-    L.kv('[ADVPS] Purchase response status', purchaseRes?.status);
-    const purchaseData = purchaseRes?.data || purchaseRes;
-    const advpsOrder = purchaseData?.order;
+    // --- Quick poll: check order details 3 times (total ~65s) ---
+    // If ADVPS hasn't assigned yet, mark as failed so the cron retries later.
+    L.line(`[ADVPS] Checking order details for ${advpsOrderId}...`);
 
-    if (!advpsOrder || !advpsOrder.orderId) {
-      throw new Error(`ADVPS purchase did not return an order ID. Response: ${JSON.stringify(purchaseRes).slice(0, 500)}`);
-    }
-
-    const advpsOrderId = advpsOrder.orderId;
-    L.kv('[ADVPS] Purchase order ID', advpsOrderId);
-    L.kv('[ADVPS] Purchase status', advpsOrder.status);
-    L.kv('[ADVPS] Total amount', advpsOrder.totalAmount);
-
-    // Persist the ADVPS order ID and product ID immediately
-    await Order.findByIdAndUpdate(order._id, {
-      advpsOrderId,
-      advpsProductId,
-    });
-
-    // If VPS purchase returns a password, stash it
-    const initialPassword = purchaseData?.password || '';
-    if (initialPassword) {
-      L.kv('[ADVPS] Initial password from purchase', initialPassword.substring(0, 4) + '****');
-    }
-
-    // --- Poll getOrderDetails until services are assigned ---
-    L.line(`[ADVPS] Polling order details for ${advpsOrderId} until ASSIGNED...`);
-
-    const pollDelays = [15000, 20000, 30000, 30000, 60000, 60000, 60000, 60000, 60000];
+    const pollDelays = [15000, 20000, 30000];
     let assignedService = null;
-    let orderDetails = null;
 
     for (let i = 0; i < pollDelays.length; i++) {
       await new Promise(resolve => setTimeout(resolve, pollDelays[i]));
 
       try {
         const detailsRes = await this.advpsApi.getOrderDetails(advpsOrderId);
-        orderDetails = detailsRes?.data || detailsRes;
+        const orderDetails = detailsRes?.data || detailsRes;
         const orderStatus = orderDetails?.order?.status || '';
         const services = orderDetails?.services || [];
 
@@ -969,10 +970,10 @@ class AutoProvisioningService {
       }
     }
 
-    // --- Extract credentials ---
+    // --- Extract credentials if assigned ---
     let ipAddress = '';
     let username = '';
-    let password = '';
+    let password = initialPassword;
     let advpsServiceId = '';
     let expiryDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
 
@@ -988,147 +989,59 @@ class AutoProvisioningService {
       L.kv('[ADVPS] Username', username);
       L.kv('[ADVPS] Password (masked)', password ? password.substring(0, 4) + '****' : '(blank)');
       L.kv('[ADVPS] Expiry', expiryDate.toISOString());
-    } else {
-      L.line(`[ADVPS] ⚠️ No assigned service found after polling. Order may still be processing.`);
-      L.line(`[ADVPS] Will save order with ADVPS order ID for later sync.`);
-    }
 
-    // If no password from service, try generate-password (for LXC, password is generated separately)
-    if (!password && advpsServiceId) {
-      L.line(`[ADVPS] No password from order details, attempting generate-password...`);
-
-      // Wait for the service to be ready
-      await new Promise(resolve => setTimeout(resolve, 30000));
-
-      // Try starting the server first
-      try {
-        await this.advpsApi.start(advpsServiceId);
-        L.line(`[ADVPS] Start command sent for ${advpsServiceId}`);
-      } catch (startErr) {
-        L.line(`[ADVPS] Start: ${startErr.message} (may already be running)`);
-      }
-
-      await new Promise(resolve => setTimeout(resolve, 45000));
-
-      const passRetryDelays = [0, 20000, 30000, 60000];
-      for (let attempt = 0; attempt < passRetryDelays.length; attempt++) {
-        if (attempt > 0) await new Promise(r => setTimeout(r, passRetryDelays[attempt]));
+      // If service assigned but no password, try generate-password once
+      if (!password && advpsServiceId) {
+        L.line(`[ADVPS] No password in order details, trying generate-password...`);
+        try {
+          await this.advpsApi.start(advpsServiceId);
+        } catch (_) { /* may already be running */ }
+        await new Promise(r => setTimeout(r, 15000));
         try {
           const passRes = await this.advpsApi.generatePassword(advpsServiceId);
           const pd = passRes?.data || {};
-          const newPass = pd.password || pd.newPassword || pd.existingPassword;
-          if (newPass) {
-            password = newPass;
-            L.kv('[ADVPS] Password generated', password.substring(0, 4) + '****');
-            break;
-          }
+          password = pd.password || pd.newPassword || pd.existingPassword || '';
+          if (password) L.kv('[ADVPS] Password generated', password.substring(0, 4) + '****');
         } catch (passErr) {
-          const msg = passErr.message || '';
-          L.line(`[ADVPS] generate-password attempt ${attempt + 1}: ${msg}`);
-          if (msg.includes('already exists') || msg.includes('Password already')) {
-            L.line(`[ADVPS] Password already exists — check ADVPS dashboard`);
-            break;
-          }
-          if (msg.includes('must be running')) continue;
+          L.line(`[ADVPS] generate-password: ${passErr.message}`);
+        }
+      }
+
+      // If assigned but no IP, try get-ip
+      if (!ipAddress && advpsServiceId) {
+        try {
+          const ipRes = await this.advpsApi.getIp(advpsServiceId);
+          ipAddress = ipRes?.data?.ip || '';
+          if (ipAddress) L.kv('[ADVPS] IP from get-ip', ipAddress);
+        } catch (e) {
+          L.line(`[ADVPS] get-ip failed: ${e.message}`);
         }
       }
     }
 
-    // If still no IP, try get-ip
-    if (!ipAddress && advpsServiceId) {
-      try {
-        const ipRes = await this.advpsApi.getIp(advpsServiceId);
-        const ipData = ipRes?.data || ipRes;
-        ipAddress = ipData?.ip || '';
-        if (ipAddress) L.kv('[ADVPS] IP from get-ip', ipAddress);
-      } catch (e) {
-        L.line(`[ADVPS] get-ip failed: ${e.message}`);
-      }
-    }
-
     // --- Update order ---
-    const provisioningStatus = (ipAddress && advpsServiceId) ? 'active' : 'provisioning';
+    const fullyProvisioned = !!(ipAddress && advpsServiceId);
     const updateData = {
-      status: ipAddress ? 'active' : 'confirmed',
-      provisioningStatus,
+      status: fullyProvisioned ? 'active' : 'confirmed',
+      provisioningStatus: fullyProvisioned ? 'active' : 'failed',
+      provisioningError: fullyProvisioned ? '' : `ADVPS_PENDING: Order ${advpsOrderId} placed but not yet assigned. Cron will retry.`,
       provider: 'advps',
       advpsServiceId: advpsServiceId || undefined,
       advpsOrderId,
       advpsProductId,
       username: username || (isWindowsProduct ? 'Administrator' : 'root'),
       password,
-      ipAddress: ipAddress || 'Pending - ADVPS provisioning',
+      ipAddress: ipAddress || '',
       autoProvisioned: true,
-      provisioningError: '',
       os: targetOS,
       expiryDate,
     };
 
     await Order.findByIdAndUpdate(order._id, updateData);
 
-    // If provisioning is not fully complete, schedule background checks
-    if (provisioningStatus !== 'active') {
-      L.line(`[ADVPS] Service not fully assigned yet, scheduling background checks...`);
-      const bgOrderId = order._id.toString();
-      const bgAdvpsOrderId = advpsOrderId;
-
-      (async () => {
-        const bgDelays = [60000, 120000, 180000, 300000, 600000];
-        for (let i = 0; i < bgDelays.length; i++) {
-          await new Promise(r => setTimeout(r, bgDelays[i]));
-          try {
-            const detailsRes = await this.advpsApi.getOrderDetails(bgAdvpsOrderId);
-            const details = detailsRes?.data || detailsRes;
-            const services = details?.services || [];
-
-            if (services.length > 0 && services[0].ip) {
-              const svc = services[0];
-              const bgUpdate = {
-                status: 'active',
-                provisioningStatus: 'active',
-                advpsServiceId: svc.id || '',
-                ipAddress: svc.ip,
-                username: svc.username || updateData.username,
-                expiryDate: svc.expiryDate ? new Date(svc.expiryDate) : undefined,
-              };
-              if (svc.password) bgUpdate.password = svc.password;
-              await Order.findByIdAndUpdate(bgOrderId, bgUpdate);
-              L.line(`[ADVPS-BG] Order ${bgOrderId} updated with service details from ADVPS`);
-
-              // Generate password if still missing
-              if (!svc.password && svc.id) {
-                try {
-                  await this.advpsApi.start(svc.id);
-                } catch (_) { /* ignore */ }
-                await new Promise(r => setTimeout(r, 60000));
-                try {
-                  const passRes = await this.advpsApi.generatePassword(svc.id);
-                  const pd = passRes?.data || {};
-                  const pw = pd.password || pd.newPassword || pd.existingPassword;
-                  if (pw) {
-                    await Order.findByIdAndUpdate(bgOrderId, { password: pw });
-                    L.line(`[ADVPS-BG] Password saved for order ${bgOrderId}`);
-                  }
-                } catch (pe) {
-                  L.line(`[ADVPS-BG] Password gen failed: ${pe.message}`);
-                }
-              }
-              return;
-            }
-          } catch (e) {
-            L.line(`[ADVPS-BG] Check ${i + 1} error: ${e.message}`);
-          }
-        }
-        L.line(`[ADVPS-BG] All background checks exhausted for order ${bgOrderId}`);
-        await Order.findByIdAndUpdate(bgOrderId, {
-          provisioningError: 'ADVPS order still pending after background checks. Check ADVPS dashboard manually.',
-        });
-      })();
-    }
-
     const totalTime = Date.now() - startTime;
     console.log("\n" + "✅".repeat(80));
-    console.log(`[ADVPS] ✅ PROVISIONING ${provisioningStatus === 'active' ? 'COMPLETED' : 'INITIATED (pending assignment)'}`);
+    console.log(`[ADVPS] ✅ PROVISIONING ${fullyProvisioned ? 'COMPLETED' : 'PENDING — cron will retry'}`);
     console.log(`   - Order ID: ${order._id}`);
     console.log(`   - ADVPS Order: ${advpsOrderId}`);
     console.log(`   - ADVPS Service: ${advpsServiceId || 'pending'}`);
@@ -1139,13 +1052,14 @@ class AutoProvisioningService {
     console.log("✅".repeat(80));
 
     return {
-      success: true,
+      success: fullyProvisioned,
       serviceId: advpsServiceId || null,
       ipAddress: ipAddress || null,
       credentials: { username: updateData.username, password },
       hostname: null,
       productId: advpsProductId,
       totalTime,
+      ...(fullyProvisioned ? {} : { error: `ADVPS order ${advpsOrderId} pending assignment, cron will retry` }),
     };
   }
 

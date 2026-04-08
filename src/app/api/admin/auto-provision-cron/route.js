@@ -169,7 +169,42 @@ async function validateOrderConfiguration(order) {
         
         console.log(`[VALIDATION] ✅ Found memory config:`, memoryConfig);
         
-        // STEP 4: Validate hostycareProductId exists
+        // STEP 4: Check provider — ADVPS orders don't need hostycareProductId
+        const advpsConfig = ipStock.defaultConfigurations?.get?.('advps') ||
+            ipStock.defaultConfigurations?.advps;
+        const isAdvps = advpsConfig || (ipStock.name || '').startsWith('⚡') || order.advpsOrderId;
+
+        if (isAdvps) {
+            // ADVPS: product ID comes from defaultConfigurations.advps.variants, not memoryOptions
+            const variants = advpsConfig?.variants instanceof Map
+                ? Object.fromEntries(advpsConfig.variants)
+                : (advpsConfig?.variants || {});
+            const anyVariant = Object.values(variants).find(v => v?.productId);
+            const advpsProductId = anyVariant?.productId || order.advpsProductId;
+
+            if (!advpsProductId) {
+                console.log(`[VALIDATION] ❌ ADVPS: No product ID in variants or order`);
+                return {
+                    valid: false,
+                    reason: `ADVPS product ID not found in IPStock variants. Run /api/advps/sync to refresh.`
+                };
+            }
+
+            console.log(`[VALIDATION] ✅ ADVPS validation passed!`);
+            console.log(`[VALIDATION]   - ADVPS Product ID: "${advpsProductId}"`);
+            console.log(`[VALIDATION]   - IP Stock: ${ipStock.name}`);
+            console.log(`[VALIDATION]   - ADVPS Order ID: ${order.advpsOrderId || '(new purchase)'}`);
+
+            return {
+                valid: true,
+                productId: String(advpsProductId),
+                ipStock: ipStock.name,
+                memoryConfig: memoryConfig,
+                isAdvps: true
+            };
+        }
+
+        // Non-ADVPS: validate hostycareProductId exists
         const productId = memoryConfig.hostycareProductId || memoryConfig.productId;
         
         if (!productId) {
