@@ -147,12 +147,14 @@ class AutoProvisioningService {
 
   /**
    * Fetch available OS options from ADVPS and match the target OS string.
-   * Falls back to scanning the list for a reasonable default.
+   * @param {string} targetOS - e.g. "Ubuntu 22", "Windows 2022 64"
+   * @param {string} vmType - "LXC" or "VM" (maps to ADVPS type "lxc" or "vps")
    */
-  async resolveAdvpsOsId(targetOS) {
-    L.line(`[ADVPS] Resolving OS ID for target: "${targetOS}"`);
+  async resolveAdvpsOsId(targetOS, vmType) {
+    L.line(`[ADVPS] Resolving OS ID for target: "${targetOS}" (vmType: ${vmType})`);
     try {
-      const res = await this.advpsApi.listOs();
+      const osType = String(vmType).toUpperCase() === 'VM' ? 'vps' : 'lxc';
+      const res = await this.advpsApi.listOs(osType);
       const osList = res?.data?.os || res?.data || [];
 
       if (!Array.isArray(osList) || osList.length === 0) {
@@ -160,15 +162,14 @@ class AutoProvisioningService {
         return null;
       }
 
-      L.kv('[ADVPS] Available OS options', osList.length);
+      L.kv('[ADVPS] Available OS options', osList.map(o => `${o.id}: ${o.name}`));
 
       const target = String(targetOS).toLowerCase();
 
-      // Scoring: prefer exact version match, then family match
       let bestMatch = null;
       let bestScore = 0;
       for (const os of osList) {
-        const osName = String(os.name || os.label || '').toLowerCase();
+        const osName = String(os.name || '').toLowerCase();
         let score = 0;
 
         if (target.includes('ubuntu')) {
@@ -189,18 +190,70 @@ class AutoProvisioningService {
       }
 
       if (bestMatch) {
-        const osId = bestMatch._id || bestMatch.id;
-        L.kv('[ADVPS] Matched OS', { name: bestMatch.name || bestMatch.label, id: osId, score: bestScore });
-        return osId;
+        L.kv('[ADVPS] Matched OS', { name: bestMatch.name, id: bestMatch.id, score: bestScore });
+        return bestMatch.id;
       }
 
-      // Fallback: pick first OS in list
       const fallback = osList[0];
-      const fallbackId = fallback._id || fallback.id;
-      L.line(`[ADVPS] No OS match found, using fallback: ${fallback.name || fallback.label} (${fallbackId})`);
-      return fallbackId;
+      L.line(`[ADVPS] No OS match found, using fallback: ${fallback.name} (${fallback.id})`);
+      return fallback.id;
     } catch (e) {
       L.line(`[ADVPS] Failed to fetch OS list: ${e.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Fallback: search ADVPS product stock API for a product matching the base name + RAM.
+   * Used when the pre-synced variant mapping doesn't have the requested RAM.
+   */
+  async findAdvpsProductByRam(baseName, ram, vmType) {
+    L.line(`[ADVPS] Fallback product search: baseName="${baseName}", ram="${ram}", vmType="${vmType}"`);
+    try {
+      const type = String(vmType).toUpperCase() === 'VM' ? 'vps' : 'linux';
+      const allProducts = await this.advpsApi.productStockAll({ type });
+      L.kv('[ADVPS] Products from API', allProducts.length);
+
+      const ramNum = String(ram).replace(/[^0-9]/g, '');
+
+      for (const product of allProducts) {
+        const pName = String(product.name || '');
+        const pRam = String(pName.match(/(\d+)\s*GB/i)?.[1] || '');
+
+        if (pRam === ramNum) {
+          const pBaseName = pName.replace(/\s*\d+\s*GB\s*/i, ' ').replace(/\s+/g, ' ').trim();
+          if (pBaseName.toLowerCase() === baseName.toLowerCase()) {
+            L.kv('[ADVPS] Fallback match found', { id: product.id, name: pName, stock: product.stock });
+            if (Number(product.stock || 0) <= 0 && product.stockStatus === 'OUT_OF_STOCK') {
+              L.line(`[ADVPS] ⚠️ Matched product is OUT_OF_STOCK, continuing search...`);
+              continue;
+            }
+            return { productId: String(product.id), productName: pName };
+          }
+        }
+      }
+
+      // Broader search: match any product with matching RAM across all base names
+      for (const product of allProducts) {
+        const pName = String(product.name || '');
+        const pRam = String(pName.match(/(\d+)\s*GB/i)?.[1] || '');
+
+        if (pRam === ramNum && Number(product.stock || 0) > 0) {
+          const pBaseName = pName.replace(/\s*\d+\s*GB\s*/i, ' ').replace(/\s+/g, ' ').trim();
+          // Check if product name partially matches the IPStock base name
+          const baseWords = baseName.toLowerCase().split(/\s+/);
+          const pWords = pBaseName.toLowerCase().split(/\s+/);
+          const overlap = baseWords.filter(w => pWords.includes(w)).length;
+          if (overlap >= Math.min(2, baseWords.length)) {
+            L.kv('[ADVPS] Fallback partial match', { id: product.id, name: pName, overlap });
+            return { productId: String(product.id), productName: pName };
+          }
+        }
+      }
+
+      return null;
+    } catch (e) {
+      L.line(`[ADVPS] Fallback product search failed: ${e.message}`);
       return null;
     }
   }
@@ -772,20 +825,37 @@ class AutoProvisioningService {
       }
     }
 
-    if (!matchedVariant || !matchedVariant.productId) {
+    let advpsProductId;
+
+    if (matchedVariant && matchedVariant.productId) {
+      advpsProductId = String(matchedVariant.productId);
+      L.kv('[ADVPS] Matched variant RAM', matchedRam);
+      L.kv('[ADVPS] ADVPS productId', advpsProductId);
+      L.kv('[ADVPS] Product name', matchedVariant.productName || '(unknown)');
+    } else {
+      // Fallback: variant not in pre-synced config — search ADVPS API directly
       const availableRams = Object.keys(variants);
-      throw new Error(
-        `ADVPS variant not found for RAM "${ram}". Available: [${availableRams.join(', ')}]`
-      );
+      L.line(`[ADVPS] ⚠️ RAM "${ram}" not in synced variants [${availableRams.join(', ')}], searching ADVPS API...`);
+
+      const baseName = advpsConfig.baseName || ipStock.name?.replace(/^⚡\s*/, '').trim() || '';
+      const fallbackProduct = await this.findAdvpsProductByRam(baseName, ram, vmType);
+
+      if (!fallbackProduct) {
+        throw new Error(
+          `ADVPS product not found for RAM "${ram}". ` +
+          `Synced variants: [${availableRams.join(', ')}]. ` +
+          `API fallback also found no match for baseName="${baseName}". ` +
+          `Run /api/advps/sync to refresh product catalog.`
+        );
+      }
+
+      advpsProductId = fallbackProduct.productId;
+      L.kv('[ADVPS] Fallback product ID', advpsProductId);
+      L.kv('[ADVPS] Fallback product name', fallbackProduct.productName);
     }
 
-    const advpsProductId = String(matchedVariant.productId);
-    L.kv('[ADVPS] Matched variant RAM', matchedRam);
-    L.kv('[ADVPS] ADVPS productId', advpsProductId);
-    L.kv('[ADVPS] Product name', matchedVariant.productName || '(unknown)');
-
     // --- Resolve OS ID ---
-    const osId = await this.resolveAdvpsOsId(targetOS);
+    const osId = await this.resolveAdvpsOsId(targetOS, vmType);
     L.kv('[ADVPS] Resolved osId', osId || '(none — will let API pick default)');
 
     // --- Build purchase params ---

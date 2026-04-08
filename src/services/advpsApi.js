@@ -115,8 +115,10 @@ class AdvpsAPI {
     return httpFetch(`/api/v1/products/stock/${id}`, { method: 'GET' });
   }
 
-  listOs() {
-    return httpFetch('/api/v1/os', { method: 'GET' });
+  listOs(type) {
+    let path = '/api/v1/os';
+    if (type) path += `?type=${type}`;
+    return httpFetch(path, { method: 'GET' });
   }
 
   purchaseLinux({ productId, ram, osId, quantity = 1, validity = 30, remark }) {
