@@ -82,7 +82,7 @@ export default function DashboardLayout({
     const [user, setUser] = useState<UserData | null>(null);
     const [loading, setLoading] = useState(true);
     const [showPhoneDialog, setShowPhoneDialog] = useState(false);
-    const [phoneNumber, setPhoneNumber] = useState('');
+    const [phoneNumber, setPhoneNumber] = useState('+91 ');
     const [isSavingPhone, setIsSavingPhone] = useState(false);
 
     useEffect(() => {
@@ -456,24 +456,29 @@ export default function DashboardLayout({
                             <DialogHeader>
                                 <DialogTitle className="flex items-center gap-2 text-base">
                                     <Phone className="h-4 w-4 text-primary" />
-                                    Add Your Phone Number
+                                    Add Your WhatsApp Number
                                 </DialogTitle>
                                 <DialogDescription className="text-sm">
-                                    Please add a phone number so we can reach you about your orders and account security.
+                                    Enter your WhatsApp number to receive instant order confirmations, server credentials, and service updates directly on WhatsApp.
                                 </DialogDescription>
                             </DialogHeader>
                             <div className="space-y-2 py-2">
-                                <Label htmlFor="phone-prompt" className="text-sm">Phone Number</Label>
+                                <Label htmlFor="phone-prompt" className="text-sm">WhatsApp Number</Label>
                                 <Input
                                     id="phone-prompt"
                                     type="tel"
                                     value={phoneNumber}
-                                    onChange={(e) => setPhoneNumber(e.target.value)}
+                                    onChange={(e) => {
+                                        const val = e.target.value;
+                                        if (val.startsWith('+91')) {
+                                            setPhoneNumber(val);
+                                        }
+                                    }}
                                     placeholder="+91 98765 43210"
                                     className="text-sm h-10"
                                     onKeyDown={(e) => { if (e.key === 'Enter') handleSavePhone(); }}
                                 />
-                                <p className="text-xs text-muted-foreground">Include country code (e.g. +91 for India)</p>
+                                <p className="text-xs text-muted-foreground">We'll send order updates to this number via WhatsApp</p>
                             </div>
                             <DialogFooter className="gap-2 flex-col-reverse sm:flex-row">
                                 <Button variant="ghost" size="sm" onClick={handleDismissPhone} disabled={isSavingPhone} className="w-full sm:w-auto text-sm">
