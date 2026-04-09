@@ -3,6 +3,7 @@ import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 import { assignPanelCredentials } from '@/lib/panelCredentials';
 const AdvpsAPI = require('@/services/advpsApi');
+const WhatsAppService = require('@/services/whatsappService');
 
 export async function POST(request) {
   await connectDB();
@@ -196,6 +197,9 @@ export async function POST(request) {
       }
     }
 
+    const existingBeforeUpdate = await Order.findById(orderId).select('status provisioningStatus ipAddress user').lean();
+    const wasActive = existingBeforeUpdate?.status === 'active' || existingBeforeUpdate?.provisioningStatus === 'active';
+
     const updatedOrder = await Order.findByIdAndUpdate(
       orderId,
       updateFields,
@@ -204,6 +208,11 @@ export async function POST(request) {
 
     if (!updatedOrder) {
       return NextResponse.json({ message: 'Order not found' }, { status: 404 });
+    }
+
+    const isNowActive = (updateFields.status === 'active' || updateFields.provisioningStatus === 'active') && updateFields.ipAddress;
+    if (isNowActive && !wasActive && updatedOrder.user) {
+      WhatsAppService.notifyOrderViaWhatsApp(updatedOrder.user, updatedOrder).catch(() => {});
     }
 
     return NextResponse.json(
