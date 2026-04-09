@@ -5,31 +5,42 @@ import { jsPDF } from 'jspdf';
 import fs from 'fs';
 import path from 'path';
 
-// ---------- ORG ----------
 const ORG = {
   brand: 'Ocean Linux',
-  legal: 'Backtick Labs', // not Pvt Ltd
+  legal: 'Backtick Labs',
   tagline: 'Most Affordable Premium Linux VPS Hosting',
   address: 'Office No.311, Kohinoor Majestic, Pune - 411019',
   email: 'hello@oceanlinux.com',
-  phone: '',
-  gstin: '',
+  web: 'oceanlinux.com',
   showGST: false,
-  gstRatePct: 0,
+  gstRatePct: 18,
+  gstin: '',
 };
-// Optional: protect with key. Call as ...?txId=...&key=XYZ
 const ADMIN_KEY = process.env.INVOICE_ADMIN_KEY || '';
-// -------------------------
 
-// Emoji-stripper only (do NOT strip general Unicode so ₹ stays)
+// -- Colors --
+const C = {
+  navy:    [10, 15, 30] as const,
+  slate9:  [15, 23, 42] as const,
+  slate7:  [51, 65, 85] as const,
+  slate5:  [100, 116, 139] as const,
+  slate4:  [148, 163, 184] as const,
+  slate2:  [226, 232, 240] as const,
+  slate1:  [241, 245, 249] as const,
+  white:   [255, 255, 255] as const,
+  blue:    [59, 130, 246] as const,
+  green:   [16, 185, 129] as const,
+  amber:   [245, 158, 11] as const,
+  red:     [239, 68, 68] as const,
+};
+
 const removeEmojis = (t: string) =>
   (t || '').replace(
-    /[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/gu,
+    /[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|[\u{FE00}-\u{FE0F}]|[\u{200D}]|[\u{20E3}]|[\u{E0020}-\u{E007F}]/gu,
     ''
   );
 const clean = (t?: string) => removeEmojis(t || '').trim();
 
-// Simple INR with commas, no NBSP
 const formatINR = (num: number) => {
   const s = Math.round(num).toString();
   const last3 = s.slice(-3);
@@ -43,128 +54,47 @@ const maskSecret = (s?: string) => {
   return s.slice(0, 2) + '*'.repeat(Math.max(1, s.length - 4)) + s.slice(-2);
 };
 
-function loadFontBase64(relPath: string) {
-  const abs = path.join(process.cwd(), relPath);
-  const buf = fs.readFileSync(abs);
-  // jsPDF expects base64 *without* data: url header for VFS
-  return buf.toString('base64');
-}
-
-function ensureFonts(doc: jsPDF) {
-  try {
-    const regular = loadFontBase64('public/fonts/NotoSans-Regular.ttf');
-    const bold = loadFontBase64('public/fonts/NotoSans-Bold.ttf');
-    doc.addFileToVFS('NotoSans-Regular.ttf', regular);
-    doc.addFileToVFS('NotoSans-Bold.ttf', bold);
-    doc.addFont('NotoSans-Regular.ttf', 'NotoSans', 'normal');
-    doc.addFont('NotoSans-Bold.ttf', 'NotoSans', 'bold');
-    doc.setFont('NotoSans', 'normal');
-  } catch (e) {
-    // Fallback (₹ may break in Helvetica)
-    doc.setFont('helvetica', 'normal');
-  }
-}
+const fmtDate = (d: Date) =>
+  d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 
 const getLogoBase64 = () => {
   try {
     const p = path.join(process.cwd(), 'public', 'oceanlinux.png');
-    const b = fs.readFileSync(p);
-    return `data:image/png;base64,${b.toString('base64')}`;
+    return `data:image/png;base64,${fs.readFileSync(p).toString('base64')}`;
   } catch {
     return null;
   }
 };
 
-// Make product name bank/compliance friendly for invoice display only
 const makeCompliantName = (raw: string) => {
   let s = clean(raw);
-
-  // Capture & remove any leading DC/IP hint (e.g., "165.99.xx", "129.227")
   let dcHint = '';
   const dcMatch = s.match(/^\s*([0-9]{1,3}\.[0-9]{1,3}(?:\.[0-9xX]{1,3}){0,2})/);
   if (dcMatch) {
-    dcHint = dcMatch[1].toUpperCase();            // "165.99.XX" / "129.227"
-    s = s.slice(dcMatch[0].length).trim();        // remove from the visible name
+    dcHint = dcMatch[1].toUpperCase();
+    s = s.slice(dcMatch[0].length).trim();
   }
-
-  // Normalize dashes
   s = s.replace(/[–—]/g, '-');
-
-  // De-risking: remove/neutralize marketing/risky terms
-  const reps: Array<[RegExp, string]> = [
-    /\bproxies?\b/gi, '',          // remove "proxy/proxies"
-    /\brotating\b/gi, '',          // remove "rotating"
-    /\bpremium\b/gi, '',           // remove "premium"
-    /\bprime\b/gi, '',             // remove "prime"
-    /\bhigh\s*demand\b/gi, '',     // remove "high demand"
-    /\blimited\s*stock\b/gi, '',   // remove "limited stock"
-    /\bseries\b/gi, '',            // drop "series"
-    /\blinux\b/gi, '',             // drop stray 'linux' from original to avoid duplicates
-    /\bproxy\b/gi, '',             // extra safety
-  ] as any;
-  for (let i = 0; i < reps.length; i += 2) s = s.replace(reps[i] as RegExp, reps[i + 1] as string);
-
-  // Decide plan tier (extend as needed)
-  let plan = '';
-  if (/\bgold\b/i.test(s)) plan = 'Gold Plan';
-  // else if (/\bplatinum\b/i.test(s)) plan = 'Platinum Plan';
-  // else if (/\bsilver\b/i.test(s)) plan = 'Silver Plan';
-  else plan = 'Plan';
-
-  // Compose final compliant name
+  const strip = [/\bproxies?\b/gi, /\brotating\b/gi, /\bpremium\b/gi, /\bprime\b/gi,
+    /\bhigh\s*demand\b/gi, /\blimited\s*stock\b/gi, /\bseries\b/gi, /\blinux\b/gi, /\bproxy\b/gi];
+  for (const re of strip) s = s.replace(re, '');
+  let plan = /\bgold\b/i.test(s) ? 'Gold Plan' : 'Plan';
   let out = `Linux VPS Hosting - ${plan}`;
   if (dcHint) out += ` (Data Center ${dcHint})`;
   return out;
 };
 
+const setColor = (doc: jsPDF, c: readonly number[]) => doc.setTextColor(c[0], c[1], c[2]);
+const setFill = (doc: jsPDF, c: readonly number[]) => doc.setFillColor(c[0], c[1], c[2]);
+const setDraw = (doc: jsPDF, c: readonly number[]) => doc.setDrawColor(c[0], c[1], c[2]);
 
-
-
-const addFinalFooter = (doc: jsPDF) => {
-  const darkBg = [2, 7, 19];
-  const primaryBlue = [59, 130, 246];
-
-  doc.setFillColor(...darkBg);
-  doc.rect(0, 270, 210, 27, 'F');
-
-  doc.setTextColor(...primaryBlue);
-  doc.setFont('NotoSans', 'bold'); doc.setFontSize(10);
-  doc.text('Thank you for choosing Ocean Linux!', 20, 280);
-
-  doc.setTextColor(255, 255, 255);
-  doc.setFont('NotoSans', 'normal'); doc.setFontSize(8);
-  doc.text(ORG.tagline, 20, 286);
-  doc.text(`This is a computer-generated invoice. Support: ${ORG.email}`, 20, 291);
-};
-
-const checkPageSpace = (doc: jsPDF, y: number, need: number) => {
-  const pageH = 297, footer = 30;
-  if (y + need > pageH - footer) {
-    doc.addPage();
-    doc.setFillColor(248, 250, 252);
-    doc.rect(0, 0, 210, 297, 'F');
-    return 30;
-  }
+const checkPage = (doc: jsPDF, y: number, need: number): number => {
+  if (y + need > 272) { doc.addPage(); return 25; }
   return y;
 };
 
-const drawLabelValue = (
-  doc: jsPDF,
-  label: string,
-  value: string,
-  x: number,
-  y: number,
-  maxWidth: number,
-  labelColor = [71, 85, 105]
-) => {
-  doc.setTextColor(labelColor[0], labelColor[1], labelColor[2]);
-  doc.setFont('NotoSans', 'bold'); doc.setFontSize(9);
-  if (label) doc.text(label, x, y);
-  doc.setFont('NotoSans', 'normal'); doc.setTextColor(0, 0, 0);
-  const lines = doc.splitTextToSize(value, maxWidth);
-  doc.text(lines, x, y + (label ? 5 : 0));
-  const height = (label ? 5 : 0) + lines.length * 5;
-  return y + height;
+const hr = (doc: jsPDF, y: number, x1 = 20, x2 = 190) => {
+  setDraw(doc, C.slate2); doc.setLineWidth(0.3); doc.line(x1, y, x2, y);
 };
 
 export async function GET(req: NextRequest) {
@@ -178,10 +108,7 @@ export async function GET(req: NextRequest) {
     const order = await Order.findOne({ transactionId: txId }).lean();
     if (!order) return NextResponse.json({ error: 'Order not found for this transactionId' }, { status: 404 });
 
-    // Pull fields
-    const productNameRaw = clean(order.productName || 'N/A');
-    const productName = makeCompliantName(productNameRaw);
-
+    const productName = makeCompliantName(clean(order.productName || 'N/A'));
     const memory = clean(order.memory || 'N/A');
     const customerName = clean(order.customerName || 'N/A');
     const customerEmail = clean(order.customerEmail || 'N/A');
@@ -196,196 +123,236 @@ export async function GET(req: NextRequest) {
     const status = (order.status || 'pending').toString();
 
     const price = Number(order.price ?? order.originalPrice ?? 0);
-    const promoDiscount = Number(order.promoDiscount ?? 0);
-    const total = price; // No GST
+    const originalPrice = Number(order.originalPrice ?? price);
+    const discount = Number(order.promoDiscount ?? 0);
+    const taxable = ORG.showGST ? price * (100 / (100 + ORG.gstRatePct)) : price;
+    const gstAmt = ORG.showGST ? Math.round(price - taxable) : 0;
 
-    // Build PDF
+    const invoiceNum = `OL-${order._id.toString().slice(-8).toUpperCase()}`;
+
     const doc = new jsPDF();
-    ensureFonts(doc);
+    const W = 210;
+    const M = 20;
+    const R = W - M;
 
-    const darkBg = [2, 7, 19];
-    const lightGray = [248, 250, 252];
-    const darkGray = [71, 85, 105];
-    const green = [34, 197, 94];
+    setFill(doc, C.white);
+    doc.rect(0, 0, W, 297, 'F');
 
-    // BG + Header
-    doc.setFillColor(...lightGray); doc.rect(0, 0, 210, 297, 'F');
-    doc.setFillColor(...darkBg); doc.rect(0, 0, 210, 66, 'F');
+    // ── HEADER ───────────────────────────────────────────────────────────
+    setFill(doc, C.navy);
+    doc.rect(0, 0, W, 52, 'F');
+    setFill(doc, C.blue);
+    doc.rect(0, 52, W, 1.5, 'F');
 
     const logo = getLogoBase64();
-    if (logo) { try { doc.addImage(logo, 'PNG', 20, 16, 28, 28); } catch { } }
+    if (logo) { try { doc.addImage(logo, 'PNG', M, 12, 26, 26); } catch {} }
+    const textX = logo ? 52 : M;
 
-    doc.setTextColor(255, 255, 255);
-    doc.setFont('NotoSans', 'bold'); doc.setFontSize(22);
-    doc.text(ORG.brand, logo ? 55 : 20, 30);
-    doc.setFont('NotoSans', 'normal'); doc.setFontSize(11);
-    doc.text(ORG.tagline, logo ? 55 : 20, 38);
-    // Corporate subline
-    doc.setFont('NotoSans', 'bold');
-    doc.text(`A product by ${ORG.legal}`, logo ? 55 : 20, 46);
+    setColor(doc, C.white);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(20);
+    doc.text(ORG.brand, textX, 26);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+    setColor(doc, C.slate4);
+    doc.text(ORG.tagline, textX, 33);
+    doc.text(`A product by ${ORG.legal}`, textX, 39);
 
-    // Invoice meta
-    doc.setFillColor(255, 255, 255);
-    doc.roundedRect(20, 78, 170, 36, 5, 5, 'F');
+    setColor(doc, C.white);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(28);
+    doc.text('INVOICE', R, 30, { align: 'right' });
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+    setColor(doc, C.slate4);
+    doc.text(invoiceNum, R, 38, { align: 'right' });
 
-    doc.setTextColor(...darkGray);
-    doc.setFont('NotoSans', 'bold'); doc.setFontSize(10);
-    doc.text('INVOICE DETAILS', 25, 88);
+    // ── META ROW ─────────────────────────────────────────────────────────
+    let y = 62;
+    const metaItems = [
+      { label: 'Invoice Date', value: fmtDate(createdAt) },
+      { label: 'Due Date', value: 'Paid' },
+      { label: 'Service Period', value: expiry ? `${fmtDate(createdAt)} — ${fmtDate(expiry)}` : fmtDate(createdAt) },
+    ];
+    const metaW = (R - M) / metaItems.length;
+    metaItems.forEach((m, i) => {
+      const mx = M + i * metaW;
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5);
+      setColor(doc, C.slate5);
+      doc.text(m.label.toUpperCase(), mx, y);
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(9.5);
+      setColor(doc, C.slate9);
+      doc.text(m.value, mx, y + 6);
+    });
 
-    const invoiceSuffix = order._id.toString().slice(-8).toUpperCase();
-    doc.setFont('NotoSans', 'normal'); doc.setTextColor(0, 0, 0); doc.setFontSize(9);
-    doc.text(`Invoice #: OL-${invoiceSuffix}`, 25, 96);
-    doc.text(`Invoice Date: ${createdAt.toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}`, 25, 102);
-    // Avoid Unicode arrow; use "to"
-    const servicePeriod = `Service Period: ${createdAt.toLocaleDateString('en-IN')}${expiry ? ` to ${expiry.toLocaleDateString('en-IN')}` : ''}`;
-    doc.text(servicePeriod, 25, 108);
+    const badgeColors: Record<string, readonly number[]> = {
+      active: C.green, completed: C.green, confirmed: C.green,
+      pending: C.amber, failed: C.red,
+    };
+    const badgeColor = badgeColors[status] || C.slate5;
+    const badgeText = status.toUpperCase();
+    const badgeW = doc.getTextWidth(badgeText) + 8;
+    setFill(doc, badgeColor);
+    doc.roundedRect(R - badgeW, y - 3, badgeW, 7, 2, 2, 'F');
+    setColor(doc, C.white);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(7);
+    doc.text(badgeText, R - badgeW + 4, y + 2);
 
-    // Status chip
-    const statusX = 140;
-    if (status === 'completed') doc.setFillColor(...green);
-    else if (status === 'pending') doc.setFillColor(255, 193, 7);
-    else doc.setFillColor(220, 53, 69);
-    doc.roundedRect(statusX, 92, 30, 9, 2, 2, 'F');
-    doc.setTextColor(255, 255, 255); doc.setFont('NotoSans', 'bold'); doc.setFontSize(8);
-    doc.text(status.toUpperCase(), statusX + 3, 98);
+    y = 76; hr(doc, y);
 
-    // BILL TO / FROM
-    doc.setFillColor(255, 255, 255);
-    doc.roundedRect(20, 122, 80, 48, 5, 5, 'F');
-    doc.setTextColor(...darkGray); doc.setFont('NotoSans', 'bold'); doc.setFontSize(10);
-    doc.text('BILL TO', 25, 132);
-    doc.setFont('NotoSans', 'normal'); doc.setTextColor(0, 0, 0); doc.setFontSize(9);
-    let yBill = 139;
-    yBill = drawLabelValue(doc, '', customerName, 25, yBill, 70);
-    yBill = drawLabelValue(doc, '', customerEmail, 25, yBill + 2, 70);
+    // ── BILL TO / ISSUED BY ──────────────────────────────────────────────
+    y += 6;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); setColor(doc, C.blue);
+    doc.text('BILL TO', M, y);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(10); setColor(doc, C.slate9);
+    doc.text(customerName, M, y + 7);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); setColor(doc, C.slate7);
+    doc.text(customerEmail, M, y + 13);
 
-    doc.setFillColor(255, 255, 255);
-    doc.roundedRect(110, 122, 80, 60, 5, 5, 'F');
-    doc.setTextColor(...darkGray); doc.setFont('NotoSans', 'bold'); doc.setFontSize(10);
-    doc.text('FROM', 115, 132);
-    doc.setFont('NotoSans', 'normal'); doc.setTextColor(0, 0, 0); doc.setFontSize(9);
-    let yFrom = 139;
-    yFrom = drawLabelValue(doc, '', ORG.brand, 115, yFrom, 70);
-    yFrom = drawLabelValue(doc, '', ORG.legal, 115, yFrom + 1, 70);
-    yFrom = drawLabelValue(doc, '', ORG.address, 115, yFrom + 1, 70);
-    yFrom = drawLabelValue(doc, '', `${ORG.email}${ORG.phone ? ` • ${ORG.phone}` : ''}`, 115, yFrom + 1, 70);
-    // no GST line (non-GST invoice)
+    const col2 = 125;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); setColor(doc, C.blue);
+    doc.text('ISSUED BY', col2, y);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(10); setColor(doc, C.slate9);
+    doc.text(ORG.brand, col2, y + 7);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); setColor(doc, C.slate7);
+    let fy = y + 13;
+    doc.text(ORG.legal, col2, fy); fy += 5;
+    const addrLines = doc.splitTextToSize(ORG.address, 60);
+    doc.text(addrLines, col2, fy); fy += addrLines.length * 4;
+    doc.text(ORG.email, col2, fy);
 
-    // Table header
-    let y = 188;
-    y = checkPageSpace(doc, y, 18);
-    doc.setFillColor(...darkBg);
-    doc.roundedRect(20, y, 170, 12, 2, 2, 'F');
-    doc.setTextColor(255, 255, 255); doc.setFont('NotoSans', 'bold'); doc.setFontSize(10);
-    doc.text('SERVICE DESCRIPTION', 25, y + 8);
-    doc.text('CONFIGURATION', 125, y + 8);
-    y += 12;
+    y += 34; hr(doc, y);
 
-    // Row
-    doc.setFillColor(255, 255, 255);
-    doc.rect(20, y, 170, 18, 'F');
-    doc.setTextColor(0, 0, 0); doc.setFont('NotoSans', 'normal'); doc.setFontSize(9);
+    // ── LINE ITEMS TABLE ─────────────────────────────────────────────────
+    y += 8;
+    setFill(doc, C.slate1);
+    doc.roundedRect(M, y, R - M, 10, 1.5, 1.5, 'F');
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); setColor(doc, C.slate5);
+    doc.text('DESCRIPTION', M + 4, y + 7);
+    doc.text('CONFIGURATION', 110, y + 7);
+    doc.text('AMOUNT', R - 4, y + 7, { align: 'right' });
+    y += 14;
 
-    const descLines = doc.splitTextToSize(productName, 95);
-    const cfgText = `RAM: ${memory}${os ? ` • OS: ${os}` : ''}`;
-    const cfgLines = doc.splitTextToSize(cfgText, 60);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); setColor(doc, C.slate9);
+    const descLines = doc.splitTextToSize(productName, 80);
+    doc.text(descLines, M + 4, y);
 
-    doc.text(descLines, 25, y + 6);
-    doc.text(cfgLines, 125, y + 6);
+    doc.setFontSize(9); setColor(doc, C.slate7);
+    const cfgParts = [`RAM: ${memory}`];
+    if (os) cfgParts.push(`OS: ${os}`);
+    const cfgLines = doc.splitTextToSize(cfgParts.join(' · '), 50);
+    doc.text(cfgLines, 110, y);
 
-    doc.setFont('NotoSans', 'bold');
-    doc.text(`Rs ${formatINR(price)}`, 175, y + 6, { align: 'right' });
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(10); setColor(doc, C.slate9);
+    doc.text(`Rs ${formatINR(price)}`, R - 4, y, { align: 'right' });
 
-    const rowHeight = Math.max(descLines.length, cfgLines.length) * 5 + 10;
-    y += rowHeight + 6;
+    y += Math.max(descLines.length, cfgLines.length) * 5 + 4;
+    hr(doc, y);
 
-    // Promo
-    if (promoDiscount > 0 && order.promoCode) {
-      doc.setFont('NotoSans', 'normal'); doc.setTextColor(34, 197, 94); doc.setFontSize(9);
-      doc.text(`Promo Applied: ${clean(order.promoCode)} (−Rs ${formatINR(promoDiscount)})`, 20, y);
-      y += 8;
+    // ── TOTALS ───────────────────────────────────────────────────────────
+    y += 6;
+    const totalsX = 135;
+    const totalsValX = R - 4;
+
+    if (discount > 0 || ORG.showGST) {
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(9); setColor(doc, C.slate5);
+      doc.text('Subtotal', totalsX, y);
+      setColor(doc, C.slate9);
+      doc.text(`Rs ${formatINR(originalPrice)}`, totalsValX, y, { align: 'right' });
+      y += 6;
+    }
+    if (discount > 0) {
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(9); setColor(doc, C.green);
+      doc.text(order.promoCode ? `Discount (${clean(order.promoCode)})` : 'Discount', totalsX, y);
+      doc.text(`-Rs ${formatINR(discount)}`, totalsValX, y, { align: 'right' });
+      y += 6;
+    }
+    if (ORG.showGST) {
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(9); setColor(doc, C.slate5);
+      doc.text(`GST (${ORG.gstRatePct}%)`, totalsX, y);
+      setColor(doc, C.slate9);
+      doc.text(`Rs ${formatINR(gstAmt)}`, totalsValX, y, { align: 'right' });
+      y += 6;
     }
 
-    // Totals (no GST)
-    doc.setFillColor(245, 247, 250);
-    doc.roundedRect(120, y, 70, 22, 3, 3, 'F');
-    doc.setTextColor(2, 7, 19); doc.setFont('NotoSans', 'bold'); doc.setFontSize(11);
-    doc.text('TOTAL', 125, y + 12);
-    doc.text(`Rs ${formatINR(total)}`, 185, y + 12, { align: 'right' });
-    y += 28;
+    y += 2;
+    setFill(doc, C.navy);
+    doc.roundedRect(totalsX - 4, y - 5, R - totalsX + 8, 12, 2, 2, 'F');
+    setColor(doc, C.white); doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10); doc.text('TOTAL', totalsX, y + 3);
+    doc.setFontSize(11); doc.text(`Rs ${formatINR(price)}`, totalsValX, y + 3, { align: 'right' });
+    y += 18;
 
-    // Service & delivery
-    y = checkPageSpace(doc, y, 60);
-    doc.setFillColor(255, 255, 255);
-    doc.roundedRect(20, y, 170, 44, 5, 5, 'F');
-    doc.setTextColor(...darkGray); doc.setFont('NotoSans', 'bold'); doc.setFontSize(10);
-    doc.text('SERVICE & DELIVERY DETAILS', 25, y + 10);
-    doc.setFont('NotoSans', 'normal'); doc.setTextColor(0, 0, 0); doc.setFontSize(9);
+    // ── SERVICE DETAILS ──────────────────────────────────────────────────
+    y = checkPage(doc, y, 55);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); setColor(doc, C.blue);
+    doc.text('SERVICE DETAILS', M, y); y += 6;
 
-    let dY = y + 16;
-    const deliveryLines = [
-      ip ? `Server / IP: ${ip}` : '',
-      uname ? `Username: ${uname}` : '',
-      passwd ? `Password: ${maskSecret(passwd)} (masked)` : '',
-      os ? `OS: ${os}` : '',
-      // show provisioning line only if status is not "failed"
-      (order.provisioningStatus !== 'failed'
-        ? `Provisioning: ${order.autoProvisioned ? 'Auto-Provisioned' : 'Manual'} • Status: ${order.provisioningStatus || order.status || 'N/A'}`
-        : 'Provisioning: Manual'),
-      `Delivery Note: Service activated on ${createdAt.toLocaleString('en-IN')} and details shared via dashboard/email.`,
-      expiry ? `Valid Until: ${expiry.toLocaleDateString('en-IN')}` : '',
-    ].filter(Boolean);
+    const serviceRows = [
+      ip && ['Server IP', ip],
+      uname && ['Username', uname],
+      passwd && ['Password', maskSecret(passwd)],
+      os && ['Operating System', os],
+      ['Provisioning', (order.provisioningStatus !== 'failed' && order.autoProvisioned) ? 'Auto-Provisioned' : 'Manual'],
+      expiry && ['Valid Until', fmtDate(expiry)],
+      ['Activated On', fmtDate(createdAt)],
+    ].filter(Boolean) as [string, string][];
 
-    deliveryLines.forEach(line => {
-      const lines = doc.splitTextToSize(line, 160);
-      doc.text(lines, 25, dY);
-      dY += lines.length * 5;
+    serviceRows.forEach((row, i) => {
+      if (i % 2 === 0) {
+        setFill(doc, C.slate1);
+        doc.roundedRect(M, y - 3.5, R - M, 9, 0.5, 0.5, 'F');
+      }
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(8); setColor(doc, C.slate5);
+      doc.text(row[0], M + 4, y + 2);
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(8.5); setColor(doc, C.slate9);
+      doc.text(row[1], 85, y + 2);
+      y += 9;
     });
+    y += 4;
 
-    y = dY + 6;
+    // ── PAYMENT INFO ─────────────────────────────────────────────────────
+    y = checkPage(doc, y, 40);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); setColor(doc, C.blue);
+    doc.text('PAYMENT INFORMATION', M, y); y += 6;
 
-    // Payment info
-    y = checkPageSpace(doc, y, 36);
-    doc.setFillColor(255, 255, 255);
-    doc.roundedRect(20, y, 170, 30, 5, 5, 'F');
-    doc.setTextColor(...darkGray); doc.setFont('NotoSans', 'bold'); doc.setFontSize(10);
-    doc.text('PAYMENT INFORMATION', 25, y + 10);
-    doc.setFont('NotoSans', 'normal'); doc.setTextColor(0, 0, 0); doc.setFontSize(8);
+    const payRows = [
+      txId && ['Payment ID', txId],
+      gatewayOrderId && ['Gateway Order ID', gatewayOrderId],
+      clientTxnId && ['Transaction Ref', clientTxnId],
+      ['Payment Status', status.charAt(0).toUpperCase() + status.slice(1)],
+      ['Payment Date', fmtDate(createdAt)],
+    ].filter(Boolean) as [string, string][];
 
-    let pY = y + 16;
-    const payLines = [
-      `Razorpay Payment ID: ${txId}`,
-      gatewayOrderId ? `Razorpay Order ID: ${gatewayOrderId}` : '',
-      clientTxnId ? `Client Txn ID: ${clientTxnId}` : '',
-      `Payment Status: ${status}`,
-      `Payment Date: ${createdAt.toLocaleString('en-IN')}`,
-    ].filter(Boolean);
-
-    payLines.forEach(line => {
-      const lines = doc.splitTextToSize(line, 160);
-      doc.text(lines, 25, pY);
-      pY += lines.length * 4.6;
+    payRows.forEach((row, i) => {
+      if (i % 2 === 0) {
+        setFill(doc, C.slate1);
+        doc.roundedRect(M, y - 3.5, R - M, 9, 0.5, 0.5, 'F');
+      }
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(8); setColor(doc, C.slate5);
+      doc.text(row[0], M + 4, y + 2);
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(8.5); setColor(doc, C.slate9);
+      doc.text(row[1], 85, y + 2);
+      y += 9;
     });
+    y += 6;
 
-    // Notes / Terms (explicitly non-GST)
-    y = checkPageSpace(doc, pY + 6, 30);
-    doc.setFillColor(255, 255, 255);
-    doc.roundedRect(20, y, 170, 26, 5, 5, 'F');
-    doc.setTextColor(...darkGray); doc.setFont('NotoSans', 'bold'); doc.setFontSize(9);
-    doc.text('NOTES / TERMS', 25, y + 8);
-    doc.setFont('NotoSans', 'normal'); doc.setTextColor(0, 0, 0); doc.setFontSize(8);
-    const terms = doc.splitTextToSize(
-      `This invoice is issued by Ocean Linux (Backtick Labs). Digital services once provisioned are non-returnable. We offer a 7-day money-back guarantee on new orders (subject to eligibility). Disputes: Pune jurisdiction. For support or refund requests, write to ${ORG.email}.`,
-      162
-    );
+    // ── TERMS ────────────────────────────────────────────────────────────
+    y = checkPage(doc, y, 25);
+    hr(doc, y); y += 5;
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(7); setColor(doc, C.slate4);
+    const termsText = `This invoice is issued by ${ORG.brand} (${ORG.legal}). Digital services once provisioned are non-returnable. 7-day money-back guarantee on new orders (subject to eligibility). Disputes: Pune jurisdiction. Support: ${ORG.email}`;
+    doc.text(doc.splitTextToSize(termsText, R - M), M, y);
 
-    doc.text(terms, 25, y + 14);
+    // ── FOOTER ───────────────────────────────────────────────────────────
+    setFill(doc, C.blue); doc.rect(0, 283, W, 1, 'F');
+    setFill(doc, C.navy); doc.rect(0, 284, W, 13, 'F');
 
-    // Footer
-    addFinalFooter(doc);
+    setColor(doc, C.white); doc.setFont('helvetica', 'bold'); doc.setFontSize(8.5);
+    doc.text('Thank you for choosing Ocean Linux!', M, 291);
+    setColor(doc, C.slate4); doc.setFont('helvetica', 'normal'); doc.setFontSize(7);
+    doc.text(`${ORG.web}  ·  ${ORG.email}`, R, 291, { align: 'right' });
+    doc.setFontSize(6);
+    doc.text('Computer-generated invoice — no signature required', W / 2, 295, { align: 'center' });
 
     const pdfBuffer = Buffer.from(doc.output('arraybuffer'));
-    const file = `oceanlinux-invoice-OL-${invoiceSuffix}.pdf`;
+    const file = `oceanlinux-invoice-${invoiceNum}.pdf`;
     return new NextResponse(pdfBuffer, {
       status: 200,
       headers: {
