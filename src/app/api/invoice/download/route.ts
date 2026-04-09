@@ -11,7 +11,7 @@ const ORG = {
   brand: 'Ocean Linux',
   legal: 'Backtick Labs',
   tagline: 'Most Affordable Premium Linux VPS Hosting',
-  address: 'Office No.311, Kohinoor Majestic, Pune - 411019',
+  address: 'Salt Lake City, Kolkata',
   email: 'hello@oceanlinux.com',
   web: 'oceanlinux.com',
   showGST: false,
@@ -19,9 +19,9 @@ const ORG = {
   gstin: '',
 };
 
-// -- Colors --
 const C = {
-  navy:    [10, 15, 30] as const,
+  dark:    [12, 12, 12] as const,
+  dark2:   [24, 24, 27] as const,
   slate9:  [15, 23, 42] as const,
   slate7:  [51, 65, 85] as const,
   slate5:  [100, 116, 139] as const,
@@ -29,12 +29,11 @@ const C = {
   slate2:  [226, 232, 240] as const,
   slate1:  [241, 245, 249] as const,
   white:   [255, 255, 255] as const,
-  blue:    [59, 130, 246] as const,
-  blueDk:  [37, 99, 235] as const,
   green:   [16, 185, 129] as const,
+  greenLt: [52, 211, 153] as const,
+  greenDk: [5, 150, 105] as const,
   amber:   [245, 158, 11] as const,
   red:     [239, 68, 68] as const,
-  black:   [0, 0, 0] as const,
 };
 
 const removeEmojis = (text: string) =>
@@ -70,29 +69,17 @@ const getLogoBase64 = () => {
   }
 };
 
-// Helpers
-const setColor = (doc: jsPDF, c: readonly number[]) =>
-  doc.setTextColor(c[0], c[1], c[2]);
-
-const setFill = (doc: jsPDF, c: readonly number[]) =>
-  doc.setFillColor(c[0], c[1], c[2]);
-
-const setDraw = (doc: jsPDF, c: readonly number[]) =>
-  doc.setDrawColor(c[0], c[1], c[2]);
+const setColor = (doc: jsPDF, c: readonly number[]) => doc.setTextColor(c[0], c[1], c[2]);
+const setFill = (doc: jsPDF, c: readonly number[]) => doc.setFillColor(c[0], c[1], c[2]);
+const setDraw = (doc: jsPDF, c: readonly number[]) => doc.setDrawColor(c[0], c[1], c[2]);
 
 const checkPage = (doc: jsPDF, y: number, need: number): number => {
-  if (y + need > 272) {
-    doc.addPage();
-    return 25;
-  }
+  if (y + need > 272) { doc.addPage(); return 25; }
   return y;
 };
 
-// ─── Draw thin horizontal rule ──────────────────────────────────────────
 const hr = (doc: jsPDF, y: number, x1 = 20, x2 = 190) => {
-  setDraw(doc, C.slate2);
-  doc.setLineWidth(0.3);
-  doc.line(x1, y, x2, y);
+  setDraw(doc, C.slate2); doc.setLineWidth(0.3); doc.line(x1, y, x2, y);
 };
 
 export async function GET(request: NextRequest) {
@@ -117,7 +104,6 @@ export async function GET(request: NextRequest) {
     if (!order) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
     if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
-    // ── Gather data ──────────────────────────────────────────────────────
     const productName = clean(order.productName || 'N/A');
     const memory = clean(order.memory || 'N/A');
     const customerName = clean(order.customerName || (user as any).name || 'N/A');
@@ -141,109 +127,109 @@ export async function GET(request: NextRequest) {
 
     const invoiceNum = `OL-${order._id.toString().slice(-8).toUpperCase()}`;
 
-    // ── Start PDF ────────────────────────────────────────────────────────
     const doc = new jsPDF();
     const W = 210;
-    const M = 20; // margin
-    const R = W - M; // right edge
+    const M = 20;
+    const R = W - M;
 
     // ── Page background ──────────────────────────────────────────────────
     setFill(doc, C.white);
     doc.rect(0, 0, W, 297, 'F');
 
     // ══════════════════════════════════════════════════════════════════════
-    // HEADER BAND (0 → 52)
+    // HEADER (0 → 56)
     // ══════════════════════════════════════════════════════════════════════
-    setFill(doc, C.navy);
-    doc.rect(0, 0, W, 52, 'F');
+    setFill(doc, C.dark);
+    doc.rect(0, 0, W, 54, 'F');
 
-    // Accent stripe at bottom of header
-    setFill(doc, C.blue);
-    doc.rect(0, 52, W, 1.5, 'F');
+    // Green accent stripe
+    setFill(doc, C.green);
+    doc.rect(0, 54, W, 2, 'F');
 
     // Logo
     const logo = getLogoBase64();
     if (logo) {
       try { doc.addImage(logo, 'PNG', M, 12, 26, 26); } catch {}
     }
-
     const textX = logo ? 52 : M;
 
-    // Brand
+    // Brand text
     setColor(doc, C.white);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(20);
-    doc.text(ORG.brand, textX, 26);
+    doc.text(ORG.brand, textX, 24);
 
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9);
     setColor(doc, C.slate4);
-    doc.text(ORG.tagline, textX, 33);
-    doc.text(`A product by ${ORG.legal}`, textX, 39);
+    doc.text(ORG.tagline, textX, 31);
+    doc.setFontSize(8);
+    doc.text(`A product by ${ORG.legal}`, textX, 37);
 
-    // "INVOICE" on right
+    // INVOICE title (right)
     setColor(doc, C.white);
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(28);
-    doc.text('INVOICE', R, 30, { align: 'right' });
+    doc.setFontSize(26);
+    doc.text('INVOICE', R, 24, { align: 'right' });
 
+    // Invoice number
+    setColor(doc, C.greenLt);
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9);
-    setColor(doc, C.slate4);
-    doc.text(invoiceNum, R, 38, { align: 'right' });
+    doc.text(invoiceNum, R, 32, { align: 'right' });
 
-    // ══════════════════════════════════════════════════════════════════════
-    // META ROW (58 → 72)
-    // ══════════════════════════════════════════════════════════════════════
-    let y = 62;
-
-    const metaItems = [
-      { label: 'Invoice Date', value: fmtDate(createdAt) },
-      { label: 'Due Date', value: 'Paid' },
-      { label: 'Service Period', value: expiry ? `${fmtDate(createdAt)} — ${fmtDate(expiry)}` : fmtDate(createdAt) },
-    ];
-
-    const metaW = (R - M) / metaItems.length;
-    metaItems.forEach((m, i) => {
-      const mx = M + i * metaW;
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(7.5);
-      setColor(doc, C.slate5);
-      doc.text(m.label.toUpperCase(), mx, y);
-
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(9.5);
-      setColor(doc, C.slate9);
-      doc.text(m.value, mx, y + 6);
-    });
-
-    // Status badge (right side)
+    // Status badge (inside header, below invoice number)
     const badgeColors: Record<string, readonly number[]> = {
       active: C.green, completed: C.green, confirmed: C.green,
       pending: C.amber, failed: C.red,
     };
     const badgeColor = badgeColors[status] || C.slate5;
     const badgeText = status.toUpperCase();
-    const badgeW = doc.getTextWidth(badgeText) + 8;
-    setFill(doc, badgeColor);
-    doc.roundedRect(R - badgeW, y - 3, badgeW, 7, 2, 2, 'F');
-    setColor(doc, C.white);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(7);
-    doc.text(badgeText, R - badgeW + 4, y + 2);
+    const badgeW = doc.getTextWidth(badgeText) + 10;
+    setFill(doc, badgeColor);
+    doc.roundedRect(R - badgeW, 36, badgeW, 8, 2, 2, 'F');
+    setColor(doc, C.white);
+    doc.text(badgeText, R - badgeW + 5, 41.5);
 
-    y = 76;
+    // ══════════════════════════════════════════════════════════════════════
+    // META ROW (60 → 74)
+    // ══════════════════════════════════════════════════════════════════════
+    let y = 64;
+
+    const metaItems = [
+      { label: 'INVOICE DATE', value: fmtDate(createdAt) },
+      { label: 'DUE DATE', value: 'Paid' },
+      { label: 'SERVICE PERIOD', value: expiry ? `${fmtDate(createdAt)} to ${fmtDate(expiry)}` : fmtDate(createdAt) },
+    ];
+
+    // Uneven columns: give service period more room
+    const colStarts = [M, M + 50, M + 100];
+    metaItems.forEach((m, i) => {
+      const mx = colStarts[i];
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7);
+      setColor(doc, C.slate5);
+      doc.text(m.label, mx, y);
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      setColor(doc, C.slate9);
+      doc.text(m.value, mx, y + 6);
+    });
+
+    y = 78;
     hr(doc, y);
 
     // ══════════════════════════════════════════════════════════════════════
-    // BILL TO / ISSUED BY (y+5 → y+40)
+    // BILL TO / ISSUED BY
     // ══════════════════════════════════════════════════════════════════════
     y += 6;
 
-    // Bill To (left)
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(7.5);
-    setColor(doc, C.blue);
+    doc.setFontSize(7);
+    setColor(doc, C.green);
     doc.text('BILL TO', M, y);
 
     doc.setFont('helvetica', 'bold');
@@ -256,11 +242,10 @@ export async function GET(request: NextRequest) {
     setColor(doc, C.slate7);
     doc.text(customerEmail, M, y + 13);
 
-    // Issued By (right column)
     const col2 = 125;
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(7.5);
-    setColor(doc, C.blue);
+    doc.setFontSize(7);
+    setColor(doc, C.green);
     doc.text('ISSUED BY', col2, y);
 
     doc.setFont('helvetica', 'bold');
@@ -274,14 +259,9 @@ export async function GET(request: NextRequest) {
     let fy = y + 13;
     doc.text(ORG.legal, col2, fy);
     fy += 5;
-    const addrLines = doc.splitTextToSize(ORG.address, 60);
-    doc.text(addrLines, col2, fy);
-    fy += addrLines.length * 4;
+    doc.text(ORG.address, col2, fy);
+    fy += 5;
     doc.text(ORG.email, col2, fy);
-    if (ORG.showGST && ORG.gstin) {
-      fy += 5;
-      doc.text(`GSTIN: ${ORG.gstin}`, col2, fy);
-    }
 
     y += 34;
     hr(doc, y);
@@ -291,15 +271,16 @@ export async function GET(request: NextRequest) {
     // ══════════════════════════════════════════════════════════════════════
     y += 8;
 
-    // Table header
-    setFill(doc, C.slate1);
+    // Table header (dark background to match theme)
+    setFill(doc, C.dark);
     doc.roundedRect(M, y, R - M, 10, 1.5, 1.5, 'F');
 
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(7.5);
-    setColor(doc, C.slate5);
+    doc.setFontSize(7);
+    setColor(doc, C.slate4);
     doc.text('DESCRIPTION', M + 4, y + 7);
     doc.text('CONFIGURATION', 110, y + 7);
+    setColor(doc, C.greenLt);
     doc.text('AMOUNT', R - 4, y + 7, { align: 'right' });
 
     y += 14;
@@ -315,13 +296,12 @@ export async function GET(request: NextRequest) {
     setColor(doc, C.slate7);
     const configParts = [`RAM: ${memory}`];
     if (os) configParts.push(`OS: ${os}`);
-    const cfgText = configParts.join(' · ');
-    const cfgLines = doc.splitTextToSize(cfgText, 50);
+    const cfgLines = doc.splitTextToSize(configParts.join(' · '), 50);
     doc.text(cfgLines, 110, y);
 
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(10);
-    setColor(doc, C.slate9);
+    setColor(doc, C.dark);
     doc.text(`Rs ${formatINR(price)}`, R - 4, y, { align: 'right' });
 
     const rowH = Math.max(descLines.length, cfgLines.length) * 5 + 4;
@@ -330,72 +310,73 @@ export async function GET(request: NextRequest) {
     hr(doc, y);
 
     // ══════════════════════════════════════════════════════════════════════
-    // TOTALS SECTION (right-aligned)
+    // TOTALS (right-aligned, wider area to prevent overlap)
     // ══════════════════════════════════════════════════════════════════════
     y += 6;
 
-    const totalsX = 135;
+    const totalsLabelX = 115;
     const totalsValX = R - 4;
 
-    // Subtotal
     if (discount > 0 || ORG.showGST) {
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(9);
       setColor(doc, C.slate5);
-      doc.text('Subtotal', totalsX, y);
+      doc.text('Subtotal', totalsLabelX, y);
       setColor(doc, C.slate9);
       doc.text(`Rs ${formatINR(originalPrice)}`, totalsValX, y, { align: 'right' });
-      y += 6;
+      y += 7;
     }
 
-    // Discount
     if (discount > 0) {
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(9);
       setColor(doc, C.green);
-      const promoLabel = order.promoCode ? `Discount (${clean(order.promoCode)})` : 'Discount';
-      doc.text(promoLabel, totalsX, y);
+      doc.text('Discount', totalsLabelX, y);
+      if (order.promoCode) {
+        doc.setFontSize(7.5);
+        doc.text(`(${clean(order.promoCode)})`, totalsLabelX + doc.getTextWidth('Discount  '), y);
+      }
+      doc.setFontSize(9);
       doc.text(`-Rs ${formatINR(discount)}`, totalsValX, y, { align: 'right' });
-      y += 6;
+      y += 7;
     }
 
-    // GST
     if (ORG.showGST) {
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(9);
       setColor(doc, C.slate5);
-      doc.text(`GST (${ORG.gstRatePct}%)`, totalsX, y);
+      doc.text(`GST (${ORG.gstRatePct}%)`, totalsLabelX, y);
       setColor(doc, C.slate9);
       doc.text(`Rs ${formatINR(gstAmt)}`, totalsValX, y, { align: 'right' });
-      y += 6;
+      y += 7;
     }
 
-    // Total (highlighted)
+    // Total pill
     y += 2;
-    setFill(doc, C.navy);
-    doc.roundedRect(totalsX - 4, y - 5, R - totalsX + 8, 12, 2, 2, 'F');
+    setFill(doc, C.dark);
+    doc.roundedRect(totalsLabelX - 4, y - 5, R - totalsLabelX + 8, 13, 2, 2, 'F');
 
-    setColor(doc, C.white);
+    setColor(doc, C.greenLt);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(10);
-    doc.text('TOTAL', totalsX, y + 3);
-    doc.setFontSize(11);
-    doc.text(`Rs ${formatINR(price)}`, totalsValX, y + 3, { align: 'right' });
+    doc.text('TOTAL', totalsLabelX, y + 3.5);
+    setColor(doc, C.white);
+    doc.setFontSize(12);
+    doc.text(`Rs ${formatINR(price)}`, totalsValX, y + 3.5, { align: 'right' });
 
-    y += 18;
+    y += 20;
 
     // ══════════════════════════════════════════════════════════════════════
-    // SERVICE & DELIVERY DETAILS
+    // SERVICE DETAILS
     // ══════════════════════════════════════════════════════════════════════
     y = checkPage(doc, y, 55);
 
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(7.5);
-    setColor(doc, C.blue);
+    doc.setFontSize(7);
+    setColor(doc, C.green);
     doc.text('SERVICE DETAILS', M, y);
     y += 6;
 
-    setFill(doc, C.slate1);
     const serviceRows = [
       ip && ['Server IP', ip],
       uname && ['Username', uname],
@@ -411,20 +392,16 @@ export async function GET(request: NextRequest) {
         setFill(doc, C.slate1);
         doc.roundedRect(M, y - 3.5, R - M, 9, 0.5, 0.5, 'F');
       }
-
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(8);
       setColor(doc, C.slate5);
       doc.text(row[0], M + 4, y + 2);
-
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(8.5);
       setColor(doc, C.slate9);
       doc.text(row[1], 85, y + 2);
-
       y += 9;
     });
-
     y += 4;
 
     // ══════════════════════════════════════════════════════════════════════
@@ -433,8 +410,8 @@ export async function GET(request: NextRequest) {
     y = checkPage(doc, y, 40);
 
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(7.5);
-    setColor(doc, C.blue);
+    doc.setFontSize(7);
+    setColor(doc, C.green);
     doc.text('PAYMENT INFORMATION', M, y);
     y += 6;
 
@@ -443,7 +420,7 @@ export async function GET(request: NextRequest) {
       gwOrderId && ['Gateway Order ID', gwOrderId],
       clientTxnId && ['Transaction Ref', clientTxnId],
       ['Payment Status', status.charAt(0).toUpperCase() + status.slice(1)],
-      ['Payment Date', `${fmtDate(createdAt)}`],
+      ['Payment Date', fmtDate(createdAt)],
     ].filter(Boolean) as [string, string][];
 
     payRows.forEach((row, i) => {
@@ -451,24 +428,20 @@ export async function GET(request: NextRequest) {
         setFill(doc, C.slate1);
         doc.roundedRect(M, y - 3.5, R - M, 9, 0.5, 0.5, 'F');
       }
-
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(8);
       setColor(doc, C.slate5);
       doc.text(row[0], M + 4, y + 2);
-
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(8.5);
       setColor(doc, C.slate9);
       doc.text(row[1], 85, y + 2);
-
       y += 9;
     });
-
     y += 6;
 
     // ══════════════════════════════════════════════════════════════════════
-    // TERMS & NOTES
+    // TERMS
     // ══════════════════════════════════════════════════════════════════════
     y = checkPage(doc, y, 25);
     hr(doc, y);
@@ -479,24 +452,22 @@ export async function GET(request: NextRequest) {
     setColor(doc, C.slate4);
     const termsText = [
       `This invoice is issued by ${ORG.brand} (${ORG.legal}).`,
-      'Digital services once provisioned are non-returnable. 7-day money-back guarantee on new orders (subject to eligibility).',
-      `Disputes: Pune jurisdiction. Support: ${ORG.email}`,
+      'Digital services once provisioned are non-returnable.',
+      '7-day money-back guarantee on new orders (subject to eligibility).',
+      `Disputes: Kolkata / West Bengal jurisdiction. Support: ${ORG.email}`,
     ].join(' ');
-    const termsLines = doc.splitTextToSize(termsText, R - M);
-    doc.text(termsLines, M, y);
+    doc.text(doc.splitTextToSize(termsText, R - M), M, y);
 
     // ══════════════════════════════════════════════════════════════════════
     // FOOTER
     // ══════════════════════════════════════════════════════════════════════
-    // Accent stripe
-    setFill(doc, C.blue);
+    setFill(doc, C.green);
     doc.rect(0, 283, W, 1, 'F');
 
-    // Footer band
-    setFill(doc, C.navy);
+    setFill(doc, C.dark);
     doc.rect(0, 284, W, 13, 'F');
 
-    setColor(doc, C.white);
+    setColor(doc, C.greenLt);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(8.5);
     doc.text('Thank you for choosing Ocean Linux!', M, 291);
