@@ -237,7 +237,7 @@ export async function GET(req: NextRequest) {
       doc.text('Discount', totalsLabelX, y);
       if (order.promoCode) {
         doc.setFontSize(7.5);
-        doc.text(`(${clean(order.promoCode)})`, totalsLabelX + doc.getTextWidth('Discount  '), y);
+        doc.text(`(${clean(order.promoCode)})`, totalsLabelX + doc.getTextWidth('Discount') + 3, y);
       }
       doc.setFontSize(9); doc.text(`-Rs ${formatINR(discount)}`, totalsValX, y, { align: 'right' });
       y += 7;
