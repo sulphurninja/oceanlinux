@@ -63,7 +63,7 @@ const fmtDate = (d: Date) =>
 
 const getLogoBase64 = () => {
   try {
-    const p = path.join(process.cwd(), 'public', 'oceanlinux.png');
+    const p = path.join(process.cwd(), 'public', 'ol.png');
     return `data:image/png;base64,${fs.readFileSync(p).toString('base64')}`;
   } catch {
     return null;
