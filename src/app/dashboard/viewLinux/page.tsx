@@ -36,7 +36,8 @@ import {
     SlidersHorizontal,
     LifeBuoy,
     ExternalLink,
-    XIcon
+    XIcon,
+    Download
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -348,6 +349,27 @@ const ViewLinux = () => {
 
 
 
+
+    const downloadInvoice = async (e: React.MouseEvent, orderId: string) => {
+        e.stopPropagation();
+        try {
+            const res = await fetch(`/api/invoice/download?orderId=${orderId}`);
+            if (!res.ok) throw new Error('Failed');
+            const blob = await res.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = url;
+            a.download = `invoice-${orderId}.pdf`;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+            toast.success('Invoice downloaded!');
+        } catch {
+            toast.error('Failed to download invoice');
+        }
+    };
 
     const copyHosthellCreds = (e: React.MouseEvent, order: Order) => {
         e.stopPropagation();
@@ -883,6 +905,16 @@ const getStatusBadge = (status: string, provisioningStatus?: string, lastAction?
                                                                 <span className="text-xs">Manage</span>
                                                             </Button>
 
+                                                            <Button
+                                                                variant="outline"
+                                                                size="sm"
+                                                                onClick={(e) => downloadInvoice(e, order._id)}
+                                                                className="gap-1 sm:gap-2 h-8 sm:h-9 px-2 sm:px-3"
+                                                            >
+                                                                <Download className="h-3 w-3" />
+                                                                <span className="text-xs">Invoice</span>
+                                                            </Button>
+
                                                             {order.panelUsername && (
                                                                 <Button
                                                                     variant="outline"
@@ -984,6 +1016,15 @@ const getStatusBadge = (status: string, provisioningStatus?: string, lastAction?
                                                                     Copy Panel Credentials
                                                                 </Button>
                                                             )}
+                                                            <Button
+                                                                variant="outline"
+                                                                size="sm"
+                                                                onClick={(e) => downloadInvoice(e, order._id)}
+                                                                className="gap-2 h-9 xl:h-10 px-3 xl:px-4"
+                                                            >
+                                                                <Download className="h-4 w-4" />
+                                                                Invoice
+                                                            </Button>
                                                             <Button
                                                                 variant="outline"
                                                                 size="sm"

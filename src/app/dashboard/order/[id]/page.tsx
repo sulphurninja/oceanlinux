@@ -34,7 +34,8 @@ import {
   Settings2,
   Info,
   Wallet,
-  LifeBuoy
+  LifeBuoy,
+  Download
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -1050,6 +1051,32 @@ const OrderDetails = () => {
   const isUnpaid = (order: Order | null) => {
     if (!order) return false;
     return order.status.toLowerCase() === 'pending';
+  };
+
+  const [downloadingInvoice, setDownloadingInvoice] = useState(false);
+
+  const handleDownloadInvoice = async () => {
+    if (!order) return;
+    setDownloadingInvoice(true);
+    try {
+      const res = await fetch(`/api/invoice/download?orderId=${order._id}`);
+      if (!res.ok) throw new Error('Failed to generate invoice');
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = url;
+      a.download = `invoice-${order._id}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      toast.success('Invoice downloaded!');
+    } catch {
+      toast.error('Failed to download invoice');
+    } finally {
+      setDownloadingInvoice(false);
+    }
   };
 
   const handleRenewService = async (selectedMethod?: 'cashfree' | 'razorpay' | 'upi') => {
@@ -2831,8 +2858,42 @@ const OrderDetails = () => {
                           </div>
                         </div>
                       )}
+                      {/* Download Invoice */}
+                      <div className="mt-4 pt-4 border-t border-border">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleDownloadInvoice}
+                          disabled={downloadingInvoice}
+                          className="w-full gap-2 h-9 text-sm"
+                        >
+                          {downloadingInvoice ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Download className="h-4 w-4" />
+                          )}
+                          {downloadingInvoice ? 'Generating...' : 'Download Invoice'}
+                        </Button>
+                      </div>
                     </CardContent>
                   </Card>
+                )}
+
+                {/* Download Invoice (standalone, shows when billing card is hidden) */}
+                {(!order.expiryDate || provider === 'oceanlinux') && (
+                  <Button
+                    variant="outline"
+                    onClick={handleDownloadInvoice}
+                    disabled={downloadingInvoice}
+                    className="w-full gap-2 h-10 text-sm"
+                  >
+                    {downloadingInvoice ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Download className="h-4 w-4" />
+                    )}
+                    {downloadingInvoice ? 'Generating Invoice...' : 'Download Invoice'}
+                  </Button>
                 )}
 
                 {/* Service Details */}
