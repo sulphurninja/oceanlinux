@@ -712,103 +712,45 @@ export async function POST(request) {
     }
 }
 
-// GET endpoint for status/health check - UPDATED
+// GET endpoint — runs the full cron (Phase 0 + provisioning), callable by Lambda/external schedulers
 export async function GET(request) {
-    try {
-        await connectDB();
+    const { searchParams } = new URL(request.url);
+    const statsOnly = searchParams.get('stats') === '1';
 
-        // Get statistics
-        const totalOrders = await Order.countDocuments();
-        const confirmedOrders = await Order.countDocuments({ status: 'confirmed' });
-        
-        const pendingProvisioning = await Order.countDocuments({
-            $and: [
-                { status: 'confirmed' },
-                {
-                    $or: [
-                        { autoProvisioned: { $ne: true } },
-                        { autoProvisioned: { $exists: false } },
-                        {
-                            $and: [
-                                { autoProvisioned: true },
-                                { provisioningStatus: 'failed' }
-                            ]
-                        }
-                    ]
-                },
-                {
-                    $or: [
-                        { provisioningStatus: { $ne: 'provisioning' } },
-                        { provisioningStatus: { $exists: false } }
-                    ]
-                }
-            ]
-        });
-
-        const currentlyProvisioning = await Order.countDocuments({
-            provisioningStatus: 'provisioning'
-        });
-
-        const activeProvisioned = await Order.countDocuments({
-            autoProvisioned: true,
-            provisioningStatus: 'active'
-        });
-
-        const failedProvisioning = await Order.countDocuments({
-            autoProvisioned: true,
-            provisioningStatus: 'failed'
-        });
-
-        const configFailures = await Order.countDocuments({
-            provisioningError: { $regex: /^CONFIG:/ }
-        });
-
-        const advpsPending = await Order.countDocuments({
-            advpsOrderId: { $exists: true, $ne: '' },
-            status: 'confirmed',
-            provisioningStatus: 'provisioning',
-            provisioningError: { $regex: /^ADVPS_PENDING/ },
-            ipAddress: { $in: [null, '', undefined] },
-        });
-
-        // Check for stale locks (provisioning status older than 20 minutes)
-        const staleLocks = await Order.countDocuments({
-            provisioningStatus: 'provisioning',
-            provisioningError: { $not: { $regex: /^ADVPS_PENDING/ } },
-            updatedAt: { $lt: new Date(Date.now() - CONFIG.lockTimeoutMs) }
-        });
-
-        return NextResponse.json({
-            success: true,
-            status: 'healthy',
-            statistics: {
-                totalOrders,
-                confirmedOrders,
-                pendingProvisioning,
-                currentlyProvisioning,
-                advpsPending,
-                staleLocks,
-                activeProvisioned,
-                failedProvisioning,
-                configFailures
-            },
-            config: {
-                maxRetries: CONFIG.maxRetries,
-                retryDelayMs: CONFIG.retryDelayMs,
-                lockTimeoutMs: CONFIG.lockTimeoutMs,
-                runInterval: "2 minutes",
-                lockMechanism: "Database-based atomic locks with strict validation",
-                note: "Only processes orders with valid IPStock configurations and hostycareProductId"
-            },
-            timestamp: new Date().toISOString()
-        });
-
-    } catch (error) {
-        return NextResponse.json({
-            success: false,
-            status: 'unhealthy',
-            error: error.message,
-            timestamp: new Date().toISOString()
-        }, { status: 500 });
+    // If ?stats=1, return health-check stats without running the cron
+    if (statsOnly) {
+        try {
+            await connectDB();
+            const [totalOrders, confirmedOrders, currentlyProvisioning, activeProvisioned, failedProvisioning, configFailures, advpsPendingCount, staleLocks] = await Promise.all([
+                Order.countDocuments(),
+                Order.countDocuments({ status: 'confirmed' }),
+                Order.countDocuments({ provisioningStatus: 'provisioning' }),
+                Order.countDocuments({ autoProvisioned: true, provisioningStatus: 'active' }),
+                Order.countDocuments({ autoProvisioned: true, provisioningStatus: 'failed' }),
+                Order.countDocuments({ provisioningError: { $regex: /^CONFIG:/ } }),
+                Order.countDocuments({
+                    advpsOrderId: { $exists: true, $ne: '' },
+                    status: 'confirmed',
+                    provisioningStatus: 'provisioning',
+                    provisioningError: { $regex: /^ADVPS_PENDING/ },
+                    ipAddress: { $in: [null, '', undefined] },
+                }),
+                Order.countDocuments({
+                    provisioningStatus: 'provisioning',
+                    provisioningError: { $not: { $regex: /^ADVPS_PENDING/ } },
+                    updatedAt: { $lt: new Date(Date.now() - CONFIG.lockTimeoutMs) }
+                }),
+            ]);
+            return NextResponse.json({
+                success: true, status: 'healthy',
+                statistics: { totalOrders, confirmedOrders, currentlyProvisioning, advpsPending: advpsPendingCount, staleLocks, activeProvisioned, failedProvisioning, configFailures },
+                timestamp: new Date().toISOString()
+            });
+        } catch (error) {
+            return NextResponse.json({ success: false, status: 'unhealthy', error: error.message, timestamp: new Date().toISOString() }, { status: 500 });
+        }
     }
+
+    // Otherwise, run the full cron — same logic as POST
+    return POST(request);
 }
