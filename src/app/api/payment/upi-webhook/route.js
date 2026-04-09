@@ -5,6 +5,7 @@ import NotificationService from '@/services/notificationService';
 import { calculateExpiryDate } from '@/lib/expiryHelper';
 import { assignPanelCredentials } from '@/lib/panelCredentials';
 const AutoProvisioningService = require('@/services/autoProvisioningService');
+const WhatsAppService = require('@/services/whatsappService');
 
 /**
  * UPI Gateway Webhook Handler
@@ -199,6 +200,7 @@ export async function POST(request) {
                   username: result.username || 'root',
                   password: result.password || 'Check dashboard'
                 });
+                WhatsAppService.notifyOrderViaWhatsApp(order.user, order).catch(() => {});
               } else if (!result.success && !result.alreadyProvisioning && !result.advpsPending) {
                 await NotificationService.notifyOrderFailed(order.user, order, result.error);
               } else if (result.advpsPending) {

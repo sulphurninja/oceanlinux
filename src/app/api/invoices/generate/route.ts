@@ -199,7 +199,7 @@ export async function GET(req: NextRequest) {
     y += 34; hr(doc, y);
 
     // ── LINE ITEMS TABLE ─────────────────────────────────────────────────
-    y += 8;
+      y += 8;
     setFill(doc, C.dark);
     doc.roundedRect(M, y, R - M, 10, 1.5, 1.5, 'F');
     doc.setFont('helvetica', 'bold'); doc.setFontSize(7); setColor(doc, C.slate4);

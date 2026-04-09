@@ -38,12 +38,22 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
-import { useState, useEffect, Suspense } from 'react';
+import { useState, useEffect, Suspense, useCallback } from 'react';
 import { toast } from 'sonner';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { SessionAlertProvider } from '@/components/session-alert';
 import FloatingSupport from '@/components/component/floating-support';
 import LoginNewsPopup from '@/components/login-news-popup';
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 interface UserData {
     _id: string;
@@ -71,6 +81,9 @@ export default function DashboardLayout({
     const pathname = usePathname();
     const [user, setUser] = useState<UserData | null>(null);
     const [loading, setLoading] = useState(true);
+    const [showPhoneDialog, setShowPhoneDialog] = useState(false);
+    const [phoneNumber, setPhoneNumber] = useState('');
+    const [isSavingPhone, setIsSavingPhone] = useState(false);
 
     useEffect(() => {
         fetchUserData();
@@ -82,12 +95,49 @@ export default function DashboardLayout({
             if (response.ok) {
                 const userData = await response.json();
                 setUser(userData);
+
+                if (!userData.phone) {
+                    const dismissed = sessionStorage.getItem('phonePromptDismissed');
+                    if (!dismissed) {
+                        setTimeout(() => setShowPhoneDialog(true), 1200);
+                    }
+                }
             }
         } catch (error) {
             console.error('Error fetching user data:', error);
         } finally {
             setLoading(false);
         }
+    };
+
+    const handleSavePhone = async () => {
+        const cleaned = phoneNumber.replace(/\s+/g, '');
+        if (!cleaned || cleaned.length < 10) {
+            toast.error('Please enter a valid phone number');
+            return;
+        }
+        setIsSavingPhone(true);
+        try {
+            const response = await fetch('/api/users/update', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ phone: cleaned }),
+            });
+            if (!response.ok) throw new Error('Failed to update phone number');
+            toast.success('Phone number updated!');
+            setUser(prev => prev ? { ...prev, phone: cleaned } : prev);
+            setShowPhoneDialog(false);
+        } catch (error) {
+            console.error('Error saving phone:', error);
+            toast.error('Failed to save phone number. Please try again.');
+        } finally {
+            setIsSavingPhone(false);
+        }
+    };
+
+    const handleDismissPhone = () => {
+        sessionStorage.setItem('phonePromptDismissed', 'true');
+        setShowPhoneDialog(false);
     };
 
     const handleLogout = async () => {
@@ -397,6 +447,48 @@ export default function DashboardLayout({
                         </main>
                         <FloatingSupport />
                     </div>
+
+                    {/* Phone Number Prompt Dialog */}
+                    <Dialog open={showPhoneDialog} onOpenChange={(open) => {
+                        if (!open) handleDismissPhone();
+                    }}>
+                        <DialogContent className="w-[calc(100vw-2rem)] max-w-md mx-auto">
+                            <DialogHeader>
+                                <DialogTitle className="flex items-center gap-2 text-base">
+                                    <Phone className="h-4 w-4 text-primary" />
+                                    Add Your Phone Number
+                                </DialogTitle>
+                                <DialogDescription className="text-sm">
+                                    Please add a phone number so we can reach you about your orders and account security.
+                                </DialogDescription>
+                            </DialogHeader>
+                            <div className="space-y-2 py-2">
+                                <Label htmlFor="phone-prompt" className="text-sm">Phone Number</Label>
+                                <Input
+                                    id="phone-prompt"
+                                    type="tel"
+                                    value={phoneNumber}
+                                    onChange={(e) => setPhoneNumber(e.target.value)}
+                                    placeholder="+91 98765 43210"
+                                    className="text-sm h-10"
+                                    onKeyDown={(e) => { if (e.key === 'Enter') handleSavePhone(); }}
+                                />
+                                <p className="text-xs text-muted-foreground">Include country code (e.g. +91 for India)</p>
+                            </div>
+                            <DialogFooter className="gap-2 flex-col-reverse sm:flex-row">
+                                <Button variant="ghost" size="sm" onClick={handleDismissPhone} disabled={isSavingPhone} className="w-full sm:w-auto text-sm">
+                                    Skip for now
+                                </Button>
+                                <Button size="sm" onClick={handleSavePhone} disabled={isSavingPhone || !phoneNumber.trim()} className="w-full sm:w-auto gap-2 text-sm">
+                                    {isSavingPhone ? (
+                                        <><div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white" />Saving...</>
+                                    ) : (
+                                        <>Save Phone Number</>
+                                    )}
+                                </Button>
+                            </DialogFooter>
+                        </DialogContent>
+                    </Dialog>
 
                 </div>
             </AuthProvider>

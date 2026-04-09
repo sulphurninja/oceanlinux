@@ -373,19 +373,35 @@ const MyAccount = () => {
     };
 
     const handlePasswordUpdate = async () => {
+        if (!security.currentPassword) {
+            toast.error('Current password is required');
+            return;
+        }
+
         if (security.newPassword !== security.confirmPassword) {
             toast.error('New passwords do not match');
             return;
         }
 
-        if (security.newPassword.length < 8) {
-            toast.error('Password must be at least 8 characters long');
+        if (security.newPassword.length < 6) {
+            toast.error('Password must be at least 6 characters long');
             return;
         }
 
         try {
             setSaving(true);
-            // This would be implemented in your API
+            const response = await fetch('/api/user/update-settings', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    name: user.name,
+                    email: user.email,
+                    currentPassword: security.currentPassword,
+                    newPassword: security.newPassword,
+                }),
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || 'Failed to update password');
             toast.success('Password updated successfully!');
             setSecurity({
                 currentPassword: '',
@@ -394,7 +410,8 @@ const MyAccount = () => {
                 twoFactorEnabled: security.twoFactorEnabled
             });
         } catch (error) {
-            toast.error('Failed to update password');
+            console.error('Error updating password:', error);
+            toast.error(error instanceof Error ? error.message : 'Failed to update password');
         } finally {
             setSaving(false);
         }
@@ -655,15 +672,58 @@ const MyAccount = () => {
                                     </div>
                                 </div>
 
-                                {/* Quick Stats */}
-                                <div className="grid grid-cols-2 md:grid-cols-1 gap-4 md:w-48">
-                                    <div className="text-center p-4 bg-primary/5 rounded-lg">
-                                        <div className="text-2xl font-bold text-primary">{user.stats?.totalOrders}</div>
-                                        <div className="text-xs text-muted-foreground">Total Orders</div>
+                                {/* Quick Stats + Desktop Edit/Save */}
+                                <div className="flex flex-col gap-4 md:w-48">
+                                    <div className="hidden md:flex gap-2 justify-end">
+                                        {isEditing ? (
+                                            <>
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={() => {
+                                                        setIsEditing(false);
+                                                        fetchUserData();
+                                                    }}
+                                                    className="gap-1"
+                                                >
+                                                    <X className="h-4 w-4" />
+                                                    Cancel
+                                                </Button>
+                                                <Button
+                                                    size="sm"
+                                                    onClick={handleProfileUpdate}
+                                                    disabled={saving}
+                                                    className="gap-1"
+                                                >
+                                                    {saving ? (
+                                                        <RefreshCw className="h-4 w-4 animate-spin" />
+                                                    ) : (
+                                                        <Save className="h-4 w-4" />
+                                                    )}
+                                                    Save
+                                                </Button>
+                                            </>
+                                        ) : (
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={() => setIsEditing(true)}
+                                                className="gap-1"
+                                            >
+                                                <Edit3 className="h-4 w-4" />
+                                                Edit Profile
+                                            </Button>
+                                        )}
                                     </div>
-                                    <div className="text-center p-4 bg-green-500/5 rounded-lg">
-                                        <div className="text-2xl font-bold text-green-600">{formatCurrency(user.stats?.totalSpent || 0)}</div>
-                                        <div className="text-xs text-muted-foreground">Total Spent</div>
+                                    <div className="grid grid-cols-2 md:grid-cols-1 gap-4">
+                                        <div className="text-center p-4 bg-primary/5 rounded-lg">
+                                            <div className="text-2xl font-bold text-primary">{user.stats?.totalOrders}</div>
+                                            <div className="text-xs text-muted-foreground">Total Orders</div>
+                                        </div>
+                                        <div className="text-center p-4 bg-green-500/5 rounded-lg">
+                                            <div className="text-2xl font-bold text-green-600">{formatCurrency(user.stats?.totalSpent || 0)}</div>
+                                            <div className="text-xs text-muted-foreground">Total Spent</div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>

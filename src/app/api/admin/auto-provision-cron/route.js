@@ -3,6 +3,7 @@ import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 const AutoProvisioningService = require('@/services/autoProvisioningService');
 const AdvpsAPI = require('@/services/advpsApi');
+const WhatsAppService = require('@/services/whatsappService');
 import NotificationService from '@/services/notificationService';
 
 // Configuration
@@ -491,6 +492,7 @@ async function checkAdvpsPendingOrders() {
                 username,
                 password: password || 'Check dashboard',
             });
+            WhatsAppService.notifyOrderViaWhatsApp(order.user, order).catch(() => {});
 
             results.push({ orderId: order._id, advpsOrderId: order.advpsOrderId, result: 'completed', ipAddress });
         } catch (err) {
@@ -593,8 +595,10 @@ export async function POST(request) {
                         productId: lockedOrder._validationInfo.productId
                     };
 
-                    // The provisionServer already updates the order status to 'active'
-                    
+                    if (!provisionResult.alreadyProvisioned) {
+                        WhatsAppService.notifyOrderViaWhatsApp(lockedOrder.user, lockedOrder).catch(() => {});
+                    }
+
                 } else {
                     throw new Error(provisionResult.error || 'Unknown provisioning error');
                 }
