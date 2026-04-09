@@ -1033,9 +1033,8 @@ const OrderDetails = () => {
 
   const isRenewalEligible = (order: Order | null) => {
     if (!order || !order.expiryDate) return false;
+    if (order.provider === 'slotip') return false;
     const daysLeft = getDaysUntilExpiry(order.expiryDate);
-    // Show the renewal button 2 days before the expiry date,
-    // and keep it visible up to 7 days after expiry.
     return daysLeft <= 2 && daysLeft >= -7;
   };
 
