@@ -301,10 +301,10 @@ export async function POST(request) {
         currency: 'INR',
         receipt: clientTxnId,
         notes: {
-          product_name: productName,
+          product_name: String(productName).replace(/[^\x20-\x7E]/g, '').trim(),
           memory: memory,
           customer_email: user.email,
-          customer_name: user.name,
+          customer_name: String(user.name).replace(/[^\x20-\x7E]/g, '').trim(),
           promo_code: promoCode || '',
           original_price: originalPrice || price,
           discount: promoDiscount || 0
