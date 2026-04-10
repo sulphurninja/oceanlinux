@@ -929,7 +929,6 @@ class AutoProvisioningService {
         advpsProductId,
         provider: 'advps',
         autoProvisioned: true,
-        ...(initialPassword ? { password: initialPassword } : {}),
       });
     }
 
@@ -976,14 +975,14 @@ class AutoProvisioningService {
     // --- Extract credentials if assigned ---
     let ipAddress = '';
     let username = '';
-    let password = initialPassword;
+    let password = '';
     let advpsServiceId = '';
     let expiryDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
 
     if (assignedService) {
       ipAddress = assignedService.ip || '';
       username = assignedService.username || (isWindowsProduct ? 'Administrator' : 'root');
-      password = assignedService.password || initialPassword || '';
+      password = assignedService.password || '';
       advpsServiceId = AdvpsAPI.extractServiceIdFromPurchaseService(assignedService);
       if (assignedService.expiryDate) expiryDate = new Date(assignedService.expiryDate);
 
@@ -993,7 +992,7 @@ class AutoProvisioningService {
       L.kv('[ADVPS] Password (masked)', password ? password.substring(0, 4) + '****' : '(blank)');
       L.kv('[ADVPS] Expiry', expiryDate.toISOString());
 
-      // Password may not be ready yet — re-poll order details a few times
+      // Password may not be in the first poll — always re-poll order details if missing
       if (!password && advpsOrderId) {
         L.line(`[ADVPS] No password yet, polling order details for password...`);
         const pwPollDelays = [60000];

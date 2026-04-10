@@ -60,7 +60,7 @@ export async function checkAdvpsPendingOrders() {
       const isWindows = /windows|rdp/i.test(String(order.productName));
       let ipAddress = svc.ip || '';
       let username = svc.username || (isWindows ? 'Administrator' : 'root');
-      let password = svc.password || order.password || '';
+      let password = svc.password || '';
       const advpsServiceId = AdvpsAPI.extractServiceIdFromPurchaseService(svc);
       const expiryDate = svc.expiryDate ? new Date(svc.expiryDate) : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
 
