@@ -935,7 +935,8 @@ class AutoProvisioningService {
     // If ADVPS hasn't assigned yet, mark as failed so the cron retries later.
     L.line(`[ADVPS] Checking order details for ${advpsOrderId}...`);
 
-    const pollDelays = [15000, 20000, 30000];
+    // Two polls + Phase-0 cron reduces getOrderDetails calls (counts toward 100 req / 15 min).
+    const pollDelays = [20000, 45000];
     let assignedService = null;
 
     for (let i = 0; i < pollDelays.length; i++) {
@@ -981,7 +982,7 @@ class AutoProvisioningService {
       ipAddress = assignedService.ip || '';
       username = assignedService.username || (isWindowsProduct ? 'Administrator' : 'root');
       password = assignedService.password || initialPassword || '';
-      advpsServiceId = assignedService.id || '';
+      advpsServiceId = AdvpsAPI.extractServiceIdFromPurchaseService(assignedService);
       if (assignedService.expiryDate) expiryDate = new Date(assignedService.expiryDate);
 
       L.kv('[ADVPS] Service ID', advpsServiceId);
