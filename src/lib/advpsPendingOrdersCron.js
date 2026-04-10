@@ -64,28 +64,24 @@ export async function checkAdvpsPendingOrders() {
       const advpsServiceId = AdvpsAPI.extractServiceIdFromPurchaseService(svc);
       const expiryDate = svc.expiryDate ? new Date(svc.expiryDate) : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
 
-      // Try status endpoint first (returns existing password without replacing it)
-      if (!password && advpsServiceId) {
-        try {
-          const statusRes = await advpsApi.status(advpsServiceId);
-          const svcData = statusRes?.data?.service || statusRes?.data || {};
-          password = svcData.password || '';
-          if (password) console.log(`${tag} Password from status endpoint`);
-        } catch (e) {
-          console.log(`${tag} status password check: ${e.message}`);
-        }
-      }
-
-      // Last resort: generate-password (creates NEW password, replaces old one on ADVPS)
-      if (!password && advpsServiceId) {
-        try { await advpsApi.start(advpsServiceId); } catch (_) {}
-        await new Promise(r => setTimeout(r, 10000));
-        try {
-          const passRes = await advpsApi.generatePassword(advpsServiceId);
-          const pd = passRes?.data || {};
-          password = pd.password || pd.newPassword || pd.existingPassword || '';
-        } catch (e) {
-          console.log(`${tag} generate-password: ${e.message}`);
+      // Password may not be in first response — re-poll order details
+      if (!password && order.advpsOrderId) {
+        const pwPollDelays = [10000, 15000, 20000];
+        for (let p = 0; p < pwPollDelays.length; p++) {
+          await new Promise(r => setTimeout(r, pwPollDelays[p]));
+          try {
+            const retryRes = await advpsApi.getOrderDetails(order.advpsOrderId);
+            const retrySvc = (retryRes?.data?.services || [])[0];
+            if (retrySvc?.password) {
+              password = retrySvc.password;
+              if (retrySvc.username) username = retrySvc.username;
+              console.log(`${tag} Password from order details (poll ${p + 1})`);
+              break;
+            }
+            console.log(`${tag} Password poll ${p + 1}/${pwPollDelays.length}: not available yet`);
+          } catch (e) {
+            console.log(`${tag} Password poll ${p + 1} error: ${e.message}`);
+          }
         }
       }
 
