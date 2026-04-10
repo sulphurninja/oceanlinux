@@ -64,6 +64,19 @@ export async function checkAdvpsPendingOrders() {
       const advpsServiceId = AdvpsAPI.extractServiceIdFromPurchaseService(svc);
       const expiryDate = svc.expiryDate ? new Date(svc.expiryDate) : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
 
+      // Try status endpoint first (returns existing password without replacing it)
+      if (!password && advpsServiceId) {
+        try {
+          const statusRes = await advpsApi.status(advpsServiceId);
+          const svcData = statusRes?.data?.service || statusRes?.data || {};
+          password = svcData.password || '';
+          if (password) console.log(`${tag} Password from status endpoint`);
+        } catch (e) {
+          console.log(`${tag} status password check: ${e.message}`);
+        }
+      }
+
+      // Last resort: generate-password (creates NEW password, replaces old one on ADVPS)
       if (!password && advpsServiceId) {
         try { await advpsApi.start(advpsServiceId); } catch (_) {}
         await new Promise(r => setTimeout(r, 10000));

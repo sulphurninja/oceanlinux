@@ -991,9 +991,22 @@ class AutoProvisioningService {
       L.kv('[ADVPS] Password (masked)', password ? password.substring(0, 4) + '****' : '(blank)');
       L.kv('[ADVPS] Expiry', expiryDate.toISOString());
 
-      // If service assigned but no password, try generate-password once
+      // If no password from order details, try status endpoint (it also returns password per docs)
       if (!password && advpsServiceId) {
-        L.line(`[ADVPS] No password in order details, trying generate-password...`);
+        L.line(`[ADVPS] No password in order details, checking status endpoint...`);
+        try {
+          const statusRes = await this.advpsApi.status(advpsServiceId);
+          const svcData = statusRes?.data?.service || statusRes?.data || {};
+          password = svcData.password || '';
+          if (password) L.kv('[ADVPS] Password from status', password.substring(0, 4) + '****');
+        } catch (statusErr) {
+          L.line(`[ADVPS] status password check: ${statusErr.message}`);
+        }
+      }
+
+      // Last resort: generate-password (creates a NEW password, replaces the old one on ADVPS side)
+      if (!password && advpsServiceId) {
+        L.line(`[ADVPS] Still no password, calling generate-password (will create new one)...`);
         try {
           await this.advpsApi.start(advpsServiceId);
         } catch (_) { /* may already be running */ }
@@ -1002,7 +1015,7 @@ class AutoProvisioningService {
           const passRes = await this.advpsApi.generatePassword(advpsServiceId);
           const pd = passRes?.data || {};
           password = pd.password || pd.newPassword || pd.existingPassword || '';
-          if (password) L.kv('[ADVPS] Password generated', password.substring(0, 4) + '****');
+          if (password) L.kv('[ADVPS] Password generated (new)', password.substring(0, 4) + '****');
         } catch (passErr) {
           L.line(`[ADVPS] generate-password: ${passErr.message}`);
         }
