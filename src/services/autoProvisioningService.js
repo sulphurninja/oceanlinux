@@ -994,7 +994,7 @@ class AutoProvisioningService {
       // Password may not be ready yet — re-poll order details a few times
       if (!password && advpsOrderId) {
         L.line(`[ADVPS] No password yet, polling order details for password...`);
-        const pwPollDelays = [60000, 60000, 60000];
+        const pwPollDelays = [60000];
         for (let p = 0; p < pwPollDelays.length; p++) {
           await new Promise(r => setTimeout(r, pwPollDelays[p]));
           try {

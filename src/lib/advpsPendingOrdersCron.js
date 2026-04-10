@@ -66,7 +66,7 @@ export async function checkAdvpsPendingOrders() {
 
       // Password may not be in first response — re-poll order details
       if (!password && order.advpsOrderId) {
-        const pwPollDelays = [60000, 60000, 60000];
+        const pwPollDelays = [60000];
         for (let p = 0; p < pwPollDelays.length; p++) {
           await new Promise(r => setTimeout(r, pwPollDelays[p]));
           try {
