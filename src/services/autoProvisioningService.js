@@ -153,7 +153,8 @@ class AutoProvisioningService {
   async resolveAdvpsOsId(targetOS, vmType) {
     L.line(`[ADVPS] Resolving OS ID for target: "${targetOS}" (vmType: ${vmType})`);
     try {
-      const osType = String(vmType).toUpperCase() === 'VM' ? 'vps' : 'lxc';
+      const upper = String(vmType).toUpperCase();
+      const osType = (upper === 'VPS' || upper === 'VM') ? 'vps' : 'lxc';
       const res = await this.advpsApi.listOs(osType);
       const osList = res?.data?.os || res?.data || [];
 
@@ -210,7 +211,8 @@ class AutoProvisioningService {
   async findAdvpsProductByRam(baseName, ram, vmType) {
     L.line(`[ADVPS] Fallback product search: baseName="${baseName}", ram="${ram}", vmType="${vmType}"`);
     try {
-      const type = String(vmType).toUpperCase() === 'VM' ? 'vps' : 'linux';
+      const upper = String(vmType).toUpperCase();
+      const type = (upper === 'VPS' || upper === 'VM') ? 'vps' : 'linux';
       const allProducts = await this.advpsApi.productStockAll({ type });
       L.kv('[ADVPS] Products from API', allProducts.length);
 
@@ -772,19 +774,15 @@ class AutoProvisioningService {
     const productNameLower = String(order.productName).toLowerCase();
     const isWindowsProduct =
       productNameLower.includes('windows') ||
-      productNameLower.includes('rdp') ||
-      productNameLower.includes('vps');
+      productNameLower.includes('rdp');
 
-    const targetOS = isWindowsProduct ? 'Windows 2022 64' : 'Ubuntu 22';
     L.kv('[ADVPS] isWindowsProduct', isWindowsProduct);
-    L.kv('[ADVPS] targetOS', targetOS);
 
     await Order.findByIdAndUpdate(order._id, {
       provisioningStatus: 'provisioning',
       provisioningError: '',
       autoProvisioned: true,
       lastProvisionAttempt: new Date(),
-      os: targetOS,
       provider: 'advps'
     });
 
@@ -797,9 +795,13 @@ class AutoProvisioningService {
     }
 
     const vmType = String(advpsConfig.vmType || '').toUpperCase();
-    const isVps = vmType === 'VM';
+    const isVps = vmType === 'VPS' || vmType === 'VM';
+    const targetOS = isWindowsProduct ? 'Windows 2022 64' : 'Ubuntu 22';
     L.kv('[ADVPS] vmType', vmType);
     L.kv('[ADVPS] isVps', isVps);
+    L.kv('[ADVPS] targetOS', targetOS);
+
+    await Order.findByIdAndUpdate(order._id, { os: targetOS });
 
     // --- Resolve ADVPS product ID ---
     // ADVPS products are NOT named with RAM (e.g. "Turbo VPS (103.109.XX.X)").

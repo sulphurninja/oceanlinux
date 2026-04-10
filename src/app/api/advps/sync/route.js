@@ -84,7 +84,7 @@ async function runSync() {
   for (const [baseName, group] of Object.entries(groups)) {
     activeBaseNames.add(baseName);
 
-    const isVPS = group.vmType === 'VM';
+    const isVPS = group.vmType === 'VPS' || group.vmType === 'VM';
     const serverType = isVPS ? 'VPS' : 'Linux';
     const namePrefix = `⚡ ${baseName}`;
     const escapedBase = baseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
