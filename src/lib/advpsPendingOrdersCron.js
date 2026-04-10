@@ -50,9 +50,12 @@ export async function checkAdvpsPendingOrders() {
         continue;
       }
 
-      const svc = services.find(s => s.ip) || (orderStatus === 'ASSIGNED' && services[0]) || null;
-      if (!svc) {
-        console.log(`${tag} Still pending (status: ${orderStatus})`);
+      // ADVPS gives a TEMP password during PENDING — real password only after COMPLETED
+      const isOrderFinal = orderStatus === 'COMPLETED' || orderStatus === 'ASSIGNED';
+
+      const svc = services.find(s => s.ip) || (isOrderFinal && services[0]) || null;
+      if (!svc || !isOrderFinal) {
+        console.log(`${tag} Not ready yet (status: ${orderStatus}, hasSvc: ${!!svc})`);
         results.push({ orderId: order._id, advpsOrderId: order.advpsOrderId, result: 'still_pending' });
         continue;
       }
@@ -63,27 +66,6 @@ export async function checkAdvpsPendingOrders() {
       let password = svc.password || '';
       const advpsServiceId = AdvpsAPI.extractServiceIdFromPurchaseService(svc);
       const expiryDate = svc.expiryDate ? new Date(svc.expiryDate) : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-
-      // Password may not be in first response — re-poll order details
-      if (!password && order.advpsOrderId) {
-        const pwPollDelays = [60000];
-        for (let p = 0; p < pwPollDelays.length; p++) {
-          await new Promise(r => setTimeout(r, pwPollDelays[p]));
-          try {
-            const retryRes = await advpsApi.getOrderDetails(order.advpsOrderId);
-            const retrySvc = (retryRes?.data?.services || [])[0];
-            if (retrySvc?.password) {
-              password = retrySvc.password;
-              if (retrySvc.username) username = retrySvc.username;
-              console.log(`${tag} Password from order details (poll ${p + 1})`);
-              break;
-            }
-            console.log(`${tag} Password poll ${p + 1}/${pwPollDelays.length}: not available yet`);
-          } catch (e) {
-            console.log(`${tag} Password poll ${p + 1} error: ${e.message}`);
-          }
-        }
-      }
 
       if (!ipAddress && advpsServiceId) {
         try {
@@ -100,7 +82,13 @@ export async function checkAdvpsPendingOrders() {
         continue;
       }
 
-      console.log(`${tag} ASSIGNED! IP=${ipAddress}, serviceId=${advpsServiceId}`);
+      if (!password) {
+        console.log(`${tag} Order ${orderStatus} but no password in response — skipping until next cycle`);
+        results.push({ orderId: order._id, advpsOrderId: order.advpsOrderId, result: 'no_password_yet' });
+        continue;
+      }
+
+      console.log(`${tag} COMPLETED! IP=${ipAddress}, serviceId=${advpsServiceId}, password=${password.substring(0, 4)}****`);
       await Order.findByIdAndUpdate(order._id, {
         status: 'active',
         provisioningStatus: 'active',
@@ -115,7 +103,7 @@ export async function checkAdvpsPendingOrders() {
       await NotificationService.notifyOrderCompleted(order.user, order, {
         ipAddress,
         username,
-        password: password || 'Check dashboard',
+        password,
       });
       WhatsAppService.notifyOrderViaWhatsApp(order.user, order).catch(() => {});
 

@@ -936,9 +936,12 @@ class AutoProvisioningService {
     // If ADVPS hasn't assigned yet, mark as failed so the cron retries later.
     L.line(`[ADVPS] Checking order details for ${advpsOrderId}...`);
 
-    // Two polls + Phase-0 cron reduces getOrderDetails calls (counts toward 100 req / 15 min).
-    const pollDelays = [20000, 45000];
+    // ADVPS assigns a TEMPORARY password while order is PENDING.
+    // The REAL password only appears once order status is COMPLETED (~3-5 min).
+    // So we poll until COMPLETED, not just until we see an IP.
+    const pollDelays = [20000, 45000, 60000, 120000];
     let assignedService = null;
+    let orderCompleted = false;
 
     for (let i = 0; i < pollDelays.length; i++) {
       await new Promise(resolve => setTimeout(resolve, pollDelays[i]));
@@ -951,20 +954,20 @@ class AutoProvisioningService {
 
         L.line(`[ADVPS] Poll ${i + 1}/${pollDelays.length}: status=${orderStatus}, services=${services.length}`);
 
-        if (services.length > 0 && services[0].ip) {
-          assignedService = services[0];
-          L.line(`[ADVPS] Service assigned with IP: ${assignedService.ip}`);
-          break;
-        }
-
-        if (orderStatus === 'ASSIGNED' && services.length > 0) {
-          assignedService = services[0];
-          L.line(`[ADVPS] Order ASSIGNED, service found`);
-          break;
-        }
-
         if (orderStatus === 'FAILED' || orderStatus === 'CANCELLED' || orderStatus === 'REJECTED') {
           throw new Error(`ADVPS order ${advpsOrderId} reached terminal status: ${orderStatus}`);
+        }
+
+        if (services.length > 0 && services[0].ip) {
+          assignedService = services[0];
+
+          if (orderStatus === 'COMPLETED' || orderStatus === 'ASSIGNED') {
+            orderCompleted = true;
+            L.line(`[ADVPS] Order ${orderStatus} with IP: ${assignedService.ip} — password is final`);
+            break;
+          }
+
+          L.line(`[ADVPS] Service has IP ${assignedService.ip} but order still ${orderStatus} — password may change, continuing polls...`);
         }
       } catch (pollErr) {
         if (pollErr.message.includes('terminal status')) throw pollErr;
@@ -972,7 +975,7 @@ class AutoProvisioningService {
       }
     }
 
-    // --- Extract credentials if assigned ---
+    // --- Extract credentials ---
     let ipAddress = '';
     let username = '';
     let password = '';
@@ -982,37 +985,19 @@ class AutoProvisioningService {
     if (assignedService) {
       ipAddress = assignedService.ip || '';
       username = assignedService.username || (isWindowsProduct ? 'Administrator' : 'root');
-      password = assignedService.password || '';
       advpsServiceId = AdvpsAPI.extractServiceIdFromPurchaseService(assignedService);
       if (assignedService.expiryDate) expiryDate = new Date(assignedService.expiryDate);
+
+      // Only trust the password if order reached COMPLETED/ASSIGNED
+      if (orderCompleted) {
+        password = assignedService.password || '';
+      }
 
       L.kv('[ADVPS] Service ID', advpsServiceId);
       L.kv('[ADVPS] IP', ipAddress);
       L.kv('[ADVPS] Username', username);
-      L.kv('[ADVPS] Password (masked)', password ? password.substring(0, 4) + '****' : '(blank)');
-      L.kv('[ADVPS] Expiry', expiryDate.toISOString());
-
-      // Password may not be in the first poll — always re-poll order details if missing
-      if (!password && advpsOrderId) {
-        L.line(`[ADVPS] No password yet, polling order details for password...`);
-        const pwPollDelays = [60000];
-        for (let p = 0; p < pwPollDelays.length; p++) {
-          await new Promise(r => setTimeout(r, pwPollDelays[p]));
-          try {
-            const detailsRes = await this.advpsApi.getOrderDetails(advpsOrderId);
-            const svc = (detailsRes?.data?.services || [])[0];
-            if (svc?.password) {
-              password = svc.password;
-              L.kv(`[ADVPS] Password from order details (poll ${p + 1})`, password.substring(0, 4) + '****');
-              if (svc.username) username = svc.username;
-              break;
-            }
-            L.line(`[ADVPS] Password poll ${p + 1}/${pwPollDelays.length}: not available yet`);
-          } catch (e) {
-            L.line(`[ADVPS] Password poll ${p + 1} error: ${e.message}`);
-          }
-        }
-      }
+      L.kv('[ADVPS] Password (masked)', password ? password.substring(0, 4) + '****' : '(not final yet)');
+      L.kv('[ADVPS] Order completed', orderCompleted);
 
       // If assigned but no IP, try get-ip
       if (!ipAddress && advpsServiceId) {
@@ -1027,12 +1012,12 @@ class AutoProvisioningService {
     }
 
     // --- Update order ---
-    const fullyProvisioned = !!(ipAddress && advpsServiceId);
+    const fullyProvisioned = !!(ipAddress && advpsServiceId && password);
     const resolvedUsername = username || (isWindowsProduct ? 'Administrator' : 'root');
     const updateData = {
       status: fullyProvisioned ? 'active' : 'confirmed',
       provisioningStatus: fullyProvisioned ? 'active' : 'provisioning',
-      provisioningError: fullyProvisioned ? '' : `ADVPS_PENDING: Order ${advpsOrderId} placed, awaiting assignment. Cron will check.`,
+      provisioningError: fullyProvisioned ? '' : `ADVPS_PENDING: Order ${advpsOrderId} placed, awaiting ${!ipAddress ? 'IP' : !password ? 'final password (order not yet COMPLETED)' : 'assignment'}. Cron will check.`,
       provider: 'advps',
       advpsServiceId: advpsServiceId || undefined,
       advpsOrderId,
