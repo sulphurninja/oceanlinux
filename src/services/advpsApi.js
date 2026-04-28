@@ -105,8 +105,8 @@ class AdvpsAPI {
     return httpFetch(`/api/v1/services/${serviceId}/get-ip`, { method: 'POST' });
   }
 
-  generatePassword(serviceId) {
-    return httpFetch(`/api/v1/services/${serviceId}/generate-password`, { method: 'POST' });
+  generatePassword(serviceId, { timeoutMs = 60_000 } = {}) {
+    return httpFetch(`/api/v1/services/${serviceId}/generate-password`, { method: 'POST', timeoutMs });
   }
 
   rebuild(serviceId, os) {

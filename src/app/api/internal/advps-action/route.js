@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 const AdvpsAPI = require('@/services/advpsApi');
+const { runAdvpsPostRebuildGeneratePasswordFlow } = require('@/lib/advpsPostRebuildFlow');
 
 function validateInternalKey(request) {
   const key = request.headers.get('x-internal-key');
@@ -93,6 +94,10 @@ export async function POST(request) {
 
         if (taskId) {
           (async () => {
+            try {
+              await connectDB();
+            } catch (_) { /* already connected */ }
+
             const pollDelays = [10000, 15000, 20000, 30000, 60000, 60000];
             for (let i = 0; i < pollDelays.length; i++) {
               await new Promise(r => setTimeout(r, pollDelays[i]));
@@ -103,56 +108,14 @@ export async function POST(request) {
                 console.log(`[INTERNAL-ADVPS] Rebuild poll ${i + 1}: status=${taskStatus}`);
 
                 if (taskStatus === 'COMPLETED' || taskStatus === 'SUCCESS' || taskStatus === 'DONE') {
-                  console.log(`[INTERNAL-ADVPS] Rebuild completed for ${serviceId}, starting post-rebuild password flow...`);
+                  console.log(`[INTERNAL-ADVPS] Rebuild completed for ${serviceId}; generate-password → save on order`);
 
-                  // Start the server first (LXC may be stopped after rebuild)
-                  try {
-                    await api.start(serviceId);
-                    console.log(`[INTERNAL-ADVPS] Post-rebuild start command sent for ${serviceId}`);
-                  } catch (startErr) {
-                    console.log(`[INTERNAL-ADVPS] Post-rebuild start: ${startErr.message} (may already be running)`);
-                  }
-
-                  await new Promise(r => setTimeout(r, 45000));
-
-                  const passRetryDelays = [0, 20000, 30000, 60000];
-                  for (let attempt = 0; attempt < passRetryDelays.length; attempt++) {
-                    if (attempt > 0) await new Promise(r => setTimeout(r, passRetryDelays[attempt]));
-                    try {
-                      const passRes = await api.generatePassword(serviceId);
-                      const pd = passRes?.data || {};
-                      const newPass = pd.password || pd.newPassword || pd.existingPassword;
-                      console.log(`[INTERNAL-ADVPS] generate-password response: status=${pd.status}, hasPassword=${!!pd.password}, hasNewPassword=${!!pd.newPassword}, hasExistingPassword=${!!pd.existingPassword}`);
-                      if (newPass) {
-                        console.log(`[INTERNAL-ADVPS] 🔑 POST-REBUILD PASSWORD: ${newPass}`);
-                        for (let db = 0; db < 5; db++) {
-                          try {
-                            await Order.findByIdAndUpdate(orderId, { password: newPass, provisioningStatus: 'active' });
-                            console.log(`[INTERNAL-ADVPS] ✅ Password saved (attempt ${db + 1})`);
-                            return;
-                          } catch (e) {
-                            if (db < 4) await new Promise(r => setTimeout(r, 2000));
-                          }
-                        }
-                        return;
-                      }
-                    } catch (passErr) {
-                      const msg = passErr.message || '';
-                      console.log(`[INTERNAL-ADVPS] generate-password error (attempt ${attempt + 1}): ${msg}`);
-
-                      const existingMatch = msg.match(/existingPassword[:\s]+"?([^"}\s,]+)/);
-                      if (existingMatch) {
-                        console.log(`[INTERNAL-ADVPS] 🔑 Extracted existingPassword from error: ${existingMatch[1]}`);
-                        await Order.findByIdAndUpdate(orderId, { password: existingMatch[1], provisioningStatus: 'active' });
-                        return;
-                      }
-
-                      if (msg.includes('must be running')) continue;
-                    }
-                  }
-                  await Order.findByIdAndUpdate(orderId, {
-                    provisioningStatus: 'active',
-                    provisioningError: 'Rebuild completed but password could not be retrieved. Check ADVPS dashboard.',
+                  await runAdvpsPostRebuildGeneratePasswordFlow({
+                    api,
+                    Order,
+                    rebuildOrderId: orderId,
+                    rebuildServiceId: serviceId,
+                    logPrefix: '[INTERNAL-ADVPS]',
                   });
                   return;
                 }
