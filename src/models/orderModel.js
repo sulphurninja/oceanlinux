@@ -54,6 +54,10 @@ const orderSchema = new mongoose.Schema({
     advpsProductId: { type: String },
     advpsOrderId: { type: String },
 
+    // ADVPS rebuild/format rate-limiting (max 10 per calendar month)
+    advpsRebuildCount: { type: Number, default: 0 },
+    advpsRebuildCountMonth: { type: String, default: '' }, // "YYYY-MM" of the current window
+
     provisioningStatus: {
         type: String,
         enum: ['pending', 'provisioning', 'active', 'failed', 'suspended', 'terminated'],

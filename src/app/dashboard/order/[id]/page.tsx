@@ -80,6 +80,8 @@ interface Order {
   hostycareServiceId?: string;
   smartvpsServiceId?: string;
   advpsServiceId?: string;
+  advpsRebuildCount?: number;
+  advpsRebuildCountMonth?: string;
   slotIpPackageId?: string;
   slotIpId?: string;
   provisioningStatus?: string;
@@ -2391,6 +2393,17 @@ const OrderDetails = () => {
                           </AlertDescription>
                         </Alert>
 
+                        {order && provider === 'advps' && (() => {
+                          const currentMonth = new Date().toISOString().slice(0, 7);
+                          const rebuildCount = (order.advpsRebuildCountMonth === currentMonth ? order.advpsRebuildCount : 0) ?? 0;
+                          const rebuildsRemaining = Math.max(0, 10 - rebuildCount);
+                          return (
+                            <p className="text-xs text-muted-foreground text-center">
+                              <span className="font-medium text-foreground">{rebuildsRemaining}</span> rebuild{rebuildsRemaining !== 1 ? 's' : ''} remaining this month &mdash; limit is 10/month, resets on the 1st.
+                            </p>
+                          );
+                        })()}
+
                         <div className="flex gap-3 pt-4">
                           <Button
                             variant="outline"
@@ -2568,19 +2581,54 @@ const OrderDetails = () => {
                       <div className="space-y-2">
                         <h4 className="font-medium text-xs text-muted-foreground uppercase tracking-wide">Advanced Actions</h4>
 
-                        <Button
-                          variant="destructive"
-                          onClick={() => handleAdvancedAction((provider === 'smartvps' || provider === 'advps') ? 'format' : 'reinstall')}
-                          disabled={!!actionBusy}
-                          className="w-full h-10 gap-2 text-sm"
-                        >
-                          {(actionBusy === 'reinstall' || actionBusy === 'format') ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <HardDriveIcon className="h-4 w-4" />
-                          )}
-                          {provider === 'smartvps' ? 'Format Server' : 'Reinstall OS'}
-                        </Button>
+                        {(() => {
+                          const isAdvps = provider === 'advps';
+                          const currentMonth = new Date().toISOString().slice(0, 7);
+                          const rebuildCount = (order.advpsRebuildCountMonth === currentMonth ? order.advpsRebuildCount : 0) ?? 0;
+                          const rebuildsRemaining = Math.max(0, 10 - rebuildCount);
+                          const rebuildLimitReached = isAdvps && rebuildsRemaining === 0;
+
+                          return (
+                            <>
+                              {isAdvps && (
+                                <div className={cn(
+                                  "flex items-center justify-between text-xs px-2.5 py-1.5 rounded-md",
+                                  rebuildLimitReached
+                                    ? "bg-destructive/10 text-destructive border border-destructive/20"
+                                    : "bg-muted/60 text-muted-foreground"
+                                )}>
+                                  <span className="flex items-center gap-1.5">
+                                    <HardDriveIcon className="h-3 w-3" />
+                                    Rebuilds this month
+                                  </span>
+                                  <span className={cn("font-semibold tabular-nums", rebuildLimitReached && "text-destructive")}>
+                                    {rebuildCount}/10
+                                  </span>
+                                </div>
+                              )}
+
+                              {rebuildLimitReached && (
+                                <p className="text-xs text-destructive px-1">
+                                  Monthly rebuild limit reached. Resets on the 1st of next month.
+                                </p>
+                              )}
+
+                              <Button
+                                variant="destructive"
+                                onClick={() => handleAdvancedAction((provider === 'smartvps' || provider === 'advps') ? 'format' : 'reinstall')}
+                                disabled={!!actionBusy || rebuildLimitReached}
+                                className="w-full h-10 gap-2 text-sm"
+                              >
+                                {(actionBusy === 'reinstall' || actionBusy === 'format') ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <HardDriveIcon className="h-4 w-4" />
+                                )}
+                                {provider === 'smartvps' ? 'Format Server' : provider === 'advps' ? `Rebuild/Format Server${isAdvps && !rebuildLimitReached ? ` (${rebuildsRemaining} left)` : ''}` : 'Reinstall OS'}
+                              </Button>
+                            </>
+                          );
+                        })()}
                       </div>
 
                       {/* Service Status */}

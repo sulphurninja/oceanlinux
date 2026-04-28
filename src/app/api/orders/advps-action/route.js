@@ -174,6 +174,28 @@ export async function POST(request) {
         const os = payload?.templateId || payload?.os;
         if (!os) return NextResponse.json({ message: 'OS template is required for rebuild' }, { status: 400 });
 
+        // Rate-limit: max 10 rebuilds per calendar month
+        const REBUILD_LIMIT = 10;
+        const currentMonth = new Date().toISOString().slice(0, 7); // "YYYY-MM"
+        const storedMonth = order.advpsRebuildCountMonth || '';
+        const currentCount = storedMonth === currentMonth ? (order.advpsRebuildCount || 0) : 0;
+
+        if (currentCount >= REBUILD_LIMIT) {
+          return NextResponse.json({
+            message: `Rebuild limit reached. You can only rebuild/format your server ${REBUILD_LIMIT} times per month. Your limit resets on the 1st of next month.`,
+            code: 'REBUILD_LIMIT_REACHED',
+            rebuildsUsed: currentCount,
+            rebuildsRemaining: 0,
+            resetsOn: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1).toISOString(),
+          }, { status: 429 });
+        }
+
+        // Increment count before calling API (optimistic lock)
+        await Order.findByIdAndUpdate(orderId, {
+          advpsRebuildCount: currentCount + 1,
+          advpsRebuildCountMonth: currentMonth,
+        });
+
         const rebuildRes = await api.rebuild(serviceId, os);
         const taskId = rebuildRes?.data?.taskId;
 
