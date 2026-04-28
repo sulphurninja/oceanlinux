@@ -4,6 +4,43 @@ import Order from '@/models/orderModel';
 import { getDataFromToken } from '@/helper/getDataFromToken';
 const AdvpsAPI = require('@/services/advpsApi');
 
+/**
+ * ADVPS returns a placeholder password until the purchase order is COMPLETED/ASSIGNED.
+ * Same after rebuild/format — only trust credentials from getOrderDetails (not generate-password).
+ */
+async function waitForAdvpsFinalServiceFromOrderDetails(api, advpsOrderId) {
+  const delaysMs = [20000, 45000, 60000, 120000, 60000, 60000];
+  for (let i = 0; i < delaysMs.length; i++) {
+    await new Promise((r) => setTimeout(r, delaysMs[i]));
+    try {
+      const detailsRes = await api.getOrderDetails(advpsOrderId);
+      const orderDetails = detailsRes?.data || detailsRes;
+      const orderStatus = (orderDetails?.order?.status || '').toUpperCase();
+      const services = orderDetails?.services || [];
+
+      console.log(`[ADVPS-ACTION] Order-details poll ${i + 1}/${delaysMs.length}: status=${orderStatus}, services=${services.length}`);
+
+      if (['FAILED', 'CANCELLED', 'REJECTED'].includes(orderStatus)) {
+        throw new Error(`ADVPS order reached terminal status: ${orderStatus}`);
+      }
+
+      if (services.length > 0 && services[0].ip) {
+        const svc = services[0];
+        if (orderStatus === 'COMPLETED' || orderStatus === 'ASSIGNED') {
+          const pwd = (svc.password || '').trim();
+          if (pwd) {
+            return svc;
+          }
+        }
+      }
+    } catch (e) {
+      if (String(e.message || '').includes('terminal status')) throw e;
+      console.error(`[ADVPS-ACTION] getOrderDetails poll ${i + 1} error:`, e.message);
+    }
+  }
+  return null;
+}
+
 export async function GET(request) {
   try {
     await connectDB();
@@ -242,8 +279,13 @@ export async function POST(request) {
         if (taskId) {
           const rebuildOrderId = orderId;
           const rebuildServiceId = serviceId;
+          const advpsOrderIdForRebuild = order.advpsOrderId;
 
           (async () => {
+            try {
+              await connectDB();
+            } catch (_) { /* already connected */ }
+
             const pollDelays = [10000, 15000, 20000, 30000, 60000, 60000];
             for (let i = 0; i < pollDelays.length; i++) {
               await new Promise(r => setTimeout(r, pollDelays[i]));
@@ -254,9 +296,8 @@ export async function POST(request) {
                 console.log(`[ADVPS-ACTION] Rebuild poll ${i + 1}: status=${taskStatus}, progress=${taskData.progress}`);
 
                 if (taskStatus === 'COMPLETED' || taskStatus === 'SUCCESS' || taskStatus === 'DONE') {
-                  console.log(`[ADVPS-ACTION] Rebuild task completed for ${rebuildServiceId}, starting post-rebuild password flow...`);
+                  console.log(`[ADVPS-ACTION] Rebuild task completed for ${rebuildServiceId}, polling getOrderDetails for final credentials (no generate-password)...`);
 
-                  // Start the server first (LXC may be stopped after rebuild)
                   try {
                     await api.start(rebuildServiceId);
                     console.log(`[ADVPS-ACTION] Post-rebuild start command sent for ${rebuildServiceId}`);
@@ -264,60 +305,55 @@ export async function POST(request) {
                     console.log(`[ADVPS-ACTION] Post-rebuild start: ${startErr.message} (may already be running)`);
                   }
 
-                  // Wait for the server to fully boot
                   await new Promise(r => setTimeout(r, 45000));
 
-                  const passRetryDelays = [0, 20000, 30000, 60000];
-                  for (let attempt = 0; attempt < passRetryDelays.length; attempt++) {
-                    if (attempt > 0) await new Promise(r => setTimeout(r, passRetryDelays[attempt]));
-                    try {
-                      const passRes = await api.generatePassword(rebuildServiceId);
-                      const pd = passRes?.data || {};
-                      const newPass = pd.password || pd.newPassword || pd.existingPassword;
-                      console.log(`[ADVPS-ACTION] generate-password response: status=${pd.status}, hasPassword=${!!pd.password}, hasNewPassword=${!!pd.newPassword}, hasExistingPassword=${!!pd.existingPassword}`);
-                      if (newPass) {
-                        console.log(`[ADVPS-ACTION] 🔑 POST-REBUILD PASSWORD for service=${rebuildServiceId} order=${rebuildOrderId}: ${newPass}`);
-
-                        for (let dbAttempt = 0; dbAttempt < 5; dbAttempt++) {
-                          try {
-                            await Order.findByIdAndUpdate(rebuildOrderId, {
-                              password: newPass,
-                              provisioningStatus: 'active',
-                            });
-                            console.log(`[ADVPS-ACTION] ✅ Post-rebuild password SAVED (attempt ${dbAttempt + 1})`);
-                            return;
-                          } catch (dbErr) {
-                            console.error(`[ADVPS-ACTION] ❌ DB save attempt ${dbAttempt + 1}/5 FAILED:`, dbErr.message);
-                            if (dbAttempt < 4) await new Promise(r => setTimeout(r, 2000));
-                          }
-                        }
-                        console.error(`[ADVPS-ACTION] 🚨 CRITICAL: Post-rebuild password ALL DB saves failed! service=${rebuildServiceId} order=${rebuildOrderId} password=${newPass}`);
-                        return;
-                      }
-                    } catch (passErr) {
-                      const msg = passErr.message || '';
-                      console.log(`[ADVPS-ACTION] generate-password error (attempt ${attempt + 1}): ${msg}`);
-
-                      // Extract password from error response if available (e.g. "already exists" with existingPassword)
-                      const existingMatch = msg.match(/existingPassword[:\s]+"?([^"}\s,]+)/);
-                      if (existingMatch) {
-                        const extractedPass = existingMatch[1];
-                        console.log(`[ADVPS-ACTION] 🔑 Extracted existingPassword from error: ${extractedPass}`);
-                        await Order.findByIdAndUpdate(rebuildOrderId, { password: extractedPass, provisioningStatus: 'active' });
-                        return;
-                      }
-
-                      if (msg.includes('must be running')) {
-                        console.log(`[ADVPS-ACTION] Server not ready for password gen (attempt ${attempt + 1})`);
-                        continue;
-                      }
-                    }
+                  if (!advpsOrderIdForRebuild) {
+                    console.error(`[ADVPS-ACTION] Post-rebuild: no advpsOrderId on order ${rebuildOrderId}`);
+                    await Order.findByIdAndUpdate(rebuildOrderId, {
+                      provisioningStatus: 'active',
+                      provisioningError: 'Rebuild completed but this order has no ADVPS order id stored — use Sync to refresh credentials from ADVPS.',
+                    });
+                    return;
                   }
-                  console.error(`[ADVPS-ACTION] Post-rebuild password gen exhausted all retries for ${rebuildServiceId}`);
-                  await Order.findByIdAndUpdate(rebuildOrderId, {
-                    provisioningStatus: 'active',
-                    provisioningError: 'Rebuild completed but password could not be retrieved. Check ADVPS dashboard for the new password.',
-                  });
+
+                  try {
+                    const svc = await waitForAdvpsFinalServiceFromOrderDetails(api, advpsOrderIdForRebuild);
+                    if (svc) {
+                      const updateFields = {
+                        password: svc.password,
+                        provisioningStatus: 'active',
+                        provisioningError: '',
+                      };
+                      if (svc.username) updateFields.username = svc.username;
+                      if (svc.ip) updateFields.ipAddress = svc.ip;
+                      if (svc.os) updateFields.os = svc.os;
+
+                      for (let dbAttempt = 0; dbAttempt < 5; dbAttempt++) {
+                        try {
+                          await Order.findByIdAndUpdate(rebuildOrderId, updateFields);
+                          console.log(`[ADVPS-ACTION] ✅ Post-rebuild credentials from getOrderDetails saved (attempt ${dbAttempt + 1})`);
+                          return;
+                        } catch (dbErr) {
+                          console.error(`[ADVPS-ACTION] ❌ DB save attempt ${dbAttempt + 1}/5 FAILED:`, dbErr.message);
+                          if (dbAttempt < 4) await new Promise(r => setTimeout(r, 2000));
+                        }
+                      }
+                      console.error(`[ADVPS-ACTION] 🚨 Post-rebuild: credentials from ADVPS but DB save failed for order ${rebuildOrderId}`);
+                      return;
+                    }
+
+                    console.error(`[ADVPS-ACTION] Post-rebuild: getOrderDetails did not return final password in time for order ${rebuildOrderId}`);
+                    await Order.findByIdAndUpdate(rebuildOrderId, {
+                      provisioningStatus: 'active',
+                      provisioningError: 'Rebuild completed but final credentials were not ready yet — use Sync in a few minutes to pull the real password from ADVPS.',
+                    });
+                  } catch (credErr) {
+                    console.error(`[ADVPS-ACTION] Post-rebuild credential poll failed:`, credErr.message);
+                    await Order.findByIdAndUpdate(rebuildOrderId, {
+                      provisioningStatus: 'failed',
+                      provisioningError: `Post-rebuild: ${credErr.message}`,
+                    });
+                  }
                   return;
                 }
                 if (taskStatus === 'FAILED' || taskStatus === 'ERROR') {
