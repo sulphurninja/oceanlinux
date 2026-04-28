@@ -4,10 +4,13 @@ import Order from '@/models/orderModel';
 import { getDataFromToken } from '@/helper/getDataFromToken';
 const AdvpsAPI = require('@/services/advpsApi');
 
+/** Wait this long after order-details polling fails before trying generate-password (ADVPS post-rebuild). */
+const ADVPS_REBUILD_GENERATE_PASSWORD_FALLBACK_DELAY_MS = 4.5 * 60 * 1000;
+
 /**
  * ADVPS returns a placeholder password until the purchase order is COMPLETED/ASSIGNED.
- * After rebuild we poll this first; if it never yields a final password, callers may fall back
- * to generate-password with spaced retries.
+ * After rebuild we poll this first; if it never yields a final password, callers wait ~4–5 min
+ * then fall back to generate-password with spaced retries.
  */
 async function waitForAdvpsFinalServiceFromOrderDetails(api, advpsOrderId) {
   const delaysMs = [20000, 45000, 60000, 120000, 60000, 60000];
@@ -343,7 +346,11 @@ export async function POST(request) {
                       return;
                     }
 
-                    console.log(`[ADVPS-ACTION] Post-rebuild: getOrderDetails did not return final password in time — trying generate-password fallback`);
+                    console.log(
+                      `[ADVPS-ACTION] Post-rebuild: getOrderDetails did not return final password in time — ` +
+                      `waiting ${ADVPS_REBUILD_GENERATE_PASSWORD_FALLBACK_DELAY_MS / 60000} min before generate-password fallback`
+                    );
+                    await new Promise((r) => setTimeout(r, ADVPS_REBUILD_GENERATE_PASSWORD_FALLBACK_DELAY_MS));
 
                     const passRetryDelays = [0, 20000, 30000, 60000];
                     for (let attempt = 0; attempt < passRetryDelays.length; attempt++) {
