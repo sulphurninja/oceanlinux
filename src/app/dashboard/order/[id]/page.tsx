@@ -1565,11 +1565,18 @@ const OrderDetails = () => {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={fetchOrder}
-                disabled={loading}
+                onClick={() => {
+                  // For ADVPS orders, do a full provider sync (fetches live credentials from ADVPS)
+                  if (order && getProviderFromOrder(order, ipStock) === 'advps' && order.advpsServiceId) {
+                    loadServiceDetails();
+                  } else {
+                    fetchOrder();
+                  }
+                }}
+                disabled={loading || serviceLoading}
                 className="h-9 gap-2"
               >
-                <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                <RefreshCw className={`h-4 w-4 ${(loading || serviceLoading) ? 'animate-spin' : ''}`} />
                 <span className="hidden sm:inline">Sync</span>
               </Button>
             </div>

@@ -22,7 +22,10 @@ export async function GET(request) {
 
     const api = new AdvpsAPI();
     let details = null;
+    const dbUpdates = { lastSyncTime: new Date() };
+    let credentialsUpdated = false;
 
+    // Fetch live running status
     try {
       const statusRes = await api.status(serviceId);
       const d = statusRes?.data || statusRes;
@@ -42,9 +45,40 @@ export async function GET(request) {
       };
     }
 
-    await Order.findByIdAndUpdate(orderId, { lastSyncTime: new Date() });
+    // Pull full order details from ADVPS to sync credentials
+    if (order.advpsOrderId) {
+      try {
+        const detailsRes = await api.getOrderDetails(order.advpsOrderId);
+        const orderDetails = detailsRes?.data || detailsRes;
+        const services = orderDetails?.services || [];
 
-    return NextResponse.json({ success: true, serviceId, details });
+        if (services.length > 0) {
+          const svc = services[0];
+          const freshIp       = svc.ip       || '';
+          const freshUsername = svc.username  || '';
+          const freshPassword = svc.password  || '';
+          const freshOs       = svc.os        || '';
+
+          if (freshIp       && freshIp       !== order.ipAddress) { dbUpdates.ipAddress = freshIp;       credentialsUpdated = true; }
+          if (freshUsername && freshUsername  !== order.username)  { dbUpdates.username  = freshUsername; credentialsUpdated = true; }
+          if (freshPassword && freshPassword  !== order.password)  { dbUpdates.password  = freshPassword; credentialsUpdated = true; }
+          if (freshOs       && freshOs        !== order.os)        { dbUpdates.os        = freshOs;       credentialsUpdated = true; }
+
+          if (credentialsUpdated) {
+            console.log(`[ADVPS-ACTION][GET] Credentials updated from getOrderDetails for order ${orderId}`);
+          }
+
+          // Merge freshIp into details so the caller gets the latest IP too
+          if (freshIp) details.ip = freshIp;
+        }
+      } catch (detailsErr) {
+        console.error('[ADVPS-ACTION][GET] getOrderDetails error:', detailsErr.message);
+      }
+    }
+
+    await Order.findByIdAndUpdate(orderId, dbUpdates);
+
+    return NextResponse.json({ success: true, serviceId, details, syncResult: { credentialsUpdated, lastSyncTime: dbUpdates.lastSyncTime } });
   } catch (error) {
     console.error('[ADVPS-ACTION][GET] Error:', error.message);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
@@ -315,8 +349,45 @@ export async function POST(request) {
         try {
           const statusRes = await api.status(serviceId);
           const d = statusRes?.data || statusRes;
-          await Order.findByIdAndUpdate(orderId, { lastSyncTime: new Date() });
-          result = { synced: true, message: 'ADVPS status synced', runningStatus: d.runningStatus };
+
+          const syncUpdates = { lastSyncTime: new Date() };
+          let syncCredentialsUpdated = false;
+
+          // Also pull full order details to sync credentials
+          if (order.advpsOrderId) {
+            try {
+              const detailsRes = await api.getOrderDetails(order.advpsOrderId);
+              const orderDetails = detailsRes?.data || detailsRes;
+              const services = orderDetails?.services || [];
+
+              if (services.length > 0) {
+                const svc = services[0];
+                const freshIp       = svc.ip       || '';
+                const freshUsername = svc.username  || '';
+                const freshPassword = svc.password  || '';
+                const freshOs       = svc.os        || '';
+
+                if (freshIp       && freshIp       !== order.ipAddress) { syncUpdates.ipAddress = freshIp;       syncCredentialsUpdated = true; }
+                if (freshUsername && freshUsername  !== order.username)  { syncUpdates.username  = freshUsername; syncCredentialsUpdated = true; }
+                if (freshPassword && freshPassword  !== order.password)  { syncUpdates.password  = freshPassword; syncCredentialsUpdated = true; }
+                if (freshOs       && freshOs        !== order.os)        { syncUpdates.os        = freshOs;       syncCredentialsUpdated = true; }
+
+                if (syncCredentialsUpdated) {
+                  console.log(`[ADVPS-ACTION][SYNC] Credentials updated from getOrderDetails for order ${orderId}`);
+                }
+              }
+            } catch (detailsErr) {
+              console.error('[ADVPS-ACTION][SYNC] getOrderDetails error:', detailsErr.message);
+            }
+          }
+
+          await Order.findByIdAndUpdate(orderId, syncUpdates);
+          result = {
+            synced: true,
+            message: syncCredentialsUpdated ? 'ADVPS status synced and credentials updated' : 'ADVPS status synced',
+            runningStatus: d.runningStatus,
+            credentialsUpdated: syncCredentialsUpdated,
+          };
         } catch (err) {
           result = { synced: false, message: `Sync failed: ${err.message}` };
         }
