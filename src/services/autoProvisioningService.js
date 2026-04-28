@@ -774,7 +774,8 @@ class AutoProvisioningService {
     const productNameLower = String(order.productName).toLowerCase();
     const isWindowsProduct =
       productNameLower.includes('windows') ||
-      productNameLower.includes('rdp');
+      productNameLower.includes('rdp') ||
+      productNameLower.includes('vps');
 
     L.kv('[ADVPS] isWindowsProduct', isWindowsProduct);
 
