@@ -42,12 +42,16 @@ async function httpFetch(path, { method = 'GET', jsonBody, timeoutMs = 60_000 } 
     if (!res.ok) {
       const detail = typeof data === 'string' ? data : (data?.message || `HTTP ${res.status}`);
       const rateHint = res.status === 429 ? ' [ADVPS limit: 100 requests / 15 min per API key]' : '';
-      throw new Error(`ADVPS ${method} ${path} failed: ${detail}${rateHint}`);
+      const err = new Error(`ADVPS ${method} ${path} failed: ${detail}${rateHint}`);
+      err.status = res.status;
+      err.advpsBody = typeof data === 'object' && data !== null ? data : undefined;
+      throw err;
     }
 
     return data;
   } catch (e) {
     if (e.name === 'AbortError') throw new Error('ADVPS API timeout');
+    if (typeof e.status === 'number') throw e;
     throw new Error(`ADVPS fetch error: ${e.message}`);
   } finally {
     clearTimeout(t);
@@ -107,6 +111,11 @@ class AdvpsAPI {
 
   generatePassword(serviceId, { timeoutMs = 60_000 } = {}) {
     return httpFetch(`/api/v1/services/${serviceId}/generate-password`, { method: 'POST', timeoutMs });
+  }
+
+  resetMac(serviceId) {
+    const id = encodeURIComponent(String(serviceId));
+    return httpFetch(`/api/v1/services/${id}/reset-mac`, { method: 'POST' });
   }
 
   rebuild(serviceId, os) {

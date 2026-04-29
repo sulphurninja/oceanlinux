@@ -68,6 +68,32 @@ export async function POST(request) {
         return NextResponse.json({ success: true, result: res });
       }
 
+      case 'resetmac':
+      case 'reset-mac': {
+        try {
+          const macRes = await api.resetMac(serviceId);
+          await Order.findByIdAndUpdate(orderId, { lastAction: 'resetmac', lastActionTime: new Date() });
+          return NextResponse.json({ success: true, result: macRes?.data || macRes });
+        } catch (macErr) {
+          const status = macErr?.status;
+          if (status === 429) {
+            return NextResponse.json({
+              success: false,
+              error: 'MAC reset is only allowed once every 24 hours without an active MAC reset subscription.',
+              code: 'MAC_RESET_RATE_LIMIT',
+            }, { status: 429 });
+          }
+          if (status === 404) {
+            return NextResponse.json({
+              success: false,
+              error: 'Service not found or MAC reset is not supported for this assignment (VPS only).',
+              code: 'MAC_RESET_NOT_APPLICABLE',
+            }, { status: 404 });
+          }
+          throw macErr;
+        }
+      }
+
       case 'status': {
         try {
           const statusRes = await api.status(serviceId);

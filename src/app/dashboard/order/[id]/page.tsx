@@ -552,6 +552,26 @@ const OrderDetails = () => {
     return false;
   };
 
+  /** ADVPS reset-mac is VPS-only; omit the control when stock or sync says LINUX/LXC. */
+  const isAdvpsMacResetBlockedByServiceType = (stock: IPStock | null, details: any): boolean => {
+    const raw = stock as Record<string, unknown> | null;
+    const dc = raw?.defaultConfigurations as
+      | Record<string, unknown>
+      | Map<string, unknown>
+      | undefined;
+    let adv: { vmType?: string } | undefined;
+    if (dc && typeof (dc as Map<string, unknown>).get === 'function') {
+      adv = (dc as Map<string, unknown>).get('advps') as { vmType?: string } | undefined;
+    } else if (dc && typeof dc === 'object') {
+      adv = (dc as { advps?: { vmType?: string } }).advps;
+    }
+    const vm = String(adv?.vmType || '').toUpperCase();
+    if (vm === 'LXC' || vm === 'LINUX') return true;
+    const st = String(details?.details?.serviceType || '').toUpperCase();
+    if (st === 'LINUX' || st === 'LXC') return true;
+    return false;
+  };
+
   const fetchServerPowerState = async () => {
     if (!order) return;
 
@@ -682,6 +702,15 @@ const OrderDetails = () => {
           toast.info('If status doesn\'t update, please refresh the page.', {
             duration: 5000,
           });
+        } else if (action === 'resetmac') {
+          const r = data.result;
+          const oldM = r?.oldMacAddress;
+          const newM = r?.newMacAddress;
+          if (oldM && newM) {
+            toast.success(`MAC address updated: ${oldM} → ${newM}`);
+          } else {
+            toast.success('MAC address reset successfully');
+          }
         } else {
           toast.success(`Action "${action}" executed successfully`);
         }
@@ -695,7 +724,7 @@ const OrderDetails = () => {
           toast.success('Password updated in your records');
         }
       } else {
-        toast.error(data.error || `Failed to execute "${action}"`);
+        toast.error(data.error || data.message || `Failed to execute "${action}"`);
         // Refresh power state on error too
         if (['start', 'stop', 'restart'].includes(action) && (provider === 'hostycare' || provider === 'smartvps')) {
           await fetchServerPowerState();
@@ -1352,7 +1381,8 @@ const OrderDetails = () => {
         'renew': { label: 'Renewing', icon: Loader2, color: 'bg-primary/10 text-primary border-primary/20' },
         'reinstall': { label: 'Reinstalling', icon: Loader2, color: 'bg-muted text-muted-foreground border-border' },
         'format': { label: 'Formatting', icon: Loader2, color: 'bg-muted text-muted-foreground border-border' },
-        'changepassword': { label: 'Changing Password', icon: Loader2, color: 'bg-primary/10 text-primary border-primary/20' }
+        'changepassword': { label: 'Changing Password', icon: Loader2, color: 'bg-primary/10 text-primary border-primary/20' },
+        'resetmac': { label: 'Resetting MAC', icon: Loader2, color: 'bg-primary/10 text-primary border-primary/20' },
       };
 
       const actionConfig = actionLabels[actionBusy as keyof typeof actionLabels];
@@ -2217,12 +2247,13 @@ const OrderDetails = () => {
                           {order.lastAction === 'changepassword' && <KeyRound className="h-5 w-5 text-primary" />}
                           {order.lastAction === 'reinstall' && <HardDriveIcon className="h-5 w-5 text-primary" />}
                           {order.lastAction === 'format' && <HardDriveIcon className="h-5 w-5 text-primary" />}
+                          {order.lastAction === 'resetmac' && <Network className="h-5 w-5 text-primary" />}
                           {!order.lastAction && <Activity className="h-5 w-5 text-primary" />}
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="font-semibold text-foreground text-sm break-words">
                             {order.lastAction ?
-                              `Last action: ${order.lastAction.charAt(0).toUpperCase() + order.lastAction.slice(1)}`
+                              `Last action: ${order.lastAction === 'resetmac' ? 'Reset MAC' : order.lastAction.charAt(0).toUpperCase() + order.lastAction.slice(1)}`
                               : 'Server Activity'
                             }
                           </p>
@@ -2618,6 +2649,32 @@ const OrderDetails = () => {
                                 <p className="text-xs text-destructive px-1">
                                   Monthly rebuild limit reached. Resets on the 1st of next month.
                                 </p>
+                              )}
+
+                              {isAdvps && !isAdvpsMacResetBlockedByServiceType(ipStock, serviceDetails) && (
+                                <>
+                                  <Button
+                                    variant="outline"
+                                    onClick={() => {
+                                      const ok = window.confirm(
+                                        'Generate and apply a new MAC address on ADVPS? Without a MAC reset subscription this is limited to once per 24 hours. You may need to renew DHCP or adjust networking inside the VM.'
+                                      );
+                                      if (ok) void runServiceAction('resetmac');
+                                    }}
+                                    disabled={!!actionBusy}
+                                    className="w-full h-10 gap-2 text-sm"
+                                  >
+                                    {actionBusy === 'resetmac' ? (
+                                      <Loader2 className="h-4 w-4 animate-spin" />
+                                    ) : (
+                                      <Network className="h-4 w-4" />
+                                    )}
+                                    Reset MAC address
+                                  </Button>
+                                  <p className="text-xs text-muted-foreground px-1">
+                                    VPS (VM) services only. LXC/Linux containers are not supported by ADVPS for this action.
+                                  </p>
+                                </>
                               )}
 
                               <Button
