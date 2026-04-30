@@ -1,10 +1,12 @@
 import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 const IPStock = require('@/models/ipStockModel');
+import Company from '@/models/companyModel';
 const {
   toPlainConfigurations,
   mergeDefaultConfigurationsPlain,
 } = require('@/lib/advpsLiveStock');
+const { getCompanyVirtualizorAccounts } = require('@/lib/companyVirtualizor');
 
 export async function GET(request, { params }) {
     console.log('[IPSTOCK-ID][GET] === REQUEST START ===');
@@ -36,8 +38,35 @@ export async function GET(request, { params }) {
             return NextResponse.json({ message: 'IP Stock not found' }, { status: 404 });
         }
 
-        console.log('[IPSTOCK-ID][GET] Returning IPStock data');
-        return NextResponse.json(ipStock);
+        // Surface (without secrets) whether the linked company has Virtualizor
+        // automation enabled — the order page uses this to decide whether to
+        // show direct controls or the manual admin-approval UI. We expose the
+        // panel count so the UI can hint at fail-over availability without
+        // leaking hosts/keys.
+        let companyAutomation = null;
+        if (ipStock.company) {
+            try {
+                const company = await Company.findById(ipStock.company)
+                    .select('virtualizors virtualizor name')
+                    .lean();
+                const accounts = getCompanyVirtualizorAccounts(company);
+                if (accounts.length > 0) {
+                    companyAutomation = {
+                        provider: 'virtualizor',
+                        enabled: true,
+                        panelCount: accounts.length,
+                        companyName: company?.name,
+                    };
+                }
+            } catch (lookupErr) {
+                console.warn('[IPSTOCK-ID][GET] Company automation lookup failed:', lookupErr.message);
+            }
+        }
+
+        console.log('[IPSTOCK-ID][GET] Returning IPStock data', {
+            companyAutomation: companyAutomation ? companyAutomation.provider : 'none',
+        });
+        return NextResponse.json({ ...ipStock, companyAutomation });
     } catch (error) {
         console.error('[IPSTOCK-ID][GET] === ERROR ===');
         console.error('[IPSTOCK-ID][GET] Error type:', error.constructor.name);

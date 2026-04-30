@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
+import IPStock from '@/models/ipStockModel';
+import Company from '@/models/companyModel';
 import { getDataFromToken } from '@/helper/getDataFromToken';
 import { execSync } from 'child_process';
 const HostycareAPI = require('@/services/hostycareApi');
@@ -8,6 +10,48 @@ const SmartVpsAPI = require('@/services/smartvpsApi');
 // at top of /api/orders/service-action/route.js
 import { VirtualizorAPI } from '@/services/virtualizorApi';   // you exported the class by name
 // or: import VirtualizorAPI from '@/services/virtualizorApi'; // you also export default
+const {
+  getCompanyVirtualizorAccounts,
+  toVirtualizorApiAccounts,
+} = require('@/lib/companyVirtualizor');
+
+/**
+ * Resolve every per-company Virtualizor panel configured against the order's
+ * IP stock, in priority order. Returns an empty array when the order isn't
+ * linked to a company that has Virtualizor automation enabled — callers
+ * should fall back to the regular provider/manual flow in that case.
+ */
+async function resolveCompanyVirtualizorAccounts(order) {
+  if (!order?.ipStockId) return { accounts: [], companyName: null };
+  try {
+    const ipStock = await IPStock.findById(order.ipStockId).select('company').lean();
+    if (!ipStock?.company) return { accounts: [], companyName: null };
+    const company = await Company.findById(ipStock.company).select('virtualizors virtualizor name').lean();
+    if (!company) return { accounts: [], companyName: null };
+    const accounts = getCompanyVirtualizorAccounts(company);
+    return { accounts, companyName: company.name };
+  } catch (err) {
+    console.error('[SERVICE-ACTION] Company-Virtualizor lookup failed:', err.message);
+    return { accounts: [], companyName: null };
+  }
+}
+
+function normalizeVirtualizorRunningState(raw) {
+  if (!raw) return 'unknown';
+  if (typeof raw === 'string') {
+    const s = raw.toLowerCase().trim();
+    if (['1', 'running', 'on', 'online', 'started', 'active'].includes(s)) return 'running';
+    if (['0', 'stopped', 'off', 'offline', 'shutdown'].includes(s)) return 'stopped';
+    if (['suspended', 'paused'].includes(s)) return 'suspended';
+    return s;
+  }
+  if (typeof raw === 'number') return raw === 1 ? 'running' : 'stopped';
+  if (typeof raw === 'object') {
+    const candidate = raw.status || raw.state || raw.power || raw.running;
+    if (candidate !== undefined) return normalizeVirtualizorRunningState(candidate);
+  }
+  return 'unknown';
+}
 
 
 // Helper function to generate secure password
@@ -38,6 +82,55 @@ function generateSecurePassword() {
   return password.split('').sort(() => Math.random() - 0.5).join('');
 }
 
+
+/**
+ * Walk Virtualizor's nested `oslist` and return metadata for a specific
+ * template id: its friendly name, the distro bucket key (e.g. "windows" /
+ * "ubuntu"), and the virtualization type bucket. Used after a company-
+ * Virtualizor reinstall so we can sync `order.os` and `order.username` to
+ * match the OS the user actually installed (e.g. Linux → Windows).
+ */
+function findTemplateMeta(oslist, templateId) {
+  if (!oslist || typeof oslist !== 'object' || templateId == null) return null;
+  const targetId = String(templateId);
+  for (const [virtType, distros] of Object.entries(oslist)) {
+    if (!distros || typeof distros !== 'object') continue;
+    for (const [distroKey, templates] of Object.entries(distros)) {
+      if (!templates || typeof templates !== 'object') continue;
+      for (const [tplId, tpl] of Object.entries(templates)) {
+        if (String(tplId) !== targetId) continue;
+        const name =
+          (tpl && typeof tpl === 'object' &&
+            (tpl.name || tpl.filename || tpl.desc || tpl.title)) ||
+          String(tplId);
+        return {
+          templateId: targetId,
+          name: String(name),
+          distro: String(distroKey),
+          virtType: String(virtType),
+        };
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Classify an OS template's family from the metadata + name. Returns the
+ * canonical username (and family) so the order document stays in sync after
+ * a cross-family reinstall (Linux → Windows or vice versa).
+ */
+function classifyOsFamily(tplMeta) {
+  if (!tplMeta) return { family: null, username: null };
+  const haystack = [tplMeta.distro, tplMeta.name].filter(Boolean).join(' ').toLowerCase();
+  if (/\b(windows|win\s*2k|win\s*server|winsrv|win\s*xp|win\s*7|win\s*8|win\s*10|win\s*11|server\s*200[38]|server\s*201[269]|server\s*202[0-9])\b/.test(haystack)) {
+    return { family: 'windows', username: 'Administrator' };
+  }
+  if (/\b(ubuntu|debian|centos|rocky|almalinux|alma|fedora|rhel|redhat|linux|arch|opensuse|suse)\b/.test(haystack)) {
+    return { family: 'linux', username: 'root' };
+  }
+  return { family: null, username: null };
+}
 
 function flattenOslist(oslist, virtFilter) {
   const out = {};
@@ -202,6 +295,201 @@ export async function POST(request) {
                        (order.productName && order.productName.includes('🌊'));
     
     console.log(`[SERVICE-ACTION][POST] Provider detection: isSmartVps=${isSmartVps}, order.provider=${order.provider}`);
+
+    // Any non-SmartVPS order that doesn't have an active Hostycare service ID
+    // attached is eligible for company-Virtualizor automation. This covers
+    // both pure OceanLinux orders and partially-configured ones whose
+    // `provider` was stamped as 'hostycare' or similar but never received a
+    // serviceId — those would otherwise fall through to the Hostycare branch
+    // and fail with "No valid API configured".
+    if (!isSmartVps && !order.hostycareServiceId) {
+      const { accounts: companyVirtAccounts } = await resolveCompanyVirtualizorAccounts(order);
+      if (companyVirtAccounts.length > 0) {
+        const supportedActions = new Set(['start', 'stop', 'restart', 'status', 'sync', 'templates', 'reinstall']);
+        if (!supportedActions.has(action)) {
+          return NextResponse.json({
+            success: false,
+            error: `Action '${action}' is not supported for this order via Virtualizor automation.`,
+          }, { status: 400 });
+        }
+
+        console.log(`[SERVICE-ACTION][POST] Using ${companyVirtAccounts.length} company Virtualizor panel(s) for action=${action} (order.provider=${order.provider || 'unset'}, no hostycareServiceId)`);
+
+        let companyApi;
+        try {
+          companyApi = new VirtualizorAPI({ accounts: toVirtualizorApiAccounts(companyVirtAccounts) });
+        } catch (apiErr) {
+          return NextResponse.json({
+            success: false,
+            error: `Company Virtualizor configuration is invalid: ${apiErr.message}`,
+          }, { status: 500 });
+        }
+
+        const hostname = guessHostnameFromOrder(order);
+        const panelHostsLabel = companyVirtAccounts.map(a => a.host).join(', ');
+        const findVps = async () => {
+          const found = await companyApi.findVpsId({ ip: ipAddress, hostname });
+          if (!found) {
+            const message = `No VPS visible for IP ${ipAddress} on any of the company's Virtualizor panels (${panelHostsLabel}).`;
+            const err = new Error(message);
+            err.status = 404;
+            throw err;
+          }
+          return typeof found === 'object' ? found : { vpsid: String(found), virt: null };
+        };
+
+        try {
+          let result;
+          switch (action) {
+            case 'start': {
+              const { vpsid } = await findVps();
+              const apiRes = await companyApi.start(vpsid);
+              result = { success: true, message: 'Start command sent (Virtualizor)', apiResponse: apiRes };
+              break;
+            }
+            case 'stop': {
+              const { vpsid } = await findVps();
+              const apiRes = await companyApi.stop(vpsid);
+              result = { success: true, message: 'Stop command sent (Virtualizor)', apiResponse: apiRes };
+              break;
+            }
+            case 'restart': {
+              const { vpsid } = await findVps();
+              const apiRes = await companyApi.restart(vpsid);
+              result = { success: true, message: 'Restart command sent (Virtualizor)', apiResponse: apiRes };
+              break;
+            }
+            case 'status':
+            case 'sync': {
+              let powerState = 'unknown';
+              let rawStatus = null;
+              try {
+                const { vpsid } = await findVps();
+                const vmRecord = await companyApi.getVpsRecord(vpsid);
+                if (vmRecord) {
+                  rawStatus =
+                    vmRecord.status ?? vmRecord.state ?? vmRecord.running ?? vmRecord.power ?? null;
+                  powerState = normalizeVirtualizorRunningState(rawStatus ?? vmRecord);
+                }
+              } catch (lookupErr) {
+                console.warn('[SERVICE-ACTION][POST] Virtualizor status lookup failed; falling back to ping:', lookupErr.message);
+              }
+              if (powerState === 'unknown' && ipAddress) {
+                powerState = isServerReachable(ipAddress) ? 'running' : 'stopped';
+              }
+              await Order.findByIdAndUpdate(orderId, { lastSyncTime: new Date() });
+              return NextResponse.json({
+                success: true,
+                powerState,
+                rawStatus,
+                provider: 'virtualizor',
+                lastSync: new Date().toISOString(),
+              });
+            }
+            case 'templates': {
+              const { vpsid, virt } = await findVps();
+              const tplRaw = await companyApi.getTemplates(vpsid);
+              const vpsVirt = virt || tplRaw?.virt || tplRaw?.info?.virt || tplRaw?.vs?.virt || null;
+              const oslistData = tplRaw?.oslist || tplRaw?.os || tplRaw;
+              const flat = flattenOslist(oslistData, vpsVirt);
+              return NextResponse.json({ success: true, result: flat, vpsId: vpsid, raw: tplRaw });
+            }
+            case 'reinstall': {
+              const chosenTemplateId = templateId ?? payload?.templateId;
+              const providedPwd = newPassword ?? payload?.password;
+              if (!chosenTemplateId) {
+                return NextResponse.json({ success: false, error: 'templateId is required' }, { status: 400 });
+              }
+              const { vpsid } = await findVps();
+              const pwd = providedPwd || generateSecurePassword();
+
+              // Look up the friendly name + family for the chosen template
+              // BEFORE we trigger the reinstall, so we can sync the order's
+              // displayed OS / username to whatever the user actually picked
+              // (handles Linux ⇄ Windows transitions, etc).
+              let tplMeta = null;
+              try {
+                const tplRaw = await companyApi.getTemplates(vpsid);
+                const oslistData = tplRaw?.oslist || tplRaw?.os || tplRaw;
+                tplMeta = findTemplateMeta(oslistData, chosenTemplateId);
+              } catch (tplErr) {
+                console.warn('[SERVICE-ACTION][POST] Pre-reinstall template metadata lookup failed:', tplErr.message);
+              }
+              const osClass = classifyOsFamily(tplMeta);
+
+              const apiRes = await companyApi.reinstall(vpsid, chosenTemplateId, pwd);
+
+              const update = {
+                $set: {
+                  password: pwd,
+                  lastAction: 'reinstall',
+                  lastActionTime: new Date(),
+                },
+                $push: {
+                  logs: {
+                    action: 'reinstall',
+                    timestamp: new Date(),
+                    details: `Reinstall via company Virtualizor (panels: ${panelHostsLabel}, osid: ${chosenTemplateId}${tplMeta?.name ? `, os: ${tplMeta.name}` : ''})`,
+                    success: true,
+                  },
+                },
+              };
+              // Sync the human-readable OS name on the order so the dashboard
+              // (icon + label) reflects what's actually running now.
+              if (tplMeta?.name) {
+                update.$set.os = tplMeta.name;
+              }
+              // Sync the login user when we can confidently identify the
+              // family — Windows uses Administrator, Linux uses root. We
+              // intentionally skip the field when classification is ambiguous
+              // so we don't clobber a manually-set value.
+              if (osClass.username) {
+                update.$set.username = osClass.username;
+              }
+
+              await Order.findByIdAndUpdate(orderId, update);
+
+              return NextResponse.json({
+                success: true,
+                result: {
+                  accepted: true,
+                  vpsId: vpsid,
+                  templateId: chosenTemplateId,
+                  message: 'Reinstall submitted via company Virtualizor',
+                  newPassword: pwd,
+                  newOs: tplMeta?.name || null,
+                  newUsername: osClass.username || null,
+                  osFamily: osClass.family || null,
+                  raw: apiRes,
+                },
+              });
+            }
+          }
+
+          await Order.findByIdAndUpdate(orderId, {
+            lastAction: action,
+            lastActionTime: new Date(),
+            $push: {
+              logs: {
+                action,
+                timestamp: new Date(),
+                details: result?.message || `Action ${action} via company Virtualizor`,
+                success: result?.success !== false,
+              },
+            },
+          });
+
+          return NextResponse.json({ success: true, result });
+        } catch (virtErr) {
+          console.error(`[SERVICE-ACTION][POST] Company-Virtualizor action '${action}' failed:`, virtErr.message);
+          const status = typeof virtErr.status === 'number' ? virtErr.status : 500;
+          return NextResponse.json({
+            success: false,
+            error: virtErr.message || 'Virtualizor action failed',
+          }, { status });
+        }
+      }
+    }
 
     if (isSmartVps) {
       smartvpsApi = new SmartVpsAPI();
@@ -790,114 +1078,168 @@ export async function POST(request) {
   }
 }
 
-// GET method for fetching templates
+/**
+ * GET /api/orders/service-action?orderId=...
+ *
+ * Returns a "service details" snapshot used by the order details page to
+ * refresh status when the page first loads. Supports three paths:
+ *   1. Company-Virtualizor automation (no Hostycare service ID).
+ *   2. Hostycare orders (with hostycareServiceId).
+ *   3. Otherwise returns 400 — there's no provider to query.
+ *
+ * Note: Templates for the OS picker are fetched via POST { action: 'templates' }.
+ * This GET intentionally does NOT return a templates list.
+ */
 export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
     const orderId = searchParams.get('orderId');
-
     if (!orderId) {
       return NextResponse.json({ success: false, error: 'Order ID is required' }, { status: 400 });
     }
 
     await connectDB();
 
-    console.log(`[SERVICE-ACTION][GET] Fetching templates for order: ${orderId}`);
+    console.log(`[SERVICE-ACTION][GET] Loading service details for order: ${orderId}`);
 
-    // Get order details
     const order = await Order.findById(orderId);
     if (!order) {
       return NextResponse.json({ success: false, error: 'Order not found' }, { status: 404 });
     }
 
-    // Extract IP address from order details
-    let ipAddress = null;
+    // Resolve IP from common locations on the order document.
+    let ipAddress = order.ipAddress
+      || order.serverDetails?.rawDetails?.ips?.[0]
+      || order.serviceDetails?.ipAddress
+      || order.serviceDetails?.ip
+      || order.productDetails?.ipAddress
+      || order.productDetails?.ip
+      || order.ip
+      || null;
 
-    if (order.ipAddress) {
-      ipAddress = order.ipAddress;
-    } else if (order.serverDetails?.rawDetails?.ips && order.serverDetails.rawDetails.ips.length > 0) {
-      ipAddress = order.serverDetails.rawDetails.ips[0];
-    }
+    // 1) Company-Virtualizor automation path.
+    //    Triggers for any order that doesn't have a real Hostycare service ID
+    //    (covers pure oceanlinux orders AND mislabeled "company" orders).
+    if (!order.hostycareServiceId) {
+      const { accounts: companyVirtAccounts, companyName } = await resolveCompanyVirtualizorAccounts(order);
+      if (companyVirtAccounts.length > 0) {
+        if (!ipAddress) {
+          return NextResponse.json({
+            success: false,
+            error: 'No IP address on this order — cannot look up VPS on the company Virtualizor.',
+          }, { status: 400 });
+        }
+        console.log(`[SERVICE-ACTION][GET] Using ${companyVirtAccounts.length} company Virtualizor panel(s) for ${companyName || 'company'} (ip=${ipAddress})`);
 
-    if (!ipAddress) {
-      return NextResponse.json({
-        success: false,
-        error: 'No IP address found for this VPS order'
-      }, { status: 400 });
-    }
+        let companyApi;
+        try {
+          companyApi = new VirtualizorAPI({ accounts: toVirtualizorApiAccounts(companyVirtAccounts) });
+        } catch (apiErr) {
+          return NextResponse.json({
+            success: false,
+            error: `Company Virtualizor configuration is invalid: ${apiErr.message}`,
+          }, { status: 500 });
+        }
 
-    console.log(`[SERVICE-ACTION][GET] Using IP address: ${ipAddress}`);
-
-    // Initialize Virtualizor API
-    const virtualizorApi = new VirtualizorAPI();
-
-    try {
-      // Find the VPS
-      const vpsInfo = await virtualizorApi.findVPSByIP(ipAddress);
-      if (!vpsInfo) {
-        throw new Error(`No VPS found with IP address: ${ipAddress}`);
-      }
-
-      // Get available templates
-      const templates = await virtualizorApi.getOSTemplates(vpsInfo.vpsId);
-
-      if (!templates.oslist) {
-        throw new Error('No OS templates available for this VPS');
-      }
-
-      // Process templates into a more user-friendly format
-      const processedTemplates = {};
-
-      for (const [virtType, distros] of Object.entries(templates.oslist)) {
-        for (const [distroName, templateList] of Object.entries(distros)) {
-          if (templateList && typeof templateList === 'object' && Object.keys(templateList).length > 0) {
-            if (!processedTemplates[distroName]) {
-              processedTemplates[distroName] = [];
-            }
-
-            for (const [templateId, templateData] of Object.entries(templateList)) {
-              // Check if this template is available for this VPS's management group
-              const templateMG = templateData.mg || [];
-              const vpsMG = parseInt(vpsInfo.vpsData.mg);
-
-              if (templateMG.includes(vpsMG) || templateMG.length === 0) {
-                processedTemplates[distroName].push({
-                  id: templateId,
-                  name: templateData.name || templateData.filename || `Template ${templateId}`,
-                  filename: templateData.filename,
-                  size: templateData.size,
-                  virtType: virtType,
-                  current: templateId === vpsInfo.vpsData.osid
-                });
-              }
-            }
+        try {
+          const hostname = guessHostnameFromOrder(order);
+          const found = await companyApi.findVpsId({ ip: ipAddress, hostname });
+          if (!found) {
+            const panelHostsLabel = companyVirtAccounts.map(a => a.host).join(', ');
+            return NextResponse.json({
+              success: false,
+              error: `No VPS visible for IP ${ipAddress} on any of the company's Virtualizor panels (${panelHostsLabel}).`,
+            }, { status: 404 });
           }
+
+          const vpsid = typeof found === 'object' ? found.vpsid : found;
+          const vmRecord = await companyApi.getVpsRecord(vpsid).catch(() => null);
+          const rawStatus =
+            vmRecord?.status ?? vmRecord?.state ?? vmRecord?.running ?? vmRecord?.power ?? null;
+          let powerState = normalizeVirtualizorRunningState(rawStatus ?? vmRecord);
+          if (powerState === 'unknown' && ipAddress) {
+            powerState = isServerReachable(ipAddress) ? 'running' : 'stopped';
+          }
+
+          await Order.findByIdAndUpdate(orderId, { lastSyncTime: new Date() });
+
+          return NextResponse.json({
+            success: true,
+            provider: 'virtualizor',
+            companyName: companyName || null,
+            serviceId: String(vpsid),
+            vpsId: String(vpsid),
+            ip: ipAddress,
+            status: powerState,
+            powerState,
+            rawStatus,
+            details: vmRecord || null,
+            syncResult: {
+              credentialsUpdated: false,
+              lastSyncTime: new Date().toISOString(),
+            },
+            lastSync: new Date().toISOString(),
+          });
+        } catch (err) {
+          console.error('[SERVICE-ACTION][GET] Company-Virtualizor lookup failed:', err.message);
+          return NextResponse.json({
+            success: false,
+            error: err.message || 'Company Virtualizor lookup failed',
+          }, { status: 500 });
         }
       }
-
-      console.log(`[SERVICE-ACTION][GET] Processed templates:`, Object.keys(processedTemplates));
-
-      return NextResponse.json({
-        success: true,
-        vpsId: vpsInfo.vpsId,
-        currentTemplate: vpsInfo.vpsData.osid,
-        currentOS: vpsInfo.vpsData.os_name,
-        templates: processedTemplates
-      });
-
-    } catch (error) {
-      console.error('[SERVICE-ACTION][GET] Error:', error);
-      return NextResponse.json({
-        success: false,
-        error: error.message || 'Failed to fetch templates'
-      }, { status: 500 });
     }
 
-  } catch (error) {
-    console.error('[SERVICE-ACTION][GET] Error:', error);
+    // 2) Hostycare path — only when we actually have a service ID to query.
+    if (order.hostycareServiceId) {
+      console.log(`[SERVICE-ACTION][GET] Using Hostycare API for service ${order.hostycareServiceId}`);
+      const hostycareApi = new HostycareAPI();
+      try {
+        let serviceInfo = null;
+        let serviceDetails = null;
+        try { serviceInfo = await hostycareApi.getServiceInfo(order.hostycareServiceId); }
+        catch (e) { console.warn('[SERVICE-ACTION][GET] getServiceInfo failed:', e.message); }
+        try { serviceDetails = await hostycareApi.getServiceDetails(order.hostycareServiceId); }
+        catch (e) { console.warn('[SERVICE-ACTION][GET] getServiceDetails failed:', e.message); }
+
+        let credentialsUpdated = false;
+        try {
+          credentialsUpdated = await syncServerState(order._id, serviceDetails, serviceInfo);
+        } catch (e) {
+          console.warn('[SERVICE-ACTION][GET] syncServerState failed:', e.message);
+        }
+
+        return NextResponse.json({
+          success: true,
+          provider: 'hostycare',
+          serviceId: order.hostycareServiceId,
+          ip: ipAddress,
+          serviceInfo,
+          serviceDetails,
+          syncResult: {
+            credentialsUpdated: !!credentialsUpdated,
+            lastSyncTime: new Date().toISOString(),
+          },
+        });
+      } catch (err) {
+        console.error('[SERVICE-ACTION][GET] Hostycare lookup failed:', err.message);
+        return NextResponse.json({
+          success: false,
+          error: err.message || 'Hostycare lookup failed',
+        }, { status: 500 });
+      }
+    }
+
+    // 3) Nothing to query.
     return NextResponse.json({
       success: false,
-      error: error.message || 'Internal server error'
+      error: 'No valid provider configured for this order (no company Virtualizor and no Hostycare service ID).',
+    }, { status: 400 });
+  } catch (error) {
+    console.error('[SERVICE-ACTION][GET] Fatal error:', error);
+    return NextResponse.json({
+      success: false,
+      error: error.message || 'Internal server error',
     }, { status: 500 });
   }
 }

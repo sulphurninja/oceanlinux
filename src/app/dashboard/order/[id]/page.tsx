@@ -61,6 +61,16 @@ interface IPStock {
   _id: string;
   name: string;
   tags: string[];
+  /**
+   * Set by /api/ipstock/[id] when the linked company has Virtualizor automation
+   * enabled. The flag intentionally carries no credentials — it just lets this
+   * page render direct server controls instead of the manual approval flow.
+   */
+  companyAutomation?: {
+    provider: 'virtualizor';
+    enabled: boolean;
+    companyName?: string;
+  } | null;
   // ... other ipStock fields
 }
 
@@ -196,16 +206,25 @@ const OrderDetails = () => {
     }
   }, [orderId]);
 
-  // Fetch server power state when order is loaded (for Hostycare and SmartVPS orders)
+  // Fetch server power state when order is loaded (for managed orders).
+  // OceanLinux orders only get status polling when the linked company has
+  // Virtualizor automation enabled; otherwise we just fetch the manual
+  // server-action request status to populate the request UI.
   useEffect(() => {
     if (order && !loading) {
       const provider = getProviderFromOrder(order, ipStock);
-      if ((provider === 'hostycare' && order.hostycareServiceId) ||
+      const hasNativeServiceId = (provider === 'hostycare' && order.hostycareServiceId) ||
         (provider === 'smartvps' && (order.smartvpsServiceId || order.ipAddress)) ||
-        (provider === 'advps' && order.advpsServiceId)) {
+        (provider === 'advps' && order.advpsServiceId);
+      const isCompanyAutomated = hasCompanyVirtualizorAutomation(ipStock) &&
+        (provider === 'oceanlinux' || !hasNativeServiceId);
+
+      if (hasNativeServiceId || isCompanyAutomated) {
         fetchServerPowerState();
       }
-      if (provider === 'oceanlinux') {
+      // Manual request fallback only applies to oceanlinux orders that
+      // don't have any automation configured at the company level.
+      if (provider === 'oceanlinux' && !isCompanyAutomated) {
         fetchPendingRequest();
       }
     }
@@ -384,7 +403,7 @@ const OrderDetails = () => {
     };
   }, []);
 
-  const openOsDialog = async (provider: 'hostycare' | 'smartvps' | 'advps') => {
+  const openOsDialog = async (provider: 'hostycare' | 'smartvps' | 'advps' | 'oceanlinux') => {
     if (osAutoCloseTimer.current) {
       clearTimeout(osAutoCloseTimer.current);
       osAutoCloseTimer.current = null;
@@ -526,30 +545,51 @@ const OrderDetails = () => {
       advpsServiceId: order.advpsServiceId,
     });
 
-    if (provider === 'hostycare') {
-      const available = !!order.hostycareServiceId;
-      console.log('[ORDER-DETAILS] Hostycare management available:', available);
-      return available;
+    if (provider === 'hostycare' && order.hostycareServiceId) return true;
+    if (provider === 'smartvps' && (order.smartvpsServiceId || order.ipAddress)) return true;
+    if (provider === 'advps' && order.advpsServiceId) return true;
+
+    // Fall back to per-company Virtualizor automation. This kicks in for:
+    //  - oceanlinux orders linked to a company that has Virtualizor enabled, AND
+    //  - orders whose declared `provider` (e.g. 'hostycare') never received a
+    //    real service ID, so the legacy provider integration can't act on them.
+    //    These would otherwise hit the manual-request fallback or surface a
+    //    "No valid API configured" error from the server.
+    if (hasCompanyVirtualizorAutomation(ipStock)) {
+      console.log('[ORDER-DETAILS] Server management available via company Virtualizor (provider=', provider, ')');
+      return true;
     }
 
-    if (provider === 'smartvps') {
-      const available = !!(order.smartvpsServiceId || order.ipAddress);
-      console.log('[ORDER-DETAILS] SmartVPS management available:', available);
-      return available;
-    }
-
-    if (provider === 'advps') {
-      const available = !!order.advpsServiceId;
-      console.log('[ORDER-DETAILS] ADVPS management available:', available);
-      return available;
-    }
-
-    if (provider === 'oceanlinux') {
-      console.log('[ORDER-DETAILS] OceanLinux - no external management');
-      return false;
-    }
-    console.log('[ORDER-DETAILS] Unknown provider or no management available');
+    console.log('[ORDER-DETAILS] No management available for provider:', provider);
     return false;
+  };
+
+  /**
+   * True when the order's IP stock is linked to a company that has Virtualizor
+   * automation enabled. Drives both the auto/manual fork in the UI and the
+   * status polling logic.
+   */
+  const hasCompanyVirtualizorAutomation = (stock: IPStock | null): boolean => {
+    return !!(stock?.companyAutomation?.enabled && stock?.companyAutomation?.provider === 'virtualizor');
+  };
+
+  /**
+   * True when this specific order is *actually being driven* by the company's
+   * Virtualizor automation. Covers two cases:
+   *   1. Pure oceanlinux orders linked to a Virtualizor-enabled company.
+   *   2. Orders whose declared provider (e.g. 'hostycare') was never wired up
+   *      with a real service ID, so the legacy provider path can't act on them
+   *      and we silently fall back to the company's Virtualizor instead.
+   */
+  const isOrderCompanyAutomated = (orderArg: Order | null, stock: IPStock | null): boolean => {
+    if (!orderArg) return false;
+    if (!hasCompanyVirtualizorAutomation(stock)) return false;
+    const prov = getProviderFromOrder(orderArg, stock);
+    if (prov === 'oceanlinux') return true;
+    const hasNativeServiceId = (prov === 'hostycare' && !!orderArg.hostycareServiceId) ||
+      (prov === 'smartvps' && !!(orderArg.smartvpsServiceId || orderArg.ipAddress)) ||
+      (prov === 'advps' && !!orderArg.advpsServiceId);
+    return !hasNativeServiceId;
   };
 
   /** ADVPS reset-mac is VPS-only; omit the control when stock or sync says LINUX/LXC. */
@@ -580,8 +620,13 @@ const OrderDetails = () => {
     const isHostycare = provider === 'hostycare' && order.hostycareServiceId;
     const isSmartVPS = provider === 'smartvps' && (order.smartvpsServiceId || order.ipAddress);
     const isAdvps = provider === 'advps' && order.advpsServiceId;
+    // Company-Virtualizor covers oceanlinux orders AND any order whose
+    // declared provider lacks a real service ID but is linked to a company
+    // with Virtualizor automation.
+    const isCompanyVirtualizor = hasCompanyVirtualizorAutomation(ipStock) &&
+      (provider === 'oceanlinux' || (!isHostycare && !isSmartVPS && !isAdvps));
 
-    if (!isHostycare && !isSmartVPS && !isAdvps) {
+    if (!isHostycare && !isSmartVPS && !isAdvps && !isCompanyVirtualizor) {
       return;
     }
 
@@ -757,7 +802,8 @@ const OrderDetails = () => {
     // NEW
     if ((provider === 'smartvps' && action === 'format') ||
       (provider === 'advps' && action === 'format') ||
-      (provider === 'hostycare' && action === 'reinstall')) {
+      (provider === 'hostycare' && action === 'reinstall' && order.hostycareServiceId) ||
+      (action === 'reinstall' && isOrderCompanyAutomated(order, ipStock))) {
       await openOsDialog(provider);
       return;
     }
@@ -1587,6 +1633,11 @@ const OrderDetails = () => {
                   <Badge variant="secondary" className="text-xs h-5">
                     {getProviderDisplayName(provider)}
                   </Badge>
+                  {isOrderCompanyAutomated(order, ipStock) && (
+                    <Badge variant="outline" className="text-xs h-5 gap-1 text-emerald-600 border-emerald-200">
+                      Auto-managed
+                    </Badge>
+                  )}
                   {getStatusBadge(order.status, order.provisioningStatus, order.lastAction, order)}
                 </div>
               </div>
@@ -2268,8 +2319,10 @@ const OrderDetails = () => {
                   </Card>
                 )}
 
-                {/* Manual Server Action Requests - For non-auto-provisioned products */}
-                {provider === 'oceanlinux' && (
+                {/* Manual Server Action Requests - For non-auto-provisioned products.
+                    Hidden when the company has Virtualizor automation; those orders use
+                    the regular Server Control card above. */}
+                {provider === 'oceanlinux' && !hasCompanyVirtualizorAutomation(ipStock) && (
                   <Card className="border-border hover:shadow-md transition-shadow">
                     <CardHeader className="pb-3">
                       <CardTitle className="flex items-center gap-2 text-base lg:text-lg">
@@ -2484,7 +2537,9 @@ const OrderDetails = () => {
                     </CardHeader>
                     <CardContent className="space-y-3">
                       {/* Server Power State Indicator */}
-                      {(provider === 'hostycare' || provider === 'smartvps') && (
+                      {(provider === 'hostycare' || provider === 'smartvps' ||
+                        provider === 'advps' ||
+                        isOrderCompanyAutomated(order, ipStock)) && (
                         <div className={cn(
                           "flex items-center gap-3 p-3 rounded-lg border transition-colors",
                           powerStateLoading && "bg-muted/50 border-border",
