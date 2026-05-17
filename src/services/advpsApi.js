@@ -1,5 +1,9 @@
 const BASE_URL = 'https://api.advps.org';
 
+/** ADVPS production tier is 100 req / 15 min — reuse OS catalog across provisions & crons. */
+const LIST_OS_CACHE_TTL_MS = 14 * 60 * 1000;
+const listOsCache = new Map();
+
 function getApiKey() {
   const key = process.env.ADVPS_API_KEY;
   if (!key) throw new Error('ADVPS_API_KEY is not set');
@@ -37,12 +41,17 @@ async function httpFetch(path, { method = 'GET', jsonBody, timeoutMs = 60_000 } 
 
     if (!res.ok) {
       const detail = typeof data === 'string' ? data : (data?.message || `HTTP ${res.status}`);
-      throw new Error(`ADVPS ${method} ${path} failed: ${detail}`);
+      const rateHint = res.status === 429 ? ' [ADVPS limit: 100 requests / 15 min per API key]' : '';
+      const err = new Error(`ADVPS ${method} ${path} failed: ${detail}${rateHint}`);
+      err.status = res.status;
+      err.advpsBody = typeof data === 'object' && data !== null ? data : undefined;
+      throw err;
     }
 
     return data;
   } catch (e) {
     if (e.name === 'AbortError') throw new Error('ADVPS API timeout');
+    if (typeof e.status === 'number') throw e;
     throw new Error(`ADVPS fetch error: ${e.message}`);
   } finally {
     clearTimeout(t);
@@ -50,6 +59,36 @@ async function httpFetch(path, { method = 'GET', jsonBody, timeoutMs = 60_000 } 
 }
 
 class AdvpsAPI {
+  /**
+   * Order-details `data.services[]` (ADVPS docs): each item has `id` (Mongo-style document id) and
+   * `serviceId` (e.g. "vps_service_1") — the latter is what /api/v1/services/:id uses. Never prefer `id`
+   * over `serviceId` for storage or API calls.
+   */
+  static extractServiceIdFromPurchaseService(svc) {
+    if (!svc || typeof svc !== 'object') return '';
+    const coerce = (v) => {
+      if (v == null || v === '') return '';
+      if (typeof v === 'object' && v !== null && '$oid' in v) return String(v.$oid).trim();
+      if (typeof v === 'object') return '';
+      const s = String(v).trim();
+      return s || '';
+    };
+    const candidates = [
+      svc.serviceId,
+      svc.service_id,
+      svc.serviceID,
+      svc.slug,
+      svc.uuid,
+      svc.id,
+      svc._id,
+    ];
+    for (const c of candidates) {
+      const out = coerce(c);
+      if (out) return out;
+    }
+    return '';
+  }
+
   start(serviceId) {
     return httpFetch(`/api/v1/services/${serviceId}/start`, { method: 'POST' });
   }
@@ -70,8 +109,13 @@ class AdvpsAPI {
     return httpFetch(`/api/v1/services/${serviceId}/get-ip`, { method: 'POST' });
   }
 
-  generatePassword(serviceId) {
-    return httpFetch(`/api/v1/services/${serviceId}/generate-password`, { method: 'POST' });
+  generatePassword(serviceId, { timeoutMs = 60_000 } = {}) {
+    return httpFetch(`/api/v1/services/${serviceId}/generate-password`, { method: 'POST', timeoutMs });
+  }
+
+  resetMac(serviceId) {
+    const id = encodeURIComponent(String(serviceId));
+    return httpFetch(`/api/v1/services/${id}/reset-mac`, { method: 'POST' });
   }
 
   rebuild(serviceId, os) {
@@ -113,6 +157,38 @@ class AdvpsAPI {
 
   productStockById(id) {
     return httpFetch(`/api/v1/products/stock/${id}`, { method: 'GET' });
+  }
+
+  async listOs(type) {
+    const key = type ? String(type) : '_';
+    const hit = listOsCache.get(key);
+    if (hit && Date.now() < hit.expires) return hit.payload;
+
+    let path = '/api/v1/os';
+    if (type) path += `?type=${type}`;
+    const payload = await httpFetch(path, { method: 'GET' });
+    listOsCache.set(key, { expires: Date.now() + LIST_OS_CACHE_TTL_MS, payload });
+    return payload;
+  }
+
+  purchaseLinux({ productId, ram, osId, quantity = 1, validity = 30, remark }) {
+    return httpFetch('/api/v1/purchase/linux', {
+      method: 'POST',
+      jsonBody: { productId, ram, osId, quantity, validity, remark },
+      timeoutMs: 120_000,
+    });
+  }
+
+  purchaseVps({ productId, ram, osId, quantity = 1, name, email, validity = 30, remark }) {
+    return httpFetch('/api/v1/purchase/vps', {
+      method: 'POST',
+      jsonBody: { productId, ram, osId, quantity, name, email, validity, remark },
+      timeoutMs: 120_000,
+    });
+  }
+
+  getOrderDetails(orderId) {
+    return httpFetch(`/api/v1/purchase/${encodeURIComponent(orderId)}`, { method: 'GET' });
   }
 }
 

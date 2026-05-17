@@ -2,6 +2,7 @@
 
 const HostycareAPI = require('./hostycareApi');
 const SmartVpsAPI = require('./smartvpsApi');              // SmartVPS client (with its own logging)
+const AdvpsAPI = require('./advpsApi');
 const connectDB = require('@/lib/db').default;
 const Order = require('@/models/orderModel').default;
 const IPStock = require('@/models/ipStockModel');
@@ -24,6 +25,7 @@ class AutoProvisioningService {
   constructor() {
     this.hostycareApi = new HostycareAPI();
     this.smartvpsApi = new SmartVpsAPI();
+    this.advpsApi = new AdvpsAPI();
     console.log('[AUTO-PROVISION-SERVICE] 🏗️ AutoProvisioningService instance created');
   }
 
@@ -115,6 +117,147 @@ class AutoProvisioningService {
     const s = String(productName).toLowerCase();
     const isWindowsLike = s.includes('windows') || s.includes('rdp') || s.includes('vps');
     return isWindowsLike ? 'administrator' : 'root';
+  }
+
+  // --- ADVPS HELPERS --------------------------------------------------------
+
+  isAdvpsStock(ipStock, order) {
+    const tags = Array.isArray(ipStock?.tags) ? ipStock.tags : [];
+    const provider = (ipStock?.provider || '').toString().toLowerCase();
+    const name = (ipStock?.name || '').toString();
+    const product = (order?.productName || '').toString();
+
+    const taggedAdvps = tags.some(t => String(t).toLowerCase() === 'advps');
+    const byProvider = provider === 'advps';
+    const byNameEmoji = name.startsWith('⚡');
+    const byProductEmoji = product.startsWith('⚡');
+
+    const hasAdvpsConfig = !!(ipStock?.defaultConfigurations?.advps ||
+      ipStock?.defaultConfigurations?.get?.('advps'));
+
+    const isAdvps = taggedAdvps || byProvider || byNameEmoji || hasAdvpsConfig || byProductEmoji;
+
+    L.kv('ADVPS detection', {
+      taggedAdvps, byProvider, byNameEmoji, hasAdvpsConfig, byProductEmoji,
+      result: isAdvps
+    });
+
+    return isAdvps;
+  }
+
+  /**
+   * Fetch available OS options from ADVPS and match the target OS string.
+   * @param {string} targetOS - e.g. "Ubuntu 22", "Windows 2022 64"
+   * @param {string} vmType - "LXC" or "VM" (maps to ADVPS type "lxc" or "vps")
+   */
+  async resolveAdvpsOsId(targetOS, vmType) {
+    L.line(`[ADVPS] Resolving OS ID for target: "${targetOS}" (vmType: ${vmType})`);
+    try {
+      const upper = String(vmType).toUpperCase();
+      const osType = (upper === 'VPS' || upper === 'VM') ? 'vps' : 'lxc';
+      const res = await this.advpsApi.listOs(osType);
+      const osList = res?.data?.os || res?.data || [];
+
+      if (!Array.isArray(osList) || osList.length === 0) {
+        L.line(`[ADVPS] OS list empty or unexpected format, will skip osId`);
+        return null;
+      }
+
+      L.kv('[ADVPS] Available OS options', osList.map(o => `${o.id}: ${o.name}`));
+
+      const target = String(targetOS).toLowerCase();
+
+      let bestMatch = null;
+      let bestScore = 0;
+      for (const os of osList) {
+        const osName = String(os.name || '').toLowerCase();
+        let score = 0;
+
+        if (target.includes('ubuntu')) {
+          if (osName.includes('ubuntu')) score = 1;
+          if (osName.includes('ubuntu') && osName.includes('22')) score = 3;
+        } else if (target.includes('centos')) {
+          if (osName.includes('centos')) score = 1;
+          if (osName.includes('centos') && osName.includes('7')) score = 3;
+        } else if (target.includes('windows')) {
+          if (osName.includes('windows')) score = 1;
+          if (osName.includes('windows') && osName.includes('2022')) score = 3;
+        }
+
+        if (score > bestScore) {
+          bestScore = score;
+          bestMatch = os;
+        }
+      }
+
+      if (bestMatch) {
+        L.kv('[ADVPS] Matched OS', { name: bestMatch.name, id: bestMatch.id, score: bestScore });
+        return bestMatch.id;
+      }
+
+      const fallback = osList[0];
+      L.line(`[ADVPS] No OS match found, using fallback: ${fallback.name} (${fallback.id})`);
+      return fallback.id;
+    } catch (e) {
+      L.line(`[ADVPS] Failed to fetch OS list: ${e.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Fallback: search ADVPS product stock API for a product matching the base name + RAM.
+   * Used when the pre-synced variant mapping doesn't have the requested RAM.
+   */
+  async findAdvpsProductByRam(baseName, ram, vmType) {
+    L.line(`[ADVPS] Fallback product search: baseName="${baseName}", ram="${ram}", vmType="${vmType}"`);
+    try {
+      const upper = String(vmType).toUpperCase();
+      const type = (upper === 'VPS' || upper === 'VM') ? 'vps' : 'linux';
+      const allProducts = await this.advpsApi.productStockAll({ type });
+      L.kv('[ADVPS] Products from API', allProducts.length);
+
+      const ramNum = String(ram).replace(/[^0-9]/g, '');
+
+      for (const product of allProducts) {
+        const pName = String(product.name || '');
+        const pRam = String(pName.match(/(\d+)\s*GB/i)?.[1] || '');
+
+        if (pRam === ramNum) {
+          const pBaseName = pName.replace(/\s*\d+\s*GB\s*/i, ' ').replace(/\s+/g, ' ').trim();
+          if (pBaseName.toLowerCase() === baseName.toLowerCase()) {
+            L.kv('[ADVPS] Fallback match found', { id: product.id, name: pName, stock: product.stock });
+            if (Number(product.stock || 0) <= 0 && product.stockStatus === 'OUT_OF_STOCK') {
+              L.line(`[ADVPS] ⚠️ Matched product is OUT_OF_STOCK, continuing search...`);
+              continue;
+            }
+            return { productId: String(product.id), productName: pName };
+          }
+        }
+      }
+
+      // Broader search: match any product with matching RAM across all base names
+      for (const product of allProducts) {
+        const pName = String(product.name || '');
+        const pRam = String(pName.match(/(\d+)\s*GB/i)?.[1] || '');
+
+        if (pRam === ramNum && Number(product.stock || 0) > 0) {
+          const pBaseName = pName.replace(/\s*\d+\s*GB\s*/i, ' ').replace(/\s+/g, ' ').trim();
+          // Check if product name partially matches the IPStock base name
+          const baseWords = baseName.toLowerCase().split(/\s+/);
+          const pWords = pBaseName.toLowerCase().split(/\s+/);
+          const overlap = baseWords.filter(w => pWords.includes(w)).length;
+          if (overlap >= Math.min(2, baseWords.length)) {
+            L.kv('[ADVPS] Fallback partial match', { id: product.id, name: pName, overlap });
+            return { productId: String(product.id), productName: pName };
+          }
+        }
+      }
+
+      return null;
+    } catch (e) {
+      L.line(`[ADVPS] Fallback product search failed: ${e.message}`);
+      return null;
+    }
   }
 
   // --- SMARTVPS HELPERS ----------------------------------------------------
@@ -588,11 +731,15 @@ class AutoProvisioningService {
       };
       L.kv('IPStock snapshot', snapshot);
 
-      const smartVps = this.isSmartVpsStock(ipStock, order);
-      L.line(`➡ Provider route selected: ${smartVps ? 'SmartVPS' : 'Hostycare'}`);
+      const advps = this.isAdvpsStock(ipStock, order);
+      const smartVps = !advps && this.isSmartVpsStock(ipStock, order);
+      const providerName = advps ? 'ADVPS' : smartVps ? 'SmartVPS' : 'Hostycare';
+      L.line(`➡ Provider route selected: ${providerName}`);
 
       // Branch
-      if (smartVps) {
+      if (advps) {
+        return await this.provisionViaAdvps(order, ipStock, startTime);
+      } else if (smartVps) {
         return await this.provisionViaSmartVps(order, ipStock, startTime);
       } else {
         return await this.provisionViaHostycare(order, ipStock, startTime);
@@ -619,9 +766,302 @@ class AutoProvisioningService {
     }
   }
 
-  // --- SMARTVPS PATH -------------------------------------------------------
+  // --- ADVPS PATH -----------------------------------------------------------
 
-  // ... existing code ...
+  async provisionViaAdvps(order, ipStock, startTime) {
+    L.head(`ADVPS PATH — order ${order._id}`);
+
+    const productNameLower = String(order.productName).toLowerCase();
+    const isWindowsProduct =
+      productNameLower.includes('windows') ||
+      productNameLower.includes('rdp') ||
+      productNameLower.includes('vps');
+
+    L.kv('[ADVPS] isWindowsProduct', isWindowsProduct);
+
+    await Order.findByIdAndUpdate(order._id, {
+      provisioningStatus: 'provisioning',
+      provisioningError: '',
+      autoProvisioned: true,
+      lastProvisionAttempt: new Date(),
+      provider: 'advps'
+    });
+
+    // --- Resolve ADVPS config from IPStock ---
+    const advpsConfig = ipStock?.defaultConfigurations?.get?.('advps') ||
+      ipStock?.defaultConfigurations?.advps;
+
+    if (!advpsConfig) {
+      throw new Error('IPStock missing ADVPS configuration (defaultConfigurations.advps)');
+    }
+
+    const vmType = String(advpsConfig.vmType || '').toUpperCase();
+    const isVps = vmType === 'VPS' || vmType === 'VM';
+    const targetOS = isWindowsProduct ? 'Windows 2022 64' : 'Ubuntu 22';
+    L.kv('[ADVPS] vmType', vmType);
+    L.kv('[ADVPS] isVps', isVps);
+    L.kv('[ADVPS] targetOS', targetOS);
+
+    await Order.findByIdAndUpdate(order._id, { os: targetOS });
+
+    // --- Resolve ADVPS product ID ---
+    // ADVPS products are NOT named with RAM (e.g. "Turbo VPS (103.109.XX.X)").
+    // Each product ID supports multiple RAM sizes — the purchase API's `ram`
+    // parameter selects the variation internally. So we just need ANY variant's
+    // productId from the config, then pass the customer's requested RAM to the API.
+    const variants = advpsConfig.variants instanceof Map
+      ? Object.fromEntries(advpsConfig.variants)
+      : (advpsConfig.variants || {});
+
+    const ram = order.memory;
+    const availableRams = Object.keys(variants);
+    L.kv('[ADVPS] Order RAM', ram);
+    L.kv('[ADVPS] Synced variant keys', availableRams);
+
+    // Try exact RAM key match first, then fall back to ANY variant's productId
+    let advpsProductId;
+    const ramVariations = [
+      ram, ram?.toLowerCase(), ram?.toUpperCase(),
+      ram?.replace('GB', 'gb'), ram?.replace('gb', 'GB'),
+    ].filter(Boolean);
+
+    for (const v of ramVariations) {
+      if (variants[v]?.productId) {
+        advpsProductId = String(variants[v].productId);
+        L.kv('[ADVPS] Exact RAM match', { ram: v, productId: advpsProductId });
+        break;
+      }
+    }
+
+    if (!advpsProductId) {
+      // Use ANY variant's productId — ADVPS products have a single ID for all RAM sizes
+      const anyVariant = Object.values(variants).find(v => v?.productId);
+      if (anyVariant) {
+        advpsProductId = String(anyVariant.productId);
+        L.line(`[ADVPS] RAM "${ram}" not a synced key [${availableRams.join(', ')}] — using product ID from existing variant (same product handles all RAM sizes)`);
+        L.kv('[ADVPS] Product ID (from variant)', advpsProductId);
+        L.kv('[ADVPS] Product name', anyVariant.productName || '(unknown)');
+      }
+    }
+
+    if (!advpsProductId) {
+      throw new Error(
+        `ADVPS config has no variants with a productId. ` +
+        `IPStock: ${ipStock.name} (${ipStock._id}). ` +
+        `Run /api/advps/sync to refresh product catalog.`
+      );
+    }
+
+    // --- Resolve OS ID ---
+    const osId = await this.resolveAdvpsOsId(targetOS, vmType);
+    L.kv('[ADVPS] Resolved osId', osId || '(none — will let API pick default)');
+
+    // --- Check if purchase was already made (idempotent re-entry from cron) ---
+    const existingAdvpsOrderId = order.advpsOrderId;
+    let advpsOrderId;
+    let initialPassword = '';
+
+    if (existingAdvpsOrderId) {
+      L.line(`[ADVPS] Purchase already made — advpsOrderId=${existingAdvpsOrderId}, skipping purchase`);
+      advpsOrderId = existingAdvpsOrderId;
+      initialPassword = order.password || '';
+    } else {
+      // --- Place the purchase ---
+      const ramFormatted = String(ram).replace(/(\d+)\s*gb/i, '$1 GB');
+      const remark = `Auto-provisioned order ${order._id}`;
+      let purchaseRes;
+
+      if (isVps) {
+        let customerName = order.customerName || order.webhookCustomerName || '';
+        let customerEmail = order.customerEmail || order.webhookCustomerEmail || '';
+
+        if (!customerName || !customerEmail) {
+          try {
+            const User = require('@/models/userModel').default;
+            const user = await User.findById(order.user).select('name email').lean();
+            if (user) {
+              customerName = customerName || user.name || 'Customer';
+              customerEmail = customerEmail || user.email || '';
+            }
+          } catch (e) {
+            L.line(`[ADVPS] Could not load user for customer info: ${e.message}`);
+          }
+        }
+
+        if (!customerEmail) {
+          throw new Error('Cannot purchase ADVPS VPS: no customer email available on order or user');
+        }
+
+        L.line(`[ADVPS] Purchasing VPS: productId=${advpsProductId}, ram=${ramFormatted}, osId=${osId}, name=${customerName}, email=${customerEmail}`);
+        purchaseRes = await this.advpsApi.purchaseVps({
+          productId: advpsProductId, ram: ramFormatted, osId,
+          quantity: 1, name: customerName, email: customerEmail,
+          validity: 30, remark,
+        });
+      } else {
+        L.line(`[ADVPS] Purchasing Linux: productId=${advpsProductId}, ram=${ramFormatted}, osId=${osId}`);
+        purchaseRes = await this.advpsApi.purchaseLinux({
+          productId: advpsProductId, ram: ramFormatted, osId,
+          quantity: 1, validity: 30, remark,
+        });
+      }
+
+      L.kv('[ADVPS] Purchase response status', purchaseRes?.status);
+      const purchaseData = purchaseRes?.data || purchaseRes;
+      const advpsOrder = purchaseData?.order;
+
+      if (!advpsOrder || !advpsOrder.orderId) {
+        throw new Error(`ADVPS purchase did not return an order ID. Response: ${JSON.stringify(purchaseRes).slice(0, 500)}`);
+      }
+
+      advpsOrderId = advpsOrder.orderId;
+      initialPassword = purchaseData?.password || '';
+
+      L.kv('[ADVPS] Purchase order ID', advpsOrderId);
+      L.kv('[ADVPS] Purchase status', advpsOrder.status);
+      L.kv('[ADVPS] Total amount', advpsOrder.totalAmount);
+      if (initialPassword) {
+        L.kv('[ADVPS] Initial password from purchase', initialPassword.substring(0, 4) + '****');
+      }
+
+      // Persist immediately so cron can resume without re-purchasing
+      await Order.findByIdAndUpdate(order._id, {
+        advpsOrderId,
+        advpsProductId,
+        provider: 'advps',
+        autoProvisioned: true,
+      });
+    }
+
+    // --- Quick poll: check order details 3 times (total ~65s) ---
+    // If ADVPS hasn't assigned yet, mark as failed so the cron retries later.
+    L.line(`[ADVPS] Checking order details for ${advpsOrderId}...`);
+
+    // ADVPS assigns a TEMPORARY password while order is PENDING.
+    // The REAL password only appears once order status is COMPLETED (~3-5 min).
+    // So we poll until COMPLETED, not just until we see an IP.
+    const pollDelays = [20000, 45000, 60000, 120000];
+    let assignedService = null;
+    let orderCompleted = false;
+
+    for (let i = 0; i < pollDelays.length; i++) {
+      await new Promise(resolve => setTimeout(resolve, pollDelays[i]));
+
+      try {
+        const detailsRes = await this.advpsApi.getOrderDetails(advpsOrderId);
+        const orderDetails = detailsRes?.data || detailsRes;
+        const orderStatus = orderDetails?.order?.status || '';
+        const services = orderDetails?.services || [];
+
+        L.line(`[ADVPS] Poll ${i + 1}/${pollDelays.length}: status=${orderStatus}, services=${services.length}`);
+
+        if (orderStatus === 'FAILED' || orderStatus === 'CANCELLED' || orderStatus === 'REJECTED') {
+          throw new Error(`ADVPS order ${advpsOrderId} reached terminal status: ${orderStatus}`);
+        }
+
+        if (services.length > 0 && services[0].ip) {
+          assignedService = services[0];
+
+          if (orderStatus === 'COMPLETED' || orderStatus === 'ASSIGNED') {
+            orderCompleted = true;
+            L.line(`[ADVPS] Order ${orderStatus} with IP: ${assignedService.ip} — password is final`);
+            break;
+          }
+
+          L.line(`[ADVPS] Service has IP ${assignedService.ip} but order still ${orderStatus} — password may change, continuing polls...`);
+        }
+      } catch (pollErr) {
+        if (pollErr.message.includes('terminal status')) throw pollErr;
+        L.line(`[ADVPS] Poll ${i + 1} error: ${pollErr.message}`);
+      }
+    }
+
+    // --- Extract credentials ---
+    let ipAddress = '';
+    let username = '';
+    let password = '';
+    let advpsServiceId = '';
+    let expiryDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+
+    if (assignedService) {
+      ipAddress = assignedService.ip || '';
+      username = assignedService.username || (isWindowsProduct ? 'Administrator' : 'root');
+      advpsServiceId = AdvpsAPI.extractServiceIdFromPurchaseService(assignedService);
+      if (assignedService.expiryDate) expiryDate = new Date(assignedService.expiryDate);
+
+      // Only trust the password if order reached COMPLETED/ASSIGNED
+      if (orderCompleted) {
+        password = assignedService.password || '';
+      }
+
+      L.kv('[ADVPS] Service ID', advpsServiceId);
+      L.kv('[ADVPS] IP', ipAddress);
+      L.kv('[ADVPS] Username', username);
+      L.kv('[ADVPS] Password (masked)', password ? password.substring(0, 4) + '****' : '(not final yet)');
+      L.kv('[ADVPS] Order completed', orderCompleted);
+
+      // If assigned but no IP, try get-ip
+      if (!ipAddress && advpsServiceId) {
+        try {
+          const ipRes = await this.advpsApi.getIp(advpsServiceId);
+          ipAddress = ipRes?.data?.ip || '';
+          if (ipAddress) L.kv('[ADVPS] IP from get-ip', ipAddress);
+        } catch (e) {
+          L.line(`[ADVPS] get-ip failed: ${e.message}`);
+        }
+      }
+    }
+
+    // --- Update order ---
+    const fullyProvisioned = !!(ipAddress && advpsServiceId && password);
+    const resolvedUsername = username || (isWindowsProduct ? 'Administrator' : 'root');
+    const updateData = {
+      status: fullyProvisioned ? 'active' : 'confirmed',
+      provisioningStatus: fullyProvisioned ? 'active' : 'provisioning',
+      provisioningError: fullyProvisioned ? '' : `ADVPS_PENDING: Order ${advpsOrderId} placed, awaiting ${!ipAddress ? 'IP' : !password ? 'final password (order not yet COMPLETED)' : 'assignment'}. Cron will check.`,
+      provider: 'advps',
+      advpsServiceId: advpsServiceId || undefined,
+      advpsOrderId,
+      advpsProductId,
+      username: resolvedUsername,
+      password,
+      ipAddress: ipAddress || '',
+      autoProvisioned: true,
+      os: targetOS,
+      expiryDate,
+    };
+
+    if (!fullyProvisioned) {
+      updateData.provisioningLockId = undefined;
+      updateData.lastProvisionAttempt = new Date();
+    }
+
+    await Order.findByIdAndUpdate(order._id, updateData);
+
+    const totalTime = Date.now() - startTime;
+    console.log("\n" + "✅".repeat(80));
+    console.log(`[ADVPS] ✅ PROVISIONING ${fullyProvisioned ? 'COMPLETED' : 'PENDING — cron will check'}`);
+    console.log(`   - Order ID: ${order._id}`);
+    console.log(`   - ADVPS Order: ${advpsOrderId}`);
+    console.log(`   - ADVPS Service: ${advpsServiceId || 'pending'}`);
+    console.log(`   - IP: ${ipAddress || 'pending'}`);
+    console.log(`   - Username: ${resolvedUsername}`);
+    console.log(`   - OS: ${targetOS}`);
+    console.log(`   - Total Time: ${totalTime}ms`);
+    console.log("✅".repeat(80));
+
+    return {
+      success: fullyProvisioned,
+      advpsPending: !fullyProvisioned,
+      serviceId: advpsServiceId || null,
+      ipAddress: ipAddress || null,
+      credentials: { username: resolvedUsername, password },
+      hostname: null,
+      productId: advpsProductId,
+      totalTime,
+      ...(fullyProvisioned ? {} : { error: `ADVPS order ${advpsOrderId} pending assignment, cron will check` }),
+    };
+  }
 
   // --- SMARTVPS PATH -------------------------------------------------------
 

@@ -147,8 +147,19 @@ function rowLooksInStock(row) {
   return st === 'IN_STOCK' || st === 'LOW_STOCK';
 }
 
+// ADVPS production: 100 req / 15 min — cache the full stock list so page loads are free.
+const STOCK_MAP_CACHE_TTL_MS = 10 * 60 * 1000;
+let _stockMapCache = null;
+let _stockMapCacheExpires = 0;
+
 async function buildListStockMap(api, verbose) {
-  const t0 = Date.now();
+  const now = Date.now();
+  if (_stockMapCache && now < _stockMapCacheExpires) {
+    if (verbose) console.log(`${LOG} list merge (cached, ${Math.round((_stockMapCacheExpires - now) / 1000)}s remaining)`);
+    return { ..._stockMapCache };
+  }
+
+  const t0 = now;
   const [linuxList, vpsList] = await Promise.all([
     api.productStockAll({ type: 'linux' }),
     api.productStockAll({ type: 'vps' }),
@@ -162,8 +173,12 @@ async function buildListStockMap(api, verbose) {
       stockStatus: p.stockStatus,
     };
   }
+
+  _stockMapCache = { ...stockMap };
+  _stockMapCacheExpires = Date.now() + STOCK_MAP_CACHE_TTL_MS;
+
   if (verbose) {
-    console.log(`${LOG} list merge`, {
+    console.log(`${LOG} list merge (fresh)`, {
       ms: Date.now() - t0,
       linuxRows: linuxList.length,
       vpsRows: vpsList.length,

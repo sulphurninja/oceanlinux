@@ -34,7 +34,8 @@ import {
   Settings2,
   Info,
   Wallet,
-  LifeBuoy
+  LifeBuoy,
+  Download
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -60,6 +61,16 @@ interface IPStock {
   _id: string;
   name: string;
   tags: string[];
+  /**
+   * Set by /api/ipstock/[id] when the linked company has Virtualizor automation
+   * enabled. The flag intentionally carries no credentials — it just lets this
+   * page render direct server controls instead of the manual approval flow.
+   */
+  companyAutomation?: {
+    provider: 'virtualizor';
+    enabled: boolean;
+    companyName?: string;
+  } | null;
   // ... other ipStock fields
 }
 
@@ -79,6 +90,8 @@ interface Order {
   hostycareServiceId?: string;
   smartvpsServiceId?: string;
   advpsServiceId?: string;
+  advpsRebuildCount?: number;
+  advpsRebuildCountMonth?: string;
   slotIpPackageId?: string;
   slotIpId?: string;
   provisioningStatus?: string;
@@ -193,16 +206,25 @@ const OrderDetails = () => {
     }
   }, [orderId]);
 
-  // Fetch server power state when order is loaded (for Hostycare and SmartVPS orders)
+  // Fetch server power state when order is loaded (for managed orders).
+  // OceanLinux orders only get status polling when the linked company has
+  // Virtualizor automation enabled; otherwise we just fetch the manual
+  // server-action request status to populate the request UI.
   useEffect(() => {
     if (order && !loading) {
       const provider = getProviderFromOrder(order, ipStock);
-      if ((provider === 'hostycare' && order.hostycareServiceId) ||
+      const hasNativeServiceId = (provider === 'hostycare' && order.hostycareServiceId) ||
         (provider === 'smartvps' && (order.smartvpsServiceId || order.ipAddress)) ||
-        (provider === 'advps' && order.advpsServiceId)) {
+        (provider === 'advps' && order.advpsServiceId);
+      const isCompanyAutomated = hasCompanyVirtualizorAutomation(ipStock) &&
+        (provider === 'oceanlinux' || !hasNativeServiceId);
+
+      if (hasNativeServiceId || isCompanyAutomated) {
         fetchServerPowerState();
       }
-      if (provider === 'oceanlinux') {
+      // Manual request fallback only applies to oceanlinux orders that
+      // don't have any automation configured at the company level.
+      if (provider === 'oceanlinux' && !isCompanyAutomated) {
         fetchPendingRequest();
       }
     }
@@ -381,7 +403,7 @@ const OrderDetails = () => {
     };
   }, []);
 
-  const openOsDialog = async (provider: 'hostycare' | 'smartvps' | 'advps') => {
+  const openOsDialog = async (provider: 'hostycare' | 'smartvps' | 'advps' | 'oceanlinux') => {
     if (osAutoCloseTimer.current) {
       clearTimeout(osAutoCloseTimer.current);
       osAutoCloseTimer.current = null;
@@ -523,29 +545,70 @@ const OrderDetails = () => {
       advpsServiceId: order.advpsServiceId,
     });
 
-    if (provider === 'hostycare') {
-      const available = !!order.hostycareServiceId;
-      console.log('[ORDER-DETAILS] Hostycare management available:', available);
-      return available;
+    if (provider === 'hostycare' && order.hostycareServiceId) return true;
+    if (provider === 'smartvps' && (order.smartvpsServiceId || order.ipAddress)) return true;
+    if (provider === 'advps' && order.advpsServiceId) return true;
+
+    // Fall back to per-company Virtualizor automation. This kicks in for:
+    //  - oceanlinux orders linked to a company that has Virtualizor enabled, AND
+    //  - orders whose declared `provider` (e.g. 'hostycare') never received a
+    //    real service ID, so the legacy provider integration can't act on them.
+    //    These would otherwise hit the manual-request fallback or surface a
+    //    "No valid API configured" error from the server.
+    if (hasCompanyVirtualizorAutomation(ipStock)) {
+      console.log('[ORDER-DETAILS] Server management available via company Virtualizor (provider=', provider, ')');
+      return true;
     }
 
-    if (provider === 'smartvps') {
-      const available = !!(order.smartvpsServiceId || order.ipAddress);
-      console.log('[ORDER-DETAILS] SmartVPS management available:', available);
-      return available;
-    }
+    console.log('[ORDER-DETAILS] No management available for provider:', provider);
+    return false;
+  };
 
-    if (provider === 'advps') {
-      const available = !!order.advpsServiceId;
-      console.log('[ORDER-DETAILS] ADVPS management available:', available);
-      return available;
-    }
+  /**
+   * True when the order's IP stock is linked to a company that has Virtualizor
+   * automation enabled. Drives both the auto/manual fork in the UI and the
+   * status polling logic.
+   */
+  const hasCompanyVirtualizorAutomation = (stock: IPStock | null): boolean => {
+    return !!(stock?.companyAutomation?.enabled && stock?.companyAutomation?.provider === 'virtualizor');
+  };
 
-    if (provider === 'oceanlinux') {
-      console.log('[ORDER-DETAILS] OceanLinux - no external management');
-      return false;
+  /**
+   * True when this specific order is *actually being driven* by the company's
+   * Virtualizor automation. Covers two cases:
+   *   1. Pure oceanlinux orders linked to a Virtualizor-enabled company.
+   *   2. Orders whose declared provider (e.g. 'hostycare') was never wired up
+   *      with a real service ID, so the legacy provider path can't act on them
+   *      and we silently fall back to the company's Virtualizor instead.
+   */
+  const isOrderCompanyAutomated = (orderArg: Order | null, stock: IPStock | null): boolean => {
+    if (!orderArg) return false;
+    if (!hasCompanyVirtualizorAutomation(stock)) return false;
+    const prov = getProviderFromOrder(orderArg, stock);
+    if (prov === 'oceanlinux') return true;
+    const hasNativeServiceId = (prov === 'hostycare' && !!orderArg.hostycareServiceId) ||
+      (prov === 'smartvps' && !!(orderArg.smartvpsServiceId || orderArg.ipAddress)) ||
+      (prov === 'advps' && !!orderArg.advpsServiceId);
+    return !hasNativeServiceId;
+  };
+
+  /** ADVPS reset-mac is VPS-only; omit the control when stock or sync says LINUX/LXC. */
+  const isAdvpsMacResetBlockedByServiceType = (stock: IPStock | null, details: any): boolean => {
+    const raw = stock as Record<string, unknown> | null;
+    const dc = raw?.defaultConfigurations as
+      | Record<string, unknown>
+      | Map<string, unknown>
+      | undefined;
+    let adv: { vmType?: string } | undefined;
+    if (dc && typeof (dc as Map<string, unknown>).get === 'function') {
+      adv = (dc as Map<string, unknown>).get('advps') as { vmType?: string } | undefined;
+    } else if (dc && typeof dc === 'object') {
+      adv = (dc as { advps?: { vmType?: string } }).advps;
     }
-    console.log('[ORDER-DETAILS] Unknown provider or no management available');
+    const vm = String(adv?.vmType || '').toUpperCase();
+    if (vm === 'LXC' || vm === 'LINUX') return true;
+    const st = String(details?.details?.serviceType || '').toUpperCase();
+    if (st === 'LINUX' || st === 'LXC') return true;
     return false;
   };
 
@@ -557,8 +620,13 @@ const OrderDetails = () => {
     const isHostycare = provider === 'hostycare' && order.hostycareServiceId;
     const isSmartVPS = provider === 'smartvps' && (order.smartvpsServiceId || order.ipAddress);
     const isAdvps = provider === 'advps' && order.advpsServiceId;
+    // Company-Virtualizor covers oceanlinux orders AND any order whose
+    // declared provider lacks a real service ID but is linked to a company
+    // with Virtualizor automation.
+    const isCompanyVirtualizor = hasCompanyVirtualizorAutomation(ipStock) &&
+      (provider === 'oceanlinux' || (!isHostycare && !isSmartVPS && !isAdvps));
 
-    if (!isHostycare && !isSmartVPS && !isAdvps) {
+    if (!isHostycare && !isSmartVPS && !isAdvps && !isCompanyVirtualizor) {
       return;
     }
 
@@ -679,6 +747,15 @@ const OrderDetails = () => {
           toast.info('If status doesn\'t update, please refresh the page.', {
             duration: 5000,
           });
+        } else if (action === 'resetmac') {
+          const r = data.result;
+          const oldM = r?.oldMacAddress;
+          const newM = r?.newMacAddress;
+          if (oldM && newM) {
+            toast.success(`MAC address updated: ${oldM} → ${newM}`);
+          } else {
+            toast.success('MAC address reset successfully');
+          }
         } else {
           toast.success(`Action "${action}" executed successfully`);
         }
@@ -692,7 +769,7 @@ const OrderDetails = () => {
           toast.success('Password updated in your records');
         }
       } else {
-        toast.error(data.error || `Failed to execute "${action}"`);
+        toast.error(data.error || data.message || `Failed to execute "${action}"`);
         // Refresh power state on error too
         if (['start', 'stop', 'restart'].includes(action) && (provider === 'hostycare' || provider === 'smartvps' || provider === 'advps')) {
           await fetchServerPowerState();
@@ -725,7 +802,8 @@ const OrderDetails = () => {
     // NEW
     if ((provider === 'smartvps' && action === 'format') ||
       (provider === 'advps' && action === 'format') ||
-      (provider === 'hostycare' && action === 'reinstall')) {
+      (provider === 'hostycare' && action === 'reinstall' && order.hostycareServiceId) ||
+      (action === 'reinstall' && isOrderCompanyAutomated(order, ipStock))) {
       await openOsDialog(provider);
       return;
     }
@@ -1033,9 +1111,8 @@ const OrderDetails = () => {
 
   const isRenewalEligible = (order: Order | null) => {
     if (!order || !order.expiryDate) return false;
+    if (order.provider === 'slotip') return false;
     const daysLeft = getDaysUntilExpiry(order.expiryDate);
-    // Show the renewal button 2 days before the expiry date,
-    // and keep it visible up to 7 days after expiry.
     return daysLeft <= 2 && daysLeft >= -7;
   };
 
@@ -1051,6 +1128,32 @@ const OrderDetails = () => {
   const isUnpaid = (order: Order | null) => {
     if (!order) return false;
     return order.status.toLowerCase() === 'pending';
+  };
+
+  const [downloadingInvoice, setDownloadingInvoice] = useState(false);
+
+  const handleDownloadInvoice = async () => {
+    if (!order) return;
+    setDownloadingInvoice(true);
+    try {
+      const res = await fetch(`/api/invoice/download?orderId=${order._id}`);
+      if (!res.ok) throw new Error('Failed to generate invoice');
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = url;
+      a.download = `invoice-${order._id}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      toast.success('Invoice downloaded!');
+    } catch {
+      toast.error('Failed to download invoice');
+    } finally {
+      setDownloadingInvoice(false);
+    }
   };
 
   const handleRenewService = async (selectedMethod?: 'cashfree' | 'razorpay' | 'upi') => {
@@ -1324,7 +1427,8 @@ const OrderDetails = () => {
         'renew': { label: 'Renewing', icon: Loader2, color: 'bg-primary/10 text-primary border-primary/20' },
         'reinstall': { label: 'Reinstalling', icon: Loader2, color: 'bg-muted text-muted-foreground border-border' },
         'format': { label: 'Formatting', icon: Loader2, color: 'bg-muted text-muted-foreground border-border' },
-        'changepassword': { label: 'Changing Password', icon: Loader2, color: 'bg-primary/10 text-primary border-primary/20' }
+        'changepassword': { label: 'Changing Password', icon: Loader2, color: 'bg-primary/10 text-primary border-primary/20' },
+        'resetmac': { label: 'Resetting MAC', icon: Loader2, color: 'bg-primary/10 text-primary border-primary/20' },
       };
 
       const actionConfig = actionLabels[actionBusy as keyof typeof actionLabels];
@@ -1512,7 +1616,8 @@ const OrderDetails = () => {
   const usesLivePowerUi =
     provider === 'hostycare' ||
     provider === 'smartvps' ||
-    (provider === 'advps' && !!order.advpsServiceId);
+    (provider === 'advps' && !!order.advpsServiceId) ||
+    isOrderCompanyAutomated(order, ipStock);
 
   return (
     <div className='min-h-screen bg-background'>
@@ -1539,6 +1644,11 @@ const OrderDetails = () => {
                   <Badge variant="secondary" className="text-xs h-5">
                     {getProviderDisplayName(provider)}
                   </Badge>
+                  {isOrderCompanyAutomated(order, ipStock) && (
+                    <Badge variant="outline" className="text-xs h-5 gap-1 text-emerald-600 border-emerald-200">
+                      Auto-managed
+                    </Badge>
+                  )}
                   {getStatusBadge(order.status, order.provisioningStatus, order.lastAction, order)}
                 </div>
               </div>
@@ -1547,11 +1657,18 @@ const OrderDetails = () => {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={fetchOrder}
-                disabled={loading}
+                onClick={() => {
+                  // For ADVPS orders, do a full provider sync (fetches live credentials from ADVPS)
+                  if (order && getProviderFromOrder(order, ipStock) === 'advps' && order.advpsServiceId) {
+                    loadServiceDetails();
+                  } else {
+                    fetchOrder();
+                  }
+                }}
+                disabled={loading || serviceLoading}
                 className="h-9 gap-2"
               >
-                <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                <RefreshCw className={`h-4 w-4 ${(loading || serviceLoading) ? 'animate-spin' : ''}`} />
                 <span className="hidden sm:inline">Sync</span>
               </Button>
             </div>
@@ -2192,12 +2309,13 @@ const OrderDetails = () => {
                           {order.lastAction === 'changepassword' && <KeyRound className="h-5 w-5 text-primary" />}
                           {order.lastAction === 'reinstall' && <HardDriveIcon className="h-5 w-5 text-primary" />}
                           {order.lastAction === 'format' && <HardDriveIcon className="h-5 w-5 text-primary" />}
+                          {order.lastAction === 'resetmac' && <Network className="h-5 w-5 text-primary" />}
                           {!order.lastAction && <Activity className="h-5 w-5 text-primary" />}
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="font-semibold text-foreground text-sm break-words">
                             {order.lastAction ?
-                              `Last action: ${order.lastAction.charAt(0).toUpperCase() + order.lastAction.slice(1)}`
+                              `Last action: ${order.lastAction === 'resetmac' ? 'Reset MAC' : order.lastAction.charAt(0).toUpperCase() + order.lastAction.slice(1)}`
                               : 'Server Activity'
                             }
                           </p>
@@ -2212,8 +2330,10 @@ const OrderDetails = () => {
                   </Card>
                 )}
 
-                {/* Manual Server Action Requests - For non-auto-provisioned products */}
-                {provider === 'oceanlinux' && (
+                {/* Manual Server Action Requests - For non-auto-provisioned products.
+                    Hidden when the company has Virtualizor automation; those orders use
+                    the regular Server Control card above. */}
+                {provider === 'oceanlinux' && !hasCompanyVirtualizorAutomation(ipStock) && (
                   <Card className="border-border hover:shadow-md transition-shadow">
                     <CardHeader className="pb-3">
                       <CardTitle className="flex items-center gap-2 text-base lg:text-lg">
@@ -2374,6 +2494,17 @@ const OrderDetails = () => {
                             <strong>Warning:</strong> This will permanently delete all data on your server and install the selected operating system.
                           </AlertDescription>
                         </Alert>
+
+                        {order && provider === 'advps' && (() => {
+                          const currentMonth = new Date().toISOString().slice(0, 7);
+                          const rebuildCount = (order.advpsRebuildCountMonth === currentMonth ? order.advpsRebuildCount : 0) ?? 0;
+                          const rebuildsRemaining = Math.max(0, 10 - rebuildCount);
+                          return (
+                            <p className="text-xs text-muted-foreground text-center">
+                              <span className="font-medium text-foreground">{rebuildsRemaining}</span> rebuild{rebuildsRemaining !== 1 ? 's' : ''} remaining this month &mdash; limit is 10/month, resets on the 1st.
+                            </p>
+                          );
+                        })()}
 
                         <div className="flex gap-3 pt-4">
                           <Button
@@ -2552,19 +2683,80 @@ const OrderDetails = () => {
                       <div className="space-y-2">
                         <h4 className="font-medium text-xs text-muted-foreground uppercase tracking-wide">Advanced Actions</h4>
 
-                        <Button
-                          variant="destructive"
-                          onClick={() => handleAdvancedAction((provider === 'smartvps' || provider === 'advps') ? 'format' : 'reinstall')}
-                          disabled={!!actionBusy}
-                          className="w-full h-10 gap-2 text-sm"
-                        >
-                          {(actionBusy === 'reinstall' || actionBusy === 'format') ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <HardDriveIcon className="h-4 w-4" />
-                          )}
-                          {provider === 'smartvps' ? 'Format Server' : 'Reinstall OS'}
-                        </Button>
+                        {(() => {
+                          const isAdvps = provider === 'advps';
+                          const currentMonth = new Date().toISOString().slice(0, 7);
+                          const rebuildCount = (order.advpsRebuildCountMonth === currentMonth ? order.advpsRebuildCount : 0) ?? 0;
+                          const rebuildsRemaining = Math.max(0, 10 - rebuildCount);
+                          const rebuildLimitReached = isAdvps && rebuildsRemaining === 0;
+
+                          return (
+                            <>
+                              {isAdvps && (
+                                <div className={cn(
+                                  "flex items-center justify-between text-xs px-2.5 py-1.5 rounded-md",
+                                  rebuildLimitReached
+                                    ? "bg-destructive/10 text-destructive border border-destructive/20"
+                                    : "bg-muted/60 text-muted-foreground"
+                                )}>
+                                  <span className="flex items-center gap-1.5">
+                                    <HardDriveIcon className="h-3 w-3" />
+                                    Rebuilds this month
+                                  </span>
+                                  <span className={cn("font-semibold tabular-nums", rebuildLimitReached && "text-destructive")}>
+                                    {rebuildCount}/10
+                                  </span>
+                                </div>
+                              )}
+
+                              {rebuildLimitReached && (
+                                <p className="text-xs text-destructive px-1">
+                                  Monthly rebuild limit reached. Resets on the 1st of next month.
+                                </p>
+                              )}
+
+                              {isAdvps && !isAdvpsMacResetBlockedByServiceType(ipStock, serviceDetails) && (
+                                <>
+                                  <Button
+                                    variant="outline"
+                                    onClick={() => {
+                                      const ok = window.confirm(
+                                        'Generate and apply a new MAC address on ADVPS? Without a MAC reset subscription this is limited to once per 24 hours. You may need to renew DHCP or adjust networking inside the VM.'
+                                      );
+                                      if (ok) void runServiceAction('resetmac');
+                                    }}
+                                    disabled={!!actionBusy}
+                                    className="w-full h-10 gap-2 text-sm"
+                                  >
+                                    {actionBusy === 'resetmac' ? (
+                                      <Loader2 className="h-4 w-4 animate-spin" />
+                                    ) : (
+                                      <Network className="h-4 w-4" />
+                                    )}
+                                    Reset MAC address
+                                  </Button>
+                                  <p className="text-xs text-muted-foreground px-1">
+                                    VPS (VM) services only. LXC/Linux containers are not supported by ADVPS for this action.
+                                  </p>
+                                </>
+                              )}
+
+                              <Button
+                                variant="destructive"
+                                onClick={() => handleAdvancedAction((provider === 'smartvps' || provider === 'advps') ? 'format' : 'reinstall')}
+                                disabled={!!actionBusy || rebuildLimitReached}
+                                className="w-full h-10 gap-2 text-sm"
+                              >
+                                {(actionBusy === 'reinstall' || actionBusy === 'format') ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <HardDriveIcon className="h-4 w-4" />
+                                )}
+                                {provider === 'smartvps' ? 'Format Server' : provider === 'advps' ? `Rebuild/Format Server${isAdvps && !rebuildLimitReached ? ` (${rebuildsRemaining} left)` : ''}` : 'Reinstall OS'}
+                              </Button>
+                            </>
+                          );
+                        })()}
                       </div>
 
                       {/* Service Status */}
@@ -2842,8 +3034,42 @@ const OrderDetails = () => {
                           </div>
                         </div>
                       )}
+                      {/* Download Invoice */}
+                      <div className="mt-4 pt-4 border-t border-border">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleDownloadInvoice}
+                          disabled={downloadingInvoice}
+                          className="w-full gap-2 h-9 text-sm"
+                        >
+                          {downloadingInvoice ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Download className="h-4 w-4" />
+                          )}
+                          {downloadingInvoice ? 'Generating...' : 'Download Invoice'}
+                        </Button>
+                      </div>
                     </CardContent>
                   </Card>
+                )}
+
+                {/* Download Invoice (standalone, shows when billing card is hidden) */}
+                {(!order.expiryDate || provider === 'oceanlinux') && (
+                  <Button
+                    variant="outline"
+                    onClick={handleDownloadInvoice}
+                    disabled={downloadingInvoice}
+                    className="w-full gap-2 h-10 text-sm"
+                  >
+                    {downloadingInvoice ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Download className="h-4 w-4" />
+                    )}
+                    {downloadingInvoice ? 'Generating Invoice...' : 'Download Invoice'}
+                  </Button>
                 )}
 
                 {/* Service Details */}

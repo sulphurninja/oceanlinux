@@ -36,7 +36,8 @@ import {
     SlidersHorizontal,
     LifeBuoy,
     ExternalLink,
-    XIcon
+    XIcon,
+    Download
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -179,6 +180,21 @@ const ViewLinux = () => {
     };
 
 
+    /**
+     * True when the customer has been delivered a working server: a real IP
+     * plus login credentials. Used to override the status badge for orders
+     * that the admin manually fulfilled (or that were filled by company-
+     * Virtualizor automation) but whose `provisioningStatus` was never
+     * flipped from the default 'pending'. The terminal/suspended/expired
+     * states still take precedence over this — see callers.
+     */
+    const hasDeliveredCredentials = (order: Order): boolean => {
+        const ip = (order.ipAddress || '').trim();
+        const user = (order.username || '').trim();
+        const pwd = (order.password || '').trim();
+        return !!(ip && user && pwd);
+    };
+
     const getProviderDisplayName = (order: Order): string => {
         if (order.provider) {
             switch (order.provider) {
@@ -227,6 +243,23 @@ const ViewLinux = () => {
 
         // Check for active states
         if (currentStatus.toLowerCase() === 'completed' || currentStatus.toLowerCase() === 'active') {
+            return 'active';
+        }
+
+        // If the customer already has a working server (IP + credentials
+        // delivered) and the order isn't explicitly suspended/terminated/
+        // failed-with-real-error, treat it as active. This catches manual
+        // fulfillments and company-Virtualizor automated orders whose
+        // `provisioningStatus` was never flipped from the default 'pending',
+        // as well as orders carrying a stale `provisioningError` from an
+        // earlier failed attempt that was later resolved by hand.
+        const lowerStatus = currentStatus.toLowerCase();
+        const isExplicitlyBad =
+            lowerStatus === 'suspended' ||
+            lowerStatus === 'terminated' ||
+            lowerStatus === 'cancelled' ||
+            lowerStatus === 'canceled';
+        if (hasDeliveredCredentials(order) && !isExplicitlyBad) {
             return 'active';
         }
 
@@ -349,6 +382,27 @@ const ViewLinux = () => {
 
 
 
+    const downloadInvoice = async (e: React.MouseEvent, orderId: string) => {
+        e.stopPropagation();
+        try {
+            const res = await fetch(`/api/invoice/download?orderId=${orderId}`);
+            if (!res.ok) throw new Error('Failed');
+            const blob = await res.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = url;
+            a.download = `invoice-${orderId}.pdf`;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+            toast.success('Invoice downloaded!');
+        } catch {
+            toast.error('Failed to download invoice');
+        }
+    };
+
     const copyHosthellCreds = (e: React.MouseEvent, order: Order) => {
         e.stopPropagation();
         if (!order.panelUsername || !order.panelPassword) {
@@ -413,6 +467,26 @@ const getStatusBadge = (status: string, provisioningStatus?: string, lastAction?
 
     const provider = order ? getProviderDisplayName(order) : 'Unknown';
     const isAutoProvisionedProvider = provider === 'Hostycare' || provider === 'SmartVPS' || provider === 'Slot IP' || provider === 'ADVPS';
+
+    // If the order has delivered credentials and isn't explicitly in a bad
+    // state, render Active regardless of the underlying provisioningStatus.
+    // This is the common case for manual fulfillments and company-Virtualizor
+    // automated orders where `provisioningStatus` was never flipped to
+    // 'active' even though the customer has a working server.
+    const lowerCurrent = currentStatus.toLowerCase();
+    const isExplicitlyBadForBadge =
+        lowerCurrent === 'suspended' ||
+        lowerCurrent === 'terminated' ||
+        lowerCurrent === 'cancelled' ||
+        lowerCurrent === 'canceled';
+    if (order && hasDeliveredCredentials(order) && !isExplicitlyBadForBadge) {
+        return (
+            <Badge className="bg-green-50 text-green-700 border border-green-200 dark:bg-green-950 dark:text-green-300 dark:border-green-800">
+                <div className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></div>
+                Active
+            </Badge>
+        );
+    }
 
     // For non-auto-provisioned services, show appropriate pending status
     if (!isAutoProvisionedProvider) {
@@ -883,6 +957,16 @@ const getStatusBadge = (status: string, provisioningStatus?: string, lastAction?
                                                                 <span className="text-xs">Manage</span>
                                                             </Button>
 
+                                                            <Button
+                                                                variant="outline"
+                                                                size="sm"
+                                                                onClick={(e) => downloadInvoice(e, order._id)}
+                                                                className="gap-1 sm:gap-2 h-8 sm:h-9 px-2 sm:px-3"
+                                                            >
+                                                                <Download className="h-3 w-3" />
+                                                                <span className="text-xs">Invoice</span>
+                                                            </Button>
+
                                                             {order.panelUsername && (
                                                                 <Button
                                                                     variant="outline"
@@ -984,6 +1068,15 @@ const getStatusBadge = (status: string, provisioningStatus?: string, lastAction?
                                                                     Copy Panel Credentials
                                                                 </Button>
                                                             )}
+                                                            <Button
+                                                                variant="outline"
+                                                                size="sm"
+                                                                onClick={(e) => downloadInvoice(e, order._id)}
+                                                                className="gap-2 h-9 xl:h-10 px-3 xl:px-4"
+                                                            >
+                                                                <Download className="h-4 w-4" />
+                                                                Invoice
+                                                            </Button>
                                                             <Button
                                                                 variant="outline"
                                                                 size="sm"

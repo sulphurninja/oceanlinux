@@ -1,14 +1,23 @@
 /**
  * OceanLinux Email Service
- * 
+ *
  * Modern, clean email templates with professional design.
- * Uses Nodemailer for sending emails via SMTP.
+ *
+ * Supports two transports — picked at runtime in this order:
+ *   1. Resend HTTP API (preferred) — set RESEND_API_KEY
+ *   2. SMTP via Nodemailer (fallback) — set SMTP_HOST/SMTP_USER/SMTP_PASS
+ *
+ * The first one that's configured wins. This keeps backward compat with
+ * existing SMTP setups while letting us move to Resend without touching
+ * any of the call sites.
  */
 
 const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 
-let transporter = null;
-let isConfigured = false;
+let transporter = null;       // nodemailer transport (SMTP fallback)
+let resendClient = null;      // Resend HTTP API client
+let transport = 'none';       // 'resend' | 'smtp' | 'none'
 
 const BRAND = {
   primary: '#8b5cf6',
@@ -25,6 +34,23 @@ const BRAND = {
 };
 
 function initializeTransporter() {
+  // 1) Prefer Resend if an API key is present. Resend gives us much better
+  //    deliverability + tracking and is the default going forward.
+  const resendKey = process.env.RESEND_API_KEY;
+  if (resendKey) {
+    try {
+      resendClient = new Resend(resendKey);
+      transport = 'resend';
+      const fromAddr = process.env.EMAIL_FROM || process.env.SMTP_FROM_EMAIL || 'noreply@updates.oceanlinux.com';
+      console.log(`[EmailService] ✅ Configured via Resend (from: ${fromAddr})`);
+      return;
+    } catch (error) {
+      console.error('[EmailService] ❌ Resend init failed:', error.message);
+      // fall through to SMTP
+    }
+  }
+
+  // 2) Fall back to SMTP (Nodemailer) for legacy setups.
   const smtpHost = process.env.SMTP_HOST;
   const smtpPort = process.env.SMTP_PORT || 465;
   const smtpUser = process.env.SMTP_USER;
@@ -32,7 +58,7 @@ function initializeTransporter() {
   const smtpSecure = process.env.SMTP_SECURE !== 'false';
 
   if (!smtpHost || !smtpUser || !smtpPass) {
-    console.warn('[EmailService] ⚠️ SMTP not configured');
+    console.warn('[EmailService] ⚠️ No transport configured (set RESEND_API_KEY or SMTP_HOST/USER/PASS)');
     return;
   }
 
@@ -45,8 +71,8 @@ function initializeTransporter() {
       pool: true,
       maxConnections: 5,
     });
-    isConfigured = true;
-    console.log(`[EmailService] ✅ Configured: ${smtpHost}:${smtpPort}`);
+    transport = 'smtp';
+    console.log(`[EmailService] ✅ Configured via SMTP: ${smtpHost}:${smtpPort}`);
     transporter.verify().catch(err => console.error('[EmailService] ❌', err.message));
   } catch (error) {
     console.error('[EmailService] ❌', error.message);
@@ -114,27 +140,68 @@ function getTemplate(content, preheader = '') {
 
 class EmailService {
   constructor() {
-    this.fromEmail = process.env.SMTP_FROM_EMAIL || 'hello@oceanlinux.com';
-    this.fromName = process.env.SMTP_FROM_NAME || 'OceanLinux';
-    this.isConfigured = isConfigured;
+    // Default `from` resolves in this order: explicit EMAIL_FROM, legacy
+    // SMTP_FROM_EMAIL, then a sensible Resend-friendly default on the
+    // verified `updates.oceanlinux.com` domain.
+    this.fromEmail =
+      process.env.EMAIL_FROM ||
+      process.env.SMTP_FROM_EMAIL ||
+      'noreply@updates.oceanlinux.com';
+    this.fromName =
+      process.env.EMAIL_FROM_NAME ||
+      process.env.SMTP_FROM_NAME ||
+      'OceanLinux';
+    this.transport = transport;
+    this.isConfigured = transport !== 'none';
     this.baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://oceanlinux.com';
   }
 
   async sendEmail({ to, subject, html }) {
-    if (!this.isConfigured || !transporter) {
+    if (!this.isConfigured) {
       return { success: false, error: 'Email service not configured' };
     }
-    try {
-      const result = await transporter.sendMail({
-        from: { name: this.fromName, address: this.fromEmail },
-        to, subject, html,
-      });
-      console.log(`[EmailService] ✅ Email sent - ${result.messageId}`);
-      return { success: true, messageId: result.messageId };
-    } catch (error) {
-      console.error('[EmailService] ❌', error.message);
-      return { success: false, error: error.message };
+
+    // ---- Resend path ----
+    if (this.transport === 'resend' && resendClient) {
+      try {
+        // Resend accepts `from` either as plain "name <email>" or just an
+        // email. Build the friendly form when we have both.
+        const from = this.fromName ? `${this.fromName} <${this.fromEmail}>` : this.fromEmail;
+        const result = await resendClient.emails.send({
+          from,
+          to: Array.isArray(to) ? to : [to],
+          subject,
+          html,
+        });
+        if (result.error) {
+          console.error('[EmailService] ❌ Resend rejected:', result.error.message || result.error);
+          return { success: false, error: result.error.message || 'Resend send failed' };
+        }
+        const id = result.data?.id || result.id;
+        console.log(`[EmailService] ✅ Email sent via Resend - ${id}`);
+        return { success: true, messageId: id };
+      } catch (error) {
+        console.error('[EmailService] ❌ Resend exception:', error.message);
+        return { success: false, error: error.message };
+      }
     }
+
+    // ---- SMTP path ----
+    if (this.transport === 'smtp' && transporter) {
+      try {
+        const result = await transporter.sendMail({
+          from: { name: this.fromName, address: this.fromEmail },
+          to, subject, html,
+        });
+        console.log(`[EmailService] ✅ Email sent via SMTP - ${result.messageId}`);
+        return { success: true, messageId: result.messageId };
+      } catch (error) {
+        console.error('[EmailService] ❌', error.message);
+        return { success: false, error: error.message };
+      }
+    }
+
+    return { success: false, error: 'Email service not configured' };
   }
 
   // ========== WELCOME EMAIL ==========
@@ -506,6 +573,38 @@ class EmailService {
       subject: `${s.emoji} Ticket #${ticketId} - ${s.text}`,
       html: getTemplate(content, `Your ticket #${ticketId} status: ${s.text}`),
     });
+  }
+
+  /**
+   * Sent when an admin posts a reply on a support ticket. Notifies the
+   * customer with the latest message inline and a link to reply back.
+   * Aliased onto sendTicketUpdateEmail so we keep one template.
+   */
+  async sendTicketReplyEmail(email, name, ticketId, subject, replyMessage) {
+    return this.sendTicketUpdateEmail(
+      email,
+      name,
+      ticketId,
+      subject,
+      'waiting-response',
+      replyMessage,
+    );
+  }
+
+  /**
+   * Sent when admin changes the status of a ticket (e.g. open → resolved).
+   * The body shows the new status; we don't render the previous one to keep
+   * the email short and customer-friendly.
+   */
+  async sendTicketStatusUpdateEmail(email, name, ticketId, subject, _previousStatus, newStatus) {
+    return this.sendTicketUpdateEmail(
+      email,
+      name,
+      ticketId,
+      subject,
+      newStatus,
+      null,
+    );
   }
 
   // ========== ANNOUNCEMENT ==========

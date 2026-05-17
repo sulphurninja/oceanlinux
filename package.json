@@ -57,9 +57,11 @@
     "react-quill": "^2.0.0",
     "react-resizable-panels": "^3.0.6",
     "recharts": "^2.12.7",
+    "resend": "^6.12.2",
     "sonner": "^1.7.4",
     "tailwind-merge": "^2.4.0",
     "tailwindcss-animate": "^1.0.7",
+    "zaptick": "^1.0.0",
     "zod": "^3.24.2"
   },
   "devDependencies": {
@@ -74,4 +76,3 @@
     "typescript": "^5"
   }
 }
-  

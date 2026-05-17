@@ -9,6 +9,7 @@ import { calculateExpiryDate } from '@/lib/expiryHelper';
 import { assignPanelCredentials } from '@/lib/panelCredentials';
 const AutoProvisioningService = require('@/services/autoProvisioningService');
 const SlotIPPackage = require('@/models/slotIpPackageModel');
+const WhatsAppService = require('@/services/whatsappService');
 
 // Initialize Cashfree
 Cashfree.XClientId = process.env.CASHFREE_APP_ID;
@@ -288,13 +289,18 @@ export async function POST(request) {
                 username: result.username || 'root',
                 password: result.password || 'Check dashboard'
               });
-            } else if (!result.success && !result.alreadyProvisioning) {
+              WhatsAppService.notifyOrderViaWhatsApp(order.user, order).catch(() => {});
+            } else if (!result.success && !result.alreadyProvisioning && !result.advpsPending) {
               await NotificationService.notifyOrderFailed(order.user, order, result.error);
+            } else if (result.advpsPending) {
+              console.log(`[PAYMENT-CONFIRM] ADVPS order pending assignment — skipping failure notification`);
             }
           })
           .catch(async error => {
             console.error(`[PAYMENT-CONFIRM] Auto-provisioning failed for order ${order._id}:`, error);
-            await NotificationService.notifyOrderFailed(order.user, order, error.message);
+            if (!String(error.message).startsWith('ADVPS_PENDING')) {
+              await NotificationService.notifyOrderFailed(order.user, order, error.message);
+            }
           });
 
         console.log("[PAYMENT-CONFIRM] Auto-provisioning initiated");

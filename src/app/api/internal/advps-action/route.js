@@ -3,6 +3,7 @@ import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 const AdvpsAPI = require('@/services/advpsApi');
 const { normalizeAdvpsPowerState, unwrapAdvpsEnvelope } = require('@/lib/advpsStatusNormalize');
+const { runAdvpsPostRebuildGeneratePasswordFlow } = require('@/lib/advpsPostRebuildFlow');
 
 function validateInternalKey(request) {
   const key = request.headers.get('x-internal-key');
@@ -51,6 +52,32 @@ export async function POST(request) {
         return NextResponse.json({ success: true, result: res });
       }
 
+      case 'resetmac':
+      case 'reset-mac': {
+        try {
+          const macRes = await api.resetMac(serviceId);
+          await Order.findByIdAndUpdate(orderId, { lastAction: 'resetmac', lastActionTime: new Date() });
+          return NextResponse.json({ success: true, result: macRes?.data || macRes });
+        } catch (macErr) {
+          const status = macErr?.status;
+          if (status === 429) {
+            return NextResponse.json({
+              success: false,
+              error: 'MAC reset is only allowed once every 24 hours without an active MAC reset subscription.',
+              code: 'MAC_RESET_RATE_LIMIT',
+            }, { status: 429 });
+          }
+          if (status === 404) {
+            return NextResponse.json({
+              success: false,
+              error: 'Service not found or MAC reset is not supported for this assignment (VPS only).',
+              code: 'MAC_RESET_NOT_APPLICABLE',
+            }, { status: 404 });
+          }
+          throw macErr;
+        }
+      }
+
       case 'status': {
         try {
           const statusRes = await api.status(serviceId);
@@ -59,6 +86,65 @@ export async function POST(request) {
           return NextResponse.json({ success: true, powerState, rawStatus: d, provider: 'advps', lastSync: new Date().toISOString() });
         } catch (e) {
           return NextResponse.json({ success: false, error: e.message, powerState: 'unknown', provider: 'advps' });
+        }
+      }
+
+      case 'sync': {
+        try {
+          const statusRes = await api.status(serviceId);
+          const d = unwrapAdvpsEnvelope(statusRes) || {};
+          const powerState = normalizeAdvpsPowerState(d);
+
+          const syncUpdates = { lastSyncTime: new Date() };
+          let syncCredentialsUpdated = false;
+
+          if (order.advpsOrderId) {
+            try {
+              const detailsRes = await api.getOrderDetails(order.advpsOrderId);
+              const orderDetails = detailsRes?.data || detailsRes;
+              const services = orderDetails?.services || [];
+
+              if (services.length > 0) {
+                const svc = services[0];
+                const freshIp = svc.ip || '';
+                const freshUsername = svc.username || '';
+                const freshPassword = svc.password || '';
+                const freshOs = svc.os || '';
+
+                if (freshIp && freshIp !== order.ipAddress) { syncUpdates.ipAddress = freshIp; syncCredentialsUpdated = true; }
+                if (freshUsername && freshUsername !== order.username) { syncUpdates.username = freshUsername; syncCredentialsUpdated = true; }
+                if (freshPassword && freshPassword !== order.password) { syncUpdates.password = freshPassword; syncCredentialsUpdated = true; }
+                if (freshOs && freshOs !== order.os) { syncUpdates.os = freshOs; syncCredentialsUpdated = true; }
+
+                if (syncCredentialsUpdated) {
+                  console.log(`[INTERNAL-ADVPS][SYNC] Credentials updated from getOrderDetails for order ${orderId}`);
+                }
+              }
+            } catch (detailsErr) {
+              console.error('[INTERNAL-ADVPS][SYNC] getOrderDetails error:', detailsErr.message);
+            }
+          }
+
+          await Order.findByIdAndUpdate(orderId, syncUpdates);
+          const orderSnapshot = await Order.findById(orderId)
+            .select('ipAddress username password os provisioningStatus provisioningError lastSyncTime advpsRebuildCount advpsRebuildCountMonth status')
+            .lean();
+
+          return NextResponse.json({
+            success: true,
+            powerState,
+            rawStatus: d,
+            provider: 'advps',
+            lastSync: new Date().toISOString(),
+            result: {
+              synced: true,
+              message: syncCredentialsUpdated ? 'ADVPS synced; credentials updated' : 'ADVPS synced',
+              credentialsUpdated: syncCredentialsUpdated,
+            },
+            order: orderSnapshot,
+          });
+        } catch (err) {
+          return NextResponse.json({ success: false, error: err.message, powerState: 'unknown', provider: 'advps' });
         }
       }
 
@@ -80,6 +166,24 @@ export async function POST(request) {
           : order.os?.toLowerCase().includes('windows') ? 'windows-2022'
           : 'ubuntu-22.04');
 
+        const REBUILD_LIMIT = 10;
+        const currentMonth = new Date().toISOString().slice(0, 7);
+        const storedMonth = order.advpsRebuildCountMonth || '';
+        const currentCount = storedMonth === currentMonth ? (order.advpsRebuildCount || 0) : 0;
+        if (currentCount >= REBUILD_LIMIT) {
+          return NextResponse.json({
+            success: false,
+            message: `Rebuild limit reached. You can only rebuild/format your server ${REBUILD_LIMIT} times per month. Your limit resets on the 1st of next month.`,
+            code: 'REBUILD_LIMIT_REACHED',
+            rebuildsUsed: currentCount,
+            rebuildsRemaining: 0,
+          }, { status: 429 });
+        }
+        await Order.findByIdAndUpdate(orderId, {
+          advpsRebuildCount: currentCount + 1,
+          advpsRebuildCountMonth: currentMonth,
+        });
+
         const rebuildRes = await api.rebuild(serviceId, os);
         const taskId = rebuildRes?.data?.taskId;
 
@@ -87,6 +191,10 @@ export async function POST(request) {
 
         if (taskId) {
           (async () => {
+            try {
+              await connectDB();
+            } catch (_) { /* already connected */ }
+
             const pollDelays = [10000, 15000, 20000, 30000, 60000, 60000];
             for (let i = 0; i < pollDelays.length; i++) {
               await new Promise(r => setTimeout(r, pollDelays[i]));
@@ -97,56 +205,14 @@ export async function POST(request) {
                 console.log(`[INTERNAL-ADVPS] Rebuild poll ${i + 1}: status=${taskStatus}`);
 
                 if (taskStatus === 'COMPLETED' || taskStatus === 'SUCCESS' || taskStatus === 'DONE') {
-                  console.log(`[INTERNAL-ADVPS] Rebuild completed for ${serviceId}, starting post-rebuild password flow...`);
+                  console.log(`[INTERNAL-ADVPS] Rebuild completed for ${serviceId}; generate-password → save on order`);
 
-                  // Start the server first (LXC may be stopped after rebuild)
-                  try {
-                    await api.start(serviceId);
-                    console.log(`[INTERNAL-ADVPS] Post-rebuild start command sent for ${serviceId}`);
-                  } catch (startErr) {
-                    console.log(`[INTERNAL-ADVPS] Post-rebuild start: ${startErr.message} (may already be running)`);
-                  }
-
-                  await new Promise(r => setTimeout(r, 45000));
-
-                  const passRetryDelays = [0, 20000, 30000, 60000];
-                  for (let attempt = 0; attempt < passRetryDelays.length; attempt++) {
-                    if (attempt > 0) await new Promise(r => setTimeout(r, passRetryDelays[attempt]));
-                    try {
-                      const passRes = await api.generatePassword(serviceId);
-                      const pd = passRes?.data || {};
-                      const newPass = pd.password || pd.newPassword || pd.existingPassword;
-                      console.log(`[INTERNAL-ADVPS] generate-password response: status=${pd.status}, hasPassword=${!!pd.password}, hasNewPassword=${!!pd.newPassword}, hasExistingPassword=${!!pd.existingPassword}`);
-                      if (newPass) {
-                        console.log(`[INTERNAL-ADVPS] 🔑 POST-REBUILD PASSWORD: ${newPass}`);
-                        for (let db = 0; db < 5; db++) {
-                          try {
-                            await Order.findByIdAndUpdate(orderId, { password: newPass, provisioningStatus: 'active' });
-                            console.log(`[INTERNAL-ADVPS] ✅ Password saved (attempt ${db + 1})`);
-                            return;
-                          } catch (e) {
-                            if (db < 4) await new Promise(r => setTimeout(r, 2000));
-                          }
-                        }
-                        return;
-                      }
-                    } catch (passErr) {
-                      const msg = passErr.message || '';
-                      console.log(`[INTERNAL-ADVPS] generate-password error (attempt ${attempt + 1}): ${msg}`);
-
-                      const existingMatch = msg.match(/existingPassword[:\s]+"?([^"}\s,]+)/);
-                      if (existingMatch) {
-                        console.log(`[INTERNAL-ADVPS] 🔑 Extracted existingPassword from error: ${existingMatch[1]}`);
-                        await Order.findByIdAndUpdate(orderId, { password: existingMatch[1], provisioningStatus: 'active' });
-                        return;
-                      }
-
-                      if (msg.includes('must be running')) continue;
-                    }
-                  }
-                  await Order.findByIdAndUpdate(orderId, {
-                    provisioningStatus: 'active',
-                    provisioningError: 'Rebuild completed but password could not be retrieved. Check ADVPS dashboard.',
+                  await runAdvpsPostRebuildGeneratePasswordFlow({
+                    api,
+                    Order,
+                    rebuildOrderId: orderId,
+                    rebuildServiceId: serviceId,
+                    logPrefix: '[INTERNAL-ADVPS]',
                   });
                   return;
                 }

@@ -38,12 +38,22 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
-import { useState, useEffect, Suspense } from 'react';
+import { useState, useEffect, Suspense, useCallback } from 'react';
 import { toast } from 'sonner';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { SessionAlertProvider } from '@/components/session-alert';
 import FloatingSupport from '@/components/component/floating-support';
 import LoginNewsPopup from '@/components/login-news-popup';
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 interface UserData {
     _id: string;
@@ -71,6 +81,9 @@ export default function DashboardLayout({
     const pathname = usePathname();
     const [user, setUser] = useState<UserData | null>(null);
     const [loading, setLoading] = useState(true);
+    const [showPhoneDialog, setShowPhoneDialog] = useState(false);
+    const [phoneNumber, setPhoneNumber] = useState('+91 ');
+    const [isSavingPhone, setIsSavingPhone] = useState(false);
 
     useEffect(() => {
         fetchUserData();
@@ -82,12 +95,49 @@ export default function DashboardLayout({
             if (response.ok) {
                 const userData = await response.json();
                 setUser(userData);
+
+                if (!userData.phone) {
+                    const dismissed = sessionStorage.getItem('phonePromptDismissed');
+                    if (!dismissed) {
+                        setTimeout(() => setShowPhoneDialog(true), 1200);
+                    }
+                }
             }
         } catch (error) {
             console.error('Error fetching user data:', error);
         } finally {
             setLoading(false);
         }
+    };
+
+    const handleSavePhone = async () => {
+        const cleaned = phoneNumber.replace(/\s+/g, '');
+        if (!cleaned || cleaned.length < 10) {
+            toast.error('Please enter a valid phone number');
+            return;
+        }
+        setIsSavingPhone(true);
+        try {
+            const response = await fetch('/api/users/update', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ phone: cleaned }),
+            });
+            if (!response.ok) throw new Error('Failed to update phone number');
+            toast.success('Phone number updated!');
+            setUser(prev => prev ? { ...prev, phone: cleaned } : prev);
+            setShowPhoneDialog(false);
+        } catch (error) {
+            console.error('Error saving phone:', error);
+            toast.error('Failed to save phone number. Please try again.');
+        } finally {
+            setIsSavingPhone(false);
+        }
+    };
+
+    const handleDismissPhone = () => {
+        sessionStorage.setItem('phonePromptDismissed', 'true');
+        setShowPhoneDialog(false);
     };
 
     const handleLogout = async () => {
@@ -397,6 +447,53 @@ export default function DashboardLayout({
                         </main>
                         <FloatingSupport />
                     </div>
+
+                    {/* Phone Number Prompt Dialog */}
+                    <Dialog open={showPhoneDialog} onOpenChange={(open) => {
+                        if (!open) handleDismissPhone();
+                    }}>
+                        <DialogContent className="w-[calc(100vw-2rem)] max-w-md mx-auto">
+                            <DialogHeader>
+                                <DialogTitle className="flex items-center gap-2 text-base">
+                                    <svg className="h-4 w-4 text-[#25D366]" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+                                    Add Your WhatsApp Number
+                                </DialogTitle>
+                                <DialogDescription className="text-sm">
+                                    Enter your WhatsApp number to receive instant order confirmations, server credentials, and service updates directly on WhatsApp.
+                                </DialogDescription>
+                            </DialogHeader>
+                            <div className="space-y-2 py-2">
+                                <Label htmlFor="phone-prompt" className="text-sm">WhatsApp Number</Label>
+                                <Input
+                                    id="phone-prompt"
+                                    type="tel"
+                                    value={phoneNumber}
+                                    onChange={(e) => {
+                                        const val = e.target.value;
+                                        if (val.startsWith('+91')) {
+                                            setPhoneNumber(val);
+                                        }
+                                    }}
+                                    placeholder="+91 98765 43210"
+                                    className="text-sm h-10"
+                                    onKeyDown={(e) => { if (e.key === 'Enter') handleSavePhone(); }}
+                                />
+                                <p className="text-xs text-muted-foreground">We'll send order updates to this number via WhatsApp</p>
+                            </div>
+                            <DialogFooter className="gap-2 flex-col-reverse sm:flex-row">
+                                <Button variant="ghost" size="sm" onClick={handleDismissPhone} disabled={isSavingPhone} className="w-full sm:w-auto text-sm">
+                                    Skip for now
+                                </Button>
+                                <Button size="sm" onClick={handleSavePhone} disabled={isSavingPhone || !phoneNumber.trim()} className="w-full sm:w-auto gap-2 text-sm">
+                                    {isSavingPhone ? (
+                                        <><div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white" />Saving...</>
+                                    ) : (
+                                        <>Save Phone Number</>
+                                    )}
+                                </Button>
+                            </DialogFooter>
+                        </DialogContent>
+                    </Dialog>
 
                 </div>
             </AuthProvider>

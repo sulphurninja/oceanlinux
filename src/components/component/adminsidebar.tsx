@@ -205,7 +205,7 @@ const AdminSidebar = () => {
       <div className="p-5 border-b border-border">
         <div className='flex flex-col items-center space-y-3'>
           <div className="relative">
-            <img src='/oceanlinux.png' className='h-14 w-auto transition-all duration-300 hover:scale-105' alt="OceanLinux" />
+            <img src='/ol.png' className='h-14 w-auto transition-all duration-300 hover:scale-105' alt="OceanLinux" />
           </div>
 
           <div className='flex items-center space-x-1 opacity-70 hover:opacity-100 transition-opacity'>
@@ -439,7 +439,7 @@ const AdminSidebar = () => {
           </Sheet>
 
           <div className="flex items-center space-x-2">
-            <img src='/oceanlinux.png' className='h-8 w-auto' alt="OceanLinux" />
+            <img src='/ol.png' className='h-8 w-auto' alt="OceanLinux" />
             <span className="text-base font-semibold">Admin</span>
           </div>
 

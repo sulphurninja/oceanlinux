@@ -3,6 +3,7 @@ import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 import { assignPanelCredentials } from '@/lib/panelCredentials';
 const AdvpsAPI = require('@/services/advpsApi');
+const WhatsAppService = require('@/services/whatsappService');
 
 export async function POST(request) {
   await connectDB();
@@ -93,108 +94,62 @@ export async function POST(request) {
           advpsNotes.push(`Panel credentials generated: ${existingOrder.panelUsername}`);
         }
 
-        // Background: start server → wait 60s → attempt password gen with retries
+        // Background: fetch password from ADVPS order details (never generate — that overwrites the real one)
         const bgOrderId = orderId;
         const bgServiceId = advpsServiceId;
-
-        // Helper: save password to DB with retries (password is one-shot from ADVPS, cannot be retrieved again)
-        async function savePasswordToDB(password, svcId, oId) {
-          for (let dbAttempt = 0; dbAttempt < 5; dbAttempt++) {
-            try {
-              await Order.findByIdAndUpdate(oId, {
-                password: password,
-                provisioningStatus: 'active',
-                lastAction: 'provision',
-                lastActionTime: new Date(),
-              });
-              console.log(`[ADVPS-PROVISION] ✅ Password SAVED to DB for ${svcId} (attempt ${dbAttempt + 1})`);
-              return true;
-            } catch (dbErr) {
-              console.error(`[ADVPS-PROVISION] ❌ DB save attempt ${dbAttempt + 1}/5 FAILED for ${svcId}:`, dbErr.message);
-              if (dbAttempt < 4) await new Promise(r => setTimeout(r, 2000));
-            }
-          }
-          return false;
-        }
+        const bgAdvpsOrderId = existingOrder?.advpsOrderId;
 
         (async () => {
           const bgApi = new AdvpsAPI();
           try {
-            // Step 1: Start the server
-            console.log(`[ADVPS-PROVISION] Starting server ${bgServiceId}...`);
-            try {
-              await bgApi.start(bgServiceId);
-              console.log(`[ADVPS-PROVISION] Start command sent for ${bgServiceId}`);
-            } catch (startErr) {
-              console.log(`[ADVPS-PROVISION] Start response: ${startErr.message} (may already be running)`);
+            if (!bgAdvpsOrderId) {
+              console.log(`[ADVPS-PROVISION] No advpsOrderId on order ${bgOrderId}, skipping password fetch`);
+              return;
             }
 
-            // Step 2: Wait 60 seconds for the server to boot
-            console.log(`[ADVPS-PROVISION] Waiting 60s for server to boot...`);
-            await new Promise(resolve => setTimeout(resolve, 60000));
-
-            // Step 3: Try generating password with retries (server may need more time)
-            const retryDelays = [0, 30000, 30000, 60000]; // immediate, then 30s, 30s, 60s
+            // Poll order details for password (2 attempts: immediate + 60s)
+            const pollDelays = [0, 60000];
             let passwordSaved = false;
 
-            for (let attempt = 0; attempt < retryDelays.length; attempt++) {
-              if (attempt > 0) {
-                console.log(`[ADVPS-PROVISION] Password retry ${attempt}, waiting ${retryDelays[attempt] / 1000}s...`);
-                await new Promise(resolve => setTimeout(resolve, retryDelays[attempt]));
+            for (let attempt = 0; attempt < pollDelays.length; attempt++) {
+              if (pollDelays[attempt] > 0) {
+                console.log(`[ADVPS-PROVISION] Waiting ${pollDelays[attempt] / 1000}s before password poll...`);
+                await new Promise(r => setTimeout(r, pollDelays[attempt]));
               }
 
               try {
-                const passRes = await bgApi.generatePassword(bgServiceId);
-                const d = passRes?.data || {};
-                const newPassword = d.password || d.newPassword || d.existingPassword;
-                if (newPassword) {
-                  console.log(`[ADVPS-PROVISION] 🔑 PASSWORD GENERATED for service=${bgServiceId} order=${bgOrderId}: ${newPassword}`);
-
-                  const saved = await savePasswordToDB(newPassword, bgServiceId, bgOrderId);
-                  if (!saved) {
-                    console.error(`[ADVPS-PROVISION] 🚨 CRITICAL: Password generated but ALL DB saves failed! service=${bgServiceId} order=${bgOrderId} password=${newPassword}`);
-                  }
-                  passwordSaved = true;
-                  break;
-                }
-              } catch (passErr) {
-                const msg = passErr.message || '';
-                if (msg.includes('already exists') || msg.includes('Password already')) {
-                  console.log(`[ADVPS-PROVISION] Password already exists for ${bgServiceId}, marking as active`);
+                const detailsRes = await bgApi.getOrderDetails(bgAdvpsOrderId);
+                const svc = (detailsRes?.data?.services || [])[0];
+                if (svc?.password) {
+                  console.log(`[ADVPS-PROVISION] Password from order details (poll ${attempt + 1}): ${svc.password.substring(0, 4)}****`);
                   await Order.findByIdAndUpdate(bgOrderId, {
+                    password: svc.password,
+                    ...(svc.username ? { username: svc.username } : {}),
                     provisioningStatus: 'active',
-                    provisioningError: 'Password was generated previously but not captured. Check ADVPS dashboard or rebuild the server to get a new password.',
                     lastAction: 'provision',
                     lastActionTime: new Date(),
                   });
                   passwordSaved = true;
                   break;
                 }
-                if (msg.includes('must be running')) {
-                  console.log(`[ADVPS-PROVISION] Server not ready yet (attempt ${attempt + 1}/${retryDelays.length})`);
-                  continue;
-                }
-                console.error(`[ADVPS-PROVISION] Password gen attempt ${attempt + 1} failed:`, msg);
+                console.log(`[ADVPS-PROVISION] Password poll ${attempt + 1}/${pollDelays.length}: not available yet`);
+              } catch (err) {
+                console.log(`[ADVPS-PROVISION] Password poll ${attempt + 1} error: ${err.message}`);
               }
             }
 
             if (!passwordSaved) {
-              console.error(`[ADVPS-PROVISION] All password attempts failed for ${bgServiceId}`);
-              await Order.findByIdAndUpdate(bgOrderId, {
-                provisioningStatus: 'failed',
-                provisioningError: 'Password generation failed after multiple attempts. Try "Generate Password" from the order page when server is running.',
-              });
+              console.log(`[ADVPS-PROVISION] Password not yet available for ${bgAdvpsOrderId}, pending cron will handle it`);
             }
           } catch (bgErr) {
-            console.error(`[ADVPS-PROVISION] Background provisioning failed for ${bgServiceId}:`, bgErr.message);
-            await Order.findByIdAndUpdate(bgOrderId, {
-              provisioningStatus: 'failed',
-              provisioningError: `Provisioning failed: ${bgErr.message}`,
-            });
+            console.error(`[ADVPS-PROVISION] Background password fetch failed for ${bgServiceId}:`, bgErr.message);
           }
         })();
       }
     }
+
+    const existingBeforeUpdate = await Order.findById(orderId).select('status provisioningStatus ipAddress user').lean();
+    const wasActive = existingBeforeUpdate?.status === 'active' || existingBeforeUpdate?.provisioningStatus === 'active';
 
     const updatedOrder = await Order.findByIdAndUpdate(
       orderId,
@@ -204,6 +159,11 @@ export async function POST(request) {
 
     if (!updatedOrder) {
       return NextResponse.json({ message: 'Order not found' }, { status: 404 });
+    }
+
+    const isNowActive = (updateFields.status === 'active' || updateFields.provisioningStatus === 'active') && updateFields.ipAddress;
+    if (isNowActive && !wasActive && updatedOrder.user) {
+      WhatsAppService.notifyOrderViaWhatsApp(updatedOrder.user, updatedOrder).catch(() => {});
     }
 
     return NextResponse.json(

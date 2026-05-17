@@ -9,8 +9,27 @@ import https from "https";
  * SSL certificate validation is disabled for servers with self-signed certificates.
  */
 export class VirtualizorAPI {
-  constructor() {
-    this.accounts = this._loadAccountsFromEnv();
+  /**
+   * @param {{ accounts?: Array<{ host: string; port?: number; key: string; pass: string; protocol?: 'http'|'https' }> }} [opts]
+   * Pass `accounts` to use an explicit set of panels (e.g. a single per-company
+   * panel pulled from the DB). When omitted, accounts are loaded from env vars
+   * for back-compat with the multi-panel admin setup.
+   */
+  constructor(opts = {}) {
+    if (Array.isArray(opts?.accounts) && opts.accounts.length > 0) {
+      this.accounts = opts.accounts
+        .filter(a => a && a.host && a.key && a.pass)
+        .map(a => ({
+          host: a.host,
+          port: Number(a.port || 4083),
+          key: a.key,
+          pass: a.pass,
+          protocol: a.protocol || 'https',
+        }));
+    } else {
+      this.accounts = this._loadAccountsFromEnv();
+    }
+
     if (!this.accounts.length) {
       // Back-compat: fail fast with the same message you had before
       throw new Error("VirtualizorAPI: VIRTUALIZOR_HOST/KEY/PASSWORD missing");
@@ -401,6 +420,59 @@ export class VirtualizorAPI {
     } catch (error) {
       console.error(`[VirtualizorAPI][getTemplates] Failed to get templates for VPS ${vpsid}:`, error.message);
       throw error;
+    }
+  }
+
+  /**
+   * Power actions on the correct account. Virtualizor's enduser API uses a
+   * two-step "confirm" flow for power actions: a plain GET to act=stop only
+   * returns the confirmation page (HTTP 200 with `act:"stop"` echoed back but
+   * NO actual effect on the VM). To actually execute, we have to POST a body
+   * containing `do=1` (the confirmation token). Without this, the VPS visibly
+   * doesn't change state even though the API call appears successful.
+   *
+   * Note: this only runs for the company-Virtualizor automation path. The
+   * Hostycare flow handles power actions via HostycareAPI directly and is
+   * not affected.
+   */
+  async start(vpsid) {
+    const idx = await this._resolveAccountIndexForVps(vpsid);
+    return this._call(idx, `svs=${vpsid}&act=start`, { do: 1 });
+  }
+
+  async stop(vpsid) {
+    const idx = await this._resolveAccountIndexForVps(vpsid);
+    return this._call(idx, `svs=${vpsid}&act=stop`, { do: 1 });
+  }
+
+  async restart(vpsid) {
+    const idx = await this._resolveAccountIndexForVps(vpsid);
+    return this._call(idx, `svs=${vpsid}&act=restart`, { do: 1 });
+  }
+
+  async reboot(vpsid) {
+    return this.restart(vpsid);
+  }
+
+  /**
+   * Locate a VPS across known accounts and return the raw VM record (incl. status).
+   * Used by service-action 'status' for company-Virtualizor automation.
+   */
+  async getVpsRecord(vpsid) {
+    const idx = await this._resolveAccountIndexForVps(vpsid);
+    try {
+      const r = await this._call(idx, `act=listvs&page=1&reslen=1000`);
+      const vsMap = r?.vps || r?.vs || (typeof r === 'object' ? r : null);
+      if (!vsMap || typeof vsMap !== 'object') return null;
+      for (const [key, vm] of Object.entries(vsMap)) {
+        if (!vm || typeof vm !== 'object') continue;
+        const id = String(vm.vpsid ?? vm.vid ?? vm.subid ?? key ?? '');
+        if (id === String(vpsid)) return vm;
+      }
+      return null;
+    } catch (err) {
+      console.error(`[VirtualizorAPI][getVpsRecord] Failed for vpsid=${vpsid}:`, err.message);
+      return null;
     }
   }
 

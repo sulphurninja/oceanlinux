@@ -46,7 +46,7 @@ function normalizeAdvpsPowerState(d) {
 
   const sl = String(raw).toLowerCase().trim();
   if (['running', 'online', 'started', 'active', 'up'].includes(sl)) return 'running';
-  if (['stopped', 'offline', 'shutdown', 'inactive', 'down'].includes(sl)) return 'stopped';
+  if (['stopped', 'offline', 'shutdown', 'inactive', 'down', 'suspended', 'paused'].includes(sl)) return 'stopped';
 
   const up = sl.toUpperCase();
   if (up === 'RUNNING' || up === 'STARTED') return 'running';

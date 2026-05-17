@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 const AutoProvisioningService = require('@/services/autoProvisioningService');
+const WhatsAppService = require('@/services/whatsappService');
 
 // Configuration
 const CONFIG = {
@@ -169,7 +170,42 @@ async function validateOrderConfiguration(order) {
         
         console.log(`[VALIDATION] ✅ Found memory config:`, memoryConfig);
         
-        // STEP 4: Validate hostycareProductId exists
+        // STEP 4: Check provider — ADVPS orders don't need hostycareProductId
+        const advpsConfig = ipStock.defaultConfigurations?.get?.('advps') ||
+            ipStock.defaultConfigurations?.advps;
+        const isAdvps = advpsConfig || (ipStock.name || '').startsWith('⚡') || order.advpsOrderId;
+
+        if (isAdvps) {
+            // ADVPS: product ID comes from defaultConfigurations.advps.variants, not memoryOptions
+            const variants = advpsConfig?.variants instanceof Map
+                ? Object.fromEntries(advpsConfig.variants)
+                : (advpsConfig?.variants || {});
+            const anyVariant = Object.values(variants).find(v => v?.productId);
+            const advpsProductId = anyVariant?.productId || order.advpsProductId;
+
+            if (!advpsProductId) {
+                console.log(`[VALIDATION] ❌ ADVPS: No product ID in variants or order`);
+                return {
+                    valid: false,
+                    reason: `ADVPS product ID not found in IPStock variants. Run /api/advps/sync to refresh.`
+                };
+            }
+
+            console.log(`[VALIDATION] ✅ ADVPS validation passed!`);
+            console.log(`[VALIDATION]   - ADVPS Product ID: "${advpsProductId}"`);
+            console.log(`[VALIDATION]   - IP Stock: ${ipStock.name}`);
+            console.log(`[VALIDATION]   - ADVPS Order ID: ${order.advpsOrderId || '(new purchase)'}`);
+
+            return {
+                valid: true,
+                productId: String(advpsProductId),
+                ipStock: ipStock.name,
+                memoryConfig: memoryConfig,
+                isAdvps: true
+            };
+        }
+
+        // Non-ADVPS: validate hostycareProductId exists
         const productId = memoryConfig.hostycareProductId || memoryConfig.productId;
         
         if (!productId) {
@@ -365,6 +401,7 @@ export async function POST(request) {
     try {
         await connectDB();
         console.log(`[CRON-${cronId}] ✅ Database connected`);
+        // ADVPS "assignment pending" follow-up: /api/admin/advps-pending-cron (separate schedule; saves ADVPS rate limit)
 
         // STEP 1: Try to acquire a database lock on a VALIDATED order
         console.log(`[CRON-${cronId}] 🔒 STEP 1: Attempting to acquire lock on validated order...`);
@@ -430,8 +467,10 @@ export async function POST(request) {
                         productId: lockedOrder._validationInfo.productId
                     };
 
-                    // The provisionServer already updates the order status to 'active'
-                    
+                    if (!provisionResult.alreadyProvisioned) {
+                        WhatsAppService.notifyOrderViaWhatsApp(lockedOrder.user, lockedOrder).catch(() => {});
+                    }
+
                 } else {
                     throw new Error(provisionResult.error || 'Unknown provisioning error');
                 }
@@ -545,93 +584,44 @@ export async function POST(request) {
     }
 }
 
-// GET endpoint for status/health check - UPDATED
+// GET — same as POST (lock + provision one order). ADVPS pending poll: /api/admin/advps-pending-cron
 export async function GET(request) {
-    try {
-        await connectDB();
+    const { searchParams } = new URL(request.url);
+    const statsOnly = searchParams.get('stats') === '1';
 
-        // Get statistics
-        const totalOrders = await Order.countDocuments();
-        const confirmedOrders = await Order.countDocuments({ status: 'confirmed' });
-        
-        const pendingProvisioning = await Order.countDocuments({
-            $and: [
-                { status: 'confirmed' },
-                {
-                    $or: [
-                        { autoProvisioned: { $ne: true } },
-                        { autoProvisioned: { $exists: false } },
-                        {
-                            $and: [
-                                { autoProvisioned: true },
-                                { provisioningStatus: 'failed' }
-                            ]
-                        }
-                    ]
-                },
-                {
-                    $or: [
-                        { provisioningStatus: { $ne: 'provisioning' } },
-                        { provisioningStatus: { $exists: false } }
-                    ]
-                }
-            ]
-        });
-
-        const currentlyProvisioning = await Order.countDocuments({
-            provisioningStatus: 'provisioning'
-        });
-
-        const activeProvisioned = await Order.countDocuments({
-            autoProvisioned: true,
-            provisioningStatus: 'active'
-        });
-
-        const failedProvisioning = await Order.countDocuments({
-            autoProvisioned: true,
-            provisioningStatus: 'failed'
-        });
-
-        const configFailures = await Order.countDocuments({
-            provisioningError: { $regex: /^CONFIG:/ }
-        });
-
-        // Check for stale locks (provisioning status older than 20 minutes)
-        const staleLocks = await Order.countDocuments({
-            provisioningStatus: 'provisioning',
-            updatedAt: { $lt: new Date(Date.now() - CONFIG.lockTimeoutMs) }
-        });
-
-        return NextResponse.json({
-            success: true,
-            status: 'healthy',
-            statistics: {
-                totalOrders,
-                confirmedOrders,
-                pendingProvisioning,
-                currentlyProvisioning,
-                staleLocks,
-                activeProvisioned,
-                failedProvisioning,
-                configFailures
-            },
-            config: {
-                maxRetries: CONFIG.maxRetries,
-                retryDelayMs: CONFIG.retryDelayMs,
-                lockTimeoutMs: CONFIG.lockTimeoutMs,
-                runInterval: "2 minutes",
-                lockMechanism: "Database-based atomic locks with strict validation",
-                note: "Only processes orders with valid IPStock configurations and hostycareProductId"
-            },
-            timestamp: new Date().toISOString()
-        });
-
-    } catch (error) {
-        return NextResponse.json({
-            success: false,
-            status: 'unhealthy',
-            error: error.message,
-            timestamp: new Date().toISOString()
-        }, { status: 500 });
+    // If ?stats=1, return health-check stats without running the cron
+    if (statsOnly) {
+        try {
+            await connectDB();
+            const [totalOrders, confirmedOrders, currentlyProvisioning, activeProvisioned, failedProvisioning, configFailures, advpsPendingCount, staleLocks] = await Promise.all([
+                Order.countDocuments(),
+                Order.countDocuments({ status: 'confirmed' }),
+                Order.countDocuments({ provisioningStatus: 'provisioning' }),
+                Order.countDocuments({ autoProvisioned: true, provisioningStatus: 'active' }),
+                Order.countDocuments({ autoProvisioned: true, provisioningStatus: 'failed' }),
+                Order.countDocuments({ provisioningError: { $regex: /^CONFIG:/ } }),
+                Order.countDocuments({
+                    advpsOrderId: { $exists: true, $ne: '' },
+                    status: 'confirmed',
+                    provisioningStatus: 'provisioning',
+                    provisioningError: { $regex: /^ADVPS_PENDING/ },
+                    ipAddress: { $in: [null, '', undefined] },
+                }),
+                Order.countDocuments({
+                    provisioningStatus: 'provisioning',
+                    provisioningError: { $not: { $regex: /^ADVPS_PENDING/ } },
+                    updatedAt: { $lt: new Date(Date.now() - CONFIG.lockTimeoutMs) }
+                }),
+            ]);
+            return NextResponse.json({
+                success: true, status: 'healthy',
+                statistics: { totalOrders, confirmedOrders, currentlyProvisioning, advpsPending: advpsPendingCount, staleLocks, activeProvisioned, failedProvisioning, configFailures },
+                timestamp: new Date().toISOString()
+            });
+        } catch (error) {
+            return NextResponse.json({ success: false, status: 'unhealthy', error: error.message, timestamp: new Date().toISOString() }, { status: 500 });
+        }
     }
+
+    return POST(request);
 }

@@ -238,7 +238,7 @@ export async function POST(request) {
           receipt: renewalTxnId,
           notes: {
             orderId: String(order._id),
-            renewal_for: order.productName,
+            renewal_for: String(order.productName).replace(/[^\x20-\x7E]/g, '').trim(),
             memory: order.memory,
             renewal_type: 'service_renewal',
             provider: provider

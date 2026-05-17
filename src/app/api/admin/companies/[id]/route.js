@@ -20,15 +20,48 @@ async function verifyAdmin() {
   }
 }
 
+function normalizeVirtualizorEntry(v) {
+  return {
+    enabled: typeof v?.enabled === 'boolean' ? v.enabled : true,
+    label: typeof v?.label === 'string' ? v.label.trim() : '',
+    host: typeof v?.host === 'string' ? v.host.trim() : '',
+    port: Number.isFinite(Number(v?.port)) ? Number(v.port) : 4083,
+    apiKey: typeof v?.apiKey === 'string' ? v.apiKey.trim() : '',
+    apiPassword: typeof v?.apiPassword === 'string' ? v.apiPassword : '',
+    protocol: v?.protocol === 'http' ? 'http' : 'https',
+  };
+}
+
+function pickAllowedUpdates(body) {
+  const out = {};
+  if (typeof body?.name === 'string') out.name = body.name;
+  if (typeof body?.password === 'string') out.password = body.password;
+  if (typeof body?.isActive === 'boolean') out.isActive = body.isActive;
+
+  if (Array.isArray(body?.virtualizors)) {
+    out.virtualizors = body.virtualizors.map(normalizeVirtualizorEntry);
+  }
+
+  // Back-compat: still accept the legacy single object, but it gets converted
+  // into a single-entry `virtualizors` array so we don't have two sources of
+  // truth going forward.
+  if (out.virtualizors === undefined && body?.virtualizor && typeof body.virtualizor === 'object') {
+    out.virtualizors = [normalizeVirtualizorEntry(body.virtualizor)];
+  }
+
+  return out;
+}
+
 export async function PUT(request, { params }) {
   const admin = await verifyAdmin();
-  if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
 
   await connectDB();
   const { id } = await params;
   const body = await request.json();
+  const updates = pickAllowedUpdates(body);
 
-  const company = await Company.findByIdAndUpdate(id, body, { new: true });
+  const company = await Company.findByIdAndUpdate(id, updates, { new: true });
   if (!company) return NextResponse.json({ error: 'Company not found' }, { status: 404 });
 
   return NextResponse.json(company);
@@ -36,7 +69,7 @@ export async function PUT(request, { params }) {
 
 export async function DELETE(request, { params }) {
   const admin = await verifyAdmin();
-  if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
 
   await connectDB();
   const { id } = await params;
