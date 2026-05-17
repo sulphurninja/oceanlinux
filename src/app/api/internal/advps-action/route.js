@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 const AdvpsAPI = require('@/services/advpsApi');
+const { normalizeAdvpsPowerState, unwrapAdvpsEnvelope } = require('@/lib/advpsStatusNormalize');
 
 function validateInternalKey(request) {
   const key = request.headers.get('x-internal-key');
@@ -53,15 +54,8 @@ export async function POST(request) {
       case 'status': {
         try {
           const statusRes = await api.status(serviceId);
-          const d = statusRes?.data || statusRes;
-          const vmSt = d?.vmStatus?.status || d?.runningStatus || '';
-          let powerState = 'unknown';
-          if (typeof vmSt === 'string') {
-            const sl = vmSt.toLowerCase();
-            if (['running', 'online', 'started', 'active'].includes(sl)) powerState = 'running';
-            else if (['stopped', 'offline', 'shutdown'].includes(sl)) powerState = 'stopped';
-            else powerState = sl;
-          }
+          const d = unwrapAdvpsEnvelope(statusRes) || {};
+          const powerState = normalizeAdvpsPowerState(d);
           return NextResponse.json({ success: true, powerState, rawStatus: d, provider: 'advps', lastSync: new Date().toISOString() });
         } catch (e) {
           return NextResponse.json({ success: false, error: e.message, powerState: 'unknown', provider: 'advps' });

@@ -694,7 +694,7 @@ const OrderDetails = () => {
       } else {
         toast.error(data.error || `Failed to execute "${action}"`);
         // Refresh power state on error too
-        if (['start', 'stop', 'restart'].includes(action) && (provider === 'hostycare' || provider === 'smartvps')) {
+        if (['start', 'stop', 'restart'].includes(action) && (provider === 'hostycare' || provider === 'smartvps' || provider === 'advps')) {
           await fetchServerPowerState();
         }
       }
@@ -1341,7 +1341,13 @@ const OrderDetails = () => {
 
     const currentStatus = provisioningStatus || status;
     const isActiveStatus = status.toLowerCase() === 'completed' || currentStatus.toLowerCase() === 'active';
-    const canShowPowerState = (provider === 'hostycare' || provider === 'smartvps') && isActiveStatus;
+    const canShowPowerState =
+      (
+        provider === 'hostycare' ||
+        provider === 'smartvps' ||
+        (provider === 'advps' && !!order?.advpsServiceId)
+      ) &&
+      isActiveStatus;
 
     // For active servers with power state support, show actual power state
     if (canShowPowerState) {
@@ -1374,7 +1380,7 @@ const OrderDetails = () => {
     switch (currentStatus.toLowerCase()) {
       case 'active':
         // If we're here, powerState is unknown - show loading or default
-        if (powerStateLoading && (provider === 'hostycare' || provider === 'smartvps')) {
+        if (powerStateLoading && (provider === 'hostycare' || provider === 'smartvps' || provider === 'advps')) {
           return (
             <Badge className="bg-muted text-muted-foreground border-border">
               <Loader2 className="w-3 h-3 mr-1 animate-spin" />
@@ -1503,6 +1509,10 @@ const OrderDetails = () => {
 
   const provider = getProviderFromOrder(order, ipStock);
   const canManageServer = isServerManagementAvailable(order, ipStock);
+  const usesLivePowerUi =
+    provider === 'hostycare' ||
+    provider === 'smartvps' ||
+    (provider === 'advps' && !!order.advpsServiceId);
 
   return (
     <div className='min-h-screen bg-background'>
@@ -1870,29 +1880,29 @@ const OrderDetails = () => {
 
                       <div className={cn(
                         "p-3 rounded-lg border shadow-sm",
-                        (provider === 'hostycare' || provider === 'smartvps') && serverPowerState === 'running' && "bg-green-500/10 border-green-500/30",
-                        (provider === 'hostycare' || provider === 'smartvps') && serverPowerState === 'stopped' && "bg-red-500/10 border-red-500/30",
-                        (provider === 'hostycare' || provider === 'smartvps') && serverPowerState === 'busy' && "bg-blue-500/10 border-blue-500/30",
-                        !((provider === 'hostycare' || provider === 'smartvps') && ['running', 'stopped', 'busy'].includes(serverPowerState)) && "bg-primary/10 border-primary/30"
+                        usesLivePowerUi && serverPowerState === 'running' && "bg-green-500/10 border-green-500/30",
+                        usesLivePowerUi && serverPowerState === 'stopped' && "bg-red-500/10 border-red-500/30",
+                        usesLivePowerUi && serverPowerState === 'busy' && "bg-blue-500/10 border-blue-500/30",
+                        !(usesLivePowerUi && ['running', 'stopped', 'busy'].includes(serverPowerState)) && "bg-primary/10 border-primary/30"
                       )}>
                         <div className="flex items-center gap-3">
                           <div className={cn(
                             "h-10 w-10 rounded-lg flex items-center justify-center flex-shrink-0 shadow-sm",
-                            (provider === 'hostycare' || provider === 'smartvps') && serverPowerState === 'running' && "bg-green-500/20",
-                            (provider === 'hostycare' || provider === 'smartvps') && serverPowerState === 'stopped' && "bg-red-500/20",
-                            (provider === 'hostycare' || provider === 'smartvps') && serverPowerState === 'busy' && "bg-blue-500/20",
-                            !((provider === 'hostycare' || provider === 'smartvps') && ['running', 'stopped', 'busy'].includes(serverPowerState)) && "bg-primary/20"
+                            usesLivePowerUi && serverPowerState === 'running' && "bg-green-500/20",
+                            usesLivePowerUi && serverPowerState === 'stopped' && "bg-red-500/20",
+                            usesLivePowerUi && serverPowerState === 'busy' && "bg-blue-500/20",
+                            !(usesLivePowerUi && ['running', 'stopped', 'busy'].includes(serverPowerState)) && "bg-primary/20"
                           )}>
                             <Activity className={cn(
                               "h-5 w-5",
-                              (provider === 'hostycare' || provider === 'smartvps') && serverPowerState === 'running' && "text-green-600",
-                              (provider === 'hostycare' || provider === 'smartvps') && serverPowerState === 'stopped' && "text-red-600",
-                              (provider === 'hostycare' || provider === 'smartvps') && serverPowerState === 'busy' && "text-blue-600"
+                              usesLivePowerUi && serverPowerState === 'running' && "text-green-600",
+                              usesLivePowerUi && serverPowerState === 'stopped' && "text-red-600",
+                              usesLivePowerUi && serverPowerState === 'busy' && "text-blue-600"
                             )} />
                           </div>
                           <div className="min-w-0 flex-1">
                             <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
-                              {(provider === 'hostycare' || provider === 'smartvps') ? 'Power Status' : 'Status'}
+                              {usesLivePowerUi ? 'Power Status' : 'Status'}
                             </p>
                             <div className="mt-1">
                               {getStatusBadge(order.status, order.provisioningStatus, order.lastAction, order)}
@@ -2407,7 +2417,7 @@ const OrderDetails = () => {
                     </CardHeader>
                     <CardContent className="space-y-3">
                       {/* Server Power State Indicator */}
-                      {(provider === 'hostycare' || provider === 'smartvps') && (
+                      {usesLivePowerUi && (
                         <div className={cn(
                           "flex items-center gap-3 p-3 rounded-lg border transition-colors",
                           powerStateLoading && "bg-muted/50 border-border",

@@ -3,6 +3,13 @@ import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 import { getDataFromToken } from '@/helper/getDataFromToken';
 const AdvpsAPI = require('@/services/advpsApi');
+const {
+  normalizeAdvpsPowerState,
+  pickAdvpsRunningStatusRaw,
+  pickAdvpsIp,
+  pickAdvpsUptime,
+  unwrapAdvpsEnvelope,
+} = require('@/lib/advpsStatusNormalize');
 
 export async function GET(request) {
   try {
@@ -25,13 +32,14 @@ export async function GET(request) {
 
     try {
       const statusRes = await api.status(serviceId);
-      const d = statusRes?.data || statusRes;
+      const d = unwrapAdvpsEnvelope(statusRes) || {};
       details = {
-        serviceId: d.serviceId || serviceId,
+        serviceId: d.serviceId || d.service?.serviceId || serviceId,
         serviceType: d.serviceType,
-        runningStatus: d.runningStatus,
-        ip: d.ip || order.ipAddress,
-        uptime: d.uptime,
+        runningStatus: pickAdvpsRunningStatusRaw(d) || undefined,
+        ip: pickAdvpsIp(d, order.ipAddress),
+        uptime: pickAdvpsUptime(d),
+        powerState: normalizeAdvpsPowerState(d),
       };
     } catch (err) {
       console.error('[ADVPS-ACTION][GET] Status error:', err.message);
@@ -103,20 +111,16 @@ export async function POST(request) {
       case 'status': {
         try {
           const statusRes = await api.status(serviceId);
-          const d = statusRes?.data || statusRes;
-          const running = (d.runningStatus || '').toUpperCase();
-
-          let powerState = 'unknown';
-          if (running === 'RUNNING') powerState = 'running';
-          else if (running === 'STOPPED') powerState = 'stopped';
+          const d = unwrapAdvpsEnvelope(statusRes) || {};
+          const powerState = normalizeAdvpsPowerState(d);
 
           return NextResponse.json({
             success: true,
             powerState,
-            runningStatus: d.runningStatus,
+            runningStatus: pickAdvpsRunningStatusRaw(d) || null,
             serviceType: d.serviceType,
-            ip: d.ip,
-            uptime: d.uptime,
+            ip: pickAdvpsIp(d),
+            uptime: pickAdvpsUptime(d),
             lastSync: new Date().toISOString(),
           });
         } catch (err) {
@@ -292,9 +296,13 @@ export async function POST(request) {
       case 'sync': {
         try {
           const statusRes = await api.status(serviceId);
-          const d = statusRes?.data || statusRes;
+          const d = unwrapAdvpsEnvelope(statusRes) || {};
           await Order.findByIdAndUpdate(orderId, { lastSyncTime: new Date() });
-          result = { synced: true, message: 'ADVPS status synced', runningStatus: d.runningStatus };
+          result = {
+            synced: true,
+            message: 'ADVPS status synced',
+            runningStatus: pickAdvpsRunningStatusRaw(d) || null,
+          };
         } catch (err) {
           result = { synced: false, message: `Sync failed: ${err.message}` };
         }
