@@ -22,6 +22,7 @@ import {
   Server,
   Cloud,
   Zap,
+  ShoppingCart,
 } from 'lucide-react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { cn } from "@/lib/utils";
@@ -29,6 +30,7 @@ import { Separator } from "@/components/ui/separator";
 import { toast } from 'sonner';
 import { ThemeToggle } from '@/components/ui/theme-toggle';
 import { Wallet } from 'lucide-react';
+import { fetchCart, subscribeCart, type CartSnapshot } from '@/lib/cartClient';
 
 interface NavItem {
   href: string;
@@ -41,6 +43,7 @@ interface NavItem {
 const ResponsiveSidebar = ({ user }: { user?: any }) => {
   const [open, setOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  const [cartCount, setCartCount] = useState<number>(0);
   const router = useRouter();
   const pathname = usePathname();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
@@ -52,6 +55,20 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
       setCollapsed(JSON.parse(savedCollapsed));
     }
   }, []);
+
+  // Hydrate cart count + subscribe to updates so the sidebar badge stays
+  // in sync after add-to-cart / checkout completion anywhere in the app.
+  useEffect(() => {
+    if (user?.userType === 'reseller' || user?.userType === 'admin') return;
+    let cancelled = false;
+    fetchCart()
+      .then((snap) => { if (!cancelled) setCartCount(snap.itemCount || 0); })
+      .catch(() => { /* unauthenticated — ignore */ });
+    const unsub = subscribeCart((snap: CartSnapshot | null) => {
+      if (snap) setCartCount(snap.itemCount || 0);
+    });
+    return () => { cancelled = true; unsub(); };
+  }, [user?.userType]);
 
   // Save collapsed state to localStorage
   const toggleCollapsed = () => {
@@ -139,6 +156,21 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
       label: 'Scripts',
       icon: NotebookText,
     },
+    // Customer wallet + cart entries (hidden for resellers — they have
+    // their own reseller wallet flow below).
+    ...((!user || user?.userType !== 'reseller') ? [
+      {
+        href: '/dashboard/wallet',
+        label: 'My Wallet',
+        icon: Wallet,
+      },
+      {
+        href: '/dashboard/cart',
+        label: 'Cart',
+        icon: ShoppingCart,
+        badge: cartCount > 0 ? String(cartCount > 99 ? '99+' : cartCount) : undefined,
+      },
+    ] : []),
     // Conditionally add Reseller Wallet
     ...(user?.userType === 'reseller' ? [
       {
@@ -383,6 +415,18 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
           </div>
 
           <div className="flex items-center gap-1">
+            {(!user || user?.userType !== 'reseller') && (
+              <Link href="/dashboard/cart" className="relative">
+                <Button variant="ghost" size="icon" className="h-9 w-9 hover:bg-muted relative">
+                  <ShoppingCart className="h-4 w-4" />
+                  {cartCount > 0 && (
+                    <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-[16px] flex items-center justify-center rounded-full bg-primary text-primary-foreground text-[9px] font-bold px-1 border-2 border-background">
+                      {cartCount > 99 ? '99+' : cartCount}
+                    </span>
+                  )}
+                </Button>
+              </Link>
+            )}
             <Button
               onClick={() => router.push('/support/tickets')}
               variant="ghost"

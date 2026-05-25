@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Loader2, CheckCircle2, XCircle, Clock, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { fetchWalletSummary } from "@/lib/walletClient";
 
 // Create a client component that uses useSearchParams
 function PaymentCallbackContent() {
@@ -22,11 +23,13 @@ function PaymentCallbackContent() {
         const orderId = searchParams.get("order_id");
         const paymentId = searchParams.get("payment_id");
         const statusParam = searchParams.get("status");
+        const callbackType = searchParams.get("type"); // 'wallet' | 'cart' | undefined (order)
 
         console.log(`Payment callback received with transaction ID: ${clientTxnId}`);
         console.log(`Order ID: ${orderId}`);
         console.log(`Payment ID: ${paymentId}`);
         console.log(`Status param: ${statusParam}`);
+        console.log(`Callback type: ${callbackType || 'order'}`);
 
         // Convert searchParams to a regular object
         const paramsObject: Record<string, string> = {};
@@ -53,6 +56,77 @@ function PaymentCallbackContent() {
           setStatus("failed");
           setMessage("Invalid payment reference");
           console.error("Missing transaction ID in URL parameters");
+          return;
+        }
+
+        // ===== HANDLE WALLET RECHARGE CALLBACK =====
+        if (callbackType === 'wallet' || clientTxnId.startsWith('WALLET_')) {
+          console.log(`[WALLET-CALLBACK] Confirming wallet recharge: ${clientTxnId}`);
+          try {
+            const confirmRes = await fetch('/api/wallet/recharge/confirm', {
+              method: 'POST',
+              credentials: 'include',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ clientTxnId }),
+            });
+            const cd = await confirmRes.json();
+            if (confirmRes.ok && cd.success) {
+              setStatus('success');
+              setMessage(cd.alreadyProcessed
+                ? 'Wallet recharge already confirmed.'
+                : `Wallet recharged successfully! New balance: ₹${cd.newBalance}`);
+              toast.success('Wallet recharged');
+              // Refresh the topbar wallet pill before navigating away.
+              fetchWalletSummary().catch(() => { });
+              setTimeout(() => router.push('/dashboard/wallet'), 2500);
+            } else {
+              setStatus('failed');
+              setMessage(cd.message || 'Recharge could not be verified yet. It will reflect once the gateway confirms.');
+            }
+          } catch (e: any) {
+            setStatus('failed');
+            setMessage('Could not verify recharge yet. Please check your wallet page.');
+          }
+          return;
+        }
+
+        // ===== HANDLE CART CHECKOUT CALLBACK =====
+        if (callbackType === 'cart' || clientTxnId.startsWith('CART_')) {
+          console.log(`[CART-CALLBACK] Confirming cart checkout: ${clientTxnId}`);
+          if (statusParam === 'wallet_paid') {
+            setStatus('success');
+            setMessage('Cart paid using wallet balance! Your servers are being provisioned.');
+            toast.success('Cart checkout complete');
+            // Wallet was just debited — refresh the topbar pill.
+            fetchWalletSummary().catch(() => { });
+            setTimeout(() => router.push('/dashboard/viewLinux'), 2500);
+            return;
+          }
+          try {
+            const confirmRes = await fetch('/api/cart/checkout/confirm', {
+              method: 'POST',
+              credentials: 'include',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ clientTxnId }),
+            });
+            const cd = await confirmRes.json();
+            if (confirmRes.ok && cd.success) {
+              setStatus('success');
+              setMessage(cd.alreadyProcessed
+                ? 'Checkout already confirmed. Your orders are being provisioned.'
+                : `Checkout confirmed for ${cd.orderIds?.length || ''} order(s). Provisioning servers now…`);
+              toast.success('Cart checkout confirmed');
+              // Wallet may have been partially used — refresh the topbar pill.
+              fetchWalletSummary().catch(() => { });
+              setTimeout(() => router.push('/dashboard/viewLinux'), 3000);
+            } else {
+              setStatus('failed');
+              setMessage(cd.message || 'Checkout verification pending. Your orders will appear shortly.');
+            }
+          } catch (e: any) {
+            setStatus('failed');
+            setMessage('Could not verify checkout yet. Check your orders page in a minute.');
+          }
           return;
         }
 

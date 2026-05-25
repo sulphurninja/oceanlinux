@@ -4,6 +4,11 @@ import Order from '@/models/orderModel';
 import NotificationService from '@/services/notificationService';
 import { calculateExpiryDate } from '@/lib/expiryHelper';
 import { assignPanelCredentials } from '@/lib/panelCredentials';
+import {
+  findDispatchTarget,
+  confirmRechargeFromWebhook,
+  confirmCheckoutFromWebhook,
+} from '@/lib/paymentDispatch';
 const AutoProvisioningService = require('@/services/autoProvisioningService');
 const WhatsAppService = require('@/services/whatsappService');
 
@@ -94,6 +99,81 @@ export async function POST(request) {
         { success: false, message: 'Missing client_txn_id' },
         { status: 400 }
       );
+    }
+
+    // Dispatch by parent collection BEFORE the existing order lookup.
+    // For UPI we still verify against the gateway first to be sure the
+    // payment is real, then route to the matching parent confirm path.
+    const dispatch = await findDispatchTarget(client_txn_id);
+    if (dispatch && status === 'success') {
+      const verification = await verifyUPIPayment(client_txn_id);
+      if (!verification.verified) {
+        console.error('[UPI Webhook] Verification failed for', dispatch.kind, client_txn_id, verification);
+        return NextResponse.json(
+          { success: false, message: 'Payment verification failed', error: verification.error },
+          { status: 400 }
+        );
+      }
+
+      const expectedAmount = dispatch.kind === 'checkout'
+        ? dispatch.doc.gatewayAmount
+        : dispatch.doc.amount;
+      const paidAmount = verification.amount || parseFloat(webhookAmount);
+      if (Math.abs(paidAmount - expectedAmount) > 1) {
+        console.error('[UPI Webhook] Amount mismatch', { expectedAmount, paidAmount, kind: dispatch.kind });
+        return NextResponse.json(
+          { success: false, message: 'Payment amount mismatch' },
+          { status: 400 }
+        );
+      }
+
+      const sharedDetails = {
+        upi_txn_id: verification.upi_txn_id || upi_txn_id,
+        customer_vpa: webhookData.customer_vpa,
+        txnAt: webhookData.txnAt,
+        verifiedAmount: paidAmount,
+        webhookReceivedAt: new Date(),
+      };
+
+      if (dispatch.kind === 'checkout') {
+        console.log(`[UPI Webhook] 🛒 Cart checkout session matched: ${dispatch.doc._id}`);
+        const result = await confirmCheckoutFromWebhook(dispatch.doc, {
+          paymentMethod: 'upi',
+          transactionId: verification.upi_txn_id || upi_txn_id || id,
+          paymentDetails: sharedDetails,
+        });
+        return NextResponse.json({
+          success: !!result.success,
+          message: 'Cart checkout (UPI) processed',
+          ...result,
+        });
+      }
+
+      if (dispatch.kind === 'recharge') {
+        console.log(`[UPI Webhook] 💰 Wallet recharge matched: ${dispatch.doc._id}`);
+        const result = await confirmRechargeFromWebhook(dispatch.doc, {
+          paymentMethod: 'upi',
+          transactionId: verification.upi_txn_id || upi_txn_id || id,
+          paymentDetails: sharedDetails,
+        });
+        return NextResponse.json({
+          success: !!result.success,
+          message: 'Wallet recharge (UPI) processed',
+          ...result,
+        });
+      }
+    }
+    if (dispatch && status !== 'success') {
+      // Mark recharge / checkout failed too.
+      if (dispatch.kind === 'recharge') {
+        dispatch.doc.status = 'failed';
+        dispatch.doc.failureReason = webhookData.remark || 'UPI payment failed';
+        await dispatch.doc.save();
+      } else if (dispatch.kind === 'checkout') {
+        const { refundAndFailCheckoutSession } = await import('@/lib/paymentDispatch');
+        await refundAndFailCheckoutSession(dispatch.doc, webhookData.remark || 'UPI payment failed');
+      }
+      return NextResponse.json({ success: true, message: 'Failure recorded' });
     }
 
     // Find the order in our database

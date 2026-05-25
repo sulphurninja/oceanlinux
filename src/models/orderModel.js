@@ -127,7 +127,14 @@ const orderSchema = new mongoose.Schema({
 
     // API Order Tracking
     apiOrderId: String,  // Reseller's order ID
-    apiMetadata: mongoose.Schema.Types.Mixed
+    apiMetadata: mongoose.Schema.Types.Mixed,
+
+    // Cart checkout linkage (null/undefined for single Buy Now orders).
+    // When set, this order was created as part of a multi-item cart checkout
+    // backed by a CheckoutSession document. Webhooks dispatch on the session
+    // first and fan out to every order that shares this id.
+    checkoutSessionId: { type: String, index: true },
+    parentTxnId: { type: String, index: true }
 }, { timestamps: true });
 
 // Indexes

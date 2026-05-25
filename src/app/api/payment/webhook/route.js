@@ -5,6 +5,11 @@ import IPStock from '@/models/ipStockModel';
 import crypto from 'crypto';
 import { calculateExpiryDate, calculateRenewalExpiryDate } from '@/lib/expiryHelper';
 import { assignPanelCredentials } from '@/lib/panelCredentials';
+import {
+  findDispatchTarget,
+  confirmRechargeFromWebhook,
+  confirmCheckoutFromWebhook,
+} from '@/lib/paymentDispatch';
 const AutoProvisioningService = require('@/services/autoProvisioningService');
 const SlotIPPackage = require('@/models/slotIpPackageModel');
 const HostycareAPI = require('@/services/hostycareApi');
@@ -64,6 +69,52 @@ export async function POST(request) {
       if (orderId.startsWith('RENEWAL_')) {
         console.log(`[WEBHOOK] 🔄 Detected RENEWAL transaction: ${orderId}`);
         return await handleRenewalWebhook(orderId, payment, webhookStartTime);
+      }
+
+      // Dispatch by parent collection: cart checkout > wallet recharge > order.
+      // Single-order ('Buy Now') flow is preserved verbatim below.
+      const dispatch = await findDispatchTarget(orderId);
+      if (dispatch?.kind === 'checkout') {
+        console.log(`[WEBHOOK] 🛒 Cart checkout session matched: ${dispatch.doc._id}`);
+        const result = await confirmCheckoutFromWebhook(dispatch.doc, {
+          paymentMethod: 'cashfree',
+          transactionId: payment.payment.cf_payment_id,
+          paymentDetails: {
+            cf_payment_id: payment.payment.cf_payment_id,
+            cf_order_id: payment.order.order_id,
+            payment_amount: payment.payment.payment_amount,
+            payment_currency: payment.payment.payment_currency,
+            payment_method: payment.payment.payment_method,
+            webhookReceivedAt: new Date(),
+          },
+        });
+        const totalWebhookTime = Date.now() - webhookStartTime;
+        return NextResponse.json({
+          success: !!result.success,
+          message: 'Cart checkout webhook processed',
+          ...result,
+          processingTime: totalWebhookTime,
+        });
+      }
+      if (dispatch?.kind === 'recharge') {
+        console.log(`[WEBHOOK] 💰 Wallet recharge matched: ${dispatch.doc._id}`);
+        const result = await confirmRechargeFromWebhook(dispatch.doc, {
+          paymentMethod: 'cashfree',
+          transactionId: payment.payment.cf_payment_id,
+          paymentDetails: {
+            cf_payment_id: payment.payment.cf_payment_id,
+            cf_order_id: payment.order.order_id,
+            payment_amount: payment.payment.payment_amount,
+            webhookReceivedAt: new Date(),
+          },
+        });
+        const totalWebhookTime = Date.now() - webhookStartTime;
+        return NextResponse.json({
+          success: !!result.success,
+          message: 'Wallet recharge webhook processed',
+          ...result,
+          processingTime: totalWebhookTime,
+        });
       }
 
       // Find the order in our database (for new orders)

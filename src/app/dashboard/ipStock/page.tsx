@@ -51,6 +51,7 @@ import {
 } from "lucide-react";
 import { z } from "zod";
 import { cn } from "@/lib/utils";
+import AddToCartButton from "@/components/cart/AddToCartButton";
 
 // Keep all existing interfaces and global declarations unchanged...
 
@@ -902,11 +903,21 @@ function IPStockContent() {
                               </Badge>
                             </div>
                           </div>
-                          <div className="flex items-center gap-3 flex-shrink-0">
+                          <div className="flex items-center gap-2 flex-shrink-0">
                             <div className="text-right">
                               <p className="font-bold text-base md:text-lg">₹{pkg.price}</p>
                               <p className="text-[10px] text-muted-foreground">per IP</p>
                             </div>
+                            {pkg.availableCount > 0 && (
+                              <AddToCartButton
+                                kind="slotip"
+                                slotIpPackageId={pkg._id}
+                                size="sm"
+                                variant="outline"
+                                className="h-8 px-2.5"
+                                iconOnly
+                              />
+                            )}
                             <Button
                               size="sm"
                               onClick={() => handleBuyNow(pkg.name, 'Premium IP Proxies', pkg.price, '', pkg._id)}
@@ -1296,8 +1307,17 @@ function CompactServerPlanRow({
                       className="flex items-center justify-between gap-3 p-2.5 rounded-md bg-background border border-border hover:border-primary/50 transition-colors"
                     >
                       <span className="text-sm font-medium flex-1">{memory}</span>
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-2">
                         <span className="font-bold text-base">₹{details.price}</span>
+                        <AddToCartButton
+                          kind="ipstock"
+                          ipStockId={stock._id}
+                          memory={memory}
+                          size="sm"
+                          variant="outline"
+                          className="h-8 px-2.5"
+                          iconOnly
+                        />
                         <Button
                           size="sm"
                           onClick={(e) => {

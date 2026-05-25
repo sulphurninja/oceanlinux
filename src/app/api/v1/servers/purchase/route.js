@@ -1,15 +1,15 @@
 import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import { validateAPIKey } from '@/lib/api-utils';
-import Wallet from '@/models/walletModel';
+import User from '@/models/userModel';
 import Order from '@/models/orderModel';
 import IPStock from '@/models/ipStockModel';
+import userWalletService from '@/services/userWalletService';
 
 export async function POST(request) {
     try {
         await connectDB();
 
-        // Validate API key and get user
         const authResult = await validateAPIKey(request);
         if (!authResult.success) {
             return NextResponse.json(
@@ -20,7 +20,6 @@ export async function POST(request) {
 
         const { user, permissions } = authResult;
 
-        // Check if user has server purchase permissions
         if (!permissions.includes('servers:write')) {
             return NextResponse.json(
                 { error: 'Insufficient permissions for server purchase' },
@@ -37,7 +36,6 @@ export async function POST(request) {
             );
         }
 
-        // Get server from IP stock
         const server = await IPStock.findById(serverId);
         if (!server || !server.available) {
             return NextResponse.json(
@@ -46,37 +44,37 @@ export async function POST(request) {
             );
         }
 
-        // Calculate total cost based on duration
         const pricePerMonth = server.price;
         const durationMonths = parseInt(duration);
         const totalCost = pricePerMonth * durationMonths;
 
-        // Apply any discounts for longer durations
         let discount = 0;
         if (durationMonths >= 12) {
-            discount = totalCost * 0.15; // 15% discount for yearly
+            discount = totalCost * 0.15;
         } else if (durationMonths >= 6) {
-            discount = totalCost * 0.10; // 10% discount for 6+ months
+            discount = totalCost * 0.10;
         } else if (durationMonths >= 3) {
-            discount = totalCost * 0.05; // 5% discount for 3+ months
+            discount = totalCost * 0.05;
         }
 
-        const finalAmount = totalCost - discount;
+        const finalAmount = Math.round(totalCost - discount);
 
-        // Check wallet balance
-        const wallet = await Wallet.findOne({ userId: user._id });
-        if (!wallet || wallet.balance < finalAmount) {
+        // Pre-flight balance check so we can return a clean 400 instead of
+        // a 500 from the wallet service. Note this is best-effort — the
+        // atomic guard inside `userWalletService.debit` is the source of
+        // truth and will still race-protect us.
+        const balance = await userWalletService.getBalance(user._id);
+        if (balance < finalAmount) {
             return NextResponse.json(
                 {
                     error: 'Insufficient wallet balance',
                     required: finalAmount,
-                    available: wallet?.balance || 0
+                    available: balance,
                 },
                 { status: 400 }
             );
         }
 
-        // Create order
         const order = new Order({
             user: user._id,
             productName: `${server.location} - ${server.specs.ram} RAM, ${server.specs.cpu} CPU`,
@@ -84,7 +82,7 @@ export async function POST(request) {
             originalPrice: totalCost,
             discount: discount,
             type: 'server',
-            status: 'confirmed', // Auto-confirm for wallet payments
+            status: 'confirmed',
             paymentMethod: 'wallet',
             duration: durationMonths,
             serverId: server._id,
@@ -103,34 +101,31 @@ export async function POST(request) {
 
         await order.save();
 
-        // Deduct amount from wallet
-        const balanceBefore = wallet.balance;
-        const balanceAfter = balanceBefore - finalAmount;
+        let debitResult;
+        try {
+            debitResult = await userWalletService.debit(user._id, finalAmount, {
+                description: `Server purchase - ${server.location}`,
+                reference: order._id.toString(),
+                metadata: {
+                    orderId: order._id,
+                    serverId: server._id,
+                    duration: durationMonths,
+                },
+            });
+        } catch (err) {
+            // Roll back the order so we don't leak a confirmed order with
+            // no payment behind it.
+            await Order.findByIdAndDelete(order._id).catch(() => {});
+            return NextResponse.json(
+                { error: 'Wallet debit failed', message: err.message },
+                { status: 400 }
+            );
+        }
 
-        wallet.balance = balanceAfter;
-        wallet.totalDebits += finalAmount;
-        wallet.transactions.push({
-            type: 'debit',
-            amount: finalAmount,
-            description: `Server purchase - ${server.location}`,
-            reference: order._id.toString(),
-            balanceBefore,
-            balanceAfter,
-            metadata: {
-                orderId: order._id,
-                serverId: server._id,
-                duration: durationMonths
-            }
-        });
-
-        await wallet.save();
-
-        // Mark server as unavailable
         server.available = false;
         server.assignedTo = user._id;
         await server.save();
 
-        // Update user's API usage
         await User.findByIdAndUpdate(user._id, {
             $inc: { 'apiSettings.currentMonthUsage': 1 }
         });
@@ -154,9 +149,9 @@ export async function POST(request) {
                 estimatedDeployment: '5-10 minutes'
             },
             wallet: {
-                previousBalance: balanceBefore,
-                newBalance: balanceAfter,
-                transactionId: wallet.transactions[wallet.transactions.length - 1]._id
+                previousBalance: debitResult.balanceBefore,
+                newBalance: debitResult.balanceAfter,
+                transactionId: debitResult.walletTxnId,
             }
         });
 

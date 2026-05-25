@@ -2,6 +2,8 @@
 
 import ResponsiveSidebar from '@/components/component/sidebar';
 import NotificationBell from '@/components/notification-bell';
+import CartIcon from '@/components/cart/CartIcon';
+import WalletBadge from '@/components/wallet/WalletBadge';
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -63,6 +65,7 @@ interface UserData {
     avatar?: string;
     createdAt: string;
     isVerified?: boolean;
+    userType?: 'customer' | 'reseller' | 'admin';
 }
 
 interface PageInfo {
@@ -337,7 +340,14 @@ export default function DashboardLayout({
                                 </div>
 
                                 {/* Right Side Actions */}
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-1.5 sm:gap-2">
+                                    {/* Wallet pill — hidden for resellers (they have a dedicated reseller wallet). */}
+                                    <WalletBadge
+                                        hidden={user?.userType === 'reseller'}
+                                        className="hidden sm:flex"
+                                    />
+                                    {/* Cart icon with live badge — hidden for resellers. */}
+                                    <CartIcon hidden={user?.userType === 'reseller'} />
                                     <NotificationBell />
 
                                     <DropdownMenu>
