@@ -7,6 +7,7 @@ const {
   mergeDefaultConfigurationsPlain,
 } = require('@/lib/advpsLiveStock');
 const { getCompanyVirtualizorAccounts } = require('@/lib/companyVirtualizor');
+const { getCompanyResellerApiConfig } = require('@/lib/companyResellerApi');
 
 export async function GET(request, { params }) {
     console.log('[IPSTOCK-ID][GET] === REQUEST START ===');
@@ -38,16 +39,20 @@ export async function GET(request, { params }) {
             return NextResponse.json({ message: 'IP Stock not found' }, { status: 404 });
         }
 
-        // Surface (without secrets) whether the linked company has Virtualizor
+        // Surface (without secrets) whether the linked company has any kind of
         // automation enabled — the order page uses this to decide whether to
-        // show direct controls or the manual admin-approval UI. We expose the
-        // panel count so the UI can hint at fail-over availability without
-        // leaking hosts/keys.
+        // show direct controls or the manual admin-approval UI.
+        //
+        // Two automation providers are supported, with priority:
+        //   1. Virtualizor multi-panel  (legacy/preferred path)
+        //   2. Reseller HTTP API        (Hostheaven / SomaniOne)
+        // We never leak credentials/hosts here — only enough metadata for the
+        // UI to render the right controls.
         let companyAutomation = null;
         if (ipStock.company) {
             try {
                 const company = await Company.findById(ipStock.company)
-                    .select('virtualizors virtualizor name')
+                    .select('virtualizors virtualizor resellerApi name')
                     .lean();
                 const accounts = getCompanyVirtualizorAccounts(company);
                 if (accounts.length > 0) {
@@ -57,6 +62,16 @@ export async function GET(request, { params }) {
                         panelCount: accounts.length,
                         companyName: company?.name,
                     };
+                } else {
+                    const reseller = getCompanyResellerApiConfig(company);
+                    if (reseller) {
+                        companyAutomation = {
+                            provider: 'reseller-api',
+                            enabled: true,
+                            companyName: company?.name,
+                            label: reseller.label || null,
+                        };
+                    }
                 }
             } catch (lookupErr) {
                 console.warn('[IPSTOCK-ID][GET] Company automation lookup failed:', lookupErr.message);

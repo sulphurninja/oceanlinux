@@ -32,6 +32,20 @@ function normalizeVirtualizorEntry(v) {
   };
 }
 
+function normalizeResellerApiEntry(v) {
+  if (v === null) return null;
+  return {
+    enabled: typeof v?.enabled === 'boolean' ? v.enabled : false,
+    label: typeof v?.label === 'string' ? v.label.trim() : '',
+    baseUrl: typeof v?.baseUrl === 'string'
+      ? v.baseUrl.trim().replace(/\/+$/, '')
+      : '',
+    resellerDomain: typeof v?.resellerDomain === 'string' ? v.resellerDomain.trim() : '',
+    email: typeof v?.email === 'string' ? v.email.trim() : '',
+    password: typeof v?.password === 'string' ? v.password : '',
+  };
+}
+
 function pickAllowedUpdates(body) {
   const out = {};
   if (typeof body?.name === 'string') out.name = body.name;
@@ -47,6 +61,15 @@ function pickAllowedUpdates(body) {
   // truth going forward.
   if (out.virtualizors === undefined && body?.virtualizor && typeof body.virtualizor === 'object') {
     out.virtualizors = [normalizeVirtualizorEntry(body.virtualizor)];
+  }
+
+  // External reseller-panel API automation (Hostheaven / SomaniOne style).
+  // Sending `null` explicitly clears the config; sending an object replaces
+  // it. Omitting the key leaves the saved config untouched.
+  if (Object.prototype.hasOwnProperty.call(body || {}, 'resellerApi')) {
+    out.resellerApi = body.resellerApi === null
+      ? null
+      : normalizeResellerApiEntry(body.resellerApi);
   }
 
   return out;

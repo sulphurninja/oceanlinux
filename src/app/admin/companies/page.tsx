@@ -33,7 +33,7 @@ import {
 import {
   Building2, Plus, Trash2, Copy, ExternalLink, Loader2, Eye, EyeOff,
   Server, ShieldCheck, ShieldAlert, CheckCircle2, XCircle,
-  ChevronDown, ChevronUp,
+  ChevronDown, ChevronUp, Cloud,
 } from 'lucide-react';
 
 interface CompanyVirtualizor {
@@ -47,6 +47,15 @@ interface CompanyVirtualizor {
   protocol: 'http' | 'https';
 }
 
+interface CompanyResellerApi {
+  enabled: boolean;
+  label: string;
+  baseUrl: string;
+  resellerDomain: string;
+  email: string;
+  password: string;
+}
+
 interface Company {
   _id: string;
   name: string;
@@ -57,6 +66,7 @@ interface Company {
   virtualizors?: Partial<CompanyVirtualizor>[];
   /** Deprecated single-config field; loaded as a fallback. */
   virtualizor?: Partial<CompanyVirtualizor>;
+  resellerApi?: Partial<CompanyResellerApi> | null;
 }
 
 const NEW_VIRT_ENTRY = (): CompanyVirtualizor => ({
@@ -68,6 +78,28 @@ const NEW_VIRT_ENTRY = (): CompanyVirtualizor => ({
   apiPassword: '',
   protocol: 'https',
 });
+
+const EMPTY_RESELLER_API = (): CompanyResellerApi => ({
+  enabled: true,
+  label: '',
+  baseUrl: '',
+  resellerDomain: '',
+  email: '',
+  password: '',
+});
+
+// Defaults pre-filled into the dialog when a company has no saved reseller
+// API config yet. Mirrors the server-side fallback in
+// `lib/companyResellerApi.js` so admins see what the company will actually
+// authenticate with — credentials can still be overridden per-company.
+const RESELLER_API_DIALOG_DEFAULTS: CompanyResellerApi = {
+  enabled: true,
+  label: 'Hostheaven',
+  baseUrl: 'https://vps.hostheaven.in',
+  resellerDomain: 'vps.hostheaven.in',
+  email: 'raftare3t5@gmail.com',
+  password: 'Umesh@2113',
+};
 
 interface VirtTestState {
   loading: boolean;
@@ -89,6 +121,14 @@ export default function CompaniesPage() {
   const [virtTestStates, setVirtTestStates] = useState<Record<number, VirtTestState>>({});
   const [showVirtPassword, setShowVirtPassword] = useState<Record<number, boolean>>({});
   const [expandedEntry, setExpandedEntry] = useState<number | null>(null);
+
+  // Reseller API (Hostheaven / SomaniOne) dialog state
+  const [resellerCompany, setResellerCompany] = useState<Company | null>(null);
+  const [resellerForm, setResellerForm] = useState<CompanyResellerApi>(EMPTY_RESELLER_API());
+  const [resellerSaving, setResellerSaving] = useState(false);
+  const [resellerTesting, setResellerTesting] = useState(false);
+  const [resellerTestResult, setResellerTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [showResellerPassword, setShowResellerPassword] = useState(false);
 
   const fetchCompanies = async () => {
     try {
@@ -294,6 +334,124 @@ export default function CompaniesPage() {
     }
   };
 
+  const openResellerDialog = (c: Company) => {
+    const r = c.resellerApi || null;
+    const hasAny = !!(r && (r.baseUrl || r.email || r.password));
+    if (!hasAny) {
+      // No saved config yet — pre-fill the dialog with the hardcoded
+      // Hostheaven defaults so the admin can just click Save.
+      setResellerForm({ ...RESELLER_API_DIALOG_DEFAULTS });
+    } else {
+      setResellerForm({
+        enabled: typeof r?.enabled === 'boolean' ? r.enabled : !!r,
+        label: r?.label || '',
+        baseUrl: r?.baseUrl || '',
+        resellerDomain: r?.resellerDomain || '',
+        email: r?.email || '',
+        password: r?.password || '',
+      });
+    }
+    setResellerTestResult(null);
+    setShowResellerPassword(false);
+    setResellerCompany(c);
+  };
+
+  const closeResellerDialog = () => {
+    if (resellerSaving || resellerTesting) return;
+    setResellerCompany(null);
+    setResellerForm(EMPTY_RESELLER_API());
+    setResellerTestResult(null);
+    setShowResellerPassword(false);
+  };
+
+  const updateResellerField = <K extends keyof CompanyResellerApi>(key: K, value: CompanyResellerApi[K]) => {
+    setResellerForm(prev => ({ ...prev, [key]: value }));
+    setResellerTestResult(null);
+  };
+
+  const handleTestResellerApi = async () => {
+    if (!resellerCompany) return;
+    // Empty fields are accepted — the backend will substitute the hardcoded
+    // Hostheaven defaults before performing the live login check.
+    setResellerTesting(true);
+    setResellerTestResult(null);
+    try {
+      const res = await fetch(`/api/admin/companies/${resellerCompany._id}/test-reseller-api`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ resellerApi: resellerForm }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setResellerTestResult({ success: true, message: data.message || 'Connected' });
+      } else {
+        setResellerTestResult({ success: false, message: data.error || 'Connection failed' });
+      }
+    } catch (err: any) {
+      setResellerTestResult({ success: false, message: err?.message || 'Request failed' });
+    } finally {
+      setResellerTesting(false);
+    }
+  };
+
+  const handleSaveResellerApi = async () => {
+    if (!resellerCompany) return;
+    // Empty fields are intentionally accepted here — the backend fills any
+    // blanks with the hardcoded Hostheaven defaults from
+    // `lib/companyResellerApi.js`.
+    setResellerSaving(true);
+    try {
+      const res = await fetch(`/api/admin/companies/${resellerCompany._id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ resellerApi: resellerForm }),
+      });
+      if (res.ok) {
+        toast.success('Reseller API configuration saved');
+        setResellerCompany(null);
+        setResellerForm(EMPTY_RESELLER_API());
+        setResellerTestResult(null);
+        setShowResellerPassword(false);
+        fetchCompanies();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error || 'Failed to save');
+      }
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to save');
+    } finally {
+      setResellerSaving(false);
+    }
+  };
+
+  const handleClearResellerApi = async () => {
+    if (!resellerCompany) return;
+    if (!confirm(`Clear reseller API config for "${resellerCompany.name}"?`)) return;
+    setResellerSaving(true);
+    try {
+      const res = await fetch(`/api/admin/companies/${resellerCompany._id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ resellerApi: null }),
+      });
+      if (res.ok) {
+        toast.success('Reseller API configuration cleared');
+        setResellerCompany(null);
+        setResellerForm(EMPTY_RESELLER_API());
+        setResellerTestResult(null);
+        setShowResellerPassword(false);
+        fetchCompanies();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error || 'Failed to clear');
+      }
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to clear');
+    } finally {
+      setResellerSaving(false);
+    }
+  };
+
   const handleSaveVirtualizor = async () => {
     if (!virtCompany) return;
 
@@ -375,7 +533,7 @@ export default function CompaniesPage() {
                 <TableHead>Slug</TableHead>
                 <TableHead>Password</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead>Virtualizor</TableHead>
+                <TableHead>Automation</TableHead>
                 <TableHead>Created</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
@@ -414,7 +572,7 @@ export default function CompaniesPage() {
                         return (
                           <Badge variant="outline" className="gap-1 text-emerald-600 border-emerald-200">
                             <ShieldCheck className="h-3 w-3" />
-                            {enabledArr.length === 1 ? enabledArr[0]?.host : `${enabledArr.length} panels`}
+                            Virtualizor: {enabledArr.length === 1 ? enabledArr[0]?.host : `${enabledArr.length} panels`}
                           </Badge>
                         );
                       }
@@ -423,7 +581,18 @@ export default function CompaniesPage() {
                         return (
                           <Badge variant="outline" className="gap-1 text-emerald-600 border-emerald-200">
                             <ShieldCheck className="h-3 w-3" />
-                            {legacy.host}
+                            Virtualizor: {legacy.host}
+                          </Badge>
+                        );
+                      }
+                      const r = c.resellerApi;
+                      if (r?.enabled && r?.baseUrl && r?.email && r?.password) {
+                        let host = r.baseUrl;
+                        try { host = new URL(r.baseUrl).host; } catch { /* keep as-is */ }
+                        return (
+                          <Badge variant="outline" className="gap-1 text-blue-600 border-blue-200">
+                            <Cloud className="h-3 w-3" />
+                            Reseller API: {host}
                           </Badge>
                         );
                       }
@@ -443,6 +612,10 @@ export default function CompaniesPage() {
                       <Button variant="ghost" size="sm" className="h-8 gap-1.5" onClick={() => openVirtualizorDialog(c)}>
                         <Server className="h-3.5 w-3.5" />
                         Virtualizor
+                      </Button>
+                      <Button variant="ghost" size="sm" className="h-8 gap-1.5" onClick={() => openResellerDialog(c)}>
+                        <Cloud className="h-3.5 w-3.5" />
+                        Reseller API
                       </Button>
                       <Button variant="ghost" size="sm" className="h-8 gap-1.5" onClick={() => copyLoginUrl(c.slug)}>
                         <Copy className="h-3.5 w-3.5" />
@@ -705,6 +878,166 @@ export default function CompaniesPage() {
             </Button>
             <Button onClick={handleSaveVirtualizor} disabled={virtSaving}>
               {virtSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!resellerCompany} onOpenChange={(open) => !open && closeResellerDialog()}>
+        <DialogContent className="max-w-xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Cloud className="h-5 w-5" />
+              Reseller API Automation
+            </DialogTitle>
+          </DialogHeader>
+          {resellerCompany && (
+            <div className="space-y-4">
+              <div className="rounded-md border p-3 text-sm">
+                <p className="font-medium">{resellerCompany.name}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Use this to wire orders linked to this company up to an external
+                  reseller hosting panel API (e.g.{' '}
+                  <code className="text-foreground">https://vps.hostheaven.in</code>).
+                  Power, reinstall and MAC reset will be driven through that API.
+                  This is an alternative to Virtualizor — Virtualizor takes priority
+                  if both are configured.
+                </p>
+                <p className="text-xs text-muted-foreground mt-2">
+                  <span className="font-medium text-foreground">Defaults:</span>{' '}
+                  any blank field falls back to the built-in Hostheaven account.
+                  Just toggle <span className="font-medium text-foreground">Enabled</span> and
+                  click Save — credentials are optional.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-between rounded-md border p-2.5">
+                <div className="text-sm">
+                  <p className="font-medium">Enabled</p>
+                  <p className="text-xs text-muted-foreground">
+                    Disable to stop using the reseller API without losing the saved config.
+                  </p>
+                </div>
+                <Switch
+                  checked={resellerForm.enabled}
+                  onCheckedChange={(c) => updateResellerField('enabled', c)}
+                />
+              </div>
+
+              <div>
+                <Label className="text-xs">Label (optional)</Label>
+                <Input
+                  placeholder="e.g. Hostheaven"
+                  value={resellerForm.label}
+                  onChange={(e) => updateResellerField('label', e.target.value)}
+                  className="mt-1"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-xs">Base URL</Label>
+                  <Input
+                    placeholder="https://vps.hostheaven.in"
+                    value={resellerForm.baseUrl}
+                    onChange={(e) => updateResellerField('baseUrl', e.target.value)}
+                    className="mt-1"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs">X-Reseller-Domain (optional)</Label>
+                  <Input
+                    placeholder="vps.hostheaven.in"
+                    value={resellerForm.resellerDomain}
+                    onChange={(e) => updateResellerField('resellerDomain', e.target.value)}
+                    className="mt-1"
+                  />
+                  <p className="text-[11px] text-muted-foreground mt-1">
+                    Leave blank to derive from base URL host.
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-xs">Email</Label>
+                  <Input
+                    type="email"
+                    placeholder="reseller@example.com"
+                    value={resellerForm.email}
+                    onChange={(e) => updateResellerField('email', e.target.value)}
+                    className="mt-1"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs">Password</Label>
+                  <div className="relative mt-1">
+                    <Input
+                      type={showResellerPassword ? 'text' : 'password'}
+                      placeholder="••••••••"
+                      value={resellerForm.password}
+                      onChange={(e) => updateResellerField('password', e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowResellerPassword((s) => !s)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      tabIndex={-1}
+                    >
+                      {showResellerPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {resellerTestResult && (
+                <div
+                  className={`flex items-start gap-2 rounded-md border p-2.5 text-xs ${
+                    resellerTestResult.success
+                      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                      : 'border-red-200 bg-red-50 text-red-700'
+                  }`}
+                >
+                  {resellerTestResult.success
+                    ? <CheckCircle2 className="h-4 w-4 mt-0.5" />
+                    : <XCircle className="h-4 w-4 mt-0.5" />}
+                  <span>{resellerTestResult.message}</span>
+                </div>
+              )}
+
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleTestResellerApi}
+                  disabled={resellerTesting || resellerSaving}
+                  className="gap-2"
+                >
+                  {resellerTesting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+                  Test Login
+                </Button>
+                {resellerCompany.resellerApi && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleClearResellerApi}
+                    disabled={resellerSaving || resellerTesting}
+                    className="gap-2 text-red-600 hover:text-red-700"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Clear Config
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
+          <DialogFooter className="gap-2">
+            <Button variant="ghost" onClick={closeResellerDialog} disabled={resellerSaving || resellerTesting}>
+              Cancel
+            </Button>
+            <Button onClick={handleSaveResellerApi} disabled={resellerSaving}>
+              {resellerSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
               Save
             </Button>
           </DialogFooter>

@@ -14,6 +14,8 @@ const {
   getCompanyVirtualizorAccounts,
   toVirtualizorApiAccounts,
 } = require('@/lib/companyVirtualizor');
+const { getCompanyResellerApiConfig } = require('@/lib/companyResellerApi');
+const ResellerApi = require('@/services/resellerApi');
 
 /**
  * Resolve every per-company Virtualizor panel configured against the order's
@@ -34,6 +36,70 @@ async function resolveCompanyVirtualizorAccounts(order) {
     console.error('[SERVICE-ACTION] Company-Virtualizor lookup failed:', err.message);
     return { accounts: [], companyName: null };
   }
+}
+
+/**
+ * Resolve the company-level reseller-API config (Hostheaven / SomaniOne)
+ * for an order. Returns { config: null } when nothing is configured (or the
+ * company has Virtualizor automation, which takes priority and should be
+ * handled by the caller before this is consulted).
+ */
+async function resolveCompanyResellerApi(order) {
+  if (!order?.ipStockId) return { config: null, companyName: null };
+  try {
+    const ipStock = await IPStock.findById(order.ipStockId).select('company').lean();
+    if (!ipStock?.company) return { config: null, companyName: null };
+    const company = await Company.findById(ipStock.company)
+      .select('resellerApi name')
+      .lean();
+    if (!company) return { config: null, companyName: null };
+    const config = getCompanyResellerApiConfig(company);
+    return { config, companyName: company.name };
+  } catch (err) {
+    console.error('[SERVICE-ACTION] Company-Reseller-API lookup failed:', err.message);
+    return { config: null, companyName: null };
+  }
+}
+
+/**
+ * Convert Reseller-API ISO objects into the flat `{ [id]: name }` shape the
+ * dashboard's reinstall dropdown expects.
+ *
+ * Each upstream entry typically looks like:
+ *   { id: 1, isoName: "Ubuntu 22.04", osType: "UBUNTU" }
+ */
+function flattenResellerIsos(isos) {
+  const out = {};
+  if (!Array.isArray(isos)) return out;
+  for (const iso of isos) {
+    if (!iso) continue;
+    const id = iso.id ?? iso.isoId ?? iso.templateId;
+    if (id == null) continue;
+    const name = iso.isoName || iso.name || iso.label || iso.osType || `ISO ${id}`;
+    out[String(id)] = String(name);
+  }
+  return out;
+}
+
+/**
+ * Best-effort family classification for an upstream ISO object — same pattern
+ * as the Virtualizor branch above. Used to keep the order document's `os`
+ * label and `username` (root vs Administrator) in sync with what the user
+ * just installed via reseller rebuild.
+ */
+function classifyResellerIso(iso) {
+  if (!iso) return { family: null, username: null, osLabel: null };
+  const haystack = [iso.isoName, iso.name, iso.osType]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  if (/\b(windows|win\s*server|win\s*xp|win\s*7|win\s*8|win\s*10|win\s*11|server\s*200[38]|server\s*201[269]|server\s*202[0-9])\b/.test(haystack)) {
+    return { family: 'windows', username: 'Administrator', osLabel: iso.isoName || iso.name || null };
+  }
+  if (/\b(ubuntu|debian|centos|rocky|almalinux|alma|fedora|rhel|redhat|linux|arch|opensuse|suse)\b/.test(haystack)) {
+    return { family: 'linux', username: 'root', osLabel: iso.isoName || iso.name || null };
+  }
+  return { family: null, username: null, osLabel: iso.isoName || iso.name || null };
 }
 
 function normalizeVirtualizorRunningState(raw) {
@@ -303,6 +369,237 @@ export async function POST(request) {
     // serviceId — those would otherwise fall through to the Hostycare branch
     // and fail with "No valid API configured".
     if (!isSmartVps && !order.hostycareServiceId) {
+      // ---- Company Reseller-API automation (Hostheaven / SomaniOne) ----
+      // Tried BEFORE Virtualizor only when there are zero Virtualizor panels
+      // configured — that way an admin can swap a company over from one
+      // automation type to the other simply by clearing the Virtualizor list
+      // and saving the reseller config.
+      const { accounts: virtPeek } = await resolveCompanyVirtualizorAccounts(order);
+      if (virtPeek.length === 0) {
+        const { config: resellerCfg, companyName: resellerCompanyName } = await resolveCompanyResellerApi(order);
+        if (resellerCfg) {
+          const supportedActions = new Set(['start', 'stop', 'restart', 'reboot', 'status', 'sync', 'templates', 'reinstall', 'resetmac']);
+          if (!supportedActions.has(action)) {
+            return NextResponse.json({
+              success: false,
+              error: `Action '${action}' is not supported for this order via reseller API automation.`,
+            }, { status: 400 });
+          }
+
+          console.log(`[SERVICE-ACTION][POST] Using reseller API automation (${resellerCfg.baseUrl}) for action=${action} (company=${resellerCompanyName || 'unknown'}, ip=${ipAddress})`);
+
+          let resellerApi;
+          try {
+            resellerApi = new ResellerApi(resellerCfg);
+          } catch (apiErr) {
+            return NextResponse.json({
+              success: false,
+              error: `Reseller API configuration is invalid: ${apiErr.message}`,
+            }, { status: 500 });
+          }
+
+          const findVm = async () => {
+            const found = await resellerApi.findVmByIp(ipAddress);
+            if (!found) {
+              const message = `No VM visible for IP ${ipAddress} on the company's reseller panel (${resellerCfg.baseUrl}).`;
+              const err = new Error(message);
+              err.status = 404;
+              throw err;
+            }
+            return found;
+          };
+
+          try {
+            switch (action) {
+              case 'start': {
+                const { vmId } = await findVm();
+                const apiRes = await resellerApi.start(vmId);
+                await Order.findByIdAndUpdate(orderId, {
+                  lastAction: 'start',
+                  lastActionTime: new Date(),
+                  $push: {
+                    logs: {
+                      action: 'start',
+                      timestamp: new Date(),
+                      details: `Start sent via reseller API (vmId=${vmId})`,
+                      success: true,
+                    },
+                  },
+                });
+                return NextResponse.json({
+                  success: true,
+                  result: { success: true, message: 'Start command sent (reseller API)', apiResponse: apiRes, vmId },
+                });
+              }
+              case 'stop': {
+                const { vmId } = await findVm();
+                const apiRes = await resellerApi.stop(vmId);
+                await Order.findByIdAndUpdate(orderId, {
+                  lastAction: 'stop',
+                  lastActionTime: new Date(),
+                  $push: {
+                    logs: {
+                      action: 'stop',
+                      timestamp: new Date(),
+                      details: `Stop sent via reseller API (vmId=${vmId})`,
+                      success: true,
+                    },
+                  },
+                });
+                return NextResponse.json({
+                  success: true,
+                  result: { success: true, message: 'Stop command sent (reseller API)', apiResponse: apiRes, vmId },
+                });
+              }
+              case 'restart':
+              case 'reboot': {
+                const { vmId } = await findVm();
+                const apiRes = await resellerApi.restart(vmId);
+                await Order.findByIdAndUpdate(orderId, {
+                  lastAction: 'restart',
+                  lastActionTime: new Date(),
+                  $push: {
+                    logs: {
+                      action: 'restart',
+                      timestamp: new Date(),
+                      details: `Reboot sent via reseller API (vmId=${vmId})`,
+                      success: true,
+                    },
+                  },
+                });
+                return NextResponse.json({
+                  success: true,
+                  result: { success: true, message: 'Restart command sent (reseller API)', apiResponse: apiRes, vmId },
+                });
+              }
+              case 'status':
+              case 'sync': {
+                const { vmId } = await findVm();
+                let powerState = 'unknown';
+                let rawStatus = null;
+                try {
+                  const metrics = await resellerApi.getVmMetrics(vmId);
+                  rawStatus = metrics?.current?.status ?? metrics?.status ?? null;
+                  powerState = ResellerApi.normalizePowerState(rawStatus ?? metrics?.current);
+                } catch (metricsErr) {
+                  console.warn('[SERVICE-ACTION][POST] Reseller metrics lookup failed; falling back to ping:', metricsErr.message);
+                }
+                if (powerState === 'unknown' && ipAddress) {
+                  powerState = isServerReachable(ipAddress) ? 'running' : 'stopped';
+                }
+                await Order.findByIdAndUpdate(orderId, { lastSyncTime: new Date() });
+                return NextResponse.json({
+                  success: true,
+                  powerState,
+                  rawStatus,
+                  provider: 'reseller-api',
+                  vmId,
+                  lastSync: new Date().toISOString(),
+                });
+              }
+              case 'templates': {
+                const { vmId } = await findVm();
+                const { isos, zoneId } = await resellerApi.getVmIsos(vmId);
+                const flat = flattenResellerIsos(isos);
+                return NextResponse.json({
+                  success: true,
+                  result: flat,
+                  vmId,
+                  zoneId,
+                  raw: isos,
+                });
+              }
+              case 'reinstall': {
+                const chosenIsoId = templateId ?? payload?.templateId ?? payload?.isoId ?? body.isoId;
+                if (!chosenIsoId) {
+                  return NextResponse.json({ success: false, error: 'templateId (isoId) is required' }, { status: 400 });
+                }
+                const { vmId } = await findVm();
+
+                // Fetch ISO catalog up-front so we can sync the order's
+                // `os` / `username` to the chosen ISO (Linux ⇄ Windows).
+                let chosenIso = null;
+                try {
+                  const { isos } = await resellerApi.getVmIsos(vmId);
+                  chosenIso = (isos || []).find(i => String(i?.id) === String(chosenIsoId)) || null;
+                } catch (isoErr) {
+                  console.warn('[SERVICE-ACTION][POST] Pre-rebuild ISO lookup failed:', isoErr.message);
+                }
+                const cls = classifyResellerIso(chosenIso);
+
+                const apiRes = await resellerApi.rebuild(vmId, chosenIsoId);
+
+                const update = {
+                  $set: {
+                    lastAction: 'reinstall',
+                    lastActionTime: new Date(),
+                  },
+                  $push: {
+                    logs: {
+                      action: 'reinstall',
+                      timestamp: new Date(),
+                      details: `Rebuild via reseller API (vmId=${vmId}, isoId=${chosenIsoId}${cls.osLabel ? `, os=${cls.osLabel}` : ''})`,
+                      success: true,
+                    },
+                  },
+                };
+                if (cls.osLabel) update.$set.os = cls.osLabel;
+                if (cls.username) update.$set.username = cls.username;
+                await Order.findByIdAndUpdate(orderId, update);
+
+                return NextResponse.json({
+                  success: true,
+                  result: {
+                    accepted: true,
+                    vmId,
+                    isoId: chosenIsoId,
+                    message: 'Rebuild submitted via reseller API',
+                    newOs: cls.osLabel || null,
+                    newUsername: cls.username || null,
+                    osFamily: cls.family || null,
+                    raw: apiRes,
+                  },
+                });
+              }
+              case 'resetmac': {
+                const { vmId } = await findVm();
+                const apiRes = await resellerApi.regenerateMac(vmId);
+                const newMac = apiRes?.newMac || apiRes?.mac || null;
+                await Order.findByIdAndUpdate(orderId, {
+                  lastAction: 'resetmac',
+                  lastActionTime: new Date(),
+                  $push: {
+                    logs: {
+                      action: 'resetmac',
+                      timestamp: new Date(),
+                      details: `MAC regenerated via reseller API (vmId=${vmId}${newMac ? `, newMac=${newMac}` : ''})`,
+                      success: true,
+                    },
+                  },
+                });
+                return NextResponse.json({
+                  success: true,
+                  result: {
+                    success: true,
+                    message: apiRes?.message || 'MAC address regenerated successfully',
+                    newMacAddress: newMac,
+                    vmId,
+                    apiResponse: apiRes,
+                  },
+                });
+              }
+            }
+          } catch (resellerErr) {
+            console.error(`[SERVICE-ACTION][POST] Reseller-API action '${action}' failed:`, resellerErr.message);
+            const status = typeof resellerErr.status === 'number' ? resellerErr.status : 500;
+            return NextResponse.json({
+              success: false,
+              error: resellerErr.message || 'Reseller API action failed',
+            }, { status });
+          }
+        }
+      }
+
       const { accounts: companyVirtAccounts } = await resolveCompanyVirtualizorAccounts(order);
       if (companyVirtAccounts.length > 0) {
         const supportedActions = new Set(['start', 'stop', 'restart', 'status', 'sync', 'templates', 'reinstall']);
@@ -1116,6 +1413,85 @@ export async function GET(request) {
       || order.productDetails?.ip
       || order.ip
       || null;
+
+    // 1a) Company-Reseller-API path (Hostheaven / SomaniOne) — used only when
+    //     the company has no Virtualizor panels configured. We resolve the
+    //     VM id by looking up the order's IP in the reseller's order list,
+    //     then drive a `metrics` call to extract the power state.
+    if (!order.hostycareServiceId) {
+      const { accounts: virtPeek } = await resolveCompanyVirtualizorAccounts(order);
+      if (virtPeek.length === 0) {
+        const { config: resellerCfg, companyName: resellerCompanyName } = await resolveCompanyResellerApi(order);
+        if (resellerCfg) {
+          if (!ipAddress) {
+            return NextResponse.json({
+              success: false,
+              error: 'No IP address on this order — cannot look up VM on the reseller panel.',
+            }, { status: 400 });
+          }
+          console.log(`[SERVICE-ACTION][GET] Using reseller API automation for ${resellerCompanyName || 'company'} (${resellerCfg.baseUrl}, ip=${ipAddress})`);
+
+          let resellerApi;
+          try {
+            resellerApi = new ResellerApi(resellerCfg);
+          } catch (apiErr) {
+            return NextResponse.json({
+              success: false,
+              error: `Reseller API configuration is invalid: ${apiErr.message}`,
+            }, { status: 500 });
+          }
+
+          try {
+            const found = await resellerApi.findVmByIp(ipAddress);
+            if (!found) {
+              return NextResponse.json({
+                success: false,
+                error: `No VM visible for IP ${ipAddress} on the company's reseller panel (${resellerCfg.baseUrl}).`,
+              }, { status: 404 });
+            }
+
+            let powerState = 'unknown';
+            let rawStatus = null;
+            try {
+              const metrics = await resellerApi.getVmMetrics(found.vmId);
+              rawStatus = metrics?.current?.status ?? metrics?.status ?? null;
+              powerState = ResellerApi.normalizePowerState(rawStatus ?? metrics?.current);
+            } catch (metricsErr) {
+              console.warn('[SERVICE-ACTION][GET] Reseller metrics lookup failed:', metricsErr.message);
+            }
+            if (powerState === 'unknown' && ipAddress) {
+              powerState = isServerReachable(ipAddress) ? 'running' : 'stopped';
+            }
+
+            await Order.findByIdAndUpdate(orderId, { lastSyncTime: new Date() });
+
+            return NextResponse.json({
+              success: true,
+              provider: 'reseller-api',
+              companyName: resellerCompanyName || null,
+              serviceId: String(found.vmId),
+              vmId: String(found.vmId),
+              ip: ipAddress,
+              status: powerState,
+              powerState,
+              rawStatus,
+              details: found.raw || null,
+              syncResult: {
+                credentialsUpdated: false,
+                lastSyncTime: new Date().toISOString(),
+              },
+              lastSync: new Date().toISOString(),
+            });
+          } catch (err) {
+            console.error('[SERVICE-ACTION][GET] Reseller-API lookup failed:', err.message);
+            return NextResponse.json({
+              success: false,
+              error: err.message || 'Reseller API lookup failed',
+            }, { status: typeof err.status === 'number' ? err.status : 500 });
+          }
+        }
+      }
+    }
 
     // 1) Company-Virtualizor automation path.
     //    Triggers for any order that doesn't have a real Hostycare service ID

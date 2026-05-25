@@ -28,6 +28,23 @@ const legacyCompanyVirtualizorSchema = new mongoose.Schema({
   protocol: { type: String, enum: ['http', 'https'], default: 'https' },
 }, { _id: false });
 
+/**
+ * External "reseller" hosting panel API (e.g. Hostheaven / SomaniOne style).
+ * When enabled, this lets a company's orders be controlled via that panel's
+ * documented HTTP API (login → JWT, list VMs by IP, power/rebuild/MAC).
+ *
+ * This is an alternative to `virtualizors[]`. Only one automation source is
+ * used per order — Virtualizor takes priority when both are configured.
+ */
+const companyResellerApiSchema = new mongoose.Schema({
+  enabled: { type: Boolean, default: false },
+  label: { type: String, default: '' },
+  baseUrl: { type: String, default: '' },        // e.g. https://vps.hostheaven.in
+  resellerDomain: { type: String, default: '' }, // X-Reseller-Domain header value
+  email: { type: String, default: '' },
+  password: { type: String, default: '' },
+}, { _id: false });
+
 const companySchema = new mongoose.Schema({
   name: { type: String, required: true, unique: true },
   slug: { type: String, required: true, unique: true },
@@ -35,6 +52,7 @@ const companySchema = new mongoose.Schema({
   isActive: { type: Boolean, default: true },
   virtualizors: { type: [companyVirtualizorSchema], default: [] },
   virtualizor: { type: legacyCompanyVirtualizorSchema, default: null }, // deprecated
+  resellerApi: { type: companyResellerApiSchema, default: null },
 }, { timestamps: true });
 
 companySchema.index({ slug: 1 });

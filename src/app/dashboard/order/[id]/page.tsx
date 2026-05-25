@@ -62,14 +62,20 @@ interface IPStock {
   name: string;
   tags: string[];
   /**
-   * Set by /api/ipstock/[id] when the linked company has Virtualizor automation
-   * enabled. The flag intentionally carries no credentials — it just lets this
+   * Set by /api/ipstock/[id] when the linked company has automation enabled.
+   * The flag intentionally carries no credentials — it just lets this
    * page render direct server controls instead of the manual approval flow.
+   *
+   * Two providers are supported:
+   *  - 'virtualizor'   → company has Virtualizor enduser panel(s) configured
+   *  - 'reseller-api'  → company is wired to an external reseller HTTP API
+   *                      (Hostheaven / SomaniOne pattern)
    */
   companyAutomation?: {
-    provider: 'virtualizor';
+    provider: 'virtualizor' | 'reseller-api';
     enabled: boolean;
     companyName?: string;
+    label?: string;
   } | null;
   // ... other ipStock fields
 }
@@ -216,7 +222,7 @@ const OrderDetails = () => {
       const hasNativeServiceId = (provider === 'hostycare' && order.hostycareServiceId) ||
         (provider === 'smartvps' && (order.smartvpsServiceId || order.ipAddress)) ||
         (provider === 'advps' && order.advpsServiceId);
-      const isCompanyAutomated = hasCompanyVirtualizorAutomation(ipStock) &&
+      const isCompanyAutomated = hasCompanyAnyAutomation(ipStock) &&
         (provider === 'oceanlinux' || !hasNativeServiceId);
 
       if (hasNativeServiceId || isCompanyAutomated) {
@@ -549,14 +555,16 @@ const OrderDetails = () => {
     if (provider === 'smartvps' && (order.smartvpsServiceId || order.ipAddress)) return true;
     if (provider === 'advps' && order.advpsServiceId) return true;
 
-    // Fall back to per-company Virtualizor automation. This kicks in for:
-    //  - oceanlinux orders linked to a company that has Virtualizor enabled, AND
+    // Fall back to per-company automation (Virtualizor or reseller HTTP API).
+    // This kicks in for:
+    //  - oceanlinux orders linked to an automation-enabled company, AND
     //  - orders whose declared `provider` (e.g. 'hostycare') never received a
     //    real service ID, so the legacy provider integration can't act on them.
     //    These would otherwise hit the manual-request fallback or surface a
     //    "No valid API configured" error from the server.
-    if (hasCompanyVirtualizorAutomation(ipStock)) {
-      console.log('[ORDER-DETAILS] Server management available via company Virtualizor (provider=', provider, ')');
+    if (hasCompanyAnyAutomation(ipStock)) {
+      console.log('[ORDER-DETAILS] Server management available via company automation (',
+        ipStock?.companyAutomation?.provider, ', provider=', provider, ')');
       return true;
     }
 
@@ -574,16 +582,33 @@ const OrderDetails = () => {
   };
 
   /**
+   * True when the order's IP stock is linked to a company that has external
+   * reseller-API automation enabled (Hostheaven / SomaniOne pattern).
+   */
+  const hasCompanyResellerApiAutomation = (stock: IPStock | null): boolean => {
+    return !!(stock?.companyAutomation?.enabled && stock?.companyAutomation?.provider === 'reseller-api');
+  };
+
+  /**
+   * True when the order's company has ANY automation configured (Virtualizor
+   * or reseller API). Use this anywhere the difference between the two
+   * doesn't matter — the actual automation type is selected on the server.
+   */
+  const hasCompanyAnyAutomation = (stock: IPStock | null): boolean => {
+    return hasCompanyVirtualizorAutomation(stock) || hasCompanyResellerApiAutomation(stock);
+  };
+
+  /**
    * True when this specific order is *actually being driven* by the company's
-   * Virtualizor automation. Covers two cases:
-   *   1. Pure oceanlinux orders linked to a Virtualizor-enabled company.
+   * automation (either Virtualizor or the reseller API). Covers two cases:
+   *   1. Pure oceanlinux orders linked to an automation-enabled company.
    *   2. Orders whose declared provider (e.g. 'hostycare') was never wired up
    *      with a real service ID, so the legacy provider path can't act on them
-   *      and we silently fall back to the company's Virtualizor instead.
+   *      and we silently fall back to the company's automation instead.
    */
   const isOrderCompanyAutomated = (orderArg: Order | null, stock: IPStock | null): boolean => {
     if (!orderArg) return false;
-    if (!hasCompanyVirtualizorAutomation(stock)) return false;
+    if (!hasCompanyAnyAutomation(stock)) return false;
     const prov = getProviderFromOrder(orderArg, stock);
     if (prov === 'oceanlinux') return true;
     const hasNativeServiceId = (prov === 'hostycare' && !!orderArg.hostycareServiceId) ||
@@ -620,13 +645,13 @@ const OrderDetails = () => {
     const isHostycare = provider === 'hostycare' && order.hostycareServiceId;
     const isSmartVPS = provider === 'smartvps' && (order.smartvpsServiceId || order.ipAddress);
     const isAdvps = provider === 'advps' && order.advpsServiceId;
-    // Company-Virtualizor covers oceanlinux orders AND any order whose
-    // declared provider lacks a real service ID but is linked to a company
-    // with Virtualizor automation.
-    const isCompanyVirtualizor = hasCompanyVirtualizorAutomation(ipStock) &&
+    // Company automation (Virtualizor or reseller API) covers oceanlinux
+    // orders AND any order whose declared provider lacks a real service ID
+    // but is linked to a company with automation enabled.
+    const isCompanyAuto = hasCompanyAnyAutomation(ipStock) &&
       (provider === 'oceanlinux' || (!isHostycare && !isSmartVPS && !isAdvps));
 
-    if (!isHostycare && !isSmartVPS && !isAdvps && !isCompanyVirtualizor) {
+    if (!isHostycare && !isSmartVPS && !isAdvps && !isCompanyAuto) {
       return;
     }
 
@@ -753,6 +778,8 @@ const OrderDetails = () => {
           const newM = r?.newMacAddress;
           if (oldM && newM) {
             toast.success(`MAC address updated: ${oldM} → ${newM}`);
+          } else if (newM) {
+            toast.success(`MAC address regenerated: ${newM}`);
           } else {
             toast.success('MAC address reset successfully');
           }
@@ -2331,9 +2358,9 @@ const OrderDetails = () => {
                 )}
 
                 {/* Manual Server Action Requests - For non-auto-provisioned products.
-                    Hidden when the company has Virtualizor automation; those orders use
-                    the regular Server Control card above. */}
-                {provider === 'oceanlinux' && !hasCompanyVirtualizorAutomation(ipStock) && (
+                    Hidden when the company has Virtualizor or reseller-API automation;
+                    those orders use the regular Server Control card above. */}
+                {provider === 'oceanlinux' && !hasCompanyAnyAutomation(ipStock) && (
                   <Card className="border-border hover:shadow-md transition-shadow">
                     <CardHeader className="pb-3">
                       <CardTitle className="flex items-center gap-2 text-base lg:text-lg">
@@ -2685,6 +2712,8 @@ const OrderDetails = () => {
 
                         {(() => {
                           const isAdvps = provider === 'advps';
+                          const isCompanyResellerApi = hasCompanyResellerApiAutomation(ipStock) &&
+                            isOrderCompanyAutomated(order, ipStock);
                           const currentMonth = new Date().toISOString().slice(0, 7);
                           const rebuildCount = (order.advpsRebuildCountMonth === currentMonth ? order.advpsRebuildCount : 0) ?? 0;
                           const rebuildsRemaining = Math.max(0, 10 - rebuildCount);
@@ -2737,6 +2766,32 @@ const OrderDetails = () => {
                                   </Button>
                                   <p className="text-xs text-muted-foreground px-1">
                                     VPS (VM) services only. LXC/Linux containers are not supported by ADVPS for this action.
+                                  </p>
+                                </>
+                              )}
+
+                              {isCompanyResellerApi && (
+                                <>
+                                  <Button
+                                    variant="outline"
+                                    onClick={() => {
+                                      const ok = window.confirm(
+                                        'Generate a new MAC address on the reseller panel? The VM will be stopped, the MAC updated, and then restarted. You may need to renew DHCP inside the guest OS.'
+                                      );
+                                      if (ok) void runServiceAction('resetmac');
+                                    }}
+                                    disabled={!!actionBusy}
+                                    className="w-full h-10 gap-2 text-sm"
+                                  >
+                                    {actionBusy === 'resetmac' ? (
+                                      <Loader2 className="h-4 w-4 animate-spin" />
+                                    ) : (
+                                      <Network className="h-4 w-4" />
+                                    )}
+                                    Reset MAC address
+                                  </Button>
+                                  <p className="text-xs text-muted-foreground px-1">
+                                    The VM will be briefly stopped to apply the new MAC, then restarted automatically.
                                   </p>
                                 </>
                               )}
