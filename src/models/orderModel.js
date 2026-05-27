@@ -95,7 +95,12 @@ const orderSchema = new mongoose.Schema({
         initiatedAt: { type: Date },
         paymentMethod: { type: String },
         amount: { type: Number },
-        gatewayOrderId: { type: String } // Razorpay order ID if applicable
+        gatewayOrderId: { type: String }, // Razorpay order ID if applicable
+        // Set when the renewal payment has been confirmed but the linked
+        // company has to approve it before the expiry is extended.
+        awaitingCompanyApproval: { type: Boolean, default: false },
+        renewalRequestId: { type: mongoose.Schema.Types.ObjectId, ref: 'RenewalRequest' },
+        paymentConfirmedAt: { type: Date }
     },
 
     // Reseller Tracking

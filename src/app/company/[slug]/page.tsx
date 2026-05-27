@@ -19,7 +19,7 @@ import {
   Building2, Server, Package, Loader2, LogOut, Lock, Save, Eye, EyeOff,
   Globe, KeyRound, Search, ArrowUpDown, CalendarDays, ClipboardList,
   Play, Square, RotateCcw, HardDriveIcon, CheckCircle, XCircle, Clock,
-  MessageSquare,
+  MessageSquare, RefreshCw, IndianRupee,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -67,6 +67,31 @@ interface ActionRequest {
   };
 }
 
+interface RenewalRequestDoc {
+  _id: string;
+  orderId: string;
+  renewalTxnId: string;
+  amount: number;
+  paymentMethod: 'cashfree' | 'razorpay' | 'upi';
+  paymentId?: string;
+  status: 'pending' | 'approved' | 'rejected';
+  requestedAt: string;
+  processedAt?: string;
+  adminNotes?: string;
+  orderSnapshot: {
+    productName: string;
+    ipAddress?: string;
+    customerEmail?: string;
+    customerName?: string;
+    memory?: string;
+    stockName?: string;
+  };
+  renewalSnapshot: {
+    previousExpiry?: string;
+    proposedNewExpiry?: string;
+  };
+}
+
 const ACTION_ICONS: Record<string, React.ReactNode> = {
   start: <Play className="h-3.5 w-3.5" />,
   stop: <Square className="h-3.5 w-3.5" />,
@@ -92,7 +117,9 @@ export default function CompanyDashboard() {
   const [stocks, setStocks] = useState<Stock[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [actionRequests, setActionRequests] = useState<ActionRequest[]>([]);
-  const [tab, setTab] = useState<'stocks' | 'orders' | 'requests'>('stocks');
+  const [renewalRequests, setRenewalRequests] = useState<RenewalRequestDoc[]>([]);
+  const [pendingRenewalCount, setPendingRenewalCount] = useState(0);
+  const [tab, setTab] = useState<'stocks' | 'orders' | 'requests' | 'renewals'>('stocks');
   const [togglingStock, setTogglingStock] = useState<string | null>(null);
 
   // Order filters
@@ -117,6 +144,13 @@ export default function CompanyDashboard() {
   const [processNewPassword, setProcessNewPassword] = useState('');
   const [processingLoading, setProcessingLoading] = useState(false);
   const [requestStatusFilter, setRequestStatusFilter] = useState('pending');
+
+  // Renewal request processing
+  const [processingRenewal, setProcessingRenewal] = useState<RenewalRequestDoc | null>(null);
+  const [renewalAction, setRenewalAction] = useState<'approve' | 'reject'>('approve');
+  const [renewalNotes, setRenewalNotes] = useState('');
+  const [renewalProcessingLoading, setRenewalProcessingLoading] = useState(false);
+  const [renewalStatusFilter, setRenewalStatusFilter] = useState<'pending' | 'approved' | 'rejected'>('pending');
 
   useEffect(() => { checkSession(); }, []);
 
@@ -164,6 +198,7 @@ export default function CompanyDashboard() {
     if (stockRes.ok) setStocks(await stockRes.json());
     if (orderRes.ok) setOrders(await orderRes.json());
     loadActionRequests('pending');
+    loadRenewalRequests('pending');
   };
 
   const loadActionRequests = async (status: string) => {
@@ -173,9 +208,24 @@ export default function CompanyDashboard() {
     } catch {}
   };
 
+  const loadRenewalRequests = async (status: 'pending' | 'approved' | 'rejected') => {
+    try {
+      const res = await fetch(`/api/company/renewal-requests?status=${status}`);
+      if (res.ok) {
+        const list = await res.json();
+        setRenewalRequests(list);
+        if (status === 'pending') setPendingRenewalCount(list.length);
+      }
+    } catch {}
+  };
+
   useEffect(() => {
     if (authed) loadActionRequests(requestStatusFilter);
   }, [requestStatusFilter]);
+
+  useEffect(() => {
+    if (authed) loadRenewalRequests(renewalStatusFilter);
+  }, [renewalStatusFilter]);
 
   const toggleStock = async (stockId: string, available: boolean) => {
     setTogglingStock(stockId);
@@ -249,6 +299,39 @@ export default function CompanyDashboard() {
       }
     } catch { toast.error('Failed to process'); }
     finally { setProcessingLoading(false); }
+  };
+
+  const handleProcessRenewal = async () => {
+    if (!processingRenewal) return;
+    setRenewalProcessingLoading(true);
+    try {
+      const res = await fetch('/api/company/renewal-requests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          requestId: processingRenewal._id,
+          action: renewalAction,
+          adminNotes: renewalNotes,
+        }),
+      });
+      if (res.ok) {
+        toast.success(`Renewal ${renewalAction === 'approve' ? 'approved — order extended' : 'rejected'}`);
+        setProcessingRenewal(null);
+        setRenewalNotes('');
+        loadRenewalRequests(renewalStatusFilter);
+        if (renewalStatusFilter !== 'pending') {
+          // Refresh the pending count badge.
+          fetch('/api/company/renewal-requests?status=pending')
+            .then(r => r.ok ? r.json() : [])
+            .then((list: RenewalRequestDoc[]) => setPendingRenewalCount(list.length))
+            .catch(() => {});
+        }
+      } else {
+        const data = await res.json();
+        toast.error(data.error || 'Failed');
+      }
+    } catch { toast.error('Failed to process'); }
+    finally { setRenewalProcessingLoading(false); }
   };
 
   const handleLogout = () => {
@@ -389,9 +472,10 @@ export default function CompanyDashboard() {
         {/* Tabs */}
         <div className="flex gap-2 mb-5 overflow-x-auto pb-1 scrollbar-hide">
           {([
-            { id: 'stocks' as const, icon: <Server className="h-4 w-4" />, label: 'IP Stocks', count: stocks.length },
-            { id: 'orders' as const, icon: <Package className="h-4 w-4" />, label: 'Orders', count: orders.length },
-            { id: 'requests' as const, icon: <ClipboardList className="h-4 w-4" />, label: 'Action Requests', count: null },
+            { id: 'stocks' as const, icon: <Server className="h-4 w-4" />, label: 'IP Stocks', count: stocks.length, badgeColor: '' },
+            { id: 'orders' as const, icon: <Package className="h-4 w-4" />, label: 'Orders', count: orders.length, badgeColor: '' },
+            { id: 'requests' as const, icon: <ClipboardList className="h-4 w-4" />, label: 'Action Requests', count: null, badgeColor: '' },
+            { id: 'renewals' as const, icon: <RefreshCw className="h-4 w-4" />, label: 'Renewals', count: pendingRenewalCount, badgeColor: pendingRenewalCount > 0 ? 'bg-amber-500 text-white' : '' },
           ]).map(t => (
             <button key={t.id} onClick={() => setTab(t.id)}
               className={cn(
@@ -400,7 +484,14 @@ export default function CompanyDashboard() {
               )}>
               {t.icon}
               {t.label}
-              {t.count !== null && <Badge variant="secondary" className="text-[10px] h-4 px-1.5">{t.count}</Badge>}
+              {t.count !== null && (
+                <Badge
+                  variant={t.badgeColor ? 'default' : 'secondary'}
+                  className={cn('text-[10px] h-4 px-1.5', t.badgeColor)}
+                >
+                  {t.count}
+                </Badge>
+              )}
             </button>
           ))}
         </div>
@@ -617,6 +708,126 @@ export default function CompanyDashboard() {
             </div>
           </div>
         )}
+
+        {/* ── Renewals Tab ── */}
+        {tab === 'renewals' && (
+          <div className="space-y-4">
+            {/* Status filter pills */}
+            <div className="flex gap-2">
+              {(['pending', 'approved', 'rejected'] as const).map(s => (
+                <button key={s} onClick={() => setRenewalStatusFilter(s)}
+                  className={cn(
+                    'px-3 py-1.5 rounded-full border text-xs font-medium transition-all capitalize',
+                    renewalStatusFilter === s
+                      ? s === 'pending' ? 'border-amber-500 bg-amber-500/10 text-amber-700' :
+                        s === 'approved' ? 'border-green-500 bg-green-500/10 text-green-700' :
+                          'border-red-500 bg-red-500/10 text-red-700'
+                      : 'border-border bg-card text-muted-foreground hover:text-foreground'
+                  )}>
+                  {s === 'pending' && <Clock className="h-3 w-3 inline mr-1" />}
+                  {s === 'approved' && <CheckCircle className="h-3 w-3 inline mr-1" />}
+                  {s === 'rejected' && <XCircle className="h-3 w-3 inline mr-1" />}
+                  {s}
+                  {s === 'pending' && pendingRenewalCount > 0 && (
+                    <span className="ml-1.5 bg-amber-500 text-white rounded-full px-1.5 py-0.5 text-[10px] leading-none">{pendingRenewalCount}</span>
+                  )}
+                </button>
+              ))}
+            </div>
+
+            {/* Renewal cards */}
+            <div className="space-y-2">
+              {renewalRequests.length === 0 ? (
+                <Card>
+                  <CardContent className="py-12 text-center">
+                    <RefreshCw className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
+                    <p className="text-sm text-muted-foreground">No {renewalStatusFilter} renewal requests.</p>
+                    <p className="text-xs text-muted-foreground mt-1">Customers&apos; renewal payments appear here for your approval before order expiry is extended.</p>
+                  </CardContent>
+                </Card>
+              ) : renewalRequests.map((req) => {
+                const prev = req.renewalSnapshot?.previousExpiry ? new Date(req.renewalSnapshot.previousExpiry) : null;
+                const next = req.renewalSnapshot?.proposedNewExpiry ? new Date(req.renewalSnapshot.proposedNewExpiry) : null;
+                return (
+                  <Card key={req._id}>
+                    <CardContent className="p-4">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <div className="h-7 w-7 rounded-md bg-primary/10 flex items-center justify-center text-primary">
+                              <RefreshCw className="h-3.5 w-3.5" />
+                            </div>
+                            <h3 className="font-medium text-sm">Renewal payment</h3>
+                            <Badge
+                              variant={req.status === 'pending' ? 'secondary' : req.status === 'approved' ? 'default' : 'destructive'}
+                              className="text-[10px] h-4 capitalize"
+                            >
+                              {req.status}
+                            </Badge>
+                            <Badge variant="outline" className="text-[10px] h-4 gap-1">
+                              <IndianRupee className="h-2.5 w-2.5" />
+                              {req.amount}
+                            </Badge>
+                            <Badge variant="outline" className="text-[10px] h-4 capitalize">
+                              {req.paymentMethod}
+                            </Badge>
+                          </div>
+
+                          <div className="mt-2 p-2.5 rounded-md bg-muted/50 text-xs space-y-1">
+                            <p className="font-medium">{req.orderSnapshot?.productName} — {req.orderSnapshot?.memory}</p>
+                            <p className="text-muted-foreground">
+                              {req.orderSnapshot?.customerName || 'Customer'} ({req.orderSnapshot?.customerEmail || '—'})
+                            </p>
+                            {req.orderSnapshot?.ipAddress && (
+                              <p className="font-mono text-muted-foreground">{req.orderSnapshot.ipAddress}</p>
+                            )}
+                            {(prev || next) && (
+                              <div className="flex flex-wrap items-center gap-1.5 mt-1.5 text-[11px]">
+                                <CalendarDays className="h-3 w-3 text-muted-foreground" />
+                                <span className="text-muted-foreground">Current:</span>
+                                <span className="font-medium">{prev ? prev.toLocaleDateString() : '—'}</span>
+                                <span className="text-muted-foreground">→</span>
+                                <span className="text-muted-foreground">After approval:</span>
+                                <span className="font-medium text-green-600">{next ? next.toLocaleDateString() : '—'}</span>
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground flex-wrap">
+                            <span>Txn: <span className="font-mono">{req.renewalTxnId}</span></span>
+                            {req.paymentId && <span>Payment ID: <span className="font-mono">{req.paymentId}</span></span>}
+                            <span>{new Date(req.requestedAt).toLocaleString()}</span>
+                          </div>
+
+                          {req.adminNotes && (
+                            <div className="mt-2 p-2 rounded-md bg-muted/30 border text-xs">
+                              <span className="font-medium">Notes:</span> {req.adminNotes}
+                            </div>
+                          )}
+                        </div>
+
+                        {req.status === 'pending' && (
+                          <div className="flex gap-1.5 shrink-0">
+                            <Button size="sm" variant="outline" className="gap-1 h-8 text-green-600 border-green-200 hover:bg-green-50"
+                              onClick={() => { setProcessingRenewal(req); setRenewalAction('approve'); setRenewalNotes(''); }}>
+                              <CheckCircle className="h-3.5 w-3.5" />
+                              Approve
+                            </Button>
+                            <Button size="sm" variant="outline" className="gap-1 h-8 text-red-600 border-red-200 hover:bg-red-50"
+                              onClick={() => { setProcessingRenewal(req); setRenewalAction('reject'); setRenewalNotes(''); }}>
+                              <XCircle className="h-3.5 w-3.5" />
+                              Reject
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Edit Order Dialog */}
@@ -695,6 +906,62 @@ export default function CompanyDashboard() {
               className={cn('gap-2', processAction === 'approve' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700')}>
               {processingLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : processAction === 'approve' ? <CheckCircle className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
               {processAction === 'approve' ? 'Approve' : 'Reject'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Renewal Approval Dialog */}
+      <Dialog open={!!processingRenewal} onOpenChange={(open) => !open && setProcessingRenewal(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="capitalize">{renewalAction} Renewal</DialogTitle>
+          </DialogHeader>
+          {processingRenewal && (
+            <div className="space-y-4">
+              <div className="p-3 rounded-lg bg-muted/50 text-sm space-y-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <RefreshCw className="h-4 w-4 text-primary" />
+                  <span className="font-medium">{processingRenewal.orderSnapshot?.productName}</span>
+                  <Badge variant="outline" className="text-[10px] h-4">{processingRenewal.orderSnapshot?.memory}</Badge>
+                  <Badge variant="outline" className="text-[10px] h-4 gap-1">
+                    <IndianRupee className="h-2.5 w-2.5" />
+                    {processingRenewal.amount}
+                  </Badge>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {processingRenewal.orderSnapshot?.customerName} ({processingRenewal.orderSnapshot?.customerEmail})
+                </p>
+                {processingRenewal.orderSnapshot?.ipAddress && (
+                  <p className="text-xs font-mono text-muted-foreground">{processingRenewal.orderSnapshot.ipAddress}</p>
+                )}
+                {processingRenewal.renewalSnapshot?.proposedNewExpiry && (
+                  <p className="text-xs flex items-center gap-1.5 mt-1">
+                    <CalendarDays className="h-3 w-3 text-muted-foreground" />
+                    <span className="text-muted-foreground">After approval, expiry:</span>
+                    <span className="font-medium text-green-600">
+                      {new Date(processingRenewal.renewalSnapshot.proposedNewExpiry).toLocaleDateString()}
+                    </span>
+                  </p>
+                )}
+              </div>
+              {renewalAction === 'reject' && (
+                <div className="p-2.5 rounded-md bg-amber-500/10 border border-amber-200 text-xs text-amber-700 dark:text-amber-400">
+                  Rejecting will <span className="font-medium">not</span> automatically refund the customer. Process the refund from your gateway dashboard separately.
+                </div>
+              )}
+              <div>
+                <Label>Notes (optional)</Label>
+                <Textarea value={renewalNotes} onChange={(e) => setRenewalNotes(e.target.value)} placeholder="Add a note for the customer..." className="mt-1.5" rows={3} />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setProcessingRenewal(null)}>Cancel</Button>
+            <Button onClick={handleProcessRenewal} disabled={renewalProcessingLoading}
+              className={cn('gap-2', renewalAction === 'approve' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700')}>
+              {renewalProcessingLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : renewalAction === 'approve' ? <CheckCircle className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
+              {renewalAction === 'approve' ? 'Approve & Extend' : 'Reject'}
             </Button>
           </DialogFooter>
         </DialogContent>

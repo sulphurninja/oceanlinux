@@ -2,11 +2,14 @@ import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 import IPStock from '@/models/ipStockModel';
+import RenewalRequest from '@/models/renewalRequestModel';
+import User from '@/models/userModel';
 import { Cashfree } from 'cashfree-pg';
 import Razorpay from 'razorpay';
 import crypto from 'crypto';
 import { calculateRenewalExpiryDate } from '@/lib/expiryHelper';
 import { assignPanelCredentials } from '@/lib/panelCredentials';
+import { detectCompanyManagedRenewal } from '@/lib/companyRenewal';
 const HostycareAPI = require('@/services/hostycareApi');
 const SmartVPSAPI = require('@/services/smartvpsApi');
 const AdvpsAPI = require('@/services/advpsApi');
@@ -361,6 +364,91 @@ export async function POST(request) {
     // Calculate new expiry based on the number of days in the base month
     const currentExpiry = order.expiryDate;
     const newExpiryDate = calculateRenewalExpiryDate(currentExpiry);
+
+    // ─── Company-managed renewal branch ───────────────────────────────────
+    // For orders whose IPStock is linked to a Company AND that have no
+    // upstream automation, payment alone must NOT extend the expiry. The
+    // company has to approve the renewal from /company/[slug] → Renewals.
+    // We capture the verified payment in a RenewalRequest and return early.
+    const companyCheck = await detectCompanyManagedRenewal(order);
+    if (companyCheck.isCompany) {
+      console.log(`[RENEWAL-CONFIRM] 🏢 Company-managed renewal — queuing for approval (companyId=${companyCheck.companyId})`);
+      logger.logInfo('Company-managed renewal — awaiting company approval', {
+        companyId: String(companyCheck.companyId),
+      });
+
+      // Idempotency: if a request was already created (e.g. by the webhook),
+      // just return success.
+      const existingReq = await RenewalRequest.findOne({ renewalTxnId }).lean();
+      if (existingReq) {
+        console.log(`[RENEWAL-CONFIRM] ✅ RenewalRequest already exists for ${renewalTxnId} (status=${existingReq.status})`);
+        await logger.finalize(true, currentExpiry);
+        return NextResponse.json({
+          success: true,
+          message: existingReq.status === 'pending'
+            ? 'Payment received. Your renewal is waiting for approval from the provider.'
+            : `Renewal already ${existingReq.status}.`,
+          companyApproval: {
+            status: existingReq.status,
+            requestId: existingReq._id,
+          },
+          orderId: order._id,
+          newExpiryDate: currentExpiry, // unchanged until approval
+        });
+      }
+
+      const customer = await User.findById(order.user).select('name email').lean();
+      const stockName = companyCheck.stockName || '';
+
+      const renewalReq = await RenewalRequest.create({
+        orderId: order._id,
+        userId: order.user,
+        companyId: companyCheck.companyId,
+        renewalTxnId,
+        amount: order.price,
+        paymentMethod: actualPaymentMethod,
+        paymentId: cf_payment_id,
+        gatewayOrderId: actualPaymentMethod === 'razorpay' ? razorpayPaymentId : renewalTxnId,
+        paymentDetails: {
+          method: actualPaymentMethod,
+          payment_id: cf_payment_id,
+          order_id: actualPaymentMethod === 'razorpay' ? razorpayPaymentId : renewalTxnId,
+          confirmedAt: new Date(),
+        },
+        status: 'pending',
+        orderSnapshot: {
+          productName: order.productName,
+          ipAddress: order.ipAddress || '',
+          customerEmail: customer?.email || '',
+          customerName: customer?.name || '',
+          memory: order.memory || '',
+          stockName,
+        },
+        renewalSnapshot: {
+          previousExpiry: currentExpiry,
+          proposedNewExpiry: newExpiryDate,
+        },
+      });
+
+      // Tag the order itself so the customer's order-detail UI can show
+      // "awaiting approval" without making a second roundtrip. We also
+      // intentionally KEEP `pendingRenewal` set so the legacy webhook /
+      // confirm idempotency keeps working.
+      await Order.findByIdAndUpdate(order._id, {
+        'pendingRenewal.awaitingCompanyApproval': true,
+        'pendingRenewal.renewalRequestId': renewalReq._id,
+        'pendingRenewal.paymentConfirmedAt': new Date(),
+      });
+
+      await logger.finalize(true, currentExpiry); // expiry unchanged for now
+      return NextResponse.json({
+        success: true,
+        message: 'Payment received. Your renewal is waiting for approval from the provider.',
+        companyApproval: { status: 'pending', requestId: renewalReq._id },
+        orderId: order._id,
+        newExpiryDate: currentExpiry, // unchanged until approval
+      });
+    }
 
     console.log(`Renewing order ${order._id}:`);
     console.log(`  Provider: ${provider}`);

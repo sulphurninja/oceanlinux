@@ -2,9 +2,12 @@ import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 import IPStock from '@/models/ipStockModel';
+import RenewalRequest from '@/models/renewalRequestModel';
+import User from '@/models/userModel';
 import crypto from 'crypto';
 import { calculateExpiryDate, calculateRenewalExpiryDate } from '@/lib/expiryHelper';
 import { assignPanelCredentials } from '@/lib/panelCredentials';
+import { detectCompanyManagedRenewal } from '@/lib/companyRenewal';
 import {
   findDispatchTarget,
   confirmRechargeFromWebhook,
@@ -421,6 +424,72 @@ async function handleRenewalWebhook(renewalTxnId, payment, webhookStartTime) {
     const newExpiryDate = calculateRenewalExpiryDate(order.expiryDate);
 
     console.log(`[WEBHOOK-RENEWAL] New expiry date: ${newExpiryDate}`);
+
+    // ─── Company-managed renewal — queue for company approval ────────────
+    const companyCheck = await detectCompanyManagedRenewal(order);
+    if (companyCheck.isCompany) {
+      console.log(`[WEBHOOK-RENEWAL] 🏢 Company-managed renewal — queuing for approval (companyId=${companyCheck.companyId})`);
+      logger.logInfo('Company-managed renewal — awaiting company approval', {
+        companyId: String(companyCheck.companyId),
+      });
+
+      const existingReq = await RenewalRequest.findOne({ renewalTxnId }).lean();
+      if (!existingReq) {
+        const customer = await User.findById(order.user).select('name email').lean();
+        await RenewalRequest.create({
+          orderId: order._id,
+          userId: order.user,
+          companyId: companyCheck.companyId,
+          renewalTxnId,
+          amount: order.price,
+          paymentMethod: 'cashfree',
+          paymentId: payment.payment.cf_payment_id,
+          gatewayOrderId: renewalTxnId,
+          paymentDetails: {
+            cf_payment_id: payment.payment.cf_payment_id,
+            cf_order_id: renewalTxnId,
+            payment_status: payment.payment.payment_status,
+            payment_amount: payment.payment.payment_amount,
+            confirmedAt: new Date(),
+            via: 'webhook',
+          },
+          status: 'pending',
+          orderSnapshot: {
+            productName: order.productName,
+            ipAddress: order.ipAddress || '',
+            customerEmail: customer?.email || '',
+            customerName: customer?.name || '',
+            memory: order.memory || '',
+            stockName: companyCheck.stockName || '',
+          },
+          renewalSnapshot: {
+            previousExpiry: order.expiryDate,
+            proposedNewExpiry: newExpiryDate,
+          },
+        });
+        console.log(`[WEBHOOK-RENEWAL] ✅ RenewalRequest created for company approval`);
+      } else {
+        console.log(`[WEBHOOK-RENEWAL] ⚠️ RenewalRequest already exists (${existingReq.status})`);
+      }
+
+      // Mark order as awaiting approval but keep `pendingRenewal` block
+      // intact so subsequent confirm-callbacks still hit the idempotent
+      // success path. The expiry is NOT extended yet.
+      await Order.findByIdAndUpdate(order._id, {
+        'pendingRenewal.awaitingCompanyApproval': true,
+        'pendingRenewal.paymentConfirmedAt': new Date(),
+      });
+
+      const totalTime = Date.now() - webhookStartTime;
+      await logger.finalize(true, order.expiryDate);
+      return NextResponse.json({
+        success: true,
+        message: 'Payment captured. Renewal awaiting company approval.',
+        awaitingCompanyApproval: true,
+        orderId: order._id,
+        processingTime: totalTime,
+      });
+    }
 
     // Process provider-specific renewal
     let providerRenewalResult = null;

@@ -115,6 +115,18 @@ interface Order {
     newExpiry: Date;
     renewalTxnId: string;
   }>;
+  // Set when a renewal payment was confirmed but the order is linked to a
+  // company that has to approve the renewal. Comes from `pendingRenewal`.
+  pendingRenewal?: {
+    renewalTxnId?: string;
+    initiatedAt?: Date;
+    paymentMethod?: string;
+    amount?: number;
+    gatewayOrderId?: string;
+    awaitingCompanyApproval?: boolean;
+    paymentConfirmedAt?: Date;
+    renewalRequestId?: string;
+  };
 }
 
 // OS Icon Component
@@ -3000,8 +3012,22 @@ const OrderDetails = () => {
                           <span className="font-semibold text-sm">₹{order.price}/month</span>
                         </div>
 
+                        {/* Awaiting company approval banner — payment received,
+                            extension blocked until the linked company approves. */}
+                        {order.pendingRenewal?.awaitingCompanyApproval && (
+                          <div className="flex items-start gap-2 mb-3 p-3 rounded-md bg-amber-500/10 border border-amber-500/30">
+                            <Clock className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
+                            <div className="text-xs space-y-0.5">
+                              <p className="font-medium text-amber-700 dark:text-amber-400">Renewal payment received — awaiting approval</p>
+                              <p className="text-amber-700/80 dark:text-amber-400/80">
+                                Your provider has to approve this renewal before your service is extended. You&apos;ll see the new expiry date here once approved.
+                              </p>
+                            </div>
+                          </div>
+                        )}
+
                         {/* Renewal Payment Method Selection */}
-                        {isRenewalEligible(order) && (
+                        {isRenewalEligible(order) && !order.pendingRenewal?.awaitingCompanyApproval && (
                           <>
                             <div className="flex items-center gap-2 mb-2">
                               <button
