@@ -37,7 +37,7 @@ const orderSchema = new mongoose.Schema({
     // Provider identification
     provider: {
         type: String,
-        enum: ['hostycare', 'smartvps', 'slotip', 'advps'],
+        enum: ['hostycare', 'smartvps', 'slotip', 'advps', 'netbay'],
         default: 'hostycare'
     },
 
@@ -57,6 +57,12 @@ const orderSchema = new mongoose.Schema({
     // ADVPS rebuild/format rate-limiting (max 10 per calendar month)
     advpsRebuildCount: { type: Number, default: 0 },
     advpsRebuildCountMonth: { type: String, default: '' }, // "YYYY-MM" of the current window
+
+    // Netbay integration fields (https://api.netbayhosts.in)
+    netbayServiceId: { type: String }, // returned by POST /services/purchase
+    netbayPlanId: { type: String },    // plan used at purchase time (cached for renewals)
+    netbayTaskId: { type: String },    // most recent async task (purchase / rebuild)
+    netbayGroupTag: { type: String },  // location filter used at purchase
 
     provisioningStatus: {
         type: String,
@@ -148,6 +154,7 @@ orderSchema.index({ user: 1 });
 orderSchema.index({ hostycareServiceId: 1 });
 orderSchema.index({ smartvpsServiceId: 1 });
 orderSchema.index({ advpsServiceId: 1 });
+orderSchema.index({ netbayServiceId: 1 });
 orderSchema.index({ lastSyncTime: -1 });
 orderSchema.index({ expiryDate: 1 });
 orderSchema.index({ provider: 1 });

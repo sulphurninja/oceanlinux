@@ -17,7 +17,8 @@ import {
 } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { X, ExternalLink } from 'lucide-react';
+import Link from 'next/link';
+import { X, ExternalLink, Zap, BookOpen } from 'lucide-react';
 
 interface MemoryOptionDetails {
     price: number;
@@ -49,6 +50,34 @@ interface IPStock {
 interface CompanyOption {
     _id: string;
     name: string;
+    netbayApi?: { enabled?: boolean; apiKey?: string; apiSecret?: string } | null;
+    resellerApi?: { enabled?: boolean } | null;
+}
+
+/**
+ * Read the Netbay block out of an IPStock's defaultConfigurations.
+ * Tolerates both Map (server-shape) and plain-object (client-shape) storage.
+ *
+ * Shape:
+ *   {
+ *     groupTag?: string,
+ *     planByMemory?: { '4GB': planId, ... },
+ *     defaultOs?: { Linux?: 'Ubuntu 22.04', Windows?: 'Windows Server 2022' },
+ *   }
+ */
+function readNetbayConfig(stock: IPStock | null): {
+    groupTag: string;
+    planByMemory: Record<string, string>;
+    defaultOs: { Linux?: string; Windows?: string };
+} {
+    const cfg: any = stock?.defaultConfigurations?.netbay || {};
+    const planByMemory = (cfg?.planByMemory && typeof cfg.planByMemory === 'object') ? { ...cfg.planByMemory } : {};
+    const defaultOs = (cfg?.defaultOs && typeof cfg.defaultOs === 'object') ? { ...cfg.defaultOs } : {};
+    return {
+        groupTag: cfg?.groupTag || '',
+        planByMemory,
+        defaultOs,
+    };
 }
 
 const ManageIpStock = () => {
@@ -175,6 +204,46 @@ const ManageIpStock = () => {
             });
         }
     };
+
+    // -------------- Netbay configuration helpers --------------
+    const updateNetbayConfig = (
+        next: Partial<{ groupTag: string; planByMemory: Record<string, string>; defaultOs: { Linux?: string; Windows?: string } }>
+    ) => {
+        if (!currentStock) return;
+        const existing = readNetbayConfig(currentStock);
+        const merged = {
+            groupTag: next.groupTag ?? existing.groupTag,
+            planByMemory: next.planByMemory ?? existing.planByMemory,
+            defaultOs: next.defaultOs ?? existing.defaultOs,
+        };
+        const isEmpty =
+            !merged.groupTag &&
+            Object.values(merged.planByMemory || {}).filter(Boolean).length === 0 &&
+            !merged.defaultOs?.Linux &&
+            !merged.defaultOs?.Windows;
+        const nextDefaults = { ...(currentStock.defaultConfigurations || {}) } as Record<string, any>;
+        if (isEmpty) {
+            delete nextDefaults.netbay;
+        } else {
+            nextDefaults.netbay = merged;
+        }
+        setCurrentStock({ ...currentStock, defaultConfigurations: nextDefaults });
+    };
+
+    const handleNetbayPlanIdChange = (size: string, value: string) => {
+        const cfg = readNetbayConfig(currentStock);
+        const next = { ...cfg.planByMemory };
+        if (value.trim()) next[size] = value.trim();
+        else delete next[size];
+        updateNetbayConfig({ planByMemory: next });
+    };
+
+    const selectedCompanyHasNetbay = (() => {
+        if (!currentStock?.company) return false;
+        const c = companies.find(c => c._id === currentStock.company);
+        const n: any = c?.netbayApi;
+        return !!(n && n.enabled && n.apiKey && n.apiSecret);
+    })();
 
     const handleHostycareProductIdChange = (size: string, value: string) => {
         if (currentStock) {
@@ -485,6 +554,111 @@ const ManageIpStock = () => {
                                         </div>
                                     </div>
                                 </div>
+
+                                {/* Netbay Configuration — only meaningful when the IP stock is
+                                    linked to a company that has Netbay enabled. The block stores
+                                    its settings in defaultConfigurations.netbay, where the auto
+                                    provisioner reads them from. */}
+                                {selectedCompanyHasNetbay && (
+                                    <div className="border rounded-lg p-4 bg-amber-50/40 dark:bg-amber-950/10 border-amber-200/60 dark:border-amber-900/40 space-y-3">
+                                        <div className="flex items-center justify-between gap-3 flex-wrap">
+                                            <div>
+                                                <Label className="text-base font-semibold flex items-center gap-2">
+                                                    <Zap className="h-4 w-4 text-amber-600" />
+                                                    Netbay Configuration
+                                                </Label>
+                                                <p className="text-xs text-muted-foreground mt-0.5">
+                                                    Auto-provisioning settings used when ordering from this stock.
+                                                    Look up Plan IDs and OS template names in the company&apos;s Netbay catalog.
+                                                </p>
+                                            </div>
+                                            {currentStock?.company && (
+                                                <Button asChild variant="outline" size="sm" className="gap-1.5 h-8">
+                                                    <Link href={`/admin/companies/${currentStock.company}/netbay-catalog`} target="_blank">
+                                                        <BookOpen className="h-3.5 w-3.5" />
+                                                        Browse Catalog
+                                                    </Link>
+                                                </Button>
+                                            )}
+                                        </div>
+
+                                        <div>
+                                            <Label className="text-sm">Group Tag (location filter, optional):</Label>
+                                            <Input
+                                                type="text"
+                                                placeholder="e.g. 103.157"
+                                                value={readNetbayConfig(currentStock).groupTag}
+                                                onChange={(e) => updateNetbayConfig({ groupTag: e.target.value })}
+                                            />
+                                            <p className="text-xs text-gray-500 mt-1">
+                                                Sent as <code>groupTag</code> in the purchase request. Leave blank to
+                                                let Netbay pick any available IP.
+                                            </p>
+                                        </div>
+
+                                        <div className="space-y-2">
+                                            <Label className="text-sm">Per-RAM Plan IDs:</Label>
+                                            {Object.keys(currentStock.memoryOptions).length === 0 ? (
+                                                <p className="text-xs text-muted-foreground">Add memory options above first.</p>
+                                            ) : (
+                                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                                    {Object.keys(currentStock.memoryOptions).map(size => (
+                                                        <div key={size}>
+                                                            <Label className="text-xs">{size} → Netbay Plan ID</Label>
+                                                            <Input
+                                                                type="text"
+                                                                placeholder="e.g. 60d5f…"
+                                                                className="mt-1 font-mono text-xs"
+                                                                value={readNetbayConfig(currentStock).planByMemory[size] || ''}
+                                                                onChange={(e) => handleNetbayPlanIdChange(size, e.target.value)}
+                                                            />
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                            <p className="text-xs text-gray-500 mt-1">
+                                                Each RAM tier maps to one Netbay Plan ID. Leave a row blank to disable
+                                                Netbay auto-provisioning for that size.
+                                            </p>
+                                        </div>
+
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                            <div>
+                                                <Label className="text-xs">Default Linux OS (optional):</Label>
+                                                <Input
+                                                    type="text"
+                                                    placeholder="Ubuntu 22.04"
+                                                    value={readNetbayConfig(currentStock).defaultOs.Linux || ''}
+                                                    onChange={(e) => {
+                                                        const cfg = readNetbayConfig(currentStock);
+                                                        updateNetbayConfig({
+                                                            defaultOs: { ...cfg.defaultOs, Linux: e.target.value },
+                                                        });
+                                                    }}
+                                                />
+                                            </div>
+                                            <div>
+                                                <Label className="text-xs">Default Windows OS (optional):</Label>
+                                                <Input
+                                                    type="text"
+                                                    placeholder="Windows Server 2022"
+                                                    value={readNetbayConfig(currentStock).defaultOs.Windows || ''}
+                                                    onChange={(e) => {
+                                                        const cfg = readNetbayConfig(currentStock);
+                                                        updateNetbayConfig({
+                                                            defaultOs: { ...cfg.defaultOs, Windows: e.target.value },
+                                                        });
+                                                    }}
+                                                />
+                                            </div>
+                                        </div>
+                                        <p className="text-[11px] text-muted-foreground">
+                                            OS values must match the names exactly as they appear in Netbay&apos;s
+                                            <code> /api/v1/os </code> catalog. Defaults to <code>Ubuntu 22.04</code> /
+                                            <code> Windows Server 2022</code> when blank.
+                                        </p>
+                                    </div>
+                                )}
 
                                 <div>
                                     <Label className="text-base font-semibold">Tags:</Label>

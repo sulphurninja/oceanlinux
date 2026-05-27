@@ -46,6 +46,19 @@ function normalizeResellerApiEntry(v) {
   };
 }
 
+function normalizeNetbayApiEntry(v) {
+  if (v === null) return null;
+  return {
+    enabled: typeof v?.enabled === 'boolean' ? v.enabled : false,
+    label: typeof v?.label === 'string' ? v.label.trim() : '',
+    baseUrl: typeof v?.baseUrl === 'string'
+      ? v.baseUrl.trim().replace(/\/+$/, '')
+      : '',
+    apiKey: typeof v?.apiKey === 'string' ? v.apiKey.trim() : '',
+    apiSecret: typeof v?.apiSecret === 'string' ? v.apiSecret : '',
+  };
+}
+
 function pickAllowedUpdates(body) {
   const out = {};
   if (typeof body?.name === 'string') out.name = body.name;
@@ -70,6 +83,14 @@ function pickAllowedUpdates(body) {
     out.resellerApi = body.resellerApi === null
       ? null
       : normalizeResellerApiEntry(body.resellerApi);
+  }
+
+  // Netbay reseller API automation (https://api.netbayhosts.in style).
+  // Same null/object/omit semantics as `resellerApi` above.
+  if (Object.prototype.hasOwnProperty.call(body || {}, 'netbayApi')) {
+    out.netbayApi = body.netbayApi === null
+      ? null
+      : normalizeNetbayApiEntry(body.netbayApi);
   }
 
   return out;

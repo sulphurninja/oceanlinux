@@ -16,6 +16,8 @@ const {
 } = require('@/lib/companyVirtualizor');
 const { getCompanyResellerApiConfig } = require('@/lib/companyResellerApi');
 const ResellerApi = require('@/services/resellerApi');
+const { getCompanyNetbayApiConfig } = require('@/lib/companyNetbayApi');
+const NetbayApi = require('@/services/netbayApi');
 
 /**
  * Resolve every per-company Virtualizor panel configured against the order's
@@ -57,6 +59,31 @@ async function resolveCompanyResellerApi(order) {
     return { config, companyName: company.name };
   } catch (err) {
     console.error('[SERVICE-ACTION] Company-Reseller-API lookup failed:', err.message);
+    return { config: null, companyName: null };
+  }
+}
+
+/**
+ * Resolve the company-level Netbay API config (https://api.netbayhosts.in)
+ * for an order. Same return-null semantics as the helpers above. Netbay is
+ * keyed by the order having a `netbayServiceId` (set during auto provision)
+ * — without one we can't address the upstream service, so action handlers
+ * should still bail with a useful error message even if the company config
+ * exists.
+ */
+async function resolveCompanyNetbayApi(order) {
+  if (!order?.ipStockId) return { config: null, companyName: null };
+  try {
+    const ipStock = await IPStock.findById(order.ipStockId).select('company').lean();
+    if (!ipStock?.company) return { config: null, companyName: null };
+    const company = await Company.findById(ipStock.company)
+      .select('netbayApi name')
+      .lean();
+    if (!company) return { config: null, companyName: null };
+    const config = getCompanyNetbayApiConfig(company);
+    return { config, companyName: company.name };
+  } catch (err) {
+    console.error('[SERVICE-ACTION] Company-Netbay-API lookup failed:', err.message);
     return { config: null, companyName: null };
   }
 }
@@ -339,14 +366,18 @@ export async function POST(request) {
         order.ip;
     }
 
-    if (!ipAddress) {
+    // Netbay actions are addressed by serviceId, not IP — so missing IP
+    // shouldn't block the request. Every other provider in this route still
+    // requires an IP for VM lookup.
+    const orderIsNetbay = order.provider === 'netbay' || !!order.netbayServiceId;
+    if (!ipAddress && !orderIsNetbay) {
       return NextResponse.json({
         success: false,
         error: `No IP address found for this VPS order. Available order fields: ${Object.keys(order).join(', ')}`
       }, { status: 400 });
     }
 
-    console.log(`[SERVICE-ACTION][POST] Using IP address: ${ipAddress}`);
+    console.log(`[SERVICE-ACTION][POST] Using IP address: ${ipAddress || '(none — Netbay)'}`);
 
     let result;
 
@@ -359,16 +390,195 @@ export async function POST(request) {
     const isSmartVps = order.provider === 'smartvps' || 
                        order.smartvpsDetails?.ip || 
                        (order.productName && order.productName.includes('🌊'));
-    
-    console.log(`[SERVICE-ACTION][POST] Provider detection: isSmartVps=${isSmartVps}, order.provider=${order.provider}`);
+    const isNetbay = order.provider === 'netbay' || !!order.netbayServiceId;
 
-    // Any non-SmartVPS order that doesn't have an active Hostycare service ID
-    // attached is eligible for company-Virtualizor automation. This covers
-    // both pure OceanLinux orders and partially-configured ones whose
+    console.log(`[SERVICE-ACTION][POST] Provider detection: isSmartVps=${isSmartVps}, isNetbay=${isNetbay}, order.provider=${order.provider}`);
+
+    // -------------------- Netbay branch --------------------
+    // Routed FIRST when the order is Netbay-backed: Netbay has its own
+    // serviceId per order, so we go straight to its REST API and skip the
+    // IP-based VM lookup that the reseller / Virtualizor branches need.
+    if (isNetbay) {
+      const supportedActions = new Set(['start', 'stop', 'restart', 'reboot', 'status', 'sync', 'reinstall', 'rebuild', 'templates']);
+      if (!supportedActions.has(action)) {
+        return NextResponse.json({
+          success: false,
+          error: `Action '${action}' is not supported for Netbay orders.`,
+        }, { status: 400 });
+      }
+
+      const { config: netbayCfg, companyName: netbayCompanyName } = await resolveCompanyNetbayApi(order);
+      if (!netbayCfg) {
+        return NextResponse.json({
+          success: false,
+          error: 'Netbay API config is missing or disabled for this order\'s company. Configure it in /admin/companies.',
+        }, { status: 503 });
+      }
+      // `templates` is a catalog lookup that doesn't require a service id —
+      // every other Netbay action is service-bound.
+      if (!order.netbayServiceId && action !== 'templates') {
+        return NextResponse.json({
+          success: false,
+          error: 'This Netbay order has no serviceId yet — auto-provisioning may still be running. Try again in a minute.',
+        }, { status: 409 });
+      }
+
+      console.log(`[SERVICE-ACTION][POST] Routing via Netbay API (${netbayCfg.baseUrl}) for action=${action} (company=${netbayCompanyName || 'unknown'}, serviceId=${order.netbayServiceId})`);
+
+      let netbayApi;
+      try {
+        netbayApi = new NetbayApi(netbayCfg);
+      } catch (apiErr) {
+        return NextResponse.json({
+          success: false,
+          error: `Netbay API configuration is invalid: ${apiErr.message}`,
+        }, { status: 500 });
+      }
+
+      try {
+        switch (action) {
+          case 'start': {
+            const apiRes = await netbayApi.start(order.netbayServiceId);
+            await Order.findByIdAndUpdate(orderId, {
+              lastAction: 'start',
+              lastActionTime: new Date(),
+            });
+            return NextResponse.json({
+              success: true,
+              result: { success: true, message: 'Start command sent (Netbay)', apiResponse: apiRes, serviceId: order.netbayServiceId },
+            });
+          }
+          case 'stop': {
+            const apiRes = await netbayApi.stop(order.netbayServiceId);
+            await Order.findByIdAndUpdate(orderId, {
+              lastAction: 'stop',
+              lastActionTime: new Date(),
+            });
+            return NextResponse.json({
+              success: true,
+              result: { success: true, message: 'Stop command sent (Netbay)', apiResponse: apiRes, serviceId: order.netbayServiceId },
+            });
+          }
+          case 'restart':
+          case 'reboot': {
+            const apiRes = await netbayApi.reboot(order.netbayServiceId);
+            await Order.findByIdAndUpdate(orderId, {
+              lastAction: 'restart',
+              lastActionTime: new Date(),
+            });
+            return NextResponse.json({
+              success: true,
+              result: { success: true, message: 'Reboot command sent (Netbay)', apiResponse: apiRes, serviceId: order.netbayServiceId },
+            });
+          }
+          case 'status':
+          case 'sync': {
+            // Netbay docs don't expose a dedicated power-state endpoint, but
+            // /services/:id returns the latest service object which usually
+            // includes status/state fields. Best-effort normalize, otherwise
+            // ping the IP for a coarse running/stopped signal.
+            let powerState = 'unknown';
+            let svc = null;
+            try {
+              const detailRes = await netbayApi.getService(order.netbayServiceId);
+              svc = detailRes?.data || detailRes || {};
+              const raw = String(svc?.status || svc?.state || svc?.powerState || '').toLowerCase();
+              if (['running', 'on', 'active', 'started', 'online'].includes(raw)) powerState = 'running';
+              else if (['stopped', 'off', 'shutdown', 'offline'].includes(raw)) powerState = 'stopped';
+              else if (['suspended', 'paused'].includes(raw)) powerState = 'suspended';
+              else powerState = raw || 'unknown';
+            } catch (statusErr) {
+              console.warn('[SERVICE-ACTION][POST] Netbay getService failed; falling back to ping:', statusErr.message);
+            }
+            if (powerState === 'unknown' && ipAddress) {
+              powerState = isServerReachable(ipAddress) ? 'running' : 'stopped';
+            }
+            await Order.findByIdAndUpdate(orderId, { lastSyncTime: new Date() });
+            return NextResponse.json({
+              success: true,
+              powerState,
+              provider: 'netbay',
+              serviceId: order.netbayServiceId,
+              service: svc || null,
+              lastSync: new Date().toISOString(),
+            });
+          }
+          case 'templates': {
+            // Catalog lookup — fetch all available OS templates for the
+            // dashboard's OS-picker dialog. Netbay uses the OS *name* as
+            // the identifier in /rebuild, so we key the response map by
+            // name instead of a numeric id.
+            const osRes = await netbayApi.listOs();
+            const osList = osRes?.data?.os || osRes?.data || [];
+            const flat = {};
+            for (const os of (Array.isArray(osList) ? osList : [])) {
+              const label = os?.name || os?.id;
+              if (!label) continue;
+              flat[String(label)] = `${os.name}${os.category ? ` (${os.category})` : ''}`;
+            }
+            return NextResponse.json({
+              success: true,
+              result: flat,
+              raw: osList,
+              provider: 'netbay',
+            });
+          }
+          case 'reinstall':
+          case 'rebuild': {
+            // Optional `os` param — defaults upstream to current OS if blank.
+            // Accept either templateId (legacy from UI) or osName.
+            const osPayload = payload?.os || payload?.osName || body?.os || body?.osName ||
+              templateId || payload?.templateId || null;
+            const apiRes = await netbayApi.rebuild(order.netbayServiceId, osPayload ? { os: String(osPayload) } : {});
+            const taskId = apiRes?.data?.taskId || null;
+
+            // Sync the order's `os` / `username` to whatever Netbay just
+            // installed — keeps the dashboard in step with the VM.
+            const update = {
+              $set: {
+                lastAction: 'reinstall',
+                lastActionTime: new Date(),
+              },
+            };
+            if (osPayload) {
+              const osStr = String(osPayload);
+              const isWindows = /windows|win\s*server/i.test(osStr);
+              update.$set.os = isWindows ? 'Windows 2022 64' : 'Ubuntu 22';
+              update.$set.username = isWindows ? 'Administrator' : 'root';
+            }
+            if (taskId) update.$set.netbayTaskId = taskId;
+            await Order.findByIdAndUpdate(orderId, update);
+
+            return NextResponse.json({
+              success: true,
+              result: {
+                accepted: true,
+                serviceId: order.netbayServiceId,
+                taskId,
+                os: osPayload || null,
+                message: 'Rebuild submitted via Netbay API',
+                raw: apiRes,
+              },
+            });
+          }
+        }
+      } catch (netbayErr) {
+        console.error(`[SERVICE-ACTION][POST] Netbay action '${action}' failed:`, netbayErr.message);
+        const status = typeof netbayErr.status === 'number' ? netbayErr.status : 500;
+        return NextResponse.json({
+          success: false,
+          error: netbayErr.message || 'Netbay action failed',
+        }, { status });
+      }
+    }
+
+    // Any non-SmartVPS, non-Netbay order that doesn't have an active Hostycare
+    // service ID attached is eligible for company-Virtualizor automation. This
+    // covers both pure OceanLinux orders and partially-configured ones whose
     // `provider` was stamped as 'hostycare' or similar but never received a
     // serviceId — those would otherwise fall through to the Hostycare branch
     // and fail with "No valid API configured".
-    if (!isSmartVps && !order.hostycareServiceId) {
+    if (!isSmartVps && !isNetbay && !order.hostycareServiceId) {
       // ---- Company Reseller-API automation (Hostheaven / SomaniOne) ----
       // Tried BEFORE Virtualizor only when there are zero Virtualizor panels
       // configured — that way an admin can swap a company over from one
@@ -1413,6 +1623,62 @@ export async function GET(request) {
       || order.productDetails?.ip
       || order.ip
       || null;
+
+    // 1a-pre) Netbay branch — Netbay carries its own serviceId per order,
+    //         so we go straight to /services/:id without any IP-based lookup.
+    if ((order.provider === 'netbay' || !!order.netbayServiceId)) {
+      const { config: netbayCfg, companyName: netbayCompanyName } = await resolveCompanyNetbayApi(order);
+      if (netbayCfg && order.netbayServiceId) {
+        console.log(`[SERVICE-ACTION][GET] Using Netbay API for order=${orderId} (serviceId=${order.netbayServiceId}, baseUrl=${netbayCfg.baseUrl})`);
+        try {
+          const api = new NetbayApi(netbayCfg);
+          const detailRes = await api.getService(order.netbayServiceId);
+          const svc = detailRes?.data || detailRes || {};
+
+          const raw = String(svc?.status || svc?.state || svc?.powerState || '').toLowerCase();
+          let powerState = 'unknown';
+          if (['running', 'on', 'active', 'started', 'online'].includes(raw)) powerState = 'running';
+          else if (['stopped', 'off', 'shutdown', 'offline'].includes(raw)) powerState = 'stopped';
+          else if (['suspended', 'paused'].includes(raw)) powerState = 'suspended';
+          else powerState = raw || 'unknown';
+          if (powerState === 'unknown' && ipAddress) {
+            powerState = isServerReachable(ipAddress) ? 'running' : 'stopped';
+          }
+
+          // Sync IP / credentials onto the order if Netbay now has them and we
+          // didn't yet — Netbay sometimes assigns these a polling cycle late.
+          const dbUpdates = { lastSyncTime: new Date() };
+          const freshIp = NetbayApi.extractServiceIp(svc);
+          if (freshIp && freshIp !== order.ipAddress) dbUpdates.ipAddress = freshIp;
+          if (svc.username && svc.username !== order.username) dbUpdates.username = svc.username;
+          if (svc.password && svc.password !== order.password) dbUpdates.password = svc.password;
+          await Order.findByIdAndUpdate(orderId, dbUpdates);
+
+          return NextResponse.json({
+            success: true,
+            provider: 'netbay',
+            companyName: netbayCompanyName || null,
+            serviceId: order.netbayServiceId,
+            ip: dbUpdates.ipAddress || ipAddress || svc.ip || null,
+            status: powerState,
+            powerState,
+            rawStatus: svc?.status || null,
+            details: svc,
+            syncResult: {
+              credentialsUpdated: !!(dbUpdates.username || dbUpdates.password || dbUpdates.ipAddress),
+              lastSyncTime: new Date().toISOString(),
+            },
+            lastSync: new Date().toISOString(),
+          });
+        } catch (err) {
+          console.error('[SERVICE-ACTION][GET] Netbay lookup failed:', err.message);
+          return NextResponse.json({
+            success: false,
+            error: err.message || 'Netbay lookup failed',
+          }, { status: typeof err.status === 'number' ? err.status : 500 });
+        }
+      }
+    }
 
     // 1a) Company-Reseller-API path (Hostheaven / SomaniOne) — used only when
     //     the company has no Virtualizor panels configured. We resolve the

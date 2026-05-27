@@ -92,10 +92,13 @@ interface Order {
   password?: string;
   expiryDate?: Date;
   createdAt?: Date;
-  provider?: 'hostycare' | 'smartvps' | 'oceanlinux' | 'slotip' | 'advps';
+  provider?: 'hostycare' | 'smartvps' | 'oceanlinux' | 'slotip' | 'advps' | 'netbay';
   hostycareServiceId?: string;
   smartvpsServiceId?: string;
   advpsServiceId?: string;
+  netbayServiceId?: string;
+  netbayPlanId?: string;
+  netbayTaskId?: string;
   advpsRebuildCount?: number;
   advpsRebuildCountMonth?: string;
   slotIpPackageId?: string;
@@ -342,26 +345,30 @@ const OrderDetails = () => {
   };
 
   // Determine provider based on order data and ipStock
-  const getProviderFromOrder = (order: Order, ipStock: IPStock | null): 'hostycare' | 'smartvps' | 'oceanlinux' | 'advps' => {
+  const getProviderFromOrder = (order: Order, ipStock: IPStock | null): 'hostycare' | 'smartvps' | 'oceanlinux' | 'advps' | 'netbay' => {
     console.log('[ORDER-DETAILS] Determining provider for order:', {
       explicitProvider: order.provider,
       hostycareServiceId: order.hostycareServiceId,
       smartvpsServiceId: order.smartvpsServiceId,
       advpsServiceId: order.advpsServiceId,
+      netbayServiceId: order.netbayServiceId,
       ipStockId: order.ipStockId,
       ipStockTags: ipStock?.tags || 'No IPStock data',
       productName: order.productName
     });
 
+    if (order.provider === 'netbay') return 'netbay';
     if (order.provider === 'advps') return 'advps';
     if (order.provider === 'smartvps') return 'smartvps';
 
+    if (order.netbayServiceId) return 'netbay';
     if (order.advpsServiceId) return 'advps';
     if (order.hostycareServiceId) return 'hostycare';
     if (order.smartvpsServiceId) return 'smartvps';
 
     if (ipStock && ipStock.tags) {
       const tagsLower = ipStock.tags.map((t: string) => t.toLowerCase());
+      if (tagsLower.includes('netbay')) return 'netbay';
       if (tagsLower.includes('advps') || tagsLower.includes('flex')) return 'advps';
       if (tagsLower.includes('smartvps') || tagsLower.includes('ocean linux')) return 'smartvps';
     }
@@ -388,6 +395,8 @@ const OrderDetails = () => {
         return 'OceanLinux';
       case 'advps':
         return 'ADVPS';
+      case 'netbay':
+        return 'Netbay';
       default:
         return provider.charAt(0).toUpperCase() + provider.slice(1);
     }
@@ -421,7 +430,7 @@ const OrderDetails = () => {
     };
   }, []);
 
-  const openOsDialog = async (provider: 'hostycare' | 'smartvps' | 'advps' | 'oceanlinux') => {
+  const openOsDialog = async (provider: 'hostycare' | 'smartvps' | 'advps' | 'oceanlinux' | 'netbay') => {
     if (osAutoCloseTimer.current) {
       clearTimeout(osAutoCloseTimer.current);
       osAutoCloseTimer.current = null;

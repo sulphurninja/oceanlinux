@@ -45,6 +45,24 @@ const companyResellerApiSchema = new mongoose.Schema({
   password: { type: String, default: '' },
 }, { _id: false });
 
+/**
+ * Netbay reseller API automation (https://api.netbayhosts.in style).
+ * When enabled, IP stocks linked to this company can auto-provision VMs
+ * (POST /services/purchase) and run lifecycle actions (start/stop/reboot/
+ * rebuild) without going through Virtualizor. Auth is a static API key +
+ * secret pair generated from the Netbay dashboard.
+ *
+ * Like `resellerApi`, this is one of several mutually-exclusive automation
+ * sources; the ipStock + order context decides which one is used at runtime.
+ */
+const companyNetbayApiSchema = new mongoose.Schema({
+  enabled: { type: Boolean, default: false },
+  label: { type: String, default: '' },
+  baseUrl: { type: String, default: '' }, // e.g. https://api.netbayhosts.in
+  apiKey: { type: String, default: '' },     // X-API-Key   — public key id
+  apiSecret: { type: String, default: '' },  // X-API-Secret — private secret
+}, { _id: false });
+
 const companySchema = new mongoose.Schema({
   name: { type: String, required: true, unique: true },
   slug: { type: String, required: true, unique: true },
@@ -53,6 +71,7 @@ const companySchema = new mongoose.Schema({
   virtualizors: { type: [companyVirtualizorSchema], default: [] },
   virtualizor: { type: legacyCompanyVirtualizorSchema, default: null }, // deprecated
   resellerApi: { type: companyResellerApiSchema, default: null },
+  netbayApi: { type: companyNetbayApiSchema, default: null },
 }, { timestamps: true });
 
 companySchema.index({ slug: 1 });

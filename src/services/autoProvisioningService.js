@@ -3,9 +3,12 @@
 const HostycareAPI = require('./hostycareApi');
 const SmartVpsAPI = require('./smartvpsApi');              // SmartVPS client (with its own logging)
 const AdvpsAPI = require('./advpsApi');
+const NetbayApi = require('./netbayApi');
 const connectDB = require('@/lib/db').default;
 const Order = require('@/models/orderModel').default;
 const IPStock = require('@/models/ipStockModel');
+const Company = require('@/models/companyModel').default;
+const { getCompanyNetbayApiConfig } = require('@/lib/companyNetbayApi');
 
 const L = {
   head: (label) => {
@@ -27,6 +30,136 @@ class AutoProvisioningService {
     this.smartvpsApi = new SmartVpsAPI();
     this.advpsApi = new AdvpsAPI();
     console.log('[AUTO-PROVISION-SERVICE] 🏗️ AutoProvisioningService instance created');
+  }
+
+  // --- NETBAY HELPERS -------------------------------------------------------
+
+  /**
+   * Decide if this IPStock should be provisioned via Netbay.
+   * Detection priority:
+   *   1) defaultConfigurations.netbay block exists (most reliable)
+   *   2) tag === 'netbay'
+   *   3) ipStock.provider === 'netbay'
+   *   4) order.netbayServiceId already set (re-entry from cron / retry)
+   *   5) IP stock's company has Netbay automation enabled (last resort,
+   *      requires the IPStock to be linked to the company)
+   *
+   * Note: company-level detection alone isn't enough — a company can have
+   * Netbay enabled while still hosting non-Netbay IP stocks. The presence
+   * of a `defaultConfigurations.netbay` block is the canonical signal.
+   */
+  isNetbayStock(ipStock, order) {
+    const tags = Array.isArray(ipStock?.tags) ? ipStock.tags : [];
+    const provider = (ipStock?.provider || '').toString().toLowerCase();
+
+    const hasNetbayConfig = !!(ipStock?.defaultConfigurations?.netbay ||
+      ipStock?.defaultConfigurations?.get?.('netbay'));
+    const taggedNetbay = tags.some(t => String(t).toLowerCase() === 'netbay');
+    const byProvider = provider === 'netbay';
+    const byOrder = !!order?.netbayServiceId || order?.provider === 'netbay';
+
+    const isNetbay = hasNetbayConfig || taggedNetbay || byProvider || byOrder;
+
+    L.kv('Netbay detection', {
+      hasNetbayConfig, taggedNetbay, byProvider, byOrder, result: isNetbay
+    });
+
+    return isNetbay;
+  }
+
+  /**
+   * Resolve the Netbay API config for an IPStock by walking up to its
+   * Company. Returns null when the company has no Netbay config (or the
+   * stock isn't linked to a company at all).
+   */
+  async resolveNetbayConfigForStock(ipStock) {
+    if (!ipStock?.company) {
+      L.line('[NETBAY] IPStock has no company link — cannot resolve Netbay API credentials');
+      return null;
+    }
+    try {
+      const company = await Company.findById(ipStock.company).select('netbayApi name').lean();
+      if (!company) {
+        L.line(`[NETBAY] Company ${ipStock.company} not found`);
+        return null;
+      }
+      const cfg = getCompanyNetbayApiConfig(company);
+      if (!cfg) {
+        L.line(`[NETBAY] Company "${company.name}" has no enabled/complete Netbay API config`);
+        return null;
+      }
+      return { ...cfg, companyName: company.name };
+    } catch (err) {
+      L.line(`[NETBAY] Failed to load company config: ${err.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Read the per-stock Netbay block out of `defaultConfigurations.netbay`,
+   * normalising both Map and plain-object storage. Expected shape:
+   *   {
+   *     groupTag: '103.157',                // optional location filter
+   *     planByMemory: { '4GB': '60d5f...' } // RAM → planId
+   *     defaultOs: { Linux: 'Ubuntu 22.04', Windows: 'Windows Server 2022' }
+   *   }
+   * Anything missing is replaced with sensible defaults at use time.
+   */
+  readNetbayStockConfig(ipStock) {
+    const cfg = ipStock?.defaultConfigurations?.get?.('netbay') ||
+      ipStock?.defaultConfigurations?.netbay ||
+      {};
+
+    const planByMemory = cfg.planByMemory instanceof Map
+      ? Object.fromEntries(cfg.planByMemory)
+      : (cfg.planByMemory || {});
+
+    const defaultOs = cfg.defaultOs instanceof Map
+      ? Object.fromEntries(cfg.defaultOs)
+      : (cfg.defaultOs || {});
+
+    return {
+      groupTag: cfg.groupTag || '',
+      planByMemory,
+      defaultOs,
+    };
+  }
+
+  /**
+   * Pick the best plan id for the order's memory size from the per-stock
+   * planByMemory map. Tries exact match first, then variations
+   * ("4GB" / "4gb" / "4 GB"), then falls back to ANY configured plan id
+   * if there's only one (small reseller convenience).
+   */
+  resolveNetbayPlanId({ planByMemory, ram }) {
+    if (!planByMemory || typeof planByMemory !== 'object') return '';
+    const variations = [
+      ram, String(ram || '').toLowerCase(), String(ram || '').toUpperCase(),
+      String(ram || '').replace(/\s+/g, ''),
+    ].filter(Boolean);
+
+    for (const v of variations) {
+      const id = planByMemory[v];
+      if (id) return String(id);
+    }
+    // Single-plan reseller convenience: if there's only one configured, use it
+    const entries = Object.entries(planByMemory).filter(([, v]) => !!v);
+    if (entries.length === 1) return String(entries[0][1]);
+    return '';
+  }
+
+  /**
+   * Pick the OS template name to send to Netbay. Order:
+   *   1) Per-stock defaultOs[Linux|Windows] override
+   *   2) Hardcoded sensible defaults that match the Netbay docs
+   *      ("Ubuntu 22.04" / "Windows Server 2022")
+   */
+  resolveNetbayOsName({ defaultOs, isWindows }) {
+    if (defaultOs) {
+      if (isWindows && defaultOs.Windows) return defaultOs.Windows;
+      if (!isWindows && defaultOs.Linux) return defaultOs.Linux;
+    }
+    return isWindows ? 'Windows Server 2022' : 'Ubuntu 22.04';
   }
 
   // Acquire a lock for a specific SmartVPS package
@@ -732,13 +865,16 @@ class AutoProvisioningService {
       L.kv('IPStock snapshot', snapshot);
 
       const advps = this.isAdvpsStock(ipStock, order);
-      const smartVps = !advps && this.isSmartVpsStock(ipStock, order);
-      const providerName = advps ? 'ADVPS' : smartVps ? 'SmartVPS' : 'Hostycare';
+      const netbay = !advps && this.isNetbayStock(ipStock, order);
+      const smartVps = !advps && !netbay && this.isSmartVpsStock(ipStock, order);
+      const providerName = advps ? 'ADVPS' : netbay ? 'Netbay' : smartVps ? 'SmartVPS' : 'Hostycare';
       L.line(`➡ Provider route selected: ${providerName}`);
 
       // Branch
       if (advps) {
         return await this.provisionViaAdvps(order, ipStock, startTime);
+      } else if (netbay) {
+        return await this.provisionViaNetbay(order, ipStock, startTime);
       } else if (smartVps) {
         return await this.provisionViaSmartVps(order, ipStock, startTime);
       } else {
@@ -1060,6 +1196,223 @@ class AutoProvisioningService {
       productId: advpsProductId,
       totalTime,
       ...(fullyProvisioned ? {} : { error: `ADVPS order ${advpsOrderId} pending assignment, cron will check` }),
+    };
+  }
+
+  // --- NETBAY PATH ---------------------------------------------------------
+  //
+  // Netbay (https://api.netbayhosts.in) is an external reseller API like
+  // ADVPS / Hostheaven. Provisioning flow:
+  //
+  //   1. Resolve the company's Netbay credentials from the IPStock link
+  //   2. Look up the planId from `defaultConfigurations.netbay.planByMemory`
+  //      using the order's RAM size
+  //   3. Decide which OS template to install (Linux vs Windows by product name)
+  //   4. POST /services/purchase  →  returns serviceId + taskId (status PENDING)
+  //   5. Poll /tasks/:taskId every ~4s until COMPLETED (or up to 3 min)
+  //   6. On COMPLETED → fetch /services/:id to read IP / credentials
+  //   7. Persist serviceId + IP + creds onto the order (or leave PENDING for the
+  //      cron to retry if Netbay hasn't finished yet)
+  //
+  // Idempotency: if `order.netbayServiceId` is already set, we skip the
+  // purchase step entirely and resume from the polling/details fetch.
+  async provisionViaNetbay(order, ipStock, startTime) {
+    L.head(`NETBAY PATH — order ${order._id}`);
+
+    const productNameLower = String(order.productName || '').toLowerCase();
+    const isWindowsProduct =
+      productNameLower.includes('windows') ||
+      productNameLower.includes('rdp') ||
+      productNameLower.includes('vps');
+    L.kv('[NETBAY] isWindowsProduct', isWindowsProduct);
+
+    await Order.findByIdAndUpdate(order._id, {
+      provisioningStatus: 'provisioning',
+      provisioningError: '',
+      autoProvisioned: true,
+      lastProvisionAttempt: new Date(),
+      provider: 'netbay',
+    });
+
+    // 1) Resolve company-level Netbay credentials (per /admin/companies)
+    const cfg = await this.resolveNetbayConfigForStock(ipStock);
+    if (!cfg) {
+      throw new Error(
+        `Netbay API not configured for IPStock "${ipStock?.name}". ` +
+        `Link the stock to a company that has Netbay enabled in /admin/companies.`
+      );
+    }
+    L.kv('[NETBAY] Using company', cfg.companyName);
+
+    // 2) Resolve per-stock plan + groupTag from IPStock.defaultConfigurations.netbay
+    const stockCfg = this.readNetbayStockConfig(ipStock);
+    L.kv('[NETBAY] Stock config', stockCfg);
+
+    let netbayServiceId = order.netbayServiceId || '';
+    let netbayTaskId = order.netbayTaskId || '';
+    let planId = order.netbayPlanId || '';
+    let groupTag = order.netbayGroupTag || stockCfg.groupTag || '';
+
+    // 3) Resolve OS template name
+    const osName = this.resolveNetbayOsName({
+      defaultOs: stockCfg.defaultOs,
+      isWindows: isWindowsProduct,
+    });
+    L.kv('[NETBAY] Target OS', osName);
+
+    // Map OS into the order's enum values for downstream UI
+    const orderOs = isWindowsProduct ? 'Windows 2022 64' : 'Ubuntu 22';
+
+    const api = new NetbayApi(cfg);
+
+    // 4) Purchase (skip if we already have a serviceId from a previous attempt)
+    if (!netbayServiceId) {
+      planId = this.resolveNetbayPlanId({
+        planByMemory: stockCfg.planByMemory,
+        ram: order.memory,
+      });
+      if (!planId) {
+        throw new Error(
+          `Netbay planId not configured for memory "${order.memory}" on IPStock "${ipStock.name}". ` +
+          `Set it in /admin/manageIpStock under "Netbay Configuration".`
+        );
+      }
+      L.kv('[NETBAY] Resolved planId', planId);
+
+      const purchaseBody = {
+        planId,
+        os: osName,
+        months: 1,
+      };
+      if (groupTag) purchaseBody.groupTag = groupTag;
+
+      L.line(`[NETBAY] POST /services/purchase ${JSON.stringify(purchaseBody)}`);
+      let purchaseRes;
+      try {
+        purchaseRes = await api.purchaseService(purchaseBody);
+      } catch (err) {
+        // Surface upstream error verbatim — the message usually says exactly
+        // what's wrong (insufficient balance, OS not supported, etc).
+        throw new Error(`Netbay purchase failed: ${err.message}`);
+      }
+      const data = purchaseRes?.data || {};
+      netbayServiceId = NetbayApi.extractServiceId(data) || data?.serviceId || '';
+      netbayTaskId = data?.taskId || '';
+
+      if (!netbayServiceId) {
+        throw new Error(`Netbay purchase did not return a serviceId. Response: ${JSON.stringify(purchaseRes).slice(0, 400)}`);
+      }
+      L.kv('[NETBAY] serviceId', netbayServiceId);
+      L.kv('[NETBAY] taskId', netbayTaskId);
+
+      // Persist immediately so retries / cron skip the purchase step
+      await Order.findByIdAndUpdate(order._id, {
+        netbayServiceId,
+        netbayTaskId,
+        netbayPlanId: planId,
+        netbayGroupTag: groupTag || undefined,
+        provider: 'netbay',
+        autoProvisioned: true,
+      });
+    } else {
+      L.line(`[NETBAY] Resuming — serviceId=${netbayServiceId}, taskId=${netbayTaskId}, planId=${planId}`);
+    }
+
+    // 5) Wait for the purchase task (or skip if there is no task — some
+    //    providers only return a serviceId)
+    let taskTerminal = null;
+    if (netbayTaskId) {
+      L.line(`[NETBAY] Polling task ${netbayTaskId}...`);
+      try {
+        taskTerminal = await api.waitForTask(netbayTaskId, {
+          maxWaitMs: 180_000,  // 3 min
+          pollIntervalMs: 4_000,
+        });
+        L.kv('[NETBAY] Task terminal status', taskTerminal?.status || '(unknown)');
+      } catch (err) {
+        L.line(`[NETBAY] Task poll failed: ${err.message} — will continue and try fetching service`);
+      }
+      if (taskTerminal?.status === 'FAILED') {
+        // Netbay refunds automatically per their docs; surface the error so
+        // the customer (and admin) can see it on the order page.
+        const errMsg = taskTerminal?.error || taskTerminal?.message || 'Netbay task FAILED';
+        await Order.findByIdAndUpdate(order._id, {
+          provisioningStatus: 'failed',
+          provisioningError: `Netbay provision failed: ${errMsg}`,
+        });
+        throw new Error(`Netbay provisioning task failed: ${errMsg}`);
+      }
+    }
+
+    // 6) Fetch service details to extract IP + credentials
+    let ipAddress = '';
+    let username = isWindowsProduct ? 'Administrator' : 'root';
+    let password = '';
+    let expiryDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    try {
+      const detailRes = await api.getService(netbayServiceId);
+      const svc = detailRes?.data || detailRes || {};
+      ipAddress = NetbayApi.extractServiceIp(svc) || '';
+      if (svc.username) username = svc.username;
+      if (svc.password) password = svc.password;
+      if (svc.expiresAt || svc.expiryDate) {
+        const candidate = new Date(svc.expiresAt || svc.expiryDate);
+        if (!Number.isNaN(candidate.getTime())) expiryDate = candidate;
+      }
+      L.kv('[NETBAY] Service IP', ipAddress || '(pending)');
+      L.kv('[NETBAY] Username', username);
+      L.kv('[NETBAY] Password', password ? `${password.slice(0, 4)}****` : '(pending)');
+    } catch (err) {
+      L.line(`[NETBAY] getService failed: ${err.message} — leaving IP/creds blank for cron retry`);
+    }
+
+    // 7) Update order. We treat "service id assigned" as the provisioning
+    //    bar — IP/credentials sometimes lag behind by a poll cycle, in which
+    //    case the cron will fetch them on the next pass.
+    const fullyProvisioned = !!(ipAddress && netbayServiceId);
+    const updateData = {
+      status: fullyProvisioned ? 'active' : 'confirmed',
+      provisioningStatus: fullyProvisioned ? 'active' : 'provisioning',
+      provisioningError: fullyProvisioned ? '' : `NETBAY_PENDING: serviceId=${netbayServiceId} placed, awaiting ${!ipAddress ? 'IP assignment' : 'credentials'}. Cron will check.`,
+      provider: 'netbay',
+      netbayServiceId,
+      netbayTaskId: netbayTaskId || undefined,
+      netbayPlanId: planId || undefined,
+      netbayGroupTag: groupTag || undefined,
+      username,
+      password: password || order.password || '',
+      ipAddress: ipAddress || '',
+      autoProvisioned: true,
+      os: orderOs,
+      expiryDate,
+    };
+    if (!fullyProvisioned) {
+      updateData.provisioningLockId = undefined;
+      updateData.lastProvisionAttempt = new Date();
+    }
+    await Order.findByIdAndUpdate(order._id, updateData);
+
+    const totalTime = Date.now() - startTime;
+    console.log("\n" + "✅".repeat(80));
+    console.log(`[NETBAY] ✅ PROVISIONING ${fullyProvisioned ? 'COMPLETED' : 'PENDING — cron will check'}`);
+    console.log(`   - Order ID: ${order._id}`);
+    console.log(`   - Netbay Service: ${netbayServiceId}`);
+    console.log(`   - Netbay Task: ${netbayTaskId || 'n/a'}`);
+    console.log(`   - IP: ${ipAddress || 'pending'}`);
+    console.log(`   - Username: ${username}`);
+    console.log(`   - OS: ${orderOs}`);
+    console.log(`   - Total Time: ${totalTime}ms`);
+    console.log("✅".repeat(80));
+
+    return {
+      success: fullyProvisioned,
+      netbayPending: !fullyProvisioned,
+      serviceId: netbayServiceId,
+      ipAddress: ipAddress || null,
+      credentials: { username, password },
+      productId: planId || null,
+      totalTime,
+      ...(fullyProvisioned ? {} : { error: `Netbay service ${netbayServiceId} pending IP/credentials` }),
     };
   }
 

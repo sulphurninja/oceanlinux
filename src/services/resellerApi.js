@@ -24,10 +24,42 @@
  */
 
 const TOKEN_CACHE = new Map(); // key: `${baseUrl}|${email}` → { token, expiresAt }
+const LOGIN_INFLIGHT = new Map(); // key → Promise<token>; de-dupes concurrent re-logins
 const TOKEN_TTL_MS = 23 * 60 * 60 * 1000; // refresh after 23h to stay clear of typical 24h JWT exp
 
 function trimSlash(s) {
   return (s || '').replace(/\/+$/, '');
+}
+
+/**
+ * Detect whether an upstream response represents a token-auth failure (so
+ * we should drop the cached JWT and re-login). Goes beyond plain HTTP 401:
+ * Spring Security backends often return 403 for expired JWTs, and some
+ * panels surface JWT errors as 5xx with the message in the body. Also
+ * watches for 419 (CSRF/Laravel) and 440 (IIS).
+ *
+ * Without this, a token rejected with anything but 401 leaves the cached
+ * JWT untouched and the admin has to manually re-login from /admin/companies.
+ */
+function isAuthFailure(res, parsed) {
+  if (!res) return false;
+  const code = res.status;
+  if (code === 401 || code === 403 || code === 419 || code === 440) return true;
+  if (code < 400) return false;
+  const text = typeof parsed === 'string'
+    ? parsed
+    : (parsed && (parsed.message || parsed.error || parsed.detail)) || '';
+  if (typeof text !== 'string' || !text) return false;
+  const t = text.toLowerCase();
+  return (
+    t.includes('jwt') ||
+    t.includes('token') ||
+    t.includes('unauthorized') ||
+    t.includes('not authenticated') ||
+    t.includes('session expired') ||
+    t.includes('signature') ||
+    t.includes('expired')
+  );
 }
 
 function deriveResellerDomain(baseUrl, override) {
@@ -114,28 +146,48 @@ class ResellerApi {
     }
   }
 
+  /**
+   * Login against upstream and cache the JWT. Concurrent calls are
+   * de-duped via LOGIN_INFLIGHT — under load (e.g. 10 customers smashing
+   * Start at the same time after token expiry), we issue exactly ONE
+   * upstream login request instead of N, which keeps us under the panel's
+   * rate limits.
+   */
   async _login() {
-    const { res, parsed } = await this._withTimeout(signal =>
-      this._rawFetch('/api/login', {
-        method: 'POST',
-        headers: this._headers({ auth: false }),
-        body: { email: this.email, password: this.password },
-        signal,
-      })
-    );
-    if (!res.ok) {
-      const msg = (parsed && (parsed.message || parsed.error)) || `HTTP ${res.status}`;
-      throw new ResellerApiError(`Reseller login failed: ${msg}`, {
-        status: res.status,
-        body: parsed,
-      });
-    }
-    const token = parsed?.token || parsed?.accessToken || parsed?.jwt;
-    if (!token) {
-      throw new ResellerApiError('Reseller login returned no token', { status: 200, body: parsed });
-    }
-    TOKEN_CACHE.set(this._cacheKey, { token, expiresAt: Date.now() + TOKEN_TTL_MS });
-    return token;
+    const inflight = LOGIN_INFLIGHT.get(this._cacheKey);
+    if (inflight) return inflight;
+
+    const p = (async () => {
+      const { res, parsed } = await this._withTimeout(signal =>
+        this._rawFetch('/api/login', {
+          method: 'POST',
+          headers: this._headers({ auth: false }),
+          body: { email: this.email, password: this.password },
+          signal,
+        })
+      );
+      if (!res.ok) {
+        const msg = (parsed && (parsed.message || parsed.error)) || `HTTP ${res.status}`;
+        throw new ResellerApiError(`Reseller login failed: ${msg}`, {
+          status: res.status,
+          body: parsed,
+        });
+      }
+      const token = parsed?.token || parsed?.accessToken || parsed?.jwt;
+      if (!token) {
+        throw new ResellerApiError('Reseller login returned no token', { status: 200, body: parsed });
+      }
+      TOKEN_CACHE.set(this._cacheKey, { token, expiresAt: Date.now() + TOKEN_TTL_MS });
+      console.log(`[ResellerApi] 🔐 Logged in to ${this.baseUrl} as ${this.email} (token cached for 23h)`);
+      return token;
+    })().finally(() => {
+      // Always clear the inflight slot — successful or not — so the next
+      // request gets a fresh attempt rather than caching a rejected promise.
+      LOGIN_INFLIGHT.delete(this._cacheKey);
+    });
+
+    LOGIN_INFLIGHT.set(this._cacheKey, p);
+    return p;
   }
 
   async _ensureToken({ force = false } = {}) {
@@ -149,7 +201,11 @@ class ResellerApi {
   }
 
   /**
-   * Authenticated request with one automatic re-login on 401.
+   * Authenticated request with one automatic re-login when upstream
+   * indicates the JWT is expired/invalid. Detection is intentionally
+   * broad — see `isAuthFailure` — because Hostheaven/SomaniOne style
+   * Spring Security backends frequently return 403 (not 401) for expired
+   * tokens, and some 5xx-with-message responses too.
    */
   async _request(path, opts = {}) {
     const attempt = async (force) => {
@@ -167,10 +223,26 @@ class ResellerApi {
     };
 
     let { res, parsed } = await attempt(false);
-    if (res.status === 401) {
-      // Token rejected - force re-login once.
+    if (isAuthFailure(res, parsed)) {
+      console.warn(
+        `[ResellerApi] ⚠️ Auth failure (${res.status}) on ${opts.method || 'GET'} ${path} — ` +
+        `dropping cached JWT and forcing re-login (${this.email}@${this.baseUrl})`
+      );
       TOKEN_CACHE.delete(this._cacheKey);
-      ({ res, parsed } = await attempt(true));
+      try {
+        ({ res, parsed } = await attempt(true));
+        if (res.ok) {
+          console.log(`[ResellerApi] ✅ Self-healed: ${opts.method || 'GET'} ${path} succeeded after auto re-login`);
+        }
+      } catch (reloginErr) {
+        // _login itself failed (most likely bad creds). Surface a clear
+        // ResellerApiError so the upstream UI can show "credentials need
+        // updating in /admin/companies" rather than a generic 500.
+        throw new ResellerApiError(
+          `Reseller auto re-login failed: ${reloginErr.message}`,
+          { status: reloginErr.status || 502, body: reloginErr.body }
+        );
+      }
     }
 
     if (!res.ok) {

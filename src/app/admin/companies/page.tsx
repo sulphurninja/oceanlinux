@@ -30,10 +30,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import Link from 'next/link';
 import {
   Building2, Plus, Trash2, Copy, ExternalLink, Loader2, Eye, EyeOff,
   Server, ShieldCheck, ShieldAlert, CheckCircle2, XCircle,
-  ChevronDown, ChevronUp, Cloud,
+  ChevronDown, ChevronUp, Cloud, Zap, BookOpen,
 } from 'lucide-react';
 
 interface CompanyVirtualizor {
@@ -56,6 +57,14 @@ interface CompanyResellerApi {
   password: string;
 }
 
+interface CompanyNetbayApi {
+  enabled: boolean;
+  label: string;
+  baseUrl: string;
+  apiKey: string;
+  apiSecret: string;
+}
+
 interface Company {
   _id: string;
   name: string;
@@ -67,6 +76,7 @@ interface Company {
   /** Deprecated single-config field; loaded as a fallback. */
   virtualizor?: Partial<CompanyVirtualizor>;
   resellerApi?: Partial<CompanyResellerApi> | null;
+  netbayApi?: Partial<CompanyNetbayApi> | null;
 }
 
 const NEW_VIRT_ENTRY = (): CompanyVirtualizor => ({
@@ -101,6 +111,25 @@ const RESELLER_API_DIALOG_DEFAULTS: CompanyResellerApi = {
   password: 'Umesh@2113',
 };
 
+const EMPTY_NETBAY_API = (): CompanyNetbayApi => ({
+  enabled: true,
+  label: '',
+  baseUrl: '',
+  apiKey: '',
+  apiSecret: '',
+});
+
+// Defaults pre-filled when a company has no Netbay config saved yet — only
+// the documented base URL is filled; apiKey/apiSecret must come from the
+// company's own Netbay dashboard.
+const NETBAY_API_DIALOG_DEFAULTS: CompanyNetbayApi = {
+  enabled: true,
+  label: 'Netbay',
+  baseUrl: 'https://api.netbayhosts.in',
+  apiKey: '',
+  apiSecret: '',
+};
+
 interface VirtTestState {
   loading: boolean;
   result: { success: boolean; message: string } | null;
@@ -129,6 +158,14 @@ export default function CompaniesPage() {
   const [resellerTesting, setResellerTesting] = useState(false);
   const [resellerTestResult, setResellerTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [showResellerPassword, setShowResellerPassword] = useState(false);
+
+  // Netbay API dialog state
+  const [netbayCompany, setNetbayCompany] = useState<Company | null>(null);
+  const [netbayForm, setNetbayForm] = useState<CompanyNetbayApi>(EMPTY_NETBAY_API());
+  const [netbaySaving, setNetbaySaving] = useState(false);
+  const [netbayTesting, setNetbayTesting] = useState(false);
+  const [netbayTestResult, setNetbayTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [showNetbaySecret, setShowNetbaySecret] = useState(false);
 
   const fetchCompanies = async () => {
     try {
@@ -452,6 +489,121 @@ export default function CompaniesPage() {
     }
   };
 
+  // -------------------- Netbay API handlers --------------------
+  const openNetbayDialog = (c: Company) => {
+    const r = c.netbayApi || null;
+    const hasAny = !!(r && (r.baseUrl || r.apiKey || r.apiSecret));
+    if (!hasAny) {
+      setNetbayForm({ ...NETBAY_API_DIALOG_DEFAULTS });
+    } else {
+      setNetbayForm({
+        enabled: typeof r?.enabled === 'boolean' ? r.enabled : !!r,
+        label: r?.label || '',
+        baseUrl: r?.baseUrl || '',
+        apiKey: r?.apiKey || '',
+        apiSecret: r?.apiSecret || '',
+      });
+    }
+    setNetbayTestResult(null);
+    setShowNetbaySecret(false);
+    setNetbayCompany(c);
+  };
+
+  const closeNetbayDialog = () => {
+    if (netbaySaving || netbayTesting) return;
+    setNetbayCompany(null);
+    setNetbayForm(EMPTY_NETBAY_API());
+    setNetbayTestResult(null);
+    setShowNetbaySecret(false);
+  };
+
+  const updateNetbayField = <K extends keyof CompanyNetbayApi>(key: K, value: CompanyNetbayApi[K]) => {
+    setNetbayForm(prev => ({ ...prev, [key]: value }));
+    setNetbayTestResult(null);
+  };
+
+  const handleTestNetbayApi = async () => {
+    if (!netbayCompany) return;
+    setNetbayTesting(true);
+    setNetbayTestResult(null);
+    try {
+      const res = await fetch(`/api/admin/companies/${netbayCompany._id}/test-netbay-api`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ netbayApi: netbayForm }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setNetbayTestResult({ success: true, message: data.message || 'Connected' });
+      } else {
+        setNetbayTestResult({ success: false, message: data.error || 'Connection failed' });
+      }
+    } catch (err: any) {
+      setNetbayTestResult({ success: false, message: err?.message || 'Request failed' });
+    } finally {
+      setNetbayTesting(false);
+    }
+  };
+
+  const handleSaveNetbayApi = async () => {
+    if (!netbayCompany) return;
+    if (netbayForm.enabled && (!netbayForm.apiKey.trim() || !netbayForm.apiSecret.trim())) {
+      toast.error('API Key and API Secret are required when Netbay is enabled.');
+      return;
+    }
+    setNetbaySaving(true);
+    try {
+      const res = await fetch(`/api/admin/companies/${netbayCompany._id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ netbayApi: netbayForm }),
+      });
+      if (res.ok) {
+        toast.success('Netbay API configuration saved');
+        setNetbayCompany(null);
+        setNetbayForm(EMPTY_NETBAY_API());
+        setNetbayTestResult(null);
+        setShowNetbaySecret(false);
+        fetchCompanies();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error || 'Failed to save');
+      }
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to save');
+    } finally {
+      setNetbaySaving(false);
+    }
+  };
+
+  const handleClearNetbayApi = async () => {
+    if (!netbayCompany) return;
+    if (!confirm(`Clear Netbay API config for "${netbayCompany.name}"?`)) return;
+    setNetbaySaving(true);
+    try {
+      const res = await fetch(`/api/admin/companies/${netbayCompany._id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ netbayApi: null }),
+      });
+      if (res.ok) {
+        toast.success('Netbay API configuration cleared');
+        setNetbayCompany(null);
+        setNetbayForm(EMPTY_NETBAY_API());
+        setNetbayTestResult(null);
+        setShowNetbaySecret(false);
+        fetchCompanies();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error || 'Failed to clear');
+      }
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to clear');
+    } finally {
+      setNetbaySaving(false);
+    }
+  };
+
   const handleSaveVirtualizor = async () => {
     if (!virtCompany) return;
 
@@ -596,6 +748,17 @@ export default function CompaniesPage() {
                           </Badge>
                         );
                       }
+                      const n = c.netbayApi;
+                      if (n?.enabled && n?.apiKey && n?.apiSecret) {
+                        let host = n.baseUrl || 'api.netbayhosts.in';
+                        try { if (n.baseUrl) host = new URL(n.baseUrl).host; } catch { /* keep as-is */ }
+                        return (
+                          <Badge variant="outline" className="gap-1 text-amber-600 border-amber-200">
+                            <Zap className="h-3 w-3" />
+                            Netbay: {host}
+                          </Badge>
+                        );
+                      }
                       return (
                         <Badge variant="outline" className="gap-1 text-muted-foreground">
                           <ShieldAlert className="h-3 w-3" />
@@ -617,6 +780,18 @@ export default function CompaniesPage() {
                         <Cloud className="h-3.5 w-3.5" />
                         Reseller API
                       </Button>
+                      <Button variant="ghost" size="sm" className="h-8 gap-1.5" onClick={() => openNetbayDialog(c)}>
+                        <Zap className="h-3.5 w-3.5" />
+                        Netbay
+                      </Button>
+                      {c.netbayApi?.enabled && c.netbayApi?.apiKey && c.netbayApi?.apiSecret && (
+                        <Button variant="ghost" size="sm" className="h-8 gap-1.5" asChild>
+                          <Link href={`/admin/companies/${c._id}/netbay-catalog`}>
+                            <BookOpen className="h-3.5 w-3.5" />
+                            Catalog
+                          </Link>
+                        </Button>
+                      )}
                       <Button variant="ghost" size="sm" className="h-8 gap-1.5" onClick={() => copyLoginUrl(c.slug)}>
                         <Copy className="h-3.5 w-3.5" />
                         URL
@@ -1038,6 +1213,162 @@ export default function CompaniesPage() {
             </Button>
             <Button onClick={handleSaveResellerApi} disabled={resellerSaving}>
               {resellerSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!netbayCompany} onOpenChange={(open) => !open && closeNetbayDialog()}>
+        <DialogContent className="max-w-xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Zap className="h-5 w-5" />
+              Netbay API Automation
+            </DialogTitle>
+          </DialogHeader>
+          {netbayCompany && (
+            <div className="space-y-4">
+              <div className="rounded-md border p-3 text-sm">
+                <p className="font-medium">{netbayCompany.name}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Wire orders linked to this company up to the Netbay reseller
+                  API (<code className="text-foreground">https://api.netbayhosts.in</code>).
+                  Auto-provisioning, power actions and rebuilds will be driven
+                  through that API. Generate the API key + secret pair from the
+                  Netbay dashboard. Once enabled, link the company to your
+                  IPStock entries and configure their per-RAM Plan IDs from
+                  /admin/manageIpStock.
+                </p>
+                {netbayCompany.netbayApi?.enabled && netbayCompany.netbayApi?.apiKey && netbayCompany.netbayApi?.apiSecret && (
+                  <div className="mt-2">
+                    <Link
+                      href={`/admin/companies/${netbayCompany._id}/netbay-catalog`}
+                      className="inline-flex items-center gap-1.5 text-xs text-blue-600 hover:underline"
+                      target="_blank"
+                    >
+                      <BookOpen className="h-3 w-3" />
+                      Browse plans &amp; OS templates
+                    </Link>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center justify-between rounded-md border p-2.5">
+                <div className="text-sm">
+                  <p className="font-medium">Enabled</p>
+                  <p className="text-xs text-muted-foreground">
+                    Disable to stop using Netbay API without losing the saved config.
+                  </p>
+                </div>
+                <Switch
+                  checked={netbayForm.enabled}
+                  onCheckedChange={(c) => updateNetbayField('enabled', c)}
+                />
+              </div>
+
+              <div>
+                <Label className="text-xs">Label (optional)</Label>
+                <Input
+                  placeholder="e.g. Netbay Production"
+                  value={netbayForm.label}
+                  onChange={(e) => updateNetbayField('label', e.target.value)}
+                  className="mt-1"
+                />
+              </div>
+
+              <div>
+                <Label className="text-xs">Base URL</Label>
+                <Input
+                  placeholder="https://api.netbayhosts.in"
+                  value={netbayForm.baseUrl}
+                  onChange={(e) => updateNetbayField('baseUrl', e.target.value)}
+                  className="mt-1"
+                />
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Defaults to <code>https://api.netbayhosts.in</code> when blank.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 gap-3">
+                <div>
+                  <Label className="text-xs">X-API-Key</Label>
+                  <Input
+                    placeholder="ak_…"
+                    value={netbayForm.apiKey}
+                    onChange={(e) => updateNetbayField('apiKey', e.target.value)}
+                    className="mt-1 font-mono text-xs"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs">X-API-Secret</Label>
+                  <div className="relative mt-1">
+                    <Input
+                      type={showNetbaySecret ? 'text' : 'password'}
+                      placeholder="sk_…"
+                      value={netbayForm.apiSecret}
+                      onChange={(e) => updateNetbayField('apiSecret', e.target.value)}
+                      className="font-mono text-xs"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowNetbaySecret((s) => !s)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      tabIndex={-1}
+                    >
+                      {showNetbaySecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {netbayTestResult && (
+                <div
+                  className={`flex items-start gap-2 rounded-md border p-2.5 text-xs ${
+                    netbayTestResult.success
+                      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                      : 'border-red-200 bg-red-50 text-red-700'
+                  }`}
+                >
+                  {netbayTestResult.success
+                    ? <CheckCircle2 className="h-4 w-4 mt-0.5" />
+                    : <XCircle className="h-4 w-4 mt-0.5" />}
+                  <span>{netbayTestResult.message}</span>
+                </div>
+              )}
+
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleTestNetbayApi}
+                  disabled={netbayTesting || netbaySaving}
+                  className="gap-2"
+                >
+                  {netbayTesting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+                  Test Credentials
+                </Button>
+                {netbayCompany.netbayApi && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleClearNetbayApi}
+                    disabled={netbaySaving || netbayTesting}
+                    className="gap-2 text-red-600 hover:text-red-700"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Clear Config
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
+          <DialogFooter className="gap-2">
+            <Button variant="ghost" onClick={closeNetbayDialog} disabled={netbaySaving || netbayTesting}>
+              Cancel
+            </Button>
+            <Button onClick={handleSaveNetbayApi} disabled={netbaySaving}>
+              {netbaySaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
               Save
             </Button>
           </DialogFooter>
