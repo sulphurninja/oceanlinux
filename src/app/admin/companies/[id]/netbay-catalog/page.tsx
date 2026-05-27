@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState, use } from 'react';
+import { useEffect, useState } from 'react';
+import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -39,10 +40,9 @@ interface CatalogResponse {
   error?: string;
 }
 
-export default function NetbayCatalogPage(
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const { id } = use(params);
+export default function NetbayCatalogPage() {
+  const params = useParams();
+  const id = String(params?.id || '');
   const [data, setData] = useState<CatalogResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

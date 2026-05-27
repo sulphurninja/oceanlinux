@@ -242,7 +242,8 @@ const ManageIpStock = () => {
         if (!currentStock?.company) return false;
         const c = companies.find(c => c._id === currentStock.company);
         const n: any = c?.netbayApi;
-        return !!(n && n.enabled && n.apiKey && n.apiSecret);
+        // apiKey/apiSecret can live in env vars, so just check `enabled`.
+        return !!(n && n.enabled);
     })();
 
     const handleHostycareProductIdChange = (size: string, value: string) => {

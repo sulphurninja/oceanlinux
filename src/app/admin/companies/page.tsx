@@ -547,8 +547,15 @@ export default function CompaniesPage() {
 
   const handleSaveNetbayApi = async () => {
     if (!netbayCompany) return;
-    if (netbayForm.enabled && (!netbayForm.apiKey.trim() || !netbayForm.apiSecret.trim())) {
-      toast.error('API Key and API Secret are required when Netbay is enabled.');
+    // apiKey/apiSecret may legitimately be blank if the deployment relies on
+    // the NETBAY_API_KEY / NETBAY_API_SECRET env vars as a global fallback —
+    // the server-side resolver fills them in at runtime. We just nudge the
+    // admin so they don't accidentally save an unusable empty config.
+    if (
+      netbayForm.enabled &&
+      (!netbayForm.apiKey.trim() || !netbayForm.apiSecret.trim()) &&
+      !confirm('API Key / Secret are blank. The server will fall back to NETBAY_API_KEY / NETBAY_API_SECRET env vars. Continue?')
+    ) {
       return;
     }
     setNetbaySaving(true);
@@ -749,7 +756,10 @@ export default function CompaniesPage() {
                         );
                       }
                       const n = c.netbayApi;
-                      if (n?.enabled && n?.apiKey && n?.apiSecret) {
+                      // Show the badge whenever Netbay is enabled — credentials
+                      // may live in NETBAY_API_KEY / NETBAY_API_SECRET env vars
+                      // rather than on the company doc, so we don't gate on them.
+                      if (n?.enabled) {
                         let host = n.baseUrl || 'api.netbayhosts.in';
                         try { if (n.baseUrl) host = new URL(n.baseUrl).host; } catch { /* keep as-is */ }
                         return (
@@ -784,7 +794,7 @@ export default function CompaniesPage() {
                         <Zap className="h-3.5 w-3.5" />
                         Netbay
                       </Button>
-                      {c.netbayApi?.enabled && c.netbayApi?.apiKey && c.netbayApi?.apiSecret && (
+                      {c.netbayApi?.enabled && (
                         <Button variant="ghost" size="sm" className="h-8 gap-1.5" asChild>
                           <Link href={`/admin/companies/${c._id}/netbay-catalog`}>
                             <BookOpen className="h-3.5 w-3.5" />
@@ -1240,7 +1250,13 @@ export default function CompaniesPage() {
                   IPStock entries and configure their per-RAM Plan IDs from
                   /admin/manageIpStock.
                 </p>
-                {netbayCompany.netbayApi?.enabled && netbayCompany.netbayApi?.apiKey && netbayCompany.netbayApi?.apiSecret && (
+                <p className="text-xs text-muted-foreground mt-2">
+                  <span className="font-medium text-foreground">Env fallback:</span>{' '}
+                  leave the API Key / Secret fields blank to use the global{' '}
+                  <code>NETBAY_API_KEY</code> / <code>NETBAY_API_SECRET</code>{' '}
+                  env vars. Per-company values always override env.
+                </p>
+                {netbayCompany.netbayApi?.enabled && (
                   <div className="mt-2">
                     <Link
                       href={`/admin/companies/${netbayCompany._id}/netbay-catalog`}

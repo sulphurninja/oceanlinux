@@ -5,7 +5,7 @@ import connectDB from '@/lib/db';
 import Company from '@/models/companyModel';
 import User from '@/models/userModel';
 const NetbayApi = require('@/services/netbayApi');
-const { NETBAY_API_DEFAULTS } = require('@/lib/companyNetbayApi');
+const { NETBAY_API_DEFAULTS, getEnvFallback } = require('@/lib/companyNetbayApi');
 
 async function verifyAdmin() {
   const cookieStore = await cookies();
@@ -44,18 +44,25 @@ export async function POST(request, { params }) {
   if (!company) return NextResponse.json({ error: 'Company not found' }, { status: 404 });
 
   const baseline = company.netbayApi || null;
+  const env = getEnvFallback();
 
+  // Same resolution order as `getCompanyNetbayApiConfig`: dialog input ▶
+  // saved company config ▶ env vars ▶ hardcoded base URL default. This lets
+  // admins drop NETBAY_API_KEY / NETBAY_API_SECRET into .env once and just
+  // hit "Test Credentials" with the apiKey/apiSecret fields blank.
   const cfg = {
-    baseUrl: ((incoming?.baseUrl ?? baseline?.baseUrl ?? '').trim().replace(/\/+$/, '')) || NETBAY_API_DEFAULTS.baseUrl,
-    apiKey: ((incoming?.apiKey ?? baseline?.apiKey ?? '').trim()),
-    apiSecret: (incoming?.apiSecret ?? baseline?.apiSecret ?? ''),
+    baseUrl: ((incoming?.baseUrl ?? baseline?.baseUrl ?? '').trim().replace(/\/+$/, ''))
+      || env.baseUrl
+      || NETBAY_API_DEFAULTS.baseUrl,
+    apiKey: ((incoming?.apiKey ?? baseline?.apiKey ?? '').trim()) || env.apiKey,
+    apiSecret: (incoming?.apiSecret ?? baseline?.apiSecret ?? '') || env.apiSecret,
     label: (incoming?.label ?? baseline?.label ?? '').trim(),
   };
 
   if (!cfg.baseUrl || !cfg.apiKey || !cfg.apiSecret) {
     return NextResponse.json({
       success: false,
-      error: 'Base URL, API key and API secret are all required.',
+      error: 'Base URL, API key and API secret are all required. Set them in the dialog or via NETBAY_API_KEY / NETBAY_API_SECRET env vars.',
     }, { status: 400 });
   }
 
