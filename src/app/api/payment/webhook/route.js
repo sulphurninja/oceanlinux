@@ -14,6 +14,7 @@ const AutoProvisioningService = require('@/services/autoProvisioningService');
 const SlotIPPackage = require('@/models/slotIpPackageModel');
 const HostycareAPI = require('@/services/hostycareApi');
 const SmartVPSAPI = require('@/services/smartvpsApi');
+const AdvpsAPI = require('@/services/advpsApi');
 const RenewalLogger = require('@/services/renewalLogger');
 
 export async function POST(request) {
@@ -311,6 +312,12 @@ export async function POST(request) {
 async function getProviderFromOrder(order) {
   console.log('[WEBHOOK-RENEWAL-PROVIDER] Determining provider for order:', order._id);
 
+  // ADVPS first — must beat any pattern fallbacks below.
+  if (order.provider === 'advps' || order.advpsServiceId) {
+    console.log('[WEBHOOK-RENEWAL-PROVIDER] ✅ Detected ADVPS via provider/serviceId');
+    return 'advps';
+  }
+
   // Primary logic: Check if order has hostycare service ID
   if (order.hostycareServiceId) {
     console.log('[WEBHOOK-RENEWAL-PROVIDER] ✅ Detected Hostycare via serviceId');
@@ -456,6 +463,41 @@ async function handleRenewalWebhook(renewalTxnId, payment, webhookStartTime) {
       } else {
         console.warn('[WEBHOOK-RENEWAL] SmartVPS missing service identifier');
         providerRenewalResult = { error: 'Missing service identifier' };
+      }
+    } else if (provider === 'advps') {
+      const advpsOrderId = order.advpsOrderId;
+      const advpsServiceId = order.advpsServiceId;
+      console.log(`[WEBHOOK-RENEWAL] Processing ADVPS renewal:`, { advpsOrderId, advpsServiceId });
+
+      if (advpsOrderId && advpsServiceId) {
+        try {
+          const apiStart = Date.now();
+          const advpsApi = new AdvpsAPI();
+          providerRenewalResult = await advpsApi.renewServices({
+            orderId: advpsOrderId,
+            serviceIds: [advpsServiceId],
+            serviceValidities: [{ serviceId: advpsServiceId, validity: 30 }],
+          });
+          const apiDuration = Date.now() - apiStart;
+          console.log(`[WEBHOOK-RENEWAL] ✅ ADVPS renewal API success`);
+          providerRenewalSuccess = true;
+          logger.setProviderApiResult('advps', true, providerRenewalResult, null, apiDuration);
+        } catch (advpsError) {
+          console.error(`[WEBHOOK-RENEWAL] ADVPS renewal API failed:`, advpsError.message);
+          logger.setProviderApiResult('advps', false, null, advpsError);
+          providerRenewalResult = {
+            error: advpsError.message,
+            status: advpsError.status,
+            body: advpsError.advpsBody,
+          };
+        }
+      } else {
+        console.warn('[WEBHOOK-RENEWAL] ADVPS missing identifiers');
+        providerRenewalResult = {
+          error: 'Missing ADVPS identifiers',
+          advpsOrderId,
+          advpsServiceId,
+        };
       }
     } else {
       console.log(`[WEBHOOK-RENEWAL] ${provider} renewal - no API call needed`);

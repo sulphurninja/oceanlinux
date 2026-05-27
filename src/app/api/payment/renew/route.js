@@ -29,10 +29,20 @@ async function getProviderFromOrder(order) {
     explicitProvider: order.provider,
     hostycareServiceId: order.hostycareServiceId,
     smartvpsServiceId: order.smartvpsServiceId,
+    advpsServiceId: order.advpsServiceId,
     ipStockId: order.ipStockId,
     ipAddress: order.ipAddress,
     productName: order.productName
   });
+
+  // ADVPS takes precedence when explicitly tagged or has an advps service id —
+  // its renew window is much tighter than other providers, and we MUST route
+  // renewals through the advps reseller API or the customer's vm won't get
+  // its expiry extended upstream.
+  if (order.provider === 'advps' || order.advpsServiceId) {
+    console.log('[RENEWAL-INIT-PROVIDER] ✅ Detected ADVPS via provider/serviceId');
+    return 'advps';
+  }
 
   // Primary logic: Check if order has hostycare service ID
   if (order.hostycareServiceId) {
@@ -161,6 +171,35 @@ export async function POST(request) {
         }, { status: 400 });
       }
       console.log('[RENEWAL-INIT] SmartVPS renewal for service:', serviceIdentifier);
+    }
+
+    // 7a. ADVPS guard — tighter window + required identifiers.
+    // ADVPS docs: services are eligible for renewal only when expiring within
+    // 5 days or up to 1 day after expiry. We block initiation outside this
+    // window so the customer doesn't get charged for a renewal advps will reject.
+    if (provider === 'advps') {
+      if (!order.advpsServiceId || !order.advpsOrderId) {
+        console.log('[RENEWAL-INIT] ADVPS order missing identifiers', {
+          advpsServiceId: order.advpsServiceId,
+          advpsOrderId: order.advpsOrderId,
+        });
+        return NextResponse.json({
+          message: 'This server is not yet provisioned upstream. Please wait a few minutes and try again.',
+        }, { status: 400 });
+      }
+      if (diffDays > 5 || diffDays < -1) {
+        console.log(`[RENEWAL-INIT] ADVPS renewal window violated: diffDays=${diffDays}`);
+        return NextResponse.json({
+          message: diffDays > 5
+            ? `Renewal opens within 5 days of expiry. Please come back in ${diffDays - 5} day(s).`
+            : 'This service has been expired for too long and can no longer be renewed. Please contact support.',
+        }, { status: 400 });
+      }
+      console.log('[RENEWAL-INIT] ADVPS renewal eligible:', {
+        advpsServiceId: order.advpsServiceId,
+        advpsOrderId: order.advpsOrderId,
+        diffDays,
+      });
     }
 
     // 8. Generate a unique renewal transaction ID

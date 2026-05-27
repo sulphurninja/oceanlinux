@@ -9,6 +9,7 @@ import { calculateRenewalExpiryDate } from '@/lib/expiryHelper';
 import { assignPanelCredentials } from '@/lib/panelCredentials';
 const HostycareAPI = require('@/services/hostycareApi');
 const SmartVPSAPI = require('@/services/smartvpsApi');
+const AdvpsAPI = require('@/services/advpsApi');
 const RenewalLogger = require('@/services/renewalLogger');
 
 // Initialize Cashfree
@@ -32,10 +33,17 @@ async function getProviderFromOrder(order) {
     explicitProvider: order.provider,
     hostycareServiceId: order.hostycareServiceId,
     smartvpsServiceId: order.smartvpsServiceId,
+    advpsServiceId: order.advpsServiceId,
     ipStockId: order.ipStockId,
     ipAddress: order.ipAddress,
     productName: order.productName
   });
+
+  // ADVPS takes precedence so the renewal API call hits the right reseller.
+  if (order.provider === 'advps' || order.advpsServiceId) {
+    console.log('[RENEWAL-PROVIDER] ✅ Detected ADVPS via provider/serviceId');
+    return 'advps';
+  }
 
   // Primary logic: Check if order has hostycare service ID
   if (order.hostycareServiceId) {
@@ -485,6 +493,49 @@ export async function POST(request) {
       }
 
       console.log('[RENEWAL-CONFIRM] === SMARTVPS RENEWAL PROCESS END ===');
+    } else if (provider === 'advps') {
+      console.log('[RENEWAL-CONFIRM] === ADVPS RENEWAL PROCESS START ===');
+      const advpsOrderId = order.advpsOrderId;
+      const advpsServiceId = order.advpsServiceId;
+      console.log('[RENEWAL-CONFIRM] ADVPS identifiers:', { advpsOrderId, advpsServiceId });
+
+      if (advpsOrderId && advpsServiceId) {
+        try {
+          const apiStart = Date.now();
+          const advpsApi = new AdvpsAPI();
+          // 30 day validity matches our calculated renewal expiry (~28-31 days)
+          // and is also ADVPS's typical default. Sending it explicitly avoids
+          // ambiguity if the website default ever changes.
+          providerRenewalResult = await advpsApi.renewServices({
+            orderId: advpsOrderId,
+            serviceIds: [advpsServiceId],
+            serviceValidities: [{ serviceId: advpsServiceId, validity: 30 }],
+          });
+          const apiDuration = Date.now() - apiStart;
+          console.log('[RENEWAL-CONFIRM] ✅ ADVPS renewal API success:', JSON.stringify(providerRenewalResult, null, 2));
+          providerRenewalSuccess = true;
+          logger.setProviderApiResult('advps', true, providerRenewalResult, null, apiDuration);
+        } catch (advpsErr) {
+          console.error('[RENEWAL-CONFIRM] ❌ ADVPS renewal API failed:', advpsErr.message);
+          console.error('[RENEWAL-CONFIRM] ADVPS error body:', advpsErr.advpsBody);
+          logger.setProviderApiResult('advps', false, null, advpsErr);
+          providerRenewalResult = {
+            error: advpsErr.message,
+            status: advpsErr.status,
+            body: advpsErr.advpsBody,
+          };
+          // Don't block the local expiry update — payment was already taken.
+          // Operations team can retry the upstream renew via admin tools.
+        }
+      } else {
+        console.warn('[RENEWAL-CONFIRM] ADVPS missing identifiers — cannot call upstream renew');
+        providerRenewalResult = {
+          error: 'Missing ADVPS identifiers',
+          advpsOrderId,
+          advpsServiceId,
+        };
+      }
+      console.log('[RENEWAL-CONFIRM] === ADVPS RENEWAL PROCESS END ===');
     } else {
       console.log(`[RENEWAL-CONFIRM] ${provider} renewal - no additional API call needed`);
       providerRenewalSuccess = true; // OceanLinux renewals are handled internally
@@ -576,6 +627,10 @@ export async function POST(request) {
       response.message = providerRenewalSuccess
         ? 'Service renewed successfully! Hostycare service has been extended.'
         : 'Service renewed successfully! Note: Hostycare API renewal encountered an issue, but your service period has been extended.';
+    } else if (provider === 'advps') {
+      response.message = providerRenewalSuccess
+        ? 'Service renewed successfully! Your VM has been extended upstream.'
+        : 'Payment received and your service period has been extended. Note: the upstream renewal API hit a snag — our team will retry it shortly.';
     }
 
     console.log('[RENEWAL-CONFIRM] === RENEWAL PROCESS COMPLETE ===');

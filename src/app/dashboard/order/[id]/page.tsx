@@ -1140,6 +1140,15 @@ const OrderDetails = () => {
     if (!order || !order.expiryDate) return false;
     if (order.provider === 'slotip') return false;
     const daysLeft = getDaysUntilExpiry(order.expiryDate);
+
+    // ADVPS upstream enforces a tighter window: services are renewable only
+    // when expiring within 5 days OR up to 1 day after expiry. Show the renew
+    // button only inside that window so users don't pay for a renewal advps
+    // would refuse.
+    if (order.provider === 'advps' || order.advpsServiceId) {
+      return daysLeft <= 5 && daysLeft >= -1;
+    }
+
     return daysLeft <= 2 && daysLeft >= -7;
   };
 

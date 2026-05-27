@@ -190,6 +190,33 @@ class AdvpsAPI {
   getOrderDetails(orderId) {
     return httpFetch(`/api/v1/purchase/${encodeURIComponent(orderId)}`, { method: 'GET' });
   }
+
+  /**
+   * Renew one or more services on an existing ADVPS order.
+   * https://api.advps.org docs → POST /api/v1/services/renew
+   *
+   * Eligibility (enforced by ADVPS): each service must expire within 5 days
+   * or be expired by no more than 1 day. ADVPS auto-detects LXC vs VPS from
+   * the orderId.
+   *
+   * @param {Object} args
+   * @param {string} args.orderId           Human-readable ADVPS orderId (e.g. "VPS040426-0008").
+   * @param {string[]} args.serviceIds      Human-readable service ids (e.g. ["KYOFMI"]).
+   * @param {Array<{serviceId:string, validity:number}>} [args.serviceValidities]
+   *        Optional per-service validity overrides in days. Services not listed
+   *        use the website default validity.
+   */
+  renewServices({ orderId, serviceIds, serviceValidities }) {
+    const body = { orderId, serviceIds };
+    if (Array.isArray(serviceValidities) && serviceValidities.length > 0) {
+      body.serviceValidities = serviceValidities;
+    }
+    return httpFetch('/api/v1/services/renew', {
+      method: 'POST',
+      jsonBody: body,
+      timeoutMs: 90_000,
+    });
+  }
 }
 
 module.exports = AdvpsAPI;
