@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import connectDB from '@/lib/db';
 import IPStock from '@/models/ipStockModel';
+import { getIpStockRemaining, setIpStockCount, usesStockCount } from '@/lib/ipStockAvailability';
 
 async function getCompanySession() {
   const cookieStore = await cookies();
@@ -14,13 +15,25 @@ async function getCompanySession() {
   }
 }
 
+function serializeStock(stock) {
+  return {
+    _id: String(stock._id),
+    name: stock.name,
+    available: !!stock.available,
+    stockCount: getIpStockRemaining(stock),
+    usesStockCount: usesStockCount(stock),
+    serverType: stock.serverType,
+    tags: stock.tags || [],
+  };
+}
+
 export async function GET() {
   const company = await getCompanySession();
   if (!company) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   await connectDB();
-  const stocks = await IPStock.find({ company: company.id }).lean();
-  return NextResponse.json(stocks);
+  const stocks = await IPStock.find({ company: company.id }).sort({ name: 1 }).lean();
+  return NextResponse.json(stocks.map(serializeStock));
 }
 
 export async function PUT(request) {
@@ -28,13 +41,15 @@ export async function PUT(request) {
   if (!company) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   await connectDB();
-  const { stockId, available } = await request.json();
+  const { stockId, stockCount } = await request.json();
+
+  if (!stockId || stockCount === undefined || stockCount === null) {
+    return NextResponse.json({ error: 'stockId and stockCount are required' }, { status: 400 });
+  }
 
   const stock = await IPStock.findOne({ _id: stockId, company: company.id });
   if (!stock) return NextResponse.json({ error: 'Stock not found or not yours' }, { status: 404 });
 
-  stock.available = available;
-  await stock.save();
-
-  return NextResponse.json({ success: true, available: stock.available });
+  const updated = await setIpStockCount(stockId, stockCount);
+  return NextResponse.json({ success: true, stock: serializeStock(updated) });
 }

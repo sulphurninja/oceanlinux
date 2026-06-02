@@ -3,6 +3,7 @@ import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 import IPStock from '@/models/ipStockModel';
 import { getDataFromToken } from '@/helper/getDataFromToken';
+import { assertIpStockPurchasable } from '@/lib/ipStockAvailability';
 
 export async function POST(request) {
   await connectDB();
@@ -27,22 +28,11 @@ export async function POST(request) {
     }
 
     // 4. SERVER-SIDE PRICE VALIDATION - Fetch actual price from database
-    const ipStock = await IPStock.findById(ipStockId);
-    if (!ipStock) {
-      console.error(`[CreateOrder] IPStock not found: ${ipStockId}`);
-      return NextResponse.json(
-        { message: 'Product not found' },
-        { status: 404 }
-      );
+    const stockCheck = await assertIpStockPurchasable(ipStockId, 1);
+    if (!stockCheck.ok) {
+      return NextResponse.json({ message: stockCheck.message }, { status: 400 });
     }
-
-    // Check if product is available
-    if (!ipStock.available) {
-      return NextResponse.json(
-        { message: 'This product is currently unavailable' },
-        { status: 400 }
-      );
-    }
+    const ipStock = stockCheck.stock;
 
     // Get the actual price from the database for this memory option
     const memoryOption = ipStock.memoryOptions.get(memory);

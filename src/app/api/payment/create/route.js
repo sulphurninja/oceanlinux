@@ -5,6 +5,7 @@ import Order from '@/models/orderModel';
 import User from '@/models/userModel';
 import IPStock from '@/models/ipStockModel';
 const SlotIPPackage = require('@/models/slotIpPackageModel');
+import { assertIpStockPurchasable } from '@/lib/ipStockAvailability';
 import { Cashfree } from 'cashfree-pg';
 import Razorpay from 'razorpay';
 import crypto from 'crypto';
@@ -108,14 +109,14 @@ export async function POST(request) {
         );
       }
 
-      const ipStock = await IPStock.findById(ipStockId);
-      if (!ipStock) {
-        console.error(`[Payment] IPStock not found: ${ipStockId}`);
-        return NextResponse.json({ message: 'Product not found' }, { status: 404 });
+      const stockCheck = await assertIpStockPurchasable(ipStockId, 1);
+      if (!stockCheck.ok) {
+        return NextResponse.json({ message: stockCheck.message }, { status: 400 });
       }
+      const ipStock = stockCheck.stock;
 
-      if (!ipStock.available) {
-        return NextResponse.json({ message: 'This product is currently unavailable' }, { status: 400 });
+      if (!ipStock) {
+        return NextResponse.json({ message: 'Product not found' }, { status: 404 });
       }
 
       const memoryOption = ipStock.memoryOptions.get(memory);

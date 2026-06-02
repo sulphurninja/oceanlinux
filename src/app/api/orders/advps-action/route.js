@@ -11,6 +11,11 @@ const {
   unwrapAdvpsEnvelope,
 } = require('@/lib/advpsStatusNormalize');
 const { runAdvpsPostRebuildGeneratePasswordFlow } = require('@/lib/advpsPostRebuildFlow');
+const {
+  ADVPS_REBUILD_LIMIT,
+  getAdvpsRebuildUsage,
+  getAdvpsRebuildLimitMessage,
+} = require('@/lib/advpsRebuildLimit');
 
 export async function GET(request) {
   try {
@@ -244,18 +249,15 @@ export async function POST(request) {
         const os = payload?.templateId || payload?.os;
         if (!os) return NextResponse.json({ message: 'OS template is required for rebuild' }, { status: 400 });
 
-        // Rate-limit: max 10 rebuilds per calendar month
-        const REBUILD_LIMIT = 10;
-        const currentMonth = new Date().toISOString().slice(0, 7); // "YYYY-MM"
-        const storedMonth = order.advpsRebuildCountMonth || '';
-        const currentCount = storedMonth === currentMonth ? (order.advpsRebuildCount || 0) : 0;
+        const { count: currentCount, currentMonth } = getAdvpsRebuildUsage(order);
 
-        if (currentCount >= REBUILD_LIMIT) {
+        if (currentCount >= ADVPS_REBUILD_LIMIT) {
           return NextResponse.json({
-            message: `Rebuild limit reached. You can only rebuild/format your server ${REBUILD_LIMIT} times per month. Your limit resets on the 1st of next month.`,
+            message: `Rebuild limit reached. ${getAdvpsRebuildLimitMessage()}`,
             code: 'REBUILD_LIMIT_REACHED',
             rebuildsUsed: currentCount,
             rebuildsRemaining: 0,
+            rebuildLimit: ADVPS_REBUILD_LIMIT,
             resetsOn: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1).toISOString(),
           }, { status: 429 });
         }

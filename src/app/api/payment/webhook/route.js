@@ -7,6 +7,7 @@ import User from '@/models/userModel';
 import crypto from 'crypto';
 import { calculateExpiryDate, calculateRenewalExpiryDate } from '@/lib/expiryHelper';
 import { assignPanelCredentials } from '@/lib/panelCredentials';
+import { decrementIpStockForOrder } from '@/lib/ipStockAvailability';
 import { detectCompanyManagedRenewal } from '@/lib/companyRenewal';
 import {
   findDispatchTarget,
@@ -19,6 +20,7 @@ const HostycareAPI = require('@/services/hostycareApi');
 const SmartVPSAPI = require('@/services/smartvpsApi');
 const AdvpsAPI = require('@/services/advpsApi');
 const RenewalLogger = require('@/services/renewalLogger');
+const { getAdvpsRebuildResetFields, isAdvpsOrder } = require('@/lib/advpsRebuildLimit');
 
 export async function POST(request) {
   const webhookStartTime = Date.now();
@@ -172,6 +174,7 @@ export async function POST(request) {
 
       await assignPanelCredentials(order);
       await order.save();
+      await decrementIpStockForOrder(order);
       const orderUpdateTime = Date.now() - orderUpdateStart;
       console.log(`[WEBHOOK] ✅ ORDER UPDATED to 'confirmed' in ${orderUpdateTime}ms`);
       console.log(`[WEBHOOK] 📅 Order expiry set to: ${expiryDate.toISOString()}`);
@@ -604,6 +607,7 @@ async function handleRenewalWebhook(renewalTxnId, payment, webhookStartTime) {
         payment_amount: payment.payment.payment_amount,
         webhookProcessedAt: new Date()
       },
+      ...(isAdvpsOrder(order) ? getAdvpsRebuildResetFields() : {}),
       $push: { renewalPayments: renewalPayment },
       $unset: { pendingRenewal: 1 } // Clear pending renewal
     }, { new: true });

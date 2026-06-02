@@ -8,7 +8,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
@@ -27,6 +26,8 @@ interface Stock {
   _id: string;
   name: string;
   available: boolean;
+  stockCount: number;
+  usesStockCount?: boolean;
   serverType: string;
   tags: string[];
 }
@@ -120,7 +121,8 @@ export default function CompanyDashboard() {
   const [renewalRequests, setRenewalRequests] = useState<RenewalRequestDoc[]>([]);
   const [pendingRenewalCount, setPendingRenewalCount] = useState(0);
   const [tab, setTab] = useState<'stocks' | 'orders' | 'requests' | 'renewals'>('stocks');
-  const [togglingStock, setTogglingStock] = useState<string | null>(null);
+  const [savingStockId, setSavingStockId] = useState<string | null>(null);
+  const [stockCountDrafts, setStockCountDrafts] = useState<Record<string, string>>({});
 
   // Order filters
   const [searchTerm, setSearchTerm] = useState('');
@@ -195,7 +197,11 @@ export default function CompanyDashboard() {
       fetch('/api/company/stocks'),
       fetch('/api/company/orders'),
     ]);
-    if (stockRes.ok) setStocks(await stockRes.json());
+    if (stockRes.ok) {
+      const rows: Stock[] = await stockRes.json();
+      setStocks(rows);
+      setStockCountDrafts(Object.fromEntries(rows.map(s => [s._id, String(s.stockCount ?? 0)])));
+    }
     if (orderRes.ok) setOrders(await orderRes.json());
     loadActionRequests('pending');
     loadRenewalRequests('pending');
@@ -227,20 +233,29 @@ export default function CompanyDashboard() {
     if (authed) loadRenewalRequests(renewalStatusFilter);
   }, [renewalStatusFilter]);
 
-  const toggleStock = async (stockId: string, available: boolean) => {
-    setTogglingStock(stockId);
+  const updateStockCount = async (stockId: string) => {
+    const raw = stockCountDrafts[stockId];
+    const stockCount = Math.max(0, Math.floor(Number(raw) || 0));
+    setSavingStockId(stockId);
     try {
       const res = await fetch('/api/company/stocks', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ stockId, available }),
+        body: JSON.stringify({ stockId, stockCount }),
       });
+      const data = await res.json();
       if (res.ok) {
-        setStocks(prev => prev.map(s => s._id === stockId ? { ...s, available } : s));
-        toast.success(available ? 'Stock enabled' : 'Stock disabled');
-      } else toast.error('Failed to update');
-    } catch { toast.error('Failed to update'); }
-    finally { setTogglingStock(null); }
+        setStocks(prev => prev.map(s => s._id === stockId ? { ...s, ...data.stock } : s));
+        setStockCountDrafts(prev => ({ ...prev, [stockId]: String(data.stock.stockCount) }));
+        toast.success(stockCount > 0 ? `Stock set to ${stockCount}` : 'Marked out of stock');
+      } else {
+        toast.error(data.error || 'Failed to update stock');
+      }
+    } catch {
+      toast.error('Failed to update stock');
+    } finally {
+      setSavingStockId(null);
+    }
   };
 
   const openEditOrder = (order: Order) => {
@@ -464,8 +479,8 @@ export default function CompanyDashboard() {
         {/* Stats */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
           <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Total Stocks</p><p className="text-2xl font-bold">{stocks.length}</p></CardContent></Card>
-          <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Available</p><p className="text-2xl font-bold text-green-600">{stocks.filter(s => s.available).length}</p></CardContent></Card>
-          <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Unavailable</p><p className="text-2xl font-bold text-red-500">{stocks.filter(s => !s.available).length}</p></CardContent></Card>
+          <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Total Units</p><p className="text-2xl font-bold">{stocks.reduce((sum, s) => sum + (s.stockCount ?? 0), 0)}</p></CardContent></Card>
+          <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Out of Stock</p><p className="text-2xl font-bold text-red-500">{stocks.filter(s => (s.stockCount ?? 0) === 0).length}</p></CardContent></Card>
           <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Active Orders</p><p className="text-2xl font-bold">{orders.length}</p></CardContent></Card>
         </div>
 
@@ -501,32 +516,53 @@ export default function CompanyDashboard() {
           <div className="space-y-2">
             {stocks.length === 0 ? (
               <Card><CardContent className="py-12 text-center"><Server className="h-10 w-10 mx-auto text-muted-foreground mb-3" /><p className="text-sm text-muted-foreground">No IP stocks assigned to your company yet.</p></CardContent></Card>
-            ) : stocks.map((stock) => (
+            ) : stocks.map((stock) => {
+              const count = stock.stockCount ?? 0;
+              const inStock = count > 0;
+              return (
               <Card key={stock._id}>
                 <CardContent className="p-4">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div className="flex items-center gap-3">
-                      <div className={cn('h-9 w-9 rounded-lg flex items-center justify-center', stock.available ? 'bg-green-500/10' : 'bg-red-500/10')}>
-                        <Server className={cn('h-4 w-4', stock.available ? 'text-green-600' : 'text-red-500')} />
+                      <div className={cn('h-9 w-9 rounded-lg flex items-center justify-center', inStock ? 'bg-green-500/10' : 'bg-red-500/10')}>
+                        <Server className={cn('h-4 w-4', inStock ? 'text-green-600' : 'text-red-500')} />
                       </div>
                       <div>
                         <h3 className="font-medium text-sm">{stock.name}</h3>
-                        <div className="flex items-center gap-2 mt-0.5">
+                        <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                           <Badge variant="outline" className="text-[10px] h-4">{stock.serverType}</Badge>
                           {stock.tags?.map(t => <Badge key={t} variant="secondary" className="text-[10px] h-4">{t}</Badge>)}
+                          {inStock ? (
+                            <Badge className="text-[10px] h-4 bg-emerald-500/10 text-emerald-700">{count} in stock</Badge>
+                          ) : (
+                            <Badge className="text-[10px] h-4 bg-red-500/10 text-red-600">Out of stock</Badge>
+                          )}
                         </div>
                       </div>
                     </div>
-                    <div className="flex items-center gap-3">
-                      <span className={cn('text-xs font-medium', stock.available ? 'text-green-600' : 'text-red-500')}>
-                        {stock.available ? 'Available' : 'Unavailable'}
-                      </span>
-                      <Switch checked={stock.available} onCheckedChange={(c) => toggleStock(stock._id, c)} disabled={togglingStock === stock._id} />
+                    <div className="flex items-center gap-2">
+                      <Label htmlFor={`stock-${stock._id}`} className="text-xs text-muted-foreground whitespace-nowrap">Units</Label>
+                      <Input
+                        id={`stock-${stock._id}`}
+                        type="number"
+                        min={0}
+                        step={1}
+                        value={stockCountDrafts[stock._id] ?? String(count)}
+                        onChange={(e) => setStockCountDrafts(prev => ({ ...prev, [stock._id]: e.target.value }))}
+                        className="w-24 h-9"
+                      />
+                      <Button
+                        size="sm"
+                        onClick={() => updateStockCount(stock._id)}
+                        disabled={savingStockId === stock._id}
+                      >
+                        {savingStockId === stock._id ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save'}
+                      </Button>
                     </div>
                   </div>
                 </CardContent>
               </Card>
-            ))}
+            );})}
           </div>
         )}
 

@@ -5,6 +5,10 @@ import IPStock from '@/models/ipStockModel';
 import Company from '@/models/companyModel';
 import { getDataFromToken } from '@/helper/getDataFromToken';
 import { execSync } from 'child_process';
+
+/** Hostycare reinstall probes multiple Virtualizor panels + may POST reinstall. */
+export const maxDuration = 120;
+
 const HostycareAPI = require('@/services/hostycareApi');
 const SmartVpsAPI = require('@/services/smartvpsApi');
 // at top of /api/orders/service-action/route.js

@@ -79,10 +79,26 @@ interface IPStock {
   name: string;
   description?: string;
   available: boolean;
+  stockCount?: number;
+  company?: string | null;
   serverType: string;
   tags: string[];
   memoryOptions: Record<string, MemoryOptionDetails>;
   promoCodes?: PromoCode[];
+}
+
+function isCompanyStock(stock: IPStock) {
+  return !!stock.company;
+}
+
+function getStockUnitsRemaining(stock: IPStock) {
+  if (isCompanyStock(stock)) return Math.max(0, stock.stockCount ?? 0);
+  return stock.available ? Number.POSITIVE_INFINITY : 0;
+}
+
+function isStockPurchasable(stock: IPStock) {
+  if (isCompanyStock(stock)) return getStockUnitsRemaining(stock) > 0;
+  return stock.available !== false;
 }
 
 interface SlotIPPackage {
@@ -194,8 +210,7 @@ function IPStockContent() {
           });
         }
 
-        const availableStocks = ipRows.filter((stock: IPStock) => stock.available);
-        setIpStocks(availableStocks);
+        setIpStocks(ipRows);
 
         const availableSlots = (slotData || []).filter(
           (pkg: SlotIPPackage) => pkg.available && pkg.availableCount > 0
@@ -329,7 +344,11 @@ function IPStockContent() {
   };
 
   // Handle buy now with ipStockId (regular) or slotIpPackageId (slot)
-  const handleBuyNow = (productName: string, memory: string, price: number, ipStockId: string, slotIpPackageId?: string) => {
+  const handleBuyNow = (productName: string, memory: string, price: number, ipStockId: string, slotIpPackageId?: string, stockAvailable = true) => {
+    if (!stockAvailable) {
+      toast.error('This plan is currently out of stock');
+      return;
+    }
     setSelectedProduct({ name: productName, memory, price, ipStockId, slotIpPackageId });
     setShowDialog(true);
     setPromoCode("");
@@ -1230,9 +1249,12 @@ function CompactServerPlanRow({
   onBuyNow
 }: {
   stock: IPStock;
-  onBuyNow: (name: string, memory: string, price: number, id: string) => void;
+  onBuyNow: (name: string, memory: string, price: number, id: string, slotIpPackageId?: string, stockAvailable?: boolean) => void;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
+  const inStock = isStockPurchasable(stock);
+  const unitsLeft = getStockUnitsRemaining(stock);
+  const showUnits = isCompanyStock(stock) && Number.isFinite(unitsLeft);
 
   const memoryOptions = Object.entries(stock.memoryOptions || {})
     .filter(([_, details]) => details.price !== null)
@@ -1242,18 +1264,24 @@ function CompactServerPlanRow({
   const startingPrice = Math.min(...memoryOptions.map(([_, details]) => details.price || 0));
 
   return (
-    <div className="border border-border rounded-lg bg-card hover:bg-muted/30 transition-colors overflow-hidden">
+    <div className={cn(
+      "border border-border rounded-lg bg-card transition-colors overflow-hidden",
+      inStock ? "hover:bg-muted/30" : "opacity-75"
+    )}>
       {/* Main Row - Always Visible */}
       <div 
         className="flex items-center gap-3 p-3 cursor-pointer"
         onClick={() => setIsExpanded(!isExpanded)}
       >
         {/* Icon */}
-        <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center border border-border flex-shrink-0">
+        <div className={cn(
+          "w-8 h-8 rounded-lg flex items-center justify-center border border-border flex-shrink-0",
+          inStock ? "bg-primary/10" : "bg-muted/50"
+        )}>
           {stock.serverType === 'VPS' ? (
-            <Cloud className="h-4 w-4 text-primary" />
+            <Cloud className={cn("h-4 w-4", inStock ? "text-primary" : "text-muted-foreground")} />
           ) : (
-            <Server className="h-4 w-4 text-primary" />
+            <Server className={cn("h-4 w-4", inStock ? "text-primary" : "text-muted-foreground")} />
           )}
         </div>
 
@@ -1264,7 +1292,17 @@ function CompactServerPlanRow({
             <Badge variant="outline" className="text-[10px] border-border px-1.5 py-0 h-5">
               {stock.serverType}
             </Badge>
-            {hasPromoCodes && (
+            {!inStock && (
+              <Badge variant="outline" className="text-[10px] gap-1 bg-red-500/10 text-red-600 border-red-500/20 px-1.5 py-0 h-5">
+                Out of stock
+              </Badge>
+            )}
+            {inStock && showUnits && (
+              <Badge variant="outline" className="text-[10px] gap-1 bg-emerald-500/10 text-emerald-700 border-emerald-500/20 px-1.5 py-0 h-5">
+                {unitsLeft} in stock
+              </Badge>
+            )}
+            {inStock && hasPromoCodes && (
               <Badge variant="outline" className="text-[10px] gap-1 bg-primary/10 text-green-500 border-primary/20 px-1.5 py-0 h-5">
                 <Tag className="h-2.5 w-2.5" />
                 Promo
@@ -1272,7 +1310,11 @@ function CompactServerPlanRow({
             )}
           </div>
           <p className="text-xs text-muted-foreground mt-0.5">
-            {memoryOptions.length} configuration{memoryOptions.length !== 1 ? 's' : ''} available
+            {!inStock
+              ? 'Currently unavailable — check back later'
+              : showUnits
+              ? `${unitsLeft} unit${unitsLeft === 1 ? '' : 's'} left · ${memoryOptions.length} configuration${memoryOptions.length !== 1 ? 's' : ''}`
+              : `${memoryOptions.length} configuration${memoryOptions.length !== 1 ? 's' : ''} available`}
           </p>
         </div>
 
@@ -1317,17 +1359,19 @@ function CompactServerPlanRow({
                           variant="outline"
                           className="h-8 px-2.5"
                           iconOnly
+                          disabled={!inStock}
                         />
                         <Button
                           size="sm"
                           onClick={(e) => {
                             e.stopPropagation();
-                            onBuyNow(stock.name, memory, details.price!, stock._id);
+                            onBuyNow(stock.name, memory, details.price!, stock._id, undefined, inStock);
                           }}
+                          disabled={!inStock}
                           className="h-8 px-3 gap-1.5"
                         >
                           <Zap className="h-3 w-3" />
-                          Buy Now
+                          {inStock ? 'Buy Now' : 'Out of stock'}
                         </Button>
                       </div>
                     </div>

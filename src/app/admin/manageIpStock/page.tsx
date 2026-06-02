@@ -40,6 +40,7 @@ interface IPStock {
     description?: string;
     memoryOptions: Record<string, MemoryOptionDetails>;
     available: boolean;
+    stockCount?: number;
     serverType: string;
     tags: string[];
     promoCodes: PromoCode[];
@@ -371,7 +372,11 @@ const ManageIpStock = () => {
                                         {stock.serverType}
                                     </Badge>
                                 </TableCell>
-                                <TableCell>{stock.available ? 'Yes' : 'No'}</TableCell>
+                                <TableCell>
+                                    {stock.company
+                                        ? `${stock.stockCount ?? 0} units`
+                                        : (stock.available ? 'Yes' : 'No')}
+                                </TableCell>
                                 {Object.entries(stock.memoryOptions).map(([memory, details]) => (
                                     <TableCell key={memory}>
                                         <div>
@@ -437,15 +442,37 @@ const ManageIpStock = () => {
                                         />
                                     </div>
                                     <div>
-                                        <Label>Available:</Label>
-                                        <select
-                                            className='flex h-10 w-full items-center justify-between rounded-md border dark:border-none border dark:border-none-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1'
-                                            value={currentStock.available.toString()}
-                                            onChange={(e) => handleAvailableChange(e.target.value)}
-                                        >
-                                            <option value="true">Yes</option>
-                                            <option value="false">No</option>
-                                        </select>
+                                        {currentStock.company ? (
+                                            <>
+                                                <Label>Stock Count (orderable units):</Label>
+                                                <Input
+                                                    type="number"
+                                                    min={0}
+                                                    step={1}
+                                                    value={currentStock.stockCount ?? 0}
+                                                    onChange={(e) => {
+                                                        const stockCount = Math.max(0, Math.floor(Number(e.target.value) || 0));
+                                                        setCurrentStock({
+                                                            ...currentStock,
+                                                            stockCount,
+                                                            available: stockCount > 0,
+                                                        });
+                                                    }}
+                                                />
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Label>Available:</Label>
+                                                <select
+                                                    className='flex h-10 w-full items-center justify-between rounded-md border dark:border-none border dark:border-none-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1'
+                                                    value={currentStock.available.toString()}
+                                                    onChange={(e) => handleAvailableChange(e.target.value)}
+                                                >
+                                                    <option value="true">Yes</option>
+                                                    <option value="false">No</option>
+                                                </select>
+                                            </>
+                                        )}
                                     </div>
                                 </div>
 
@@ -476,7 +503,15 @@ const ManageIpStock = () => {
                                     <Label>Company (optional):</Label>
                                     <Select
                                         value={currentStock.company || 'none'}
-                                        onValueChange={(value) => setCurrentStock({ ...currentStock, company: value === 'none' ? null : value })}
+                                        onValueChange={(value) => {
+                                            const company = value === 'none' ? null : value;
+                                            setCurrentStock({
+                                                ...currentStock,
+                                                company,
+                                                stockCount: company ? (currentStock.stockCount ?? 0) : currentStock.stockCount,
+                                                available: company ? (currentStock.stockCount ?? 0) > 0 : currentStock.available,
+                                            });
+                                        }}
                                     >
                                         <SelectTrigger>
                                             <SelectValue placeholder="No company" />

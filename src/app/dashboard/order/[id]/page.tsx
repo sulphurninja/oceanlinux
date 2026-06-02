@@ -47,6 +47,7 @@ import { Progress } from '@/components/ui/progress';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { ADVPS_REBUILD_LIMIT, getAdvpsRebuildUsage } from '@/lib/advpsRebuildLimit';
 import { useSessionAlert } from '@/components/session-alert';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -2553,12 +2554,10 @@ const OrderDetails = () => {
                         </Alert>
 
                         {order && provider === 'advps' && (() => {
-                          const currentMonth = new Date().toISOString().slice(0, 7);
-                          const rebuildCount = (order.advpsRebuildCountMonth === currentMonth ? order.advpsRebuildCount : 0) ?? 0;
-                          const rebuildsRemaining = Math.max(0, 10 - rebuildCount);
+                          const { remaining: rebuildsRemaining } = getAdvpsRebuildUsage(order);
                           return (
                             <p className="text-xs text-muted-foreground text-center">
-                              <span className="font-medium text-foreground">{rebuildsRemaining}</span> rebuild{rebuildsRemaining !== 1 ? 's' : ''} remaining this month &mdash; limit is 10/month, resets on the 1st.
+                              <span className="font-medium text-foreground">{rebuildsRemaining}</span> rebuild{rebuildsRemaining !== 1 ? 's' : ''} remaining &mdash; limit is {ADVPS_REBUILD_LIMIT}/billing period, resets when you renew or on the 1st.
                             </p>
                           );
                         })()}
@@ -2744,10 +2743,8 @@ const OrderDetails = () => {
                           const isAdvps = provider === 'advps';
                           const isCompanyResellerApi = hasCompanyResellerApiAutomation(ipStock) &&
                             isOrderCompanyAutomated(order, ipStock);
-                          const currentMonth = new Date().toISOString().slice(0, 7);
-                          const rebuildCount = (order.advpsRebuildCountMonth === currentMonth ? order.advpsRebuildCount : 0) ?? 0;
-                          const rebuildsRemaining = Math.max(0, 10 - rebuildCount);
-                          const rebuildLimitReached = isAdvps && rebuildsRemaining === 0;
+                          const { count: rebuildCount, remaining: rebuildsRemaining, limitReached } = getAdvpsRebuildUsage(order);
+                          const rebuildLimitReached = isAdvps && limitReached;
 
                           return (
                             <>
@@ -2763,14 +2760,14 @@ const OrderDetails = () => {
                                     Rebuilds this month
                                   </span>
                                   <span className={cn("font-semibold tabular-nums", rebuildLimitReached && "text-destructive")}>
-                                    {rebuildCount}/10
+                                    {rebuildCount}/{ADVPS_REBUILD_LIMIT}
                                   </span>
                                 </div>
                               )}
 
                               {rebuildLimitReached && (
                                 <p className="text-xs text-destructive px-1">
-                                  Monthly rebuild limit reached. Resets on the 1st of next month.
+                                  Rebuild limit reached. Resets when you renew or on the 1st of next month.
                                 </p>
                               )}
 

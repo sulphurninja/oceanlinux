@@ -4,6 +4,7 @@ import Order from '@/models/orderModel';
 import NotificationService from '@/services/notificationService';
 import { calculateExpiryDate } from '@/lib/expiryHelper';
 import { assignPanelCredentials } from '@/lib/panelCredentials';
+import { decrementIpStockForOrder } from '@/lib/ipStockAvailability';
 import {
   findDispatchTarget,
   confirmRechargeFromWebhook,
@@ -235,6 +236,7 @@ export async function POST(request) {
       };
       await assignPanelCredentials(order);
       await order.save();
+      await decrementIpStockForOrder(order);
 
       console.log(`[UPI Webhook] Order ${order._id} confirmed with UPI txn ${upi_txn_id}`);
       console.log(`[UPI Webhook] Order expiry set to: ${expiryDate.toISOString()}`);

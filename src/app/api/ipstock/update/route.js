@@ -10,7 +10,7 @@ const {
 
 export async function PUT(req, res) {
   const reqBody = await req.json();
-  const { _id, name, available, serverType, tags, memoryOptions, promoCodes, defaultConfigurations, company } = reqBody;
+  const { _id, name, available, serverType, tags, memoryOptions, promoCodes, defaultConfigurations, company, stockCount } = reqBody;
 
   await connectDB();
 
@@ -25,18 +25,35 @@ export async function PUT(req, res) {
     const plainIncoming = defaultConfigurations !== undefined ? toPlainConfigurations(defaultConfigurations) : {};
     const mergedDefaults = mergeDefaultConfigurationsPlain(plainExisting, plainIncoming);
 
+    const resolvedCompany = company !== undefined
+      ? (company && company !== 'none' ? company : null)
+      : existing.company;
+
+    const updatePayload = {
+      name: mergedName,
+      serverType,
+      tags,
+      memoryOptions,
+      promoCodes,
+      defaultConfigurations: mergedDefaults,
+      company: resolvedCompany,
+    };
+
+    if (resolvedCompany) {
+      const count = stockCount !== undefined
+        ? Math.max(0, Math.floor(Number(stockCount) || 0))
+        : Math.max(0, Number(existing.stockCount) || 0);
+      updatePayload.stockCount = count;
+      updatePayload.available = count > 0;
+    } else if (available !== undefined) {
+      updatePayload.available = available;
+    } else {
+      updatePayload.available = existing.available;
+    }
+
     const updatedStock = await IPStock.findByIdAndUpdate(
       _id,
-      {
-        name: mergedName,
-        available,
-        serverType,
-        tags,
-        memoryOptions,
-        promoCodes,
-        defaultConfigurations: mergedDefaults,
-        company: company && company !== 'none' ? company : null,
-      },
+      updatePayload,
       { new: true }
     );
 

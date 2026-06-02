@@ -7,17 +7,21 @@ export async function POST(request) {
 
     try {
         const reqBody = await request.json();
-        const { name, available, serverType, tags, memoryOptions, promoCodes, defaultConfigurations, company } = reqBody;
+        const { name, available, serverType, tags, memoryOptions, promoCodes, defaultConfigurations, company, stockCount } = reqBody;
+
+        const linkedCompany = company && company !== 'none' ? company : null;
+        const count = linkedCompany ? Math.max(0, Math.floor(Number(stockCount) || 0)) : undefined;
 
         const newIPStock = new IPStock({
             name,
-            available,
+            available: linkedCompany ? (count > 0) : available,
+            stockCount: linkedCompany ? count : 0,
             serverType,
             tags: tags || [],
             memoryOptions,
             promoCodes: promoCodes || [],
             defaultConfigurations: defaultConfigurations || {},
-            company: company && company !== 'none' ? company : null,
+            company: linkedCompany,
         });
 
         await newIPStock.save();

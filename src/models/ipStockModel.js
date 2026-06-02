@@ -4,6 +4,8 @@ const IPStockSchema = new mongoose.Schema({
   name: { type: String, required: true },
   description: { type: String, default: "" },
   available: { type: Boolean, default: true },
+  /** Units remaining for company-managed stock. Only enforced when `company` is set. */
+  stockCount: { type: Number, default: 0, min: 0 },
   company: { type: mongoose.Schema.Types.ObjectId, ref: 'Company', default: null },
   serverType: {
     type: String,

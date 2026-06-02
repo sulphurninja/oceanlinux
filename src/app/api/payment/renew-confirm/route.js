@@ -14,6 +14,7 @@ const HostycareAPI = require('@/services/hostycareApi');
 const SmartVPSAPI = require('@/services/smartvpsApi');
 const AdvpsAPI = require('@/services/advpsApi');
 const RenewalLogger = require('@/services/renewalLogger');
+const { getAdvpsRebuildResetFields, isAdvpsOrder } = require('@/lib/advpsRebuildLimit');
 
 // Initialize Cashfree
 Cashfree.XClientId = process.env.CASHFREE_APP_ID;
@@ -658,6 +659,7 @@ export async function POST(request) {
       gatewayOrderId: renewalPayment.gatewayOrderId,
       paymentMethod: actualPaymentMethod,
       paymentDetails: renewalPayment.paymentDetails,
+      ...(isAdvpsOrder(order) ? getAdvpsRebuildResetFields() : {}),
       // Store renewal payment info for record keeping
       $push: {
         renewalPayments: renewalPayment

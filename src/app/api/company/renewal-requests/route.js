@@ -4,6 +4,7 @@ import connectDB from '@/lib/db';
 import RenewalRequest from '@/models/renewalRequestModel';
 import Order from '@/models/orderModel';
 import { calculateRenewalExpiryDate } from '@/lib/expiryHelper';
+const { getAdvpsRebuildResetFields, isAdvpsOrder } = require('@/lib/advpsRebuildLimit');
 
 async function getCompanySession() {
   const cookieStore = await cookies();
@@ -112,6 +113,7 @@ export async function POST(request) {
       gatewayOrderId: renewalReq.gatewayOrderId,
       paymentMethod: renewalReq.paymentMethod,
       paymentDetails: renewalReq.paymentDetails,
+      ...(isAdvpsOrder(order) ? getAdvpsRebuildResetFields() : {}),
       $push: { renewalPayments: renewalPayment },
       $unset: { pendingRenewal: 1 },
     });

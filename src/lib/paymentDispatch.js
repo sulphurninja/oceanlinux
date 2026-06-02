@@ -5,6 +5,7 @@ import Cart from '@/models/cartModel';
 import userWalletService from '@/services/userWalletService';
 import { calculateExpiryDate } from '@/lib/expiryHelper';
 import NotificationService from '@/services/notificationService';
+import { decrementIpStockForOrder } from '@/lib/ipStockAvailability';
 
 const AutoProvisioningService = require('@/services/autoProvisioningService');
 const SlotIPPackage = require('@/models/slotIpPackageModel');
@@ -152,6 +153,7 @@ export async function confirmCheckoutFromWebhook(session, { paymentMethod, trans
       confirmedAt: new Date(),
     };
     await order.save();
+    await decrementIpStockForOrder(order);
 
     if (order.slotIpPackageId && !order.slotIpId) {
       slotOrderIds.push(order._id);

@@ -6,6 +6,7 @@ import Razorpay from 'razorpay';
 import NotificationService from '@/services/notificationService';
 import { calculateExpiryDate } from '@/lib/expiryHelper';
 import { assignPanelCredentials } from '@/lib/panelCredentials';
+import { decrementIpStockForOrder } from '@/lib/ipStockAvailability';
 const AutoProvisioningService = require('@/services/autoProvisioningService');
 const WhatsAppService = require('@/services/whatsappService');
 
@@ -267,6 +268,7 @@ export async function POST(request) {
           };
           await assignPanelCredentials(order);
           await order.save();
+          await decrementIpStockForOrder(order);
           
           console.log(`Order expiry set to: ${expiryDate.toISOString()}`);
 

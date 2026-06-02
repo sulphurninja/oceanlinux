@@ -1,6 +1,13 @@
 import querystring from "querystring";
 import https from "https";
 
+/** Fast fail for listvs / find / template listing — dead panels must not block the request. */
+const TIMEOUT_LIST_MS = 20000;
+/** Reinstall can take longer on the Virtualizor side. */
+const TIMEOUT_REINSTALL_MS = 90000;
+/** Default for power actions and misc calls. */
+const TIMEOUT_DEFAULT_MS = 45000;
+
 /**
  * Multi-account Virtualizor enduser client.
  * - Searches across multiple panels to resolve a vpsid by IP/hostname.
@@ -114,13 +121,28 @@ export class VirtualizorAPI {
     return `${protocol}://${acct.host}:${acct.port}/index.php?api=json&${this._qsAuth(acct)}`;
   }
 
-  async _call(accountIndex, path, post, retries = 2) {
+  async _call(accountIndex, path, post, callOpts = {}) {
     const acct = this.accounts[accountIndex];
     if (!acct) throw new Error(`Virtualizor account[${accountIndex}] not found`);
 
+    // Back-compat: _call(idx, path, post, 2) where 4th arg was retry count.
+    const opts = typeof callOpts === 'number'
+      ? { retries: callOpts }
+      : (callOpts || {});
+
+    const isListOrTemplateGet = !post && (
+      path.includes('act=listvs') ||
+      path.includes('act=ostemplate')
+    );
+    const timeoutMs = opts.timeoutMs ?? (
+      post && path.includes('act=ostemplate') ? TIMEOUT_REINSTALL_MS
+        : isListOrTemplateGet ? TIMEOUT_LIST_MS
+        : TIMEOUT_DEFAULT_MS
+    );
+    const retries = opts.retries ?? (isListOrTemplateGet ? 0 : 1);
+
     const url = `${this._baseUrl(acct)}&${path}`;
-    console.log(`[VirtualizorAPI][Account ${accountIndex}] Making ${post ? 'POST' : 'GET'} request to: ${acct.host}:${acct.port}`);
-    console.log(`[VirtualizorAPI][Account ${accountIndex}] Full URL: ${url.substring(0, 100)}...`);
+    console.log(`[VirtualizorAPI][Account ${accountIndex}] Making ${post ? 'POST' : 'GET'} request to: ${acct.host}:${acct.port} (timeout=${timeoutMs}ms, retries=${retries})`);
     console.log(`[VirtualizorAPI][Account ${accountIndex}] Path: ${path}`);
     if (post) {
       console.log(`[VirtualizorAPI][Account ${accountIndex}] POST data:`, Object.keys(post));
@@ -131,45 +153,24 @@ export class VirtualizorAPI {
         console.log(`[VirtualizorAPI][Account ${accountIndex}] Attempt ${attempt}/${retries + 1} - Starting request...`);
         const startTime = Date.now();
 
-        // Use native Node.js HTTPS with SSL bypass instead of fetch
-        const data = await this._makeHttpsRequest(url, post, accountIndex);
+        const data = await this._makeHttpsRequest(url, post, accountIndex, timeoutMs);
         const duration = Date.now() - startTime;
 
         console.log(`[VirtualizorAPI][Account ${accountIndex}] Request completed in ${duration}ms`);
-        console.log(`[VirtualizorAPI][Account ${accountIndex}] Request successful`);
         return data;
 
       } catch (error) {
         console.error(`[VirtualizorAPI][Account ${accountIndex}] Attempt ${attempt} failed:`, error.message);
-        console.error(`[VirtualizorAPI][Account ${accountIndex}] Error type:`, error.name);
-        console.error(`[VirtualizorAPI][Account ${accountIndex}] Error stack:`, error.stack?.substring(0, 200));
 
-        // Log specific error types
-        if (error.name === 'TimeoutError' || error.message.includes('timeout')) {
-          console.error(`[VirtualizorAPI][Account ${accountIndex}] Request timed out after 2 minutes`);
+        if (error.message.includes('timeout')) {
+          console.error(`[VirtualizorAPI][Account ${accountIndex}] Request timed out after ${timeoutMs}ms`);
         }
 
-        if (error.message.includes('504 Gateway Time-out') || error.message.includes('Gateway Time-out')) {
-          console.error(`[VirtualizorAPI][Account ${accountIndex}] 504 Gateway timeout detected - server may be overloaded`);
-        }
-
-        if (error.message.includes('fetch failed') || error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
-          console.error(`[VirtualizorAPI][Account ${accountIndex}] Network error: Server unreachable or DNS resolution failed`);
-          console.error(`[VirtualizorAPI][Account ${accountIndex}] This could be due to:`);
-          console.error(`[VirtualizorAPI][Account ${accountIndex}]   - Server is down`);
-          console.error(`[VirtualizorAPI][Account ${accountIndex}]   - Firewall blocking connection`);
-          console.error(`[VirtualizorAPI][Account ${accountIndex}]   - SSL/TLS certificate issues`);
-          console.error(`[VirtualizorAPI][Account ${accountIndex}]   - DNS resolution failure`);
-        }
-
-        // If this is the last attempt, throw the error
         if (attempt === retries + 1) {
-          console.error(`[VirtualizorAPI][Account ${accountIndex}] All ${retries + 1} attempts failed, giving up`);
           throw new Error(`Virtualizor ${acct.host} failed after ${retries + 1} attempts: ${error.message}`);
         }
 
-        // Wait before retrying (exponential backoff)
-        const waitTime = Math.min(5000 * Math.pow(2, attempt - 1), 30000); // Max 30 seconds
+        const waitTime = Math.min(2000 * attempt, 5000);
         console.log(`[VirtualizorAPI][Account ${accountIndex}] Waiting ${waitTime}ms before retry...`);
         await new Promise(resolve => setTimeout(resolve, waitTime));
       }
@@ -180,7 +181,7 @@ export class VirtualizorAPI {
    * Make HTTPS request using native Node.js https module with SSL certificate bypass
    * This works around Next.js fetch() not supporting custom agents
    */
-  _makeHttpsRequest(url, postData, accountIndex) {
+  _makeHttpsRequest(url, postData, accountIndex, timeoutMs = TIMEOUT_DEFAULT_MS) {
     return new Promise((resolve, reject) => {
       const urlObj = new URL(url);
       const postBody = postData ? querystring.stringify(postData) : null;
@@ -198,7 +199,7 @@ export class VirtualizorAPI {
           })
         },
         rejectUnauthorized: false, // BYPASS SSL CERTIFICATE VALIDATION FOR SELF-SIGNED CERTS
-        timeout: 120000, // 2 minutes
+        timeout: timeoutMs,
       };
 
       console.log(`[VirtualizorAPI][Account ${accountIndex}] Using native HTTPS with SSL bypass (rejectUnauthorized: false)`);
@@ -244,7 +245,7 @@ export class VirtualizorAPI {
 
       req.on('timeout', () => {
         req.destroy();
-        reject(new Error('Request timeout after 2 minutes'));
+        reject(new Error(`Request timeout after ${timeoutMs}ms`));
       });
 
       if (postBody) {
@@ -302,10 +303,10 @@ export class VirtualizorAPI {
     return { vpsid, hostname, virt, ips: Array.from(new Set(ips)) };
   }
 
-  async _listMyVms(accountIndex) {
+  async _listMyVms(accountIndex, callOpts = {}) {
     console.log(`[VirtualizorAPI][_listMyVms] Listing VMs for account ${accountIndex}`);
     try {
-      const r = await this._call(accountIndex, `act=listvs&page=1&reslen=1000`);
+      const r = await this._call(accountIndex, `act=listvs&page=1&reslen=1000`, null, callOpts);
       const vsMap = r?.vps || r?.vs || (typeof r === "object" ? r : null);
 
       if (!vsMap || typeof vsMap !== "object") {
@@ -329,78 +330,63 @@ export class VirtualizorAPI {
 
   // -------------------- public API --------------------
 
+  _matchVpsInList(vms, ipIn, hostIn) {
+    if (!vms?.length) return null;
+
+    const matchIpHost = () => {
+      if (!ipIn || !hostIn) return null;
+      return vms.find(vm => vm.ips.includes(ipIn) && vm.hostname.toLowerCase() === hostIn) || null;
+    };
+    const matchIp = () => {
+      if (!ipIn) return null;
+      return vms.find(vm => vm.ips.includes(ipIn)) || null;
+    };
+    const matchHost = () => {
+      if (!hostIn) return null;
+      return vms.find(vm => vm.hostname.toLowerCase() === hostIn) || null;
+    };
+
+    return matchIpHost() || matchIp() || matchHost() || (vms.length === 1 ? vms[0] : null);
+  }
+
   /**
    * Try to find a vpsid across ALL configured accounts, using BOTH ip and hostname when provided.
-   * Match order per account:
-   *  1) ip + hostname (exact)
-   *  2) ip (exact)
-   *  3) hostname (exact)
-   *  4) if only one VM is visible on that account, pick it
-   *
-   * Returns { vpsid, virt } object. Also caches (vpsid -> accountIndex) for later calls.
-   * Returns null ONLY if nothing matched across all accounts.
+   * Panels are queried in parallel so dead/unreachable Hostycare Virtualizor nodes do not
+   * block the request for minutes before the working panel is tried.
    */
   async findVpsId(by = {}) {
-    // Strip port from IP address if present (e.g., "192.168.1.1:49965" -> "192.168.1.1")
     const ipRaw  = by.ip?.trim();
     const ipIn   = ipRaw ? ipRaw.split(':')[0] : null;
     const hostIn = by.hostname?.trim()?.toLowerCase();
 
     console.log(`[VirtualizorAPI][findVpsId] Searching for VPS with IP: ${ipIn}${ipRaw !== ipIn ? ` (stripped from ${ipRaw})` : ''}, hostname: ${hostIn}`);
 
-    for (let i = 0; i < this.accounts.length; i++) {
-      console.log(`[VirtualizorAPI][findVpsId] Checking account ${i}: ${this.accounts[i].host}`);
+    const listOpts = { timeoutMs: TIMEOUT_LIST_MS, retries: 0 };
+    const settled = await Promise.allSettled(
+      this.accounts.map((acct, i) =>
+        this._listMyVms(i, listOpts).then(vms => ({ i, acct, vms }))
+      )
+    );
 
-      try {
-        const vms = await this._listMyVms(i);
-        console.log(`[VirtualizorAPI][findVpsId] Account ${i} returned ${vms.length} VMs`);
+    for (const entry of settled) {
+      if (entry.status !== 'fulfilled') {
+        const reason = entry.reason?.message || String(entry.reason);
+        console.warn(`[VirtualizorAPI][findVpsId] Panel lookup failed: ${reason}`);
+        continue;
+      }
 
-        if (!vms.length) {
-          console.log(`[VirtualizorAPI][findVpsId] Account ${i} has no VMs, skipping`);
-          continue;
-        }
+      const { i, acct, vms } = entry.value;
+      console.log(`[VirtualizorAPI][findVpsId] Account ${i} (${acct.host}) returned ${vms.length} VMs`);
 
-        // Log all VMs found for debugging
-        vms.forEach((vm, idx) => {
-          console.log(`[VirtualizorAPI][findVpsId] Account ${i} VM ${idx}: vpsid=${vm.vpsid}, hostname=${vm.hostname}, virt=${vm.virt}, ips=[${vm.ips.join(', ')}]`);
-        });
-
-        const matchIpHost = () => {
-          if (!ipIn || !hostIn) return null;
-          return vms.find(vm => vm.ips.includes(ipIn) && vm.hostname.toLowerCase() === hostIn) || null;
-        };
-
-        const matchIp = () => {
-          if (!ipIn) return null;
-          return vms.find(vm => vm.ips.includes(ipIn)) || null;
-        };
-
-        const matchHost = () => {
-          if (!hostIn) return null;
-          return vms.find(vm => vm.hostname.toLowerCase() === hostIn) || null;
-        };
-
-        const matched =
-          matchIpHost() ||
-          matchIp()     ||
-          matchHost()   ||
-          (vms.length === 1 ? vms[0] : null);
-
-        if (matched?.vpsid) {
-          const vpsid = matched.vpsid;
-          console.log(`[VirtualizorAPI][findVpsId] Found VPS ${vpsid} (virt: ${matched.virt || 'unknown'}) on account ${i}`);
-          this._vpsAccountCache.set(vpsid, i);
-          return { vpsid, virt: matched.virt || null };
-        } else {
-          console.log(`[VirtualizorAPI][findVpsId] No matching VPS found on account ${i}`);
-        }
-      } catch (error) {
-        console.error(`[VirtualizorAPI][findVpsId] Error checking account ${i} (${this.accounts[i].host}):`, error.message);
-        // Continue checking other accounts
+      const matched = this._matchVpsInList(vms, ipIn, hostIn);
+      if (matched?.vpsid) {
+        console.log(`[VirtualizorAPI][findVpsId] Found VPS ${matched.vpsid} on account ${i}`);
+        this._vpsAccountCache.set(matched.vpsid, i);
+        return { vpsid: matched.vpsid, virt: matched.virt || null };
       }
     }
 
-    console.log(`[VirtualizorAPI][findVpsId] No VPS found across all ${this.accounts.length} accounts`);
+    console.log(`[VirtualizorAPI][findVpsId] No VPS found across ${this.accounts.length} accounts`);
     return null;
   }
 
@@ -515,25 +501,25 @@ export class VirtualizorAPI {
       return idx;
     }
 
-    console.log(`[VirtualizorAPI][_resolveAccountIndexForVps] VPS ${vpsid} not in cache, searching accounts...`);
+    console.log(`[VirtualizorAPI][_resolveAccountIndexForVps] VPS ${vpsid} not in cache, searching accounts in parallel...`);
 
-    // Not in cache (e.g., caller provided a vpsid directly) — search accounts.
-    for (let i = 0; i < this.accounts.length; i++) {
-      try {
-        console.log(`[VirtualizorAPI][_resolveAccountIndexForVps] Checking account ${i}: ${this.accounts[i].host}`);
-        const vms = await this._listMyVms(i);
-        if (vms.some(vm => vm.vpsid === String(vpsid))) {
-          console.log(`[VirtualizorAPI][_resolveAccountIndexForVps] Found VPS ${vpsid} on account ${i}`);
-          this._vpsAccountCache.set(vpsid, i);
-          return i;
-        }
-      } catch (error) {
-        console.error(`[VirtualizorAPI][_resolveAccountIndexForVps] Error checking account ${i}:`, error.message);
-        // Continue checking other accounts
+    const listOpts = { timeoutMs: TIMEOUT_LIST_MS, retries: 0 };
+    const settled = await Promise.allSettled(
+      this.accounts.map((_, i) =>
+        this._listMyVms(i, listOpts).then(vms => ({ i, vms }))
+      )
+    );
+
+    for (const entry of settled) {
+      if (entry.status !== 'fulfilled') continue;
+      const { i, vms } = entry.value;
+      if (vms.some(vm => vm.vpsid === String(vpsid))) {
+        console.log(`[VirtualizorAPI][_resolveAccountIndexForVps] Found VPS ${vpsid} on account ${i}`);
+        this._vpsAccountCache.set(vpsid, i);
+        return i;
       }
     }
 
-    console.error(`[VirtualizorAPI][_resolveAccountIndexForVps] Could not resolve account for vpsid ${vpsid}`);
     throw new Error(`Virtualizor: could not resolve account for vpsid ${vpsid}`);
   }
 }

@@ -34,7 +34,7 @@ import Link from 'next/link';
 import {
   Building2, Plus, Trash2, Copy, ExternalLink, Loader2, Eye, EyeOff,
   Server, ShieldCheck, ShieldAlert, CheckCircle2, XCircle,
-  ChevronDown, ChevronUp, Cloud, Zap, BookOpen,
+  ChevronDown, ChevronUp, Cloud, Zap, BookOpen, Package,
 } from 'lucide-react';
 
 interface CompanyVirtualizor {
@@ -135,6 +135,17 @@ interface VirtTestState {
   result: { success: boolean; message: string } | null;
 }
 
+interface CompanyStock {
+  _id: string;
+  name: string;
+  available: boolean;
+  stockCount: number;
+  usesStockCount?: boolean;
+  serverType: string;
+  tags: string[];
+  memorySizes: string[];
+}
+
 export default function CompaniesPage() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
@@ -166,6 +177,12 @@ export default function CompaniesPage() {
   const [netbayTesting, setNetbayTesting] = useState(false);
   const [netbayTestResult, setNetbayTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [showNetbaySecret, setShowNetbaySecret] = useState(false);
+
+  const [stocksCompany, setStocksCompany] = useState<Company | null>(null);
+  const [companyStocks, setCompanyStocks] = useState<CompanyStock[]>([]);
+  const [stocksLoading, setStocksLoading] = useState(false);
+  const [savingStockId, setSavingStockId] = useState<string | null>(null);
+  const [stockCountDrafts, setStockCountDrafts] = useState<Record<string, string>>({});
 
   const fetchCompanies = async () => {
     try {
@@ -249,6 +266,62 @@ export default function CompaniesPage() {
       else next.add(id);
       return next;
     });
+  };
+
+  const openStocksDialog = async (company: Company) => {
+    setStocksCompany(company);
+    setCompanyStocks([]);
+    setStocksLoading(true);
+    try {
+      const res = await fetch(`/api/admin/companies/${company._id}/stocks`);
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || 'Failed to load stocks');
+        setStocksCompany(null);
+        return;
+      }
+      setCompanyStocks(data.stocks || []);
+      setStockCountDrafts(Object.fromEntries((data.stocks || []).map((s: CompanyStock) => [s._id, String(s.stockCount ?? 0)])));
+    } catch {
+      toast.error('Failed to load stocks');
+      setStocksCompany(null);
+    } finally {
+      setStocksLoading(false);
+    }
+  };
+
+  const closeStocksDialog = () => {
+    setStocksCompany(null);
+    setCompanyStocks([]);
+    setSavingStockId(null);
+    setStockCountDrafts({});
+  };
+
+  const updateCompanyStockCount = async (stockId: string) => {
+    if (!stocksCompany) return;
+    const stockCount = Math.max(0, Math.floor(Number(stockCountDrafts[stockId]) || 0));
+    setSavingStockId(stockId);
+    try {
+      const res = await fetch(`/api/admin/companies/${stocksCompany._id}/stocks`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stockId, stockCount }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || 'Failed to update stock');
+        return;
+      }
+      setCompanyStocks(prev =>
+        prev.map(s => (s._id === stockId ? { ...s, ...data.stock } : s))
+      );
+      setStockCountDrafts(prev => ({ ...prev, [stockId]: String(data.stock.stockCount) }));
+      toast.success(stockCount > 0 ? `Stock set to ${stockCount}` : 'Marked out of stock');
+    } catch {
+      toast.error('Failed to update stock');
+    } finally {
+      setSavingStockId(null);
+    }
   };
 
   const copyLoginUrl = (slug: string) => {
@@ -781,7 +854,11 @@ export default function CompaniesPage() {
                     {new Date(c.createdAt).toLocaleDateString()}
                   </TableCell>
                   <TableCell className="text-right">
-                    <div className="flex items-center justify-end gap-1">
+                    <div className="flex items-center justify-end gap-1 flex-wrap">
+                      <Button variant="ghost" size="sm" className="h-8 gap-1.5" onClick={() => openStocksDialog(c)}>
+                        <Package className="h-3.5 w-3.5" />
+                        Stocks
+                      </Button>
                       <Button variant="ghost" size="sm" className="h-8 gap-1.5" onClick={() => openVirtualizorDialog(c)}>
                         <Server className="h-3.5 w-3.5" />
                         Virtualizor
@@ -1387,6 +1464,100 @@ export default function CompaniesPage() {
               {netbaySaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
               Save
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!stocksCompany} onOpenChange={(open) => !open && closeStocksDialog()}>
+        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Package className="h-5 w-5" />
+              IP Stock Availability
+            </DialogTitle>
+          </DialogHeader>
+          {stocksCompany && (
+            <div className="space-y-4">
+              <div className="rounded-md border p-3 text-sm">
+                <p className="font-medium">{stocksCompany.name}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Set how many units customers can order for each IP stock linked to this company.
+                  When the count reaches 0, the plan shows as out of stock and purchases are blocked.
+                  Link stocks in{' '}
+                  <Link href="/admin/manageIpStock" className="text-blue-600 hover:underline">
+                    /admin/manageIpStock
+                  </Link>.
+                </p>
+              </div>
+
+              {stocksLoading ? (
+                <div className="flex items-center justify-center py-10">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : companyStocks.length === 0 ? (
+                <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">
+                  <Server className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                  No IP stocks linked to this company yet.
+                  <br />
+                  <span className="text-xs">Assign a company when creating or editing stock in manageIpStock.</span>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {companyStocks.map((stock) => {
+                    const count = stock.stockCount ?? 0;
+                    const inStock = count > 0;
+                    return (
+                    <div
+                      key={stock._id}
+                      className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-lg border p-3"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="font-medium text-sm truncate">{stock.name}</p>
+                          <Badge variant="outline" className="text-[10px] h-4">{stock.serverType}</Badge>
+                          {inStock ? (
+                            <Badge className="text-[10px] h-4 bg-emerald-500/10 text-emerald-700 border-emerald-200">
+                              {count} in stock
+                            </Badge>
+                          ) : (
+                            <Badge className="text-[10px] h-4 bg-red-500/10 text-red-600 border-red-200">
+                              Out of stock
+                            </Badge>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {stock.memorySizes.length > 0
+                            ? `${stock.memorySizes.join(', ')}`
+                            : 'No memory options configured'}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <Label htmlFor={`admin-stock-${stock._id}`} className="text-xs whitespace-nowrap">Units</Label>
+                        <Input
+                          id={`admin-stock-${stock._id}`}
+                          type="number"
+                          min={0}
+                          step={1}
+                          value={stockCountDrafts[stock._id] ?? String(count)}
+                          onChange={(e) => setStockCountDrafts(prev => ({ ...prev, [stock._id]: e.target.value }))}
+                          className="w-24 h-9"
+                        />
+                        <Button
+                          size="sm"
+                          onClick={() => updateCompanyStockCount(stock._id)}
+                          disabled={savingStockId === stock._id}
+                        >
+                          {savingStockId === stock._id ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save'}
+                        </Button>
+                      </div>
+                    </div>
+                  );})}
+                </div>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={closeStocksDialog}>Close</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

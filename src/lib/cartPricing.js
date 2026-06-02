@@ -1,5 +1,6 @@
 import IPStock from '@/models/ipStockModel';
 import SlotIPPackage from '@/models/slotIpPackageModel';
+import { isIpStockPurchasable } from '@/lib/ipStockAvailability';
 
 /**
  * Server-side pricing + availability validator for cart line items.
@@ -39,8 +40,8 @@ export async function priceCartLine(item) {
     if (!stock) {
       return { valid: false, reason: 'Product no longer exists' };
     }
-    if (!stock.available) {
-      return { valid: false, reason: 'Product is currently unavailable', stock };
+    if (!isIpStockPurchasable(stock, quantity)) {
+      return { valid: false, reason: 'Product is out of stock', stock };
     }
     const memory = item.memory;
     if (!memory) {

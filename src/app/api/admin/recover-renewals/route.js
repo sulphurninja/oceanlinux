@@ -9,6 +9,7 @@ import User from '@/models/userModel';
 
 const HostycareAPI = require('@/services/hostycareApi');
 const SmartVPSAPI = require('@/services/smartvpsApi');
+const { getAdvpsRebuildResetFields, isAdvpsOrder } = require('@/lib/advpsRebuildLimit');
 
 // Initialize payment gateways
 Cashfree.XClientId = process.env.CASHFREE_APP_ID;
@@ -147,6 +148,7 @@ async function processRenewal(order, paymentInfo) {
     lastActionTime: new Date(),
     transactionId: paymentInfo.paymentId,
     paymentMethod: paymentInfo.method,
+    ...(isAdvpsOrder(order) ? getAdvpsRebuildResetFields() : {}),
     $push: { renewalPayments: renewalPayment },
     $unset: { pendingRenewal: 1 }
   });

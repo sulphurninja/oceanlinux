@@ -21,6 +21,7 @@ interface BaseProps {
   fullWidth?: boolean;
   label?: string;
   iconOnly?: boolean;
+  disabled?: boolean;
   onAdded?: () => void;
 }
 
@@ -48,6 +49,7 @@ export default function AddToCartButton(props: Props) {
     fullWidth,
     label = 'Add to Cart',
     iconOnly,
+    disabled,
     onAdded,
   } = props;
   const [busy, setBusy] = useState(false);
@@ -56,7 +58,7 @@ export default function AddToCartButton(props: Props) {
   const onClick = async (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (busy) return;
+    if (busy || disabled) return;
     setBusy(true);
     try {
       if (props.kind === 'ipstock') {
@@ -93,7 +95,7 @@ export default function AddToCartButton(props: Props) {
       size={size}
       variant={variant}
       onClick={onClick}
-      disabled={busy}
+      disabled={busy || disabled}
       className={cn(fullWidth && 'w-full', 'gap-1.5', className)}
       title="Add to Cart"
     >

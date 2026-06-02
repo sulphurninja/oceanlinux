@@ -9,6 +9,7 @@ const orderSchema = new mongoose.Schema({
     promoCode: { type: String },
     promoDiscount: { type: Number, default: 0 },
     ipStockId: { type: String },
+    inventoryDecremented: { type: Boolean, default: false },
     slotIpPackageId: { type: String },
     slotIpId: { type: String },
     transactionId: { type: String, default: '' },
@@ -54,7 +55,7 @@ const orderSchema = new mongoose.Schema({
     advpsProductId: { type: String },
     advpsOrderId: { type: String },
 
-    // ADVPS rebuild/format rate-limiting (max 10 per calendar month)
+    // ADVPS rebuild/format rate-limiting (max 15 per billing period; resets on renewal + calendar month)
     advpsRebuildCount: { type: Number, default: 0 },
     advpsRebuildCountMonth: { type: String, default: '' }, // "YYYY-MM" of the current window
 
