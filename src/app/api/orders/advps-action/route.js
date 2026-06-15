@@ -64,7 +64,12 @@ export async function GET(request) {
       };
     }
 
-    const sync = await syncAdvpsOrderCredentials(api, order, { statusPayload: statusRes, statusError, Order });
+    const sync = await syncAdvpsOrderCredentials(api, order, {
+      statusPayload: statusRes,
+      statusError,
+      Order,
+      tryGeneratePasswordFallback: true,
+    });
     if (sync.freshIp) details.ip = sync.freshIp;
 
     if (Object.keys(sync.dbUpdates).length > 1 || sync.credentialsUpdated) {
@@ -89,6 +94,9 @@ export async function GET(request) {
         purchaseError: sync.purchaseError,
         syncFailed: sync.syncFailed,
         apiBlocked: sync.apiBlocked,
+        passwordStale: sync.passwordStale,
+        passwordSource: sync.passwordSource,
+        passwordFoundInApi: sync.passwordFoundInApi,
         error: sync.error || null,
       },
     });
@@ -341,21 +349,30 @@ export async function POST(request) {
         break;
       }
 
-      case 'sync': {
+      case 'sync':
+      case 'pullpassword': {
         try {
           const statusRes = await api.status(serviceId);
           const d = unwrapAdvpsEnvelope(statusRes) || {};
-          const sync = await syncAdvpsOrderCredentials(api, order, { statusPayload: statusRes, Order });
+          const sync = await syncAdvpsOrderCredentials(api, order, {
+            statusPayload: statusRes,
+            Order,
+            tryGeneratePasswordFallback: action === 'pullpassword' || action === 'sync',
+          });
           await Order.findByIdAndUpdate(orderId, sync.dbUpdates);
           result = {
             synced: true,
             message: sync.credentialsUpdated
               ? `ADVPS synced — updated: ${sync.changes.join(', ')}`
-              : 'ADVPS status synced (no credential changes)',
+              : sync.passwordStale
+                ? 'ADVPS API returned the same password. Update it manually in Admin → Manage Orders after changing it on ADVPS panel.'
+                : 'ADVPS status synced (no credential changes)',
             runningStatus: pickAdvpsRunningStatusRaw(d) || null,
             credentialsUpdated: sync.credentialsUpdated,
             changes: sync.changes,
             advpsOrderIdMissing: sync.advpsOrderIdMissing,
+            passwordStale: sync.passwordStale,
+            passwordSource: sync.passwordSource,
           };
         } catch (err) {
           result = { synced: false, message: `Sync failed: ${err.message}` };

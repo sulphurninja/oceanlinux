@@ -3,6 +3,11 @@ const {
   unwrapAdvpsEnvelope,
   extractAdvpsStatusCredentials,
 } = require('@/lib/advpsStatusNormalize');
+const {
+  deepCollectPasswords,
+  pickPasswordCandidate,
+  tryFetchAdvpsPasswordViaGenerate,
+} = require('@/lib/advpsPasswordFetch');
 
 /**
  * Normalize GET /api/v1/purchase/{orderId} payloads.
@@ -190,7 +195,7 @@ function pickChangedCredential(stored, ...candidates) {
  * Pull live IP/username/password from ADVPS status + purchase order endpoints.
  * Status API is live for IP; password/username use whichever source differs from stored order.
  */
-async function syncAdvpsOrderCredentials(api, order, { statusPayload, statusError, Order } = {}) {
+async function syncAdvpsOrderCredentials(api, order, { statusPayload, statusError, Order, tryGeneratePasswordFallback = false } = {}) {
   const dbUpdates = { lastSyncTime: new Date() };
   const changes = [];
   let credentialsUpdated = false;
@@ -200,7 +205,15 @@ async function syncAdvpsOrderCredentials(api, order, { statusPayload, statusErro
   let purchaseApiOk = false;
 
   const statusCreds = statusPayload ? extractAdvpsStatusCredentials(statusPayload, order) : {};
+  let statusPasswordDeep = new Set();
+  let purchasePasswordDeep = new Set();
+  let passwordSource = null;
+  let passwordStale = false;
   let purchaseCreds = {};
+
+  if (statusPayload) {
+    statusPasswordDeep = deepCollectPasswords(statusPayload);
+  }
 
   let purchaseOrderId = resolveAdvpsPurchaseOrderId(order);
   if (!purchaseOrderId) {
@@ -224,6 +237,7 @@ async function syncAdvpsOrderCredentials(api, order, { statusPayload, statusErro
     try {
       const detailsRes = await api.getOrderDetails(purchaseOrderId);
       purchaseApiOk = true;
+      purchasePasswordDeep = deepCollectPasswords(detailsRes);
       const { services } = normalizePurchaseOrderDetails(detailsRes);
       const svc = pickAdvpsService(services, order.advpsServiceId);
 
@@ -249,13 +263,39 @@ async function syncAdvpsOrderCredentials(api, order, { statusPayload, statusErro
     }
   }
 
-  // Merge live credentials — status IP is authoritative; password from any source that changed
+  // Merge live credentials — status IP is authoritative
   const mergedIp = statusCreds.ip || purchaseCreds.ip || '';
-  const mergedPassword = pickChangedCredential(
+  let mergedPassword = pickPasswordCandidate(
     order.password,
     statusCreds.password,
-    purchaseCreds.password
+    purchaseCreds.password,
+    statusPasswordDeep,
+    purchasePasswordDeep
   );
+
+  if (!mergedPassword && tryGeneratePasswordFallback && order.advpsServiceId) {
+    const gen = await tryFetchAdvpsPasswordViaGenerate(api, order.advpsServiceId);
+    if (gen.password) {
+      mergedPassword = pickPasswordCandidate(order.password, gen.password);
+      if (mergedPassword) passwordSource = gen.source;
+    } else if (gen.source === 'generate-locked') {
+      passwordStale = true;
+      console.log(`[ADVPS-SYNC] Order ${order._id} generate-password locked — ADVPS will not expose password via read APIs`);
+    }
+  }
+
+  if (!mergedPassword) {
+    if (statusCreds.password || purchaseCreds.password) {
+      passwordStale = true;
+    }
+  } else {
+    if (!passwordSource) {
+      if (statusCreds.password === mergedPassword) passwordSource = 'status';
+      else if (purchaseCreds.password === mergedPassword) passwordSource = 'purchase';
+      else passwordSource = 'deep-scan';
+    }
+  }
+
   const mergedUsername = pickChangedCredential(
     order.username,
     statusCreds.username,
@@ -267,7 +307,7 @@ async function syncAdvpsOrderCredentials(api, order, { statusPayload, statusErro
   }
   if (mergedPassword && applyCredentialField(dbUpdates, changes, 'password', 'password', mergedPassword, order.password)) {
     credentialsUpdated = true;
-    console.log(`[ADVPS-SYNC] Order ${order._id} password updated (src: ${statusCreds.password === mergedPassword ? 'status' : 'purchase'})`);
+    console.log(`[ADVPS-SYNC] Order ${order._id} password updated (src: ${passwordSource || 'unknown'})`);
   }
   if (mergedUsername && applyCredentialField(dbUpdates, changes, 'username', 'username', mergedUsername, order.username)) {
     credentialsUpdated = true;
@@ -296,7 +336,9 @@ async function syncAdvpsOrderCredentials(api, order, { statusPayload, statusErro
   if (credentialsUpdated) {
     console.log(`[ADVPS-SYNC] Order ${order._id} changes: ${changes.join(', ')}`);
   } else if (statusApiOk || purchaseApiOk) {
-    console.log(`[ADVPS-SYNC] Order ${order._id} no credential changes (statusPwd=${statusCreds.password ? 'yes' : 'no'}, purchasePwd=${purchaseCreds.password ? 'yes' : 'no'})`);
+    console.log(
+      `[ADVPS-SYNC] Order ${order._id} no credential changes (statusPwd=${statusCreds.password ? 'yes' : 'no'}, purchasePwd=${purchaseCreds.password ? 'yes' : 'no'}, deepStatus=${statusPasswordDeep.size}, deepPurchase=${purchasePasswordDeep.size}, stale=${passwordStale})`
+    );
   }
 
   const primaryError = purchaseError || statusError || null;
@@ -317,6 +359,9 @@ async function syncAdvpsOrderCredentials(api, order, { statusPayload, statusErro
     error: syncFailed ? primaryError : purchaseError && !purchaseApiOk ? purchaseError : null,
     syncFailed,
     apiBlocked,
+    passwordStale,
+    passwordSource,
+    passwordFoundInApi: Boolean(statusCreds.password || purchaseCreds.password || statusPasswordDeep.size || purchasePasswordDeep.size),
   };
 }
 

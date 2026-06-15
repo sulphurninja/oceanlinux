@@ -1175,7 +1175,7 @@ const ManageOrders = () => {
                                             className="font-mono text-sm"
                                         />
                                         <p className="text-xs text-muted-foreground">
-                                            Required for credential auto-sync (IP/password) when admin changes them on ADVPS
+                                            Required for renewals. After changing password on ADVPS panel, also paste the new password here — ADVPS read APIs often do not return updated passwords.
                                         </p>
                                     </div>
                                     {editingOrder.expiryDate && (

@@ -805,6 +805,11 @@ const OrderDetails = () => {
             `ADVPS sync failed: ${data.syncResult.error || data.syncResult.statusError || 'Could not reach ADVPS API'}`,
             { duration: 8000 }
           );
+        } else if (data.syncResult?.passwordStale && provider === 'advps') {
+          toast.warning(
+            'IP synced but ADVPS API still returns the old password. After changing password on ADVPS panel, admin must update it in Manage Orders.',
+            { duration: 10000 }
+          );
         } else if (data.syncResult?.credentialsUpdated) {
           const changed = data.syncResult.changes?.length
             ? data.syncResult.changes.join(', ')
