@@ -21,13 +21,16 @@ import {
   MessageSquare, RefreshCw, IndianRupee,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import {
-  COMPANY_VISIBLE_ORDER_STATUSES,
-  isCompanyVisibleOrder,
-} from '@/lib/companyOrders';
+
+const COMPANY_FILTER_VERSION = 'confirmed-active-only-v4';
 
 function visibleCompanyOrder(order: Order): boolean {
-  return isCompanyVisibleOrder(order);
+  const status = String(order?.status ?? '').trim().toLowerCase();
+  if (!status) return false;
+  if (status.includes('cancel')) return false;
+  if (status.includes('fail')) return false;
+  if (status.includes('pending')) return false;
+  return status === 'confirmed' || status === 'active';
 }
 
 function orderStatusBadgeProps(status: string): {
@@ -230,6 +233,9 @@ export default function CompanyDashboard() {
       const data = await orderRes.json();
       const rows: Order[] = Array.isArray(data) ? data : (data.orders ?? []);
       setOrders(rows.filter(visibleCompanyOrder));
+      if (data?.filterVersion && data.filterVersion !== COMPANY_FILTER_VERSION) {
+        console.warn('[company] API filter version mismatch', data.filterVersion);
+      }
     }
     loadActionRequests('pending');
     loadRenewalRequests('pending');
@@ -599,7 +605,7 @@ export default function CompanyDashboard() {
         {tab === 'orders' && (
           <div className="space-y-4">
             <p className="text-xs text-muted-foreground">
-              Only confirmed and active orders are shown. Cancelled, pending, and failed orders are hidden.
+              Only confirmed and active orders are shown. Cancelled orders are hidden. ({COMPANY_FILTER_VERSION})
             </p>
             {/* Filters */}
             <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
@@ -612,11 +618,8 @@ export default function CompanyDashboard() {
                   <SelectTrigger className="w-28 h-9 text-xs"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Status</SelectItem>
-                    {COMPANY_VISIBLE_ORDER_STATUSES.map((status) => (
-                      <SelectItem key={status} value={status} className="capitalize">
-                        {status}
-                      </SelectItem>
-                    ))}
+                    <SelectItem value="confirmed">Confirmed</SelectItem>
+                    <SelectItem value="active">Active</SelectItem>
                   </SelectContent>
                 </Select>
                 <Select value={dateFilter} onValueChange={setDateFilter}>

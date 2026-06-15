@@ -1,42 +1,54 @@
 #!/usr/bin/env bash
-# Rebuild and restart oceanlinux on the production server (EC2 + PM2).
-# Run ON THE SERVER after git pull — not locally on Windows.
+# Production deploy for EC2 + PM2 + nginx.
+# SSH into your server and run: bash scripts/deploy-rebuild.sh
 set -euo pipefail
 
 APP_DIR="${1:-$(cd "$(dirname "$0")/.." && pwd)}"
 cd "$APP_DIR"
 
-echo "==> App dir: $APP_DIR"
-echo "==> Git commit: $(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+echo "========================================"
+echo " OceanLinux production deploy"
+echo " App dir: $APP_DIR"
+echo " Git: $(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+echo "========================================"
 
-echo "==> Installing dependencies..."
+echo "==> git pull..."
+git pull origin main
+
+echo "==> install deps..."
 if command -v bun >/dev/null 2>&1; then
   bun install
   BUILD_CMD="bun run build"
-  START_CMD="bun run start"
 else
   npm install
   BUILD_CMD="npm run build"
-  START_CMD="npm run start"
 fi
 
-echo "==> Removing old Next.js build cache..."
+echo "==> wipe old build..."
 rm -rf .next
 
-echo "==> Building fresh production bundle..."
+echo "==> build..."
 $BUILD_CMD
 
-echo "==> Restarting PM2 process..."
-if pm2 describe oceanlinux >/dev/null 2>&1; then
-  pm2 restart oceanlinux
-else
-  echo "PM2 app 'oceanlinux' not found. Start manually with:"
-  echo "  pm2 start $START_CMD --name oceanlinux"
+echo "==> verify new company orders filter is in build..."
+if ! grep -R "confirmed-active-only-v4" .next/server/app/api/company/orders 2>/dev/null | head -1; then
+  echo "ERROR: Build does NOT contain confirmed-active-only-v4."
+  echo "       Wrong directory or build failed. Fix before restarting PM2."
+  exit 1
 fi
 
-echo "==> Verify deploy — should show confirmed-active-only-v3:"
-sleep 2
-curl -s "https://oceanlinux.com/api/company/version" || curl -s "http://127.0.0.1:3000/api/company/version" || true
+echo "==> restart PM2 from THIS directory..."
+pm2 delete oceanlinux 2>/dev/null || true
+pm2 start ecosystem.config.cjs
+pm2 save
+
+sleep 3
+echo "==> verify live endpoint..."
+curl -s "http://127.0.0.1:3000/api/company/version" || true
+echo ""
+curl -sI "http://127.0.0.1:3000/api/company/orders" | grep -i "x-company-orders-filter" || true
 
 echo ""
-echo "Done. Hard-refresh /company/rockybhai in the browser (Ctrl+Shift+R)."
+echo "Done. Open https://oceanlinux.com/api/company/version"
+echo "You must see: confirmed-active-only-v4"
+echo "Then hard-refresh /company/rockybhai"
