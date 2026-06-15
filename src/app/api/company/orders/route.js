@@ -4,7 +4,7 @@ import connectDB from '@/lib/db';
 import IPStock from '@/models/ipStockModel';
 import Order from '@/models/orderModel';
 import {
-  COMPANY_PAID_ORDER_STATUSES,
+  buildCompanyStockIdVariants,
   isCompanyPaidOrder,
 } from '@/lib/companyOrders';
 
@@ -29,14 +29,19 @@ export async function GET() {
   const stockIds = stocks.map(s => s._id.toString());
 
   if (stockIds.length === 0) {
-    return NextResponse.json([]);
+    return NextResponse.json([], {
+      headers: { 'Cache-Control': 'no-store, max-age=0' },
+    });
   }
 
+  const stockIdVariants = buildCompanyStockIdVariants(stockIds);
+
   const orders = await Order.find({
-    ipStockId: { $in: stockIds },
-    status: { $in: COMPANY_PAID_ORDER_STATUSES },
+    ipStockId: { $in: stockIdVariants },
   })
-    .select('productName memory ipAddress username password os status provisioningStatus createdAt expiryDate customerName customerEmail ipStockId panelUsername')
+    .select(
+      'productName memory ipAddress username password os status provisioningStatus createdAt expiryDate customerName customerEmail ipStockId panelUsername transactionId walletDeduction paymentDetails paymentMethod clientTxnId'
+    )
     .sort({ createdAt: -1 })
     .lean();
 
@@ -46,11 +51,13 @@ export async function GET() {
   const enriched = orders
     .filter(isCompanyPaidOrder)
     .map(o => ({
-    ...o,
-    stockName: stockMap[o.ipStockId] || 'Unknown',
-  }));
+      ...o,
+      stockName: stockMap[String(o.ipStockId)] || 'Unknown',
+    }));
 
-  return NextResponse.json(enriched);
+  return NextResponse.json(enriched, {
+    headers: { 'Cache-Control': 'no-store, max-age=0' },
+  });
 }
 
 export async function PUT(request) {
@@ -67,14 +74,14 @@ export async function PUT(request) {
 
   const stocks = await IPStock.find({ company: company.id }).select('_id').lean();
   const stockIds = stocks.map(s => s._id.toString());
+  const stockIdVariants = buildCompanyStockIdVariants(stockIds);
 
   const order = await Order.findOne({
     _id: orderId,
-    ipStockId: { $in: stockIds },
-    status: { $in: COMPANY_PAID_ORDER_STATUSES },
+    ipStockId: { $in: stockIdVariants },
   });
 
-  if (!order) {
+  if (!order || !isCompanyPaidOrder(order)) {
     return NextResponse.json({ error: 'Order not found or not authorized' }, { status: 404 });
   }
 
