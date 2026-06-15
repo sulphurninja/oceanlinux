@@ -41,7 +41,15 @@ function extractAdvpsStatusCredentials(statusPayload, order) {
     username: String(
       svc?.username || svc?.user || (isWindows ? 'Administrator' : 'root')
     ).trim(),
-    password: String(svc?.password || svc?.pass || '').trim(),
+    password: String(
+      svc?.password ||
+      svc?.pass ||
+      svc?.rootPassword ||
+      svc?.adminPassword ||
+      svc?.newPassword ||
+      d?.password ||
+      ''
+    ).trim(),
     os: osName,
     expiryDate: svc?.expiryDate || null,
   };

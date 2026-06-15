@@ -40,6 +40,7 @@ export async function GET(request) {
     const api = new AdvpsAPI();
     let details = null;
     let statusRes = null;
+    let statusError = null;
 
     // Fetch live running status
     try {
@@ -54,6 +55,7 @@ export async function GET(request) {
         powerState: normalizeAdvpsPowerState(d),
       };
     } catch (err) {
+      statusError = err.message;
       console.error('[ADVPS-ACTION][GET] Status error:', err.message);
       details = {
         serviceId,
@@ -62,13 +64,17 @@ export async function GET(request) {
       };
     }
 
-    const sync = await syncAdvpsOrderCredentials(api, order, { statusPayload: statusRes, Order });
+    const sync = await syncAdvpsOrderCredentials(api, order, { statusPayload: statusRes, statusError, Order });
     if (sync.freshIp) details.ip = sync.freshIp;
 
-    await Order.findByIdAndUpdate(orderId, sync.dbUpdates);
+    if (Object.keys(sync.dbUpdates).length > 1 || sync.credentialsUpdated) {
+      await Order.findByIdAndUpdate(orderId, sync.dbUpdates);
+    } else {
+      await Order.findByIdAndUpdate(orderId, { lastSyncTime: sync.dbUpdates.lastSyncTime });
+    }
 
     return NextResponse.json({
-      success: true,
+      success: !sync.syncFailed,
       serviceId,
       details,
       syncResult: {
@@ -77,6 +83,12 @@ export async function GET(request) {
         advpsOrderIdMissing: sync.advpsOrderIdMissing,
         advpsOrderId: sync.purchaseOrderId || resolveAdvpsPurchaseOrderId(order) || null,
         lastSyncTime: sync.dbUpdates.lastSyncTime,
+        statusApiOk: sync.statusApiOk,
+        purchaseApiOk: sync.purchaseApiOk,
+        statusError: sync.statusError,
+        purchaseError: sync.purchaseError,
+        syncFailed: sync.syncFailed,
+        apiBlocked: sync.apiBlocked,
         error: sync.error || null,
       },
     });
@@ -172,14 +184,24 @@ export async function POST(request) {
           const d = unwrapAdvpsEnvelope(statusRes) || {};
           const powerState = normalizeAdvpsPowerState(d);
 
+          // Auto-sync IP/password/username on every status poll (same path as manual Sync)
+          const sync = await syncAdvpsOrderCredentials(api, order, { statusPayload: statusRes, Order });
+          if (sync.credentialsUpdated) {
+            await Order.findByIdAndUpdate(orderId, sync.dbUpdates);
+          } else {
+            await Order.findByIdAndUpdate(orderId, { lastSyncTime: sync.dbUpdates.lastSyncTime });
+          }
+
           return NextResponse.json({
             success: true,
             powerState,
             runningStatus: pickAdvpsRunningStatusRaw(d) || null,
             serviceType: d.serviceType,
-            ip: pickAdvpsIp(d),
+            ip: sync.freshIp || pickAdvpsIp(d, order.ipAddress),
             uptime: pickAdvpsUptime(d),
             lastSync: new Date().toISOString(),
+            credentialsUpdated: sync.credentialsUpdated,
+            changes: sync.changes,
           });
         } catch (err) {
           return NextResponse.json({ success: false, error: err.message, powerState: 'unknown' });

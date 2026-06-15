@@ -751,6 +751,11 @@ const OrderDetails = () => {
         console.log('[ORDER-DETAILS] Could not determine power state:', data);
         setServerPowerState('unknown');
       }
+
+      // ADVPS status poll also syncs credentials — refresh order if IP/password changed
+      if (provider === 'advps' && data.credentialsUpdated) {
+        await fetchOrder();
+      }
     } catch (error) {
       console.error('[ORDER-DETAILS] Failed to fetch power state:', error);
       setServerPowerState('unknown');
@@ -777,33 +782,39 @@ const OrderDetails = () => {
       const res = await fetch(`/api/orders/${endpoint}?orderId=${order._id}`);
       const data = await res.json();
 
-      if (data.success) {
-        console.log('[ORDER-DETAILS] Service details loaded:', {
-          serviceId: data.serviceId,
-          credentialsUpdated: data.syncResult?.credentialsUpdated,
-          lastSyncTime: data.syncResult?.lastSyncTime
-        });
-
-        setServiceDetails(data);
+      if (data.success || data.syncResult) {
+        if (data.success) {
+          setServiceDetails(data);
+        }
 
         // Refresh order data to get latest synced information
         await fetchOrder();
 
-        if (provider === 'hostycare' || provider === 'smartvps' || provider === 'advps') {
+        if (data.success && (provider === 'hostycare' || provider === 'smartvps' || provider === 'advps')) {
           await fetchServerPowerState();
         }
 
-        // Show success message if credentials were updated during sync
-        if (data.syncResult?.credentialsUpdated) {
+        // Show sync result — never pretend success when ADVPS API failed
+        if (data.syncResult?.apiBlocked) {
+          toast.error(
+            'ADVPS API blocked this server (IP address not allowed). Whitelist your server IP in ADVPS API settings, then sync again.',
+            { duration: 10000 }
+          );
+        } else if (data.syncResult?.syncFailed || data.syncResult?.error) {
+          toast.error(
+            `ADVPS sync failed: ${data.syncResult.error || data.syncResult.statusError || 'Could not reach ADVPS API'}`,
+            { duration: 8000 }
+          );
+        } else if (data.syncResult?.credentialsUpdated) {
           const changed = data.syncResult.changes?.length
             ? data.syncResult.changes.join(', ')
             : 'IP/credentials';
           toast.success(`Synced from ADVPS: ${changed}`);
-        } else if (data.syncResult?.advpsOrderIdMissing && provider === 'advps') {
-          toast.success('Synced from ADVPS service status — credentials up to date');
         } else if (provider === 'advps') {
           toast.success('Synced with ADVPS — credentials already up to date');
         }
+      } else {
+        toast.error(data.error || data.message || 'Failed to load service details');
       }
     } catch (error) {
       console.error('[ORDER-DETAILS] Failed to load service details:', error);
