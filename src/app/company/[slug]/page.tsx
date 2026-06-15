@@ -227,7 +227,8 @@ export default function CompanyDashboard() {
       setStockCountDrafts(Object.fromEntries(rows.map(s => [s._id, String(s.stockCount ?? 0)])));
     }
     if (orderRes.ok) {
-      const rows: Order[] = await orderRes.json();
+      const data = await orderRes.json();
+      const rows: Order[] = Array.isArray(data) ? data : (data.orders ?? []);
       setOrders(rows.filter(visibleCompanyOrder));
     }
     loadActionRequests('pending');
@@ -297,8 +298,9 @@ export default function CompanyDashboard() {
     if (!editOrder) return;
     setSaving(true);
     try {
-      const res = await fetch('/api/company/orders', {
+      const res = await fetch(`/api/company/orders?_=${Date.now()}`, {
         method: 'PUT',
+        cache: 'no-store',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ orderId: editOrder._id, ipAddress: editIp, username: editUsername, password: editPassword, os: editOs }),
       });

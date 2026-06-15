@@ -22,6 +22,15 @@ const nextConfig = {
   async headers() {
     return [
       {
+        source: "/api/company/:path*",
+        headers: [
+          { key: "Cache-Control", value: "no-store, no-cache, must-revalidate, max-age=0" },
+          { key: "Pragma", value: "no-cache" },
+          { key: "Expires", value: "0" },
+          { key: "X-Company-Orders-Filter", value: "confirmed-active-only-v3" },
+        ],
+      },
+      {
         // matching all API routes
         source: "/api/v1/reseller/:path*",
         headers: [

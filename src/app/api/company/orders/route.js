@@ -25,7 +25,9 @@ async function getCompanySession() {
 
 export async function GET() {
   const company = await getCompanySession();
-  if (!company) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!company) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers: responseHeaders() });
+  }
 
   await connectDB();
 
@@ -33,7 +35,14 @@ export async function GET() {
   const stockIds = stocks.map(s => s._id.toString());
 
   if (stockIds.length === 0) {
-    return NextResponse.json([], { headers: responseHeaders() });
+    return NextResponse.json(
+      {
+        orders: [],
+        filterVersion: 'confirmed-active-only-v3',
+        visibleStatuses: COMPANY_VISIBLE_ORDER_STATUSES,
+      },
+      { headers: responseHeaders() }
+    );
   }
 
   const stockIdVariants = buildCompanyStockIdVariants(stockIds);
@@ -58,7 +67,14 @@ export async function GET() {
       stockName: stockMap[String(o.ipStockId)] || 'Unknown',
     }));
 
-  return NextResponse.json(enriched, { headers: responseHeaders() });
+  return NextResponse.json(
+    {
+      orders: enriched,
+      filterVersion: 'confirmed-active-only-v3',
+      visibleStatuses: COMPANY_VISIBLE_ORDER_STATUSES,
+    },
+    { headers: responseHeaders() }
+  );
 }
 
 export async function PUT(request) {
