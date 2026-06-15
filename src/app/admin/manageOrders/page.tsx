@@ -45,6 +45,7 @@ interface Order {
     hostycareServiceId?: string;
     smartvpsServiceId?: string;
     advpsServiceId?: string;
+    advpsOrderId?: string;
     provider?: string;
     autoProvisioned?: boolean;
     ipAddress?: string;
@@ -295,6 +296,7 @@ const ManageOrders = () => {
                     provider: editingOrder.provider,
                     provisioningStatus: editingOrder.provisioningStatus,
                     advpsServiceId: editingOrder.advpsServiceId || undefined,
+                    advpsOrderId: editingOrder.advpsOrderId || undefined,
                 })
             });
 
@@ -1162,6 +1164,18 @@ const ManageOrders = () => {
                                         />
                                         <p className="text-xs text-muted-foreground">
                                             Set this to enable ADVPS server actions for this order
+                                        </p>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label>ADVPS Purchase Order ID</Label>
+                                        <Input
+                                            value={editingOrder.advpsOrderId || ''}
+                                            onChange={(e) => setEditingOrder({ ...editingOrder, advpsOrderId: e.target.value })}
+                                            placeholder="e.g. VPS040426-0008"
+                                            className="font-mono text-sm"
+                                        />
+                                        <p className="text-xs text-muted-foreground">
+                                            Required for credential auto-sync (IP/password) when admin changes them on ADVPS
                                         </p>
                                     </div>
                                     {editingOrder.expiryDate && (

@@ -100,7 +100,7 @@ export async function POST(request) {
           const statusRes = await api.status(serviceId);
           const d = unwrapAdvpsEnvelope(statusRes) || {};
           const powerState = normalizeAdvpsPowerState(d);
-          const sync = await syncAdvpsOrderCredentials(api, order, { statusPayload: statusRes });
+          const sync = await syncAdvpsOrderCredentials(api, order, { statusPayload: statusRes, Order });
           await Order.findByIdAndUpdate(orderId, sync.dbUpdates);
           const orderSnapshot = await Order.findById(orderId)
             .select('ipAddress username password os provisioningStatus provisioningError lastSyncTime advpsRebuildCount advpsRebuildCountMonth status advpsOrderId advpsServiceId')

@@ -1,5 +1,8 @@
 const AdvpsAPI = require('@/services/advpsApi');
-const { pickAdvpsIp, unwrapAdvpsEnvelope } = require('@/lib/advpsStatusNormalize');
+const {
+  unwrapAdvpsEnvelope,
+  extractAdvpsStatusCredentials,
+} = require('@/lib/advpsStatusNormalize');
 
 /**
  * Normalize GET /api/v1/purchase/{orderId} payloads.
@@ -60,28 +63,174 @@ function resolveAdvpsPurchaseOrderId(order) {
   ).trim();
 }
 
+/** Try to discover purchase order ID (e.g. VPS040426-0008) from status/details payloads. */
+function pickAdvpsPurchaseOrderId(payload) {
+  const d = unwrapAdvpsEnvelope(payload) || payload || {};
+  const candidates = [
+    d.orderId,
+    d.purchaseOrderId,
+    d.purchaseId,
+    d.order?.orderId,
+    d.order?.id,
+    d.service?.orderId,
+    d.service?.purchaseOrderId,
+    d.service?.purchaseId,
+  ];
+  for (const raw of candidates) {
+    const id = String(raw || '').trim();
+    if (/^(VPS|LXC)\d{6}-\d{4}$/i.test(id)) return id.toUpperCase();
+  }
+  return '';
+}
+
+function serviceIdMatchesPurchaseRow(services, serviceId) {
+  const target = String(serviceId || '').trim().toLowerCase();
+  if (!target || !services?.length) return false;
+
+  return services.some((svc) => {
+    const extracted = AdvpsAPI.extractServiceIdFromPurchaseService(svc);
+    const candidates = [extracted, svc?.serviceId, svc?.service_id, svc?.id, svc?._id]
+      .filter(Boolean)
+      .map((v) => String(v).trim().toLowerCase());
+    return candidates.includes(target);
+  });
+}
+
 /**
- * Pull live IP/username/password from ADVPS purchase order details and build DB updates.
- * When admin changes IP on ADVPS (192 → 198), user Sync replaces local values automatically.
+ * Resolve ADVPS purchase order ID from service ID when not stored on the order.
+ * Tries status payload → sibling orders in DB → scan known purchase IDs in DB.
  */
-async function syncAdvpsOrderCredentials(api, order, { statusPayload } = {}) {
+async function resolveAdvpsPurchaseOrderIdForService(api, order, { statusPayload, Order } = {}) {
+  const existing = resolveAdvpsPurchaseOrderId(order);
+  if (existing) return existing;
+
+  if (statusPayload) {
+    const fromStatus = pickAdvpsPurchaseOrderId(statusPayload);
+    if (fromStatus) return fromStatus;
+
+    const d = unwrapAdvpsEnvelope(statusPayload) || {};
+    const nested = pickAdvpsPurchaseOrderId(d.service || {});
+    if (nested) return nested;
+  }
+
+  const serviceId = String(order?.advpsServiceId || '').trim();
+  if (!serviceId || !Order) return '';
+
+  const sibling = await Order.findOne({
+    advpsServiceId: serviceId,
+    advpsOrderId: { $exists: true, $ne: '' },
+    _id: { $ne: order._id },
+  })
+    .select('advpsOrderId')
+    .lean();
+  if (sibling?.advpsOrderId) {
+    console.log(`[ADVPS-RESOLVE] Matched purchase ${sibling.advpsOrderId} via sibling order for service ${serviceId}`);
+    return String(sibling.advpsOrderId).trim();
+  }
+
+  const query = {
+    advpsOrderId: { $exists: true, $ne: '' },
+    _id: { $ne: order._id },
+  };
+  if (order.user) {
+    query.$or = [{ user: order.user }, { advpsServiceId: serviceId }];
+  } else {
+    query.advpsServiceId = serviceId;
+  }
+
+  const candidates = await Order.find(query)
+    .sort({ updatedAt: -1 })
+    .limit(15)
+    .select('advpsOrderId')
+    .lean();
+
+  const checked = new Set();
+  for (const row of candidates) {
+    const purchaseId = String(row.advpsOrderId || '').trim();
+    if (!purchaseId || checked.has(purchaseId)) continue;
+    checked.add(purchaseId);
+
+    try {
+      const detailsRes = await api.getOrderDetails(purchaseId);
+      const { services } = normalizePurchaseOrderDetails(detailsRes);
+      if (serviceIdMatchesPurchaseRow(services, serviceId)) {
+        console.log(`[ADVPS-RESOLVE] Matched purchase ${purchaseId} for service ${serviceId} via order scan`);
+        return purchaseId;
+      }
+    } catch (err) {
+      console.warn(`[ADVPS-RESOLVE] getOrderDetails(${purchaseId}) failed:`, err.message);
+    }
+  }
+
+  return '';
+}
+
+function applyCredentialField(dbUpdates, changes, field, dbKey, freshValue, currentValue) {
+  const next = String(freshValue || '').trim();
+  const prev = String(currentValue || '').trim();
+  if (!next || next === prev) return false;
+  dbUpdates[dbKey] = next;
+  if (!changes.includes(field)) changes.push(field);
+  return true;
+}
+
+/**
+ * Pull live IP/username/password from ADVPS status + purchase order details and build DB updates.
+ * Service ID alone is enough for credentials — ADVPS /status returns ip, username, password.
+ */
+async function syncAdvpsOrderCredentials(api, order, { statusPayload, Order } = {}) {
   const dbUpdates = { lastSyncTime: new Date() };
   const changes = [];
   let credentialsUpdated = false;
   let advpsOrderIdMissing = false;
 
-  const purchaseOrderId = resolveAdvpsPurchaseOrderId(order);
+  let purchaseOrderId = resolveAdvpsPurchaseOrderId(order);
   if (!purchaseOrderId) {
     advpsOrderIdMissing = true;
   }
 
-  // Live IP from /status as a secondary source
+  // Credentials from /status — works with service ID only (no purchase order ID required)
   if (statusPayload) {
-    const statusIp = pickAdvpsIp(unwrapAdvpsEnvelope(statusPayload), '').trim();
-    if (statusIp && statusIp !== String(order.ipAddress || '').trim()) {
-      dbUpdates.ipAddress = statusIp;
-      if (!changes.includes('ip')) changes.push('ip');
+    const statusCreds = extractAdvpsStatusCredentials(statusPayload, order);
+
+    if (applyCredentialField(dbUpdates, changes, 'ip', 'ipAddress', statusCreds.ip, order.ipAddress)) {
       credentialsUpdated = true;
+    }
+    if (applyCredentialField(dbUpdates, changes, 'username', 'username', statusCreds.username, order.username)) {
+      credentialsUpdated = true;
+    }
+    if (applyCredentialField(dbUpdates, changes, 'password', 'password', statusCreds.password, order.password)) {
+      credentialsUpdated = true;
+    }
+    if (statusCreds.os) {
+      const normalizedOs = statusCreds.os.toLowerCase().includes('windows')
+        ? 'Windows 2022 64'
+        : statusCreds.os.toLowerCase().includes('ubuntu')
+          ? 'Ubuntu 22'
+          : statusCreds.os.toLowerCase().includes('centos')
+            ? 'CentOS 7'
+            : statusCreds.os;
+      if (applyCredentialField(dbUpdates, changes, 'os', 'os', normalizedOs, order.os)) {
+        credentialsUpdated = true;
+      }
+    }
+    if (statusCreds.expiryDate && !order.expiryDate) {
+      dbUpdates.expiryDate = new Date(statusCreds.expiryDate);
+      changes.push('expiryDate');
+      credentialsUpdated = true;
+    }
+  }
+
+  // Auto-resolve purchase order ID from service ID when missing
+  if (!purchaseOrderId) {
+    const resolved = await resolveAdvpsPurchaseOrderIdForService(api, order, { statusPayload, Order });
+    if (resolved) {
+      purchaseOrderId = resolved;
+      dbUpdates.advpsOrderId = resolved;
+      advpsOrderIdMissing = false;
+      if (!changes.includes('advpsOrderId')) changes.push('advpsOrderId');
+      credentialsUpdated = true;
+      console.log(`[ADVPS-SYNC] Auto-linked purchase order ID ${resolved} for service ${order.advpsServiceId}`);
     }
   }
 
@@ -95,25 +244,21 @@ async function syncAdvpsOrderCredentials(api, order, { statusPayload } = {}) {
         console.warn(`[ADVPS-SYNC] Purchase ${purchaseOrderId} returned no services`);
       } else {
         const fresh = extractServiceCredentials(svc, order);
+        const currentIp = dbUpdates.ipAddress ?? order.ipAddress;
+        const currentUsername = dbUpdates.username ?? order.username;
+        const currentPassword = dbUpdates.password ?? order.password;
+        const currentOs = dbUpdates.os ?? order.os;
 
-        if (fresh.ip && fresh.ip !== String(order.ipAddress || '').trim()) {
-          dbUpdates.ipAddress = fresh.ip;
-          if (!changes.includes('ip')) changes.push('ip');
+        if (applyCredentialField(dbUpdates, changes, 'ip', 'ipAddress', fresh.ip, currentIp)) {
           credentialsUpdated = true;
         }
-        if (fresh.username && fresh.username !== String(order.username || '').trim()) {
-          dbUpdates.username = fresh.username;
-          changes.push('username');
+        if (applyCredentialField(dbUpdates, changes, 'username', 'username', fresh.username, currentUsername)) {
           credentialsUpdated = true;
         }
-        if (fresh.password && fresh.password !== String(order.password || '').trim()) {
-          dbUpdates.password = fresh.password;
-          changes.push('password');
+        if (applyCredentialField(dbUpdates, changes, 'password', 'password', fresh.password, currentPassword)) {
           credentialsUpdated = true;
         }
-        if (fresh.os && fresh.os !== String(order.os || '').trim()) {
-          dbUpdates.os = fresh.os;
-          changes.push('os');
+        if (applyCredentialField(dbUpdates, changes, 'os', 'os', fresh.os, currentOs)) {
           credentialsUpdated = true;
         }
 
@@ -142,6 +287,7 @@ async function syncAdvpsOrderCredentials(api, order, { statusPayload } = {}) {
         changes,
         advpsOrderIdMissing,
         error: err.message,
+        purchaseOrderId: purchaseOrderId || null,
         freshIp: dbUpdates.ipAddress || order.ipAddress,
       };
     }
@@ -152,6 +298,7 @@ async function syncAdvpsOrderCredentials(api, order, { statusPayload } = {}) {
     credentialsUpdated,
     changes,
     advpsOrderIdMissing,
+    purchaseOrderId: purchaseOrderId || resolveAdvpsPurchaseOrderId(order) || null,
     freshIp: dbUpdates.ipAddress || order.ipAddress,
   };
 }
@@ -161,5 +308,7 @@ module.exports = {
   pickAdvpsService,
   extractServiceCredentials,
   resolveAdvpsPurchaseOrderId,
+  pickAdvpsPurchaseOrderId,
+  resolveAdvpsPurchaseOrderIdForService,
   syncAdvpsOrderCredentials,
 };

@@ -4,12 +4,13 @@ import Order from '@/models/orderModel';
 import { assignPanelCredentials } from '@/lib/panelCredentials';
 const AdvpsAPI = require('@/services/advpsApi');
 const WhatsAppService = require('@/services/whatsappService');
+const { syncAdvpsOrderCredentials } = require('@/lib/advpsOrderSync');
 
 export async function POST(request) {
   await connectDB();
 
   try {
-    const { orderId, ipAddress, username, password, status, os, provider, provisioningStatus, advpsServiceId } = await request.json();
+    const { orderId, ipAddress, username, password, status, os, provider, provisioningStatus, advpsServiceId, advpsOrderId } = await request.json();
     if (!orderId) {
       return NextResponse.json(
         { message: 'Missing orderId' },
@@ -27,6 +28,7 @@ export async function POST(request) {
     if (provider) updateFields.provider = provider;
     if (provisioningStatus !== undefined) updateFields.provisioningStatus = provisioningStatus || 'pending';
     if (advpsServiceId !== undefined) updateFields.advpsServiceId = advpsServiceId || '';
+    if (advpsOrderId !== undefined) updateFields.advpsOrderId = String(advpsOrderId || '').trim();
 
     // Auto-provision ADVPS when a service ID is set/changed
     const advpsNotes = [];
@@ -36,55 +38,52 @@ export async function POST(request) {
       const isNewServiceId = !existingOrder?.advpsServiceId || existingOrder.advpsServiceId !== advpsServiceId;
 
       if (isNewServiceId) {
-        console.log('[ORDER-UPDATE] New ADVPS serviceId detected, starting provisioning flow...');
+        console.log('[ORDER-UPDATE] New ADVPS serviceId detected, auto-syncing from ADVPS...');
         const api = new AdvpsAPI();
 
-        // Immediately fetch IP and service info
         try {
           const statusRes = await api.status(advpsServiceId);
-          const svcData = statusRes?.data || statusRes;
-          const svc = svcData?.service || svcData;
+          const sync = await syncAdvpsOrderCredentials(api, existingOrder, {
+            statusPayload: statusRes,
+            Order,
+          });
 
-          if (svc?.ip || svcData?.ip) {
-            updateFields.ipAddress = svc?.ip || svcData?.ip;
-            advpsNotes.push(`IP fetched: ${updateFields.ipAddress}`);
+          Object.assign(updateFields, sync.dbUpdates);
+          if (sync.dbUpdates.ipAddress) {
+            advpsNotes.push(`IP fetched: ${sync.dbUpdates.ipAddress}`);
+          }
+          if (sync.dbUpdates.username) {
+            advpsNotes.push(`Username: ${sync.dbUpdates.username}`);
+          }
+          if (sync.dbUpdates.password) {
+            advpsNotes.push('Password synced from ADVPS');
+          }
+          if (sync.dbUpdates.advpsOrderId) {
+            advpsNotes.push(`ADVPS purchase order linked: ${sync.dbUpdates.advpsOrderId}`);
+          } else if (sync.advpsOrderIdMissing) {
+            advpsNotes.push('Credentials synced from service status (purchase order ID not found yet)');
           }
 
-          if (svc?.productInfo?.os || svc?.os?.name) {
-            const osName = svc?.os?.name || svc?.productInfo?.os || '';
-            if (osName.toLowerCase().includes('windows')) {
-              updateFields.os = 'Windows 2022 64';
-            } else if (osName.toLowerCase().includes('ubuntu')) {
-              updateFields.os = 'Ubuntu 22';
-            } else if (osName.toLowerCase().includes('centos')) {
-              updateFields.os = 'CentOS 7';
-            }
-
-            if (osName.toLowerCase().includes('windows')) {
-              // For Windows, username is in parentheses e.g. "WINDOWS SERVER 2022 (GHOST)" → "GHOST"
-              const usernameMatch = osName.match(/\(([^)]+)\)/);
-              updateFields.username = usernameMatch ? usernameMatch[1] : 'administrator';
-            } else {
-              updateFields.username = 'root';
-            }
-            advpsNotes.push(`Username: ${updateFields.username}`);
-          }
-
-          if (svc?.expiryDate) {
-            updateFields.expiryDate = new Date(svc.expiryDate);
+          updateFields.provider = 'advps';
+          updateFields.provisioningStatus = sync.dbUpdates.password ? 'active' : 'provisioning';
+          updateFields.status = 'active';
+          advpsProvisioningStarted = true;
+          if (!sync.dbUpdates.password) {
+            advpsNotes.push('Password not yet available — will retry automatically');
           }
         } catch (err) {
-          console.error('[ORDER-UPDATE] ADVPS status fetch failed:', err.message);
+          console.error('[ORDER-UPDATE] ADVPS auto-sync failed:', err.message);
           advpsNotes.push('Failed to fetch service status from ADVPS');
         }
 
-        // Set order to provisioning state — customer sees a loader
-        updateFields.provider = 'advps';
-        updateFields.provisioningStatus = 'provisioning';
-        updateFields.status = 'active';
-        updateFields.lastSyncTime = new Date();
-        advpsProvisioningStarted = true;
-        advpsNotes.push('Server provisioning started. Starting server → generating password (takes ~2 min).');
+        // Set order to provisioning state when sync did not complete credentials
+        if (!advpsProvisioningStarted) {
+          updateFields.provider = 'advps';
+          updateFields.provisioningStatus = 'provisioning';
+          updateFields.status = 'active';
+          updateFields.lastSyncTime = new Date();
+          advpsProvisioningStarted = true;
+        }
 
         // Assign panel credentials if missing
         if (!existingOrder.panelUsername) {
@@ -94,26 +93,42 @@ export async function POST(request) {
           advpsNotes.push(`Panel credentials generated: ${existingOrder.panelUsername}`);
         }
 
-        // Background: fetch password from ADVPS order details (never generate — that overwrites the real one)
+        // Background: retry password/purchase sync if still incomplete
         const bgOrderId = orderId;
         const bgServiceId = advpsServiceId;
-        const bgAdvpsOrderId = existingOrder?.advpsOrderId;
+        const bgAdvpsOrderId = updateFields.advpsOrderId || existingOrder?.advpsOrderId;
 
         (async () => {
           const bgApi = new AdvpsAPI();
           try {
+            const bgOrder = await Order.findById(bgOrderId);
+            if (!bgOrder) return;
+
+            const statusRes = await bgApi.status(bgServiceId);
+            const sync = await syncAdvpsOrderCredentials(bgApi, bgOrder, {
+              statusPayload: statusRes,
+              Order,
+            });
+
+            if (sync.credentialsUpdated) {
+              await Order.findByIdAndUpdate(bgOrderId, {
+                ...sync.dbUpdates,
+                provisioningStatus: sync.dbUpdates.password ? 'active' : bgOrder.provisioningStatus,
+                lastAction: 'provision',
+                lastActionTime: new Date(),
+              });
+              return;
+            }
+
             if (!bgAdvpsOrderId) {
-              console.log(`[ADVPS-PROVISION] No advpsOrderId on order ${bgOrderId}, skipping password fetch`);
+              console.log(`[ADVPS-PROVISION] No advpsOrderId on order ${bgOrderId}, status sync will retry on user Sync`);
               return;
             }
 
             // Poll order details for password (2 attempts: immediate + 60s)
             const pollDelays = [0, 60000];
-            let passwordSaved = false;
-
             for (let attempt = 0; attempt < pollDelays.length; attempt++) {
               if (pollDelays[attempt] > 0) {
-                console.log(`[ADVPS-PROVISION] Waiting ${pollDelays[attempt] / 1000}s before password poll...`);
                 await new Promise(r => setTimeout(r, pollDelays[attempt]));
               }
 
@@ -121,7 +136,6 @@ export async function POST(request) {
                 const detailsRes = await bgApi.getOrderDetails(bgAdvpsOrderId);
                 const svc = (detailsRes?.data?.services || [])[0];
                 if (svc?.password) {
-                  console.log(`[ADVPS-PROVISION] Password from order details (poll ${attempt + 1}): ${svc.password.substring(0, 4)}****`);
                   await Order.findByIdAndUpdate(bgOrderId, {
                     password: svc.password,
                     ...(svc.username ? { username: svc.username } : {}),
@@ -129,20 +143,16 @@ export async function POST(request) {
                     lastAction: 'provision',
                     lastActionTime: new Date(),
                   });
-                  passwordSaved = true;
-                  break;
+                  return;
                 }
-                console.log(`[ADVPS-PROVISION] Password poll ${attempt + 1}/${pollDelays.length}: not available yet`);
               } catch (err) {
                 console.log(`[ADVPS-PROVISION] Password poll ${attempt + 1} error: ${err.message}`);
               }
             }
 
-            if (!passwordSaved) {
-              console.log(`[ADVPS-PROVISION] Password not yet available for ${bgAdvpsOrderId}, pending cron will handle it`);
-            }
+            console.log(`[ADVPS-PROVISION] Password not yet available for ${bgAdvpsOrderId}, pending cron will handle it`);
           } catch (bgErr) {
-            console.error(`[ADVPS-PROVISION] Background password fetch failed for ${bgServiceId}:`, bgErr.message);
+            console.error(`[ADVPS-PROVISION] Background sync failed for ${bgServiceId}:`, bgErr.message);
           }
         })();
       }

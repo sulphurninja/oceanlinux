@@ -30,6 +30,23 @@ function pickAdvpsUptime(d) {
   return u;
 }
 
+/** Credentials from GET /api/v1/services/{id}/status (ADVPS docs include ip/username/password on service). */
+function extractAdvpsStatusCredentials(statusPayload, order) {
+  const d = unwrapAdvpsEnvelope(statusPayload) || {};
+  const svc = d.service || d;
+  const osName = String(svc?.os?.name || svc?.productInfo?.os || svc?.os || '').trim();
+  const isWindows = /windows|rdp/i.test(`${order?.productName || ''} ${osName}`);
+  return {
+    ip: pickAdvpsIp(d, '').trim(),
+    username: String(
+      svc?.username || svc?.user || (isWindows ? 'Administrator' : 'root')
+    ).trim(),
+    password: String(svc?.password || svc?.pass || '').trim(),
+    os: osName,
+    expiryDate: svc?.expiryDate || null,
+  };
+}
+
 function normalizeAdvpsPowerState(d) {
   if (!d || typeof d !== 'object') return 'unknown';
 
@@ -61,4 +78,5 @@ module.exports = {
   pickAdvpsIp,
   pickAdvpsUptime,
   normalizeAdvpsPowerState,
+  extractAdvpsStatusCredentials,
 };

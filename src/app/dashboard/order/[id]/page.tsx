@@ -798,9 +798,9 @@ const OrderDetails = () => {
           const changed = data.syncResult.changes?.length
             ? data.syncResult.changes.join(', ')
             : 'IP/credentials';
-          toast.success(`Updated from ADVPS: ${changed}`);
-        } else if (data.syncResult?.advpsOrderIdMissing) {
-          toast.warning('ADVPS purchase order ID is not linked — credential auto-sync unavailable');
+          toast.success(`Synced from ADVPS: ${changed}`);
+        } else if (data.syncResult?.advpsOrderIdMissing && provider === 'advps') {
+          toast.success('Synced from ADVPS service status — credentials up to date');
         } else if (provider === 'advps') {
           toast.success('Synced with ADVPS — credentials already up to date');
         }

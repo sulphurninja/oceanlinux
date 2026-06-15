@@ -62,7 +62,7 @@ export async function GET(request) {
       };
     }
 
-    const sync = await syncAdvpsOrderCredentials(api, order, { statusPayload: statusRes });
+    const sync = await syncAdvpsOrderCredentials(api, order, { statusPayload: statusRes, Order });
     if (sync.freshIp) details.ip = sync.freshIp;
 
     await Order.findByIdAndUpdate(orderId, sync.dbUpdates);
@@ -75,7 +75,7 @@ export async function GET(request) {
         credentialsUpdated: sync.credentialsUpdated,
         changes: sync.changes,
         advpsOrderIdMissing: sync.advpsOrderIdMissing,
-        advpsOrderId: resolveAdvpsPurchaseOrderId(order) || null,
+        advpsOrderId: sync.purchaseOrderId || resolveAdvpsPurchaseOrderId(order) || null,
         lastSyncTime: sync.dbUpdates.lastSyncTime,
         error: sync.error || null,
       },
@@ -323,7 +323,7 @@ export async function POST(request) {
         try {
           const statusRes = await api.status(serviceId);
           const d = unwrapAdvpsEnvelope(statusRes) || {};
-          const sync = await syncAdvpsOrderCredentials(api, order, { statusPayload: statusRes });
+          const sync = await syncAdvpsOrderCredentials(api, order, { statusPayload: statusRes, Order });
           await Order.findByIdAndUpdate(orderId, sync.dbUpdates);
           result = {
             synced: true,
