@@ -21,8 +21,10 @@ import {
   MessageSquare, RefreshCw, IndianRupee,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-
-const COMPANY_ORDER_STATUSES = ['confirmed', 'paid', 'active', 'completed'] as const;
+import {
+  COMPANY_PAID_ORDER_STATUSES,
+  isCompanyPaidOrder,
+} from '@/lib/companyOrders';
 
 function orderStatusBadgeProps(status: string): {
   variant: 'default' | 'secondary' | 'outline';
@@ -220,7 +222,10 @@ export default function CompanyDashboard() {
       setStocks(rows);
       setStockCountDrafts(Object.fromEntries(rows.map(s => [s._id, String(s.stockCount ?? 0)])));
     }
-    if (orderRes.ok) setOrders(await orderRes.json());
+    if (orderRes.ok) {
+      const rows: Order[] = await orderRes.json();
+      setOrders(rows.filter(isCompanyPaidOrder));
+    }
     loadActionRequests('pending');
     loadRenewalRequests('pending');
   };
@@ -383,7 +388,7 @@ export default function CompanyDashboard() {
 
   // Filtered and sorted orders
   const filteredOrders = useMemo(() => {
-    let result = orders.filter(o => COMPANY_ORDER_STATUSES.includes(o.status as typeof COMPANY_ORDER_STATUSES[number]));
+    let result = orders.filter(isCompanyPaidOrder);
 
     if (searchTerm.trim()) {
       const q = searchTerm.toLowerCase();
@@ -587,6 +592,9 @@ export default function CompanyDashboard() {
         {/* ── Orders Tab ── */}
         {tab === 'orders' && (
           <div className="space-y-4">
+            <p className="text-xs text-muted-foreground">
+              Only paid orders are shown. Unpaid, cancelled, and failed checkouts are hidden.
+            </p>
             {/* Filters */}
             <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
               <div className="relative flex-1 max-w-full sm:max-w-sm">
@@ -598,10 +606,11 @@ export default function CompanyDashboard() {
                   <SelectTrigger className="w-28 h-9 text-xs"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Status</SelectItem>
-                    <SelectItem value="confirmed">Confirmed</SelectItem>
-                    <SelectItem value="paid">Paid</SelectItem>
-                    <SelectItem value="active">Active</SelectItem>
-                    <SelectItem value="completed">Completed</SelectItem>
+                    {COMPANY_PAID_ORDER_STATUSES.map((status) => (
+                      <SelectItem key={status} value={status} className="capitalize">
+                        {status}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
                 <Select value={dateFilter} onValueChange={setDateFilter}>
