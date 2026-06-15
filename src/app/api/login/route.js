@@ -5,6 +5,7 @@ import User from '../../../models/userModel'
 import connectDB from '../../../lib/db';
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyUserPassword } from '@/lib/userPassword';
+import { findUserByEmail } from '@/lib/userEmail';
 
 export async function POST(request) {
     await connectDB();
@@ -13,8 +14,7 @@ export async function POST(request) {
         const reqBody = await request.json();
         const { email, password } = reqBody;
 
-        // Check if user exists
-        const existingUser = await User.findOne({ email });
+        const existingUser = await findUserByEmail(User, email);
         if (!existingUser) {
             return new NextResponse(JSON.stringify({ message: "User doesn't exist." }), {
                 status: 404,

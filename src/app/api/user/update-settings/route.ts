@@ -3,6 +3,7 @@ import { getDataFromToken } from '@/helper/getDataFromToken';
 import connectDB from '@/lib/db';
 import User from '@/models/userModel';
 import { hashUserPassword, verifyUserPassword } from '@/lib/userPassword';
+import { findOtherUserByEmail, normalizeEmail } from '@/lib/userEmail';
 
 export async function PUT(request: NextRequest) {
   try {
@@ -23,8 +24,10 @@ export async function PUT(request: NextRequest) {
 
     const { name, email, currentPassword, newPassword } = await request.json();
 
-    // Validate required fields
-    if (!name || !email) {
+    const trimmedName = String(name || '').trim();
+    const normalizedEmail = normalizeEmail(email);
+
+    if (!trimmedName || !normalizedEmail) {
       return NextResponse.json({ error: 'Name and email are required' }, { status: 400 });
     }
 
@@ -34,9 +37,9 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
-    // Check if email is being changed and if it's already in use
-    if (email !== user.email) {
-      const existingUser = await User.findOne({ email, _id: { $ne: userId } });
+    // Check if email is being changed and if it's already in use (case-insensitive)
+    if (normalizeEmail(user.email) !== normalizedEmail) {
+      const existingUser = await findOtherUserByEmail(User, normalizedEmail, userId);
       if (existingUser) {
         return NextResponse.json({ error: 'Email is already in use' }, { status: 400 });
       }
@@ -44,8 +47,8 @@ export async function PUT(request: NextRequest) {
 
     // Prepare update data
     const updateData: any = {
-      name,
-      email,
+      name: trimmedName,
+      email: normalizedEmail,
     };
 
     // Handle password change
