@@ -32,3 +32,46 @@ export async function detectCompanyManagedRenewal(order) {
     stockName: ipStock.name || '',
   };
 }
+
+/** True when the order is fulfilled via a native upstream API (not company-manual). */
+export function orderHasUpstreamAutomation(order) {
+  if (!order) return false;
+  return !!(order.hostycareServiceId || order.smartvpsServiceId || order.advpsServiceId);
+}
+
+/**
+ * Renewal provider routing. Company-linked manual orders must stay on the
+ * `oceanlinux` path (company approval queue) — never infer SmartVPS from the
+ * generic "ocean linux" ipStock tag used on partner stocks.
+ */
+export async function resolveRenewalProvider(order) {
+  if (!order) return 'oceanlinux';
+
+  if (order.provider === 'advps' || order.advpsServiceId) return 'advps';
+  if (order.hostycareServiceId) return 'hostycare';
+  if (order.smartvpsServiceId || order.provider === 'smartvps') return 'smartvps';
+
+  if (order.ipStockId) {
+    const ipStock = await IPStock.findById(order.ipStockId).select('company tags').lean();
+    if (ipStock) {
+      if (ipStock.company && !orderHasUpstreamAutomation(order)) {
+        return 'oceanlinux';
+      }
+      const tagsLower = ipStock.tags?.map((t) => t.toLowerCase()) || [];
+      if (tagsLower.includes('smartvps') || tagsLower.includes('ocean linux')) {
+        return 'smartvps';
+      }
+    }
+  }
+
+  if (
+    order.productName?.includes('🌊') ||
+    order.productName?.includes('103.195') ||
+    order.ipAddress?.startsWith('103.195') ||
+    order.productName?.includes('🏅')
+  ) {
+    return 'smartvps';
+  }
+
+  return 'oceanlinux';
+}

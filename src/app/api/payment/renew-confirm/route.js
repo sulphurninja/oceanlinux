@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
-import IPStock from '@/models/ipStockModel';
 import RenewalRequest from '@/models/renewalRequestModel';
 import User from '@/models/userModel';
 import { Cashfree } from 'cashfree-pg';
@@ -9,7 +8,9 @@ import Razorpay from 'razorpay';
 import crypto from 'crypto';
 import { calculateRenewalExpiryDate } from '@/lib/expiryHelper';
 import { assignPanelCredentials } from '@/lib/panelCredentials';
-import { detectCompanyManagedRenewal } from '@/lib/companyRenewal';
+import { detectCompanyManagedRenewal, resolveRenewalProvider } from '@/lib/companyRenewal';
+import { isSlotIpOrder, SLOT_IP_NO_RENEWAL_MESSAGE } from '@/lib/slotIpOrder';
+import { resolveOrderRenewalPrice } from '@/lib/orderRenewalPricingServer';
 const HostycareAPI = require('@/services/hostycareApi');
 const SmartVPSAPI = require('@/services/smartvpsApi');
 const AdvpsAPI = require('@/services/advpsApi');
@@ -28,93 +29,6 @@ const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
   key_secret: process.env.RAZORPAY_KEY_SECRET
 });
-
-// Enhanced helper function to determine provider from order with IPStock data
-async function getProviderFromOrder(order) {
-  console.log('[RENEWAL-PROVIDER] === PROVIDER DETECTION START ===');
-  console.log('[RENEWAL-PROVIDER] Determining provider for order:', {
-    orderId: order._id,
-    explicitProvider: order.provider,
-    hostycareServiceId: order.hostycareServiceId,
-    smartvpsServiceId: order.smartvpsServiceId,
-    advpsServiceId: order.advpsServiceId,
-    ipStockId: order.ipStockId,
-    ipAddress: order.ipAddress,
-    productName: order.productName
-  });
-
-  // ADVPS takes precedence so the renewal API call hits the right reseller.
-  if (order.provider === 'advps' || order.advpsServiceId) {
-    console.log('[RENEWAL-PROVIDER] ✅ Detected ADVPS via provider/serviceId');
-    return 'advps';
-  }
-
-  // Primary logic: Check if order has hostycare service ID
-  if (order.hostycareServiceId) {
-    console.log('[RENEWAL-PROVIDER] ✅ Detected Hostycare via serviceId:', order.hostycareServiceId);
-    return 'hostycare';
-  }
-
-  // Secondary logic: Check if ipStock has smartvps tag
-  if (order.ipStockId) {
-    try {
-      console.log('[RENEWAL-PROVIDER] Fetching IPStock data for ID:', order.ipStockId);
-      const ipStock = await IPStock.findById(order.ipStockId);
-
-      if (ipStock) {
-        console.log('[RENEWAL-PROVIDER] IPStock found:', {
-          _id: ipStock._id,
-          name: ipStock.name,
-          tags: ipStock.tags,
-          serverType: ipStock.serverType
-        });
-
-        // Check for both 'smartvps' and 'ocean linux' tags (SmartVPS uses 'ocean linux' tag)
-        const tagsLower = ipStock.tags?.map(t => t.toLowerCase()) || [];
-        if (tagsLower.includes('smartvps') || tagsLower.includes('ocean linux')) {
-          console.log('[RENEWAL-PROVIDER] ✅ Detected SmartVPS via ipStock tags:', ipStock.tags);
-          return 'smartvps';
-        } else {
-          console.log('[RENEWAL-PROVIDER] IPStock tags do not include smartvps/ocean linux:', ipStock.tags);
-        }
-      } else {
-        console.log('[RENEWAL-PROVIDER] IPStock not found for ID:', order.ipStockId);
-      }
-    } catch (ipStockError) {
-      console.error('[RENEWAL-PROVIDER] Error fetching IPStock:', ipStockError);
-    }
-  } else {
-    console.log('[RENEWAL-PROVIDER] No ipStockId in order');
-  }
-
-  // Additional fallback: Check smartvps service ID
-  if (order.smartvpsServiceId) {
-    console.log('[RENEWAL-PROVIDER] ✅ Detected SmartVPS via serviceId:', order.smartvpsServiceId);
-    return 'smartvps';
-  }
-
-  // Check explicit provider field
-  if (order.provider === 'smartvps') {
-    console.log('[RENEWAL-PROVIDER] ✅ Detected SmartVPS via explicit provider field');
-    return 'smartvps';
-  }
-
-  // Final fallback: Check product name patterns for SmartVPS
-  if (order.productName?.includes('🌊') ||
-    order.productName?.includes('103.195') ||
-    order.ipAddress?.startsWith('103.195') ||
-    order.productName?.includes('🏅')) {
-    console.log('[RENEWAL-PROVIDER] ✅ Detected SmartVPS via patterns');
-    console.log('[RENEWAL-PROVIDER] Product name:', order.productName);
-    console.log('[RENEWAL-PROVIDER] IP address:', order.ipAddress);
-    return 'smartvps';
-  }
-
-  // Default to oceanlinux
-  console.log('[RENEWAL-PROVIDER] ⚪ Defaulting to OceanLinux');
-  console.log('[RENEWAL-PROVIDER] === PROVIDER DETECTION END ===');
-  return 'oceanlinux';
-}
 
 export async function POST(request) {
   await connectDB();
@@ -155,6 +69,16 @@ export async function POST(request) {
         { status: 404 }
       );
     }
+
+    if (isSlotIpOrder(order)) {
+      return NextResponse.json(
+        { success: false, message: SLOT_IP_NO_RENEWAL_MESSAGE },
+        { status: 400 }
+      );
+    }
+
+    const renewalPrice = await resolveOrderRenewalPrice(order);
+    console.log(`[RENEWAL-CONFIRM] Locked renewal price: ₹${renewalPrice} (paid=${order.price}, originalPrice=${order.originalPrice ?? 'n/a'}, promoDiscount=${order.promoDiscount ?? 0})`);
 
     // Initialize logger now that we have the order
     logger = new RenewalLogger(order, renewalTxnId, 'confirm-api');
@@ -239,7 +163,7 @@ export async function POST(request) {
         logger.logSuccess('Razorpay payment verified');
         payment_id = razorpayPaymentId;
         paymentVerified = true;
-        logger.setPaymentInfo('razorpay', razorpayPaymentId, order.price);
+        logger.setPaymentInfo('razorpay', razorpayPaymentId, renewalPrice);
       } else {
         console.error('[RENEWAL-CONFIRM] ❌ Razorpay signature verification failed');
         console.error('[RENEWAL-CONFIRM] Expected signature format: order_id|payment_id');
@@ -306,7 +230,7 @@ export async function POST(request) {
               logger.logSuccess('Cashfree payment verified');
               payment_id = payment.cf_payment_id;
               paymentVerified = true;
-              logger.setPaymentInfo('cashfree', payment.cf_payment_id, order.price);
+              logger.setPaymentInfo('cashfree', payment.cf_payment_id, renewalPrice);
             } else {
               console.log('[RENEWAL-CONFIRM] ⏳ Payment status:', payment.payment_status);
               return NextResponse.json({
@@ -358,7 +282,7 @@ export async function POST(request) {
     const cf_payment_id = payment_id;
 
     // Determine the provider for this order using the enhanced function with IPStock lookup
-    const provider = await getProviderFromOrder(order);
+    const provider = await resolveRenewalProvider(order);
     console.log(`[RENEWAL-CONFIRM] Final determined provider: ${provider} for order ${orderId}`);
     logger.logInfo('Provider determined', { provider });
 
@@ -406,7 +330,7 @@ export async function POST(request) {
         userId: order.user,
         companyId: companyCheck.companyId,
         renewalTxnId,
-        amount: order.price,
+        amount: renewalPrice,
         paymentMethod: actualPaymentMethod,
         paymentId: cf_payment_id,
         gatewayOrderId: actualPaymentMethod === 'razorpay' ? razorpayPaymentId : renewalTxnId,
@@ -460,7 +384,7 @@ export async function POST(request) {
     // Create renewal payment record with full payment details
     const renewalPayment = {
       paymentId: cf_payment_id,
-      amount: order.price,
+      amount: renewalPrice,
       paidAt: new Date(),
       previousExpiry: currentExpiry,
       newExpiry: newExpiryDate,
@@ -701,7 +625,7 @@ export async function POST(request) {
       renewalDetails: {
         previousExpiry: currentExpiry,
         newExpiry: newExpiryDate,
-        amount: order.price,
+        amount: renewalPrice,
         provider: provider,
         providerRenewalSuccess: providerRenewalSuccess
       }

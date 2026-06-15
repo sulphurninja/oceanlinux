@@ -3,10 +3,17 @@ import connectDB from '@/lib/db';
 import { getDataFromToken } from '@/helper/getDataFromToken';
 import Order from '@/models/orderModel';
 import User from '@/models/userModel';
-import IPStock from '@/models/ipStockModel';
 import { Cashfree } from 'cashfree-pg';
 import Razorpay from 'razorpay';
 import axios from 'axios';
+import { detectCompanyManagedRenewal, resolveRenewalProvider } from '@/lib/companyRenewal';
+import {
+  getDaysUntilExpiry,
+  isWithinRenewalWindow,
+  RENEWAL_DAYS_BEFORE_EXPIRY,
+} from '@/lib/expiryHelper';
+import { isSlotIpOrder, SLOT_IP_NO_RENEWAL_MESSAGE } from '@/lib/slotIpOrder';
+import { resolveOrderRenewalPrice } from '@/lib/orderRenewalPricingServer';
 
 // Initialize Cashfree
 Cashfree.XClientId = process.env.CASHFREE_APP_ID;
@@ -20,96 +27,6 @@ const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
   key_secret: process.env.RAZORPAY_KEY_SECRET
 });
-
-// Enhanced helper function to determine provider from order with IPStock data
-async function getProviderFromOrder(order) {
-  console.log('[RENEWAL-INIT-PROVIDER] === PROVIDER DETECTION START ===');
-  console.log('[RENEWAL-INIT-PROVIDER] Determining provider for order:', {
-    orderId: order._id,
-    explicitProvider: order.provider,
-    hostycareServiceId: order.hostycareServiceId,
-    smartvpsServiceId: order.smartvpsServiceId,
-    advpsServiceId: order.advpsServiceId,
-    ipStockId: order.ipStockId,
-    ipAddress: order.ipAddress,
-    productName: order.productName
-  });
-
-  // ADVPS takes precedence when explicitly tagged or has an advps service id —
-  // its renew window is much tighter than other providers, and we MUST route
-  // renewals through the advps reseller API or the customer's vm won't get
-  // its expiry extended upstream.
-  if (order.provider === 'advps' || order.advpsServiceId) {
-    console.log('[RENEWAL-INIT-PROVIDER] ✅ Detected ADVPS via provider/serviceId');
-    return 'advps';
-  }
-
-  // Primary logic: Check if order has hostycare service ID
-  if (order.hostycareServiceId) {
-    console.log('[RENEWAL-INIT-PROVIDER] ✅ Detected Hostycare via serviceId:', order.hostycareServiceId);
-    return 'hostycare';
-  }
-
-  // Secondary logic: Check if ipStock has smartvps tag
-  if (order.ipStockId) {
-    try {
-      console.log('[RENEWAL-INIT-PROVIDER] Fetching IPStock data for ID:', order.ipStockId);
-      const ipStock = await IPStock.findById(order.ipStockId);
-
-      if (ipStock) {
-        console.log('[RENEWAL-INIT-PROVIDER] IPStock found:', {
-          _id: ipStock._id,
-          name: ipStock.name,
-          tags: ipStock.tags,
-          serverType: ipStock.serverType
-        });
-
-        // Check for both 'smartvps' and 'ocean linux' tags (SmartVPS uses 'ocean linux' tag)
-        const tagsLower = ipStock.tags?.map(t => t.toLowerCase()) || [];
-        if (tagsLower.includes('smartvps') || tagsLower.includes('ocean linux')) {
-          console.log('[RENEWAL-INIT-PROVIDER] ✅ Detected SmartVPS via ipStock tags:', ipStock.tags);
-          return 'smartvps';
-        } else {
-          console.log('[RENEWAL-INIT-PROVIDER] IPStock tags do not include smartvps/ocean linux:', ipStock.tags);
-        }
-      } else {
-        console.log('[RENEWAL-INIT-PROVIDER] IPStock not found for ID:', order.ipStockId);
-      }
-    } catch (ipStockError) {
-      console.error('[RENEWAL-INIT-PROVIDER] Error fetching IPStock:', ipStockError);
-    }
-  } else {
-    console.log('[RENEWAL-INIT-PROVIDER] No ipStockId in order');
-  }
-
-  // Additional fallback: Check smartvps service ID
-  if (order.smartvpsServiceId) {
-    console.log('[RENEWAL-INIT-PROVIDER] ✅ Detected SmartVPS via serviceId:', order.smartvpsServiceId);
-    return 'smartvps';
-  }
-
-  // Check explicit provider field
-  if (order.provider === 'smartvps') {
-    console.log('[RENEWAL-INIT-PROVIDER] ✅ Detected SmartVPS via explicit provider field');
-    return 'smartvps';
-  }
-
-  // Final fallback: Check product name patterns for SmartVPS
-  if (order.productName?.includes('🌊') ||
-      order.productName?.includes('103.195') ||
-      order.ipAddress?.startsWith('103.195') ||
-      order.productName?.includes('🏅')) {
-    console.log('[RENEWAL-INIT-PROVIDER] ✅ Detected SmartVPS via patterns');
-    console.log('[RENEWAL-INIT-PROVIDER] Product name:', order.productName);
-    console.log('[RENEWAL-INIT-PROVIDER] IP address:', order.ipAddress);
-    return 'smartvps';
-  }
-
-  // Default to oceanlinux
-  console.log('[RENEWAL-INIT-PROVIDER] ⚪ Defaulting to OceanLinux');
-  console.log('[RENEWAL-INIT-PROVIDER] === PROVIDER DETECTION END ===');
-  return 'oceanlinux';
-}
 
 export async function POST(request) {
   await connectDB();
@@ -140,29 +57,32 @@ export async function POST(request) {
       return NextResponse.json({ message: 'Order not found' }, { status: 404 });
     }
 
+    if (isSlotIpOrder(order)) {
+      return NextResponse.json({ message: SLOT_IP_NO_RENEWAL_MESSAGE }, { status: 400 });
+    }
+
     // 5. Check if order is eligible for renewal
     if (!order.expiryDate) {
       return NextResponse.json({ message: 'Order has no expiry date' }, { status: 400 });
     }
 
-    const now = new Date();
-    const expiry = new Date(order.expiryDate);
-    const diffTime = expiry.getTime() - now.getTime();
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    const diffDays = getDaysUntilExpiry(order.expiryDate);
 
-    // Allow renewal if expiring within 30 days or expired but not more than 7 days ago
-    if (diffDays > 30 || diffDays < -7) {
+    // ADVPS + company manual: renew opens within 2 days of expiry (7-day grace after).
+    if (!isWithinRenewalWindow(order.expiryDate)) {
       return NextResponse.json({
-        message: 'Order is not eligible for renewal at this time'
+        message: diffDays > RENEWAL_DAYS_BEFORE_EXPIRY
+          ? `Renewal opens within ${RENEWAL_DAYS_BEFORE_EXPIRY} days of expiry. Please come back in ${diffDays - RENEWAL_DAYS_BEFORE_EXPIRY} day(s).`
+          : `This service has been expired for too long and can no longer be renewed. Please contact support.`,
       }, { status: 400 });
     }
 
-    // 6. Determine the provider for this order using enhanced detection
-    const provider = await getProviderFromOrder(order);
-    console.log('[RENEWAL-INIT] Final determined provider for order:', provider);
+    const companyCheck = await detectCompanyManagedRenewal(order);
+    const provider = await resolveRenewalProvider(order);
+    console.log('[RENEWAL-INIT] Provider:', provider, 'companyManaged:', companyCheck.isCompany);
 
     // 7. For SmartVPS orders, validate that we have the necessary identifiers
-    if (provider === 'smartvps') {
+    if (provider === 'smartvps' && !companyCheck.isCompany) {
       const serviceIdentifier = order.smartvpsServiceId || order.ipAddress;
       if (!serviceIdentifier) {
         console.log('[RENEWAL-INIT] SmartVPS order missing service identifier');
@@ -173,10 +93,7 @@ export async function POST(request) {
       console.log('[RENEWAL-INIT] SmartVPS renewal for service:', serviceIdentifier);
     }
 
-    // 7a. ADVPS guard — tighter window + required identifiers.
-    // ADVPS docs: services are eligible for renewal only when expiring within
-    // 5 days or up to 1 day after expiry. We block initiation outside this
-    // window so the customer doesn't get charged for a renewal advps will reject.
+    // 7a. ADVPS — require upstream identifiers (window is shared above).
     if (provider === 'advps') {
       if (!order.advpsServiceId || !order.advpsOrderId) {
         console.log('[RENEWAL-INIT] ADVPS order missing identifiers', {
@@ -185,14 +102,6 @@ export async function POST(request) {
         });
         return NextResponse.json({
           message: 'This server is not yet provisioned upstream. Please wait a few minutes and try again.',
-        }, { status: 400 });
-      }
-      if (diffDays > 5 || diffDays < -1) {
-        console.log(`[RENEWAL-INIT] ADVPS renewal window violated: diffDays=${diffDays}`);
-        return NextResponse.json({
-          message: diffDays > 5
-            ? `Renewal opens within 5 days of expiry. Please come back in ${diffDays - 5} day(s).`
-            : 'This service has been expired for too long and can no longer be renewed. Please contact support.',
         }, { status: 400 });
       }
       console.log('[RENEWAL-INIT] ADVPS renewal eligible:', {
@@ -206,7 +115,8 @@ export async function POST(request) {
     const renewalTxnId = `RENEWAL_${Date.now()}_${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
 
     // 9. Use the original order price for renewal
-    const renewalPrice = order.price;
+    const renewalPrice = await resolveOrderRenewalPrice(order);
+    console.log(`[RENEWAL-INIT] Renewal price: ₹${renewalPrice} (paid=${order.price}, originalPrice=${order.originalPrice ?? 'n/a'}, promoDiscount=${order.promoDiscount ?? 0})`);
 
     // Helper function to sanitize strings for Cashfree (remove emojis and special chars)
     const sanitizeForCashfree = (str) => {

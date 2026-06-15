@@ -731,7 +731,7 @@ export default function CompaniesPage() {
             Companies
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Manage partner companies that can update their stock availability and order credentials.
+            Manage partner companies that can update their stock availability, order credentials, and approve customer renewals.
           </p>
         </div>
         <Button onClick={() => setShowCreate(true)} className="gap-2">

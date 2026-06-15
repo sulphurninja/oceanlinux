@@ -8,7 +8,9 @@ import crypto from 'crypto';
 import { calculateExpiryDate, calculateRenewalExpiryDate } from '@/lib/expiryHelper';
 import { assignPanelCredentials } from '@/lib/panelCredentials';
 import { decrementIpStockForOrder } from '@/lib/ipStockAvailability';
-import { detectCompanyManagedRenewal } from '@/lib/companyRenewal';
+import { detectCompanyManagedRenewal, resolveRenewalProvider } from '@/lib/companyRenewal';
+import { isSlotIpOrder, SLOT_IP_NO_RENEWAL_MESSAGE } from '@/lib/slotIpOrder';
+import { resolveOrderRenewalPrice } from '@/lib/orderRenewalPricingServer';
 import {
   findDispatchTarget,
   confirmRechargeFromWebhook,
@@ -314,64 +316,6 @@ export async function POST(request) {
   }
 }
 
-// Helper function to determine provider from order with IPStock data
-async function getProviderFromOrder(order) {
-  console.log('[WEBHOOK-RENEWAL-PROVIDER] Determining provider for order:', order._id);
-
-  // ADVPS first — must beat any pattern fallbacks below.
-  if (order.provider === 'advps' || order.advpsServiceId) {
-    console.log('[WEBHOOK-RENEWAL-PROVIDER] ✅ Detected ADVPS via provider/serviceId');
-    return 'advps';
-  }
-
-  // Primary logic: Check if order has hostycare service ID
-  if (order.hostycareServiceId) {
-    console.log('[WEBHOOK-RENEWAL-PROVIDER] ✅ Detected Hostycare via serviceId');
-    return 'hostycare';
-  }
-
-  // Check explicit provider field
-  if (order.provider === 'smartvps') {
-    console.log('[WEBHOOK-RENEWAL-PROVIDER] ✅ Detected SmartVPS via explicit provider field');
-    return 'smartvps';
-  }
-
-  // Secondary logic: Check if ipStock has smartvps or ocean linux tag
-  if (order.ipStockId) {
-    try {
-      const ipStock = await IPStock.findById(order.ipStockId);
-      if (ipStock && ipStock.tags) {
-        const tagsLower = ipStock.tags.map(t => t.toLowerCase());
-        if (tagsLower.includes('smartvps') || tagsLower.includes('ocean linux')) {
-          console.log('[WEBHOOK-RENEWAL-PROVIDER] ✅ Detected SmartVPS via ipStock tags:', ipStock.tags);
-          return 'smartvps';
-        }
-      }
-    } catch (ipStockError) {
-      console.error('[WEBHOOK-RENEWAL-PROVIDER] Error fetching IPStock:', ipStockError);
-    }
-  }
-
-  // Additional fallback: Check smartvps service ID
-  if (order.smartvpsServiceId) {
-    console.log('[WEBHOOK-RENEWAL-PROVIDER] ✅ Detected SmartVPS via serviceId');
-    return 'smartvps';
-  }
-
-  // Final fallback: Check product name patterns for SmartVPS
-  if (order.productName?.includes('🌊') ||
-    order.productName?.includes('103.195') ||
-    order.ipAddress?.startsWith('103.195') ||
-    order.productName?.includes('🏅')) {
-    console.log('[WEBHOOK-RENEWAL-PROVIDER] ✅ Detected SmartVPS via patterns');
-    return 'smartvps';
-  }
-
-  // Default to oceanlinux
-  console.log('[WEBHOOK-RENEWAL-PROVIDER] ⚪ Defaulting to OceanLinux');
-  return 'oceanlinux';
-}
-
 // Handle renewal payment webhooks
 async function handleRenewalWebhook(renewalTxnId, payment, webhookStartTime) {
   console.log(`[WEBHOOK-RENEWAL] 🔄 Processing renewal webhook for: ${renewalTxnId}`);
@@ -393,6 +337,16 @@ async function handleRenewalWebhook(renewalTxnId, payment, webhookStartTime) {
     console.log(`[WEBHOOK-RENEWAL] ✅ Found order: ${order._id}`);
     console.log(`[WEBHOOK-RENEWAL] Product: ${order.productName}`);
     console.log(`[WEBHOOK-RENEWAL] Current expiry: ${order.expiryDate}`);
+
+    if (isSlotIpOrder(order)) {
+      console.error(`[WEBHOOK-RENEWAL] ❌ Slot IP order cannot be renewed: ${order._id}`);
+      return NextResponse.json(
+        { success: false, message: SLOT_IP_NO_RENEWAL_MESSAGE },
+        { status: 400 }
+      );
+    }
+
+    const renewalPrice = await resolveOrderRenewalPrice(order);
 
     // Initialize logger
     logger = new RenewalLogger(order, renewalTxnId, 'webhook');
@@ -418,10 +372,10 @@ async function handleRenewalWebhook(renewalTxnId, payment, webhookStartTime) {
     }
 
     // Determine provider
-    const provider = await getProviderFromOrder(order);
+    const provider = await resolveRenewalProvider(order);
     console.log(`[WEBHOOK-RENEWAL] Provider: ${provider}`);
     logger.logInfo('Provider determined', { provider });
-    logger.setPaymentInfo('cashfree', payment.payment.cf_payment_id, order.price);
+    logger.setPaymentInfo('cashfree', payment.payment.cf_payment_id, renewalPrice);
 
     // Calculate new expiry based on the number of days in the base month
     const newExpiryDate = calculateRenewalExpiryDate(order.expiryDate);
@@ -444,7 +398,7 @@ async function handleRenewalWebhook(renewalTxnId, payment, webhookStartTime) {
           userId: order.user,
           companyId: companyCheck.companyId,
           renewalTxnId,
-          amount: order.price,
+          amount: renewalPrice,
           paymentMethod: 'cashfree',
           paymentId: payment.payment.cf_payment_id,
           gatewayOrderId: renewalTxnId,
@@ -579,7 +533,7 @@ async function handleRenewalWebhook(renewalTxnId, payment, webhookStartTime) {
     // Create renewal payment record
     const renewalPayment = {
       paymentId: payment.payment.cf_payment_id,
-      amount: order.price,
+      amount: renewalPrice,
       paidAt: new Date(),
       previousExpiry: currentExpiry,
       newExpiry: newExpiryDate,

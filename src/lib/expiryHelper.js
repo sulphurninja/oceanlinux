@@ -35,3 +35,23 @@ export function calculateRenewalExpiryDate(currentExpiry) {
   const base = current > now ? current : now;
   return calculateExpiryDate(base);
 }
+
+/** Renew button opens when this many days or fewer remain (inclusive). */
+export const RENEWAL_DAYS_BEFORE_EXPIRY = 2;
+
+/** Grace period after expiry during which renewal is still allowed. */
+export const RENEWAL_DAYS_AFTER_EXPIRY = 7;
+
+export function getDaysUntilExpiry(expiryDate) {
+  if (!expiryDate) return 0;
+  const now = new Date();
+  const expiry = new Date(expiryDate);
+  const diffTime = expiry.getTime() - now.getTime();
+  return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+}
+
+/** True when renewal is allowed (ADVPS + company manual use the same window). */
+export function isWithinRenewalWindow(expiryDate) {
+  const daysLeft = getDaysUntilExpiry(expiryDate);
+  return daysLeft <= RENEWAL_DAYS_BEFORE_EXPIRY && daysLeft >= -RENEWAL_DAYS_AFTER_EXPIRY;
+}

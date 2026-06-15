@@ -33,7 +33,8 @@ import {
   AlertCircle,
   TrendingUp,
   FileText,
-  Wallet
+  Wallet,
+  KeyRound,
 } from "lucide-react";
 import { toast } from 'sonner';
 import Link from "next/link";
@@ -87,6 +88,7 @@ export default function AdminUsersPage() {
   const [showUserDialog, setShowUserDialog] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [walletUser, setWalletUser] = useState<User | null>(null);
+  const [passwordUser, setPasswordUser] = useState<User | null>(null);
   const [bulkActionLoading, setBulkActionLoading] = useState(false);
 
   useEffect(() => {
@@ -513,9 +515,9 @@ export default function AdminUsersPage() {
                         <Users className="w-4 h-4 mr-2" />
                         Change Role
                       </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => handleUserAction(user._id, 'resetPassword')}>
-                        <RefreshCw className="w-4 h-4 mr-2" />
-                        Reset Password
+                      <DropdownMenuItem onClick={() => setPasswordUser(user)}>
+                        <KeyRound className="w-4 h-4 mr-2" />
+                        Change Password
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
@@ -591,6 +593,104 @@ export default function AdminUsersPage() {
           )}
         </DialogContent>
       </Dialog>
+      {/* Change Password Dialog */}
+      <Dialog open={!!passwordUser} onOpenChange={(open) => !open && setPasswordUser(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Change Password</DialogTitle>
+          </DialogHeader>
+          {passwordUser && (
+            <ChangePasswordForm user={passwordUser} onClose={() => setPasswordUser(null)} />
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function ChangePasswordForm({ user, onClose }: { user: User; onClose: () => void }) {
+  const [saving, setSaving] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+
+  const handleSave = async () => {
+    if (newPassword.trim().length < 6) {
+      toast.error('Password must be at least 6 characters');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      toast.error('Passwords do not match');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const response = await fetch(`/api/admin/users/${user._id}/password`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: newPassword.trim() }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        toast.error(data.message || 'Failed to update password');
+        return;
+      }
+      toast.success('Password updated successfully');
+      setNewPassword('');
+      setConfirmPassword('');
+      onClose();
+    } catch (error) {
+      console.error('Error updating password:', error);
+      toast.error('Failed to update password');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-lg border bg-muted/30 p-3 text-sm">
+        <p className="font-medium">{user.name}</p>
+        <p className="text-muted-foreground">{user.email}</p>
+      </div>
+
+      <p className="text-xs text-muted-foreground">
+        Passwords are encrypted and cannot be viewed. Enter a new password below.
+      </p>
+
+      <div className="space-y-3">
+        <div className="space-y-2">
+          <label className="text-sm font-medium">New password</label>
+          <Input
+            type="password"
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            placeholder="At least 6 characters"
+            autoComplete="new-password"
+          />
+        </div>
+        <div className="space-y-2">
+          <label className="text-sm font-medium">Confirm password</label>
+          <Input
+            type="password"
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            placeholder="Re-enter new password"
+            autoComplete="new-password"
+          />
+        </div>
+      </div>
+
+      <DialogFooter className="gap-2 sm:gap-0">
+        <Button variant="outline" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button onClick={handleSave} disabled={saving}>
+          {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+          Update Password
+        </Button>
+      </DialogFooter>
     </div>
   );
 }

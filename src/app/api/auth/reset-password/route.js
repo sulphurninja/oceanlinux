@@ -2,7 +2,7 @@ import connectDB from '@/lib/db';
 import User from '@/models/userModel';
 import PasswordReset from '@/models/passwordResetModel';
 import crypto from 'crypto';
-import bcrypt from 'bcryptjs';
+import { hashUserPassword } from '@/lib/userPassword';
 
 export async function POST(request) {
   try {
@@ -52,11 +52,7 @@ export async function POST(request) {
       });
     }
 
-    // Hash the new password
-    const hashedPassword = await bcrypt.hash(newPassword, 12);
-
-    // Update user password
-    user.password = hashedPassword;
+    user.password = await hashUserPassword(newPassword);
     await user.save();
 
     // Mark reset token as used

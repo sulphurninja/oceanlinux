@@ -1,11 +1,11 @@
 // src/pages/api/signup.js
 
-import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import User from '../../../models/userModel'; // Adjust the import path to your User model
 import connectDB from '../../../lib/db'; // Adjust the import path for database connection
 import { NextRequest, NextResponse } from 'next/server';
 import EmailService from '../../../lib/sendgrid';
+import { hashUserPassword } from '@/lib/userPassword';
 
 export async function POST(request) {
     await connectDB();
@@ -25,10 +25,8 @@ export async function POST(request) {
             });
         }
 
-        // Hash password before storing
-        const hashedPassword = await bcrypt.hash(password, 12);
+        const hashedPassword = await hashUserPassword(password);
 
-        // Create new user
         const newUser = await User.create({
             name,
             email,

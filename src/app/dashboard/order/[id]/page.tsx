@@ -36,7 +36,8 @@ import {
   Wallet,
   LifeBuoy,
   Download,
-  Hash
+  Hash,
+  Building2,
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -49,6 +50,8 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { ADVPS_REBUILD_LIMIT, getAdvpsRebuildUsage } from '@/lib/advpsRebuildLimit';
+import { isWithinRenewalWindow } from '@/lib/expiryHelper';
+import { getOrderRenewalPrice, getOrderRenewalPriceNote, getCurrentListPriceFromStock } from '@/lib/orderRenewalPricing';
 import { useSessionAlert } from '@/components/session-alert';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -79,6 +82,8 @@ interface IPStock {
     companyName?: string;
     label?: string;
   } | null;
+  company?: string | null;
+  memoryOptions?: Record<string, { price?: number }>;
   // ... other ipStock fields
 }
 
@@ -89,9 +94,7 @@ type SlotIpConnection = {
   password: string;
 };
 
-function isSlotIpOrder(order: Order): boolean {
-  return order.provider === 'slotip' || !!order.slotIpPackageId;
-}
+import { isSlotIpOrder } from '@/lib/slotIpOrder';
 
 function parseSlotIpConnection(order: Order): SlotIpConnection | null {
   const raw = (order.ipAddress || '').trim();
@@ -134,6 +137,9 @@ interface Order {
   memory: string;
   status: string;
   price: number;
+  originalPrice?: number;
+  promoCode?: string;
+  promoDiscount?: number;
   ipAddress?: string;
   username?: string;
   password?: string;
@@ -1264,17 +1270,7 @@ const OrderDetails = () => {
   const isRenewalEligible = (order: Order | null) => {
     if (!order || !order.expiryDate) return false;
     if (isSlotIpOrder(order)) return false;
-    const daysLeft = getDaysUntilExpiry(order.expiryDate);
-
-    // ADVPS upstream enforces a tighter window: services are renewable only
-    // when expiring within 5 days OR up to 1 day after expiry. Show the renew
-    // button only inside that window so users don't pay for a renewal advps
-    // would refuse.
-    if (order.provider === 'advps' || order.advpsServiceId) {
-      return daysLeft <= 5 && daysLeft >= -1;
-    }
-
-    return daysLeft <= 2 && daysLeft >= -7;
+    return isWithinRenewalWindow(order.expiryDate);
   };
 
 
@@ -1327,7 +1323,7 @@ const OrderDetails = () => {
     const isExpiredService = daysLeft < 0;
 
     const confirmed = confirm(
-      `Renew service for ₹${order.price}?\n\n` +
+      `Renew service for ₹${renewalPrice}?\n\n` +
       `Service: ${order.productName}\n` +
       `Configuration: ${order.memory}\n` +
       `Current Expiry: ${formatDate(order.expiryDate)}\n` +
@@ -1464,7 +1460,11 @@ const OrderDetails = () => {
             const confirmData = await confirmRes.json();
 
             if (confirmRes.ok && confirmData.success) {
-              toast.success("Service renewed successfully!");
+              if (confirmData.companyApproval?.status === 'pending') {
+                toast.success('Payment received — your provider will approve the renewal shortly.');
+              } else {
+                toast.success('Service renewed successfully!');
+              }
               await fetchOrder();
             } else {
               toast.error("Payment successful but renewal processing failed. Please contact support.");
@@ -1605,12 +1605,18 @@ const OrderDetails = () => {
     }
 
     const currentStatus = provisioningStatus || status;
-    const isActiveStatus = status.toLowerCase() === 'completed' || currentStatus.toLowerCase() === 'active';
+    const companyAutomated = isOrderCompanyAutomated(order, ipStock);
+    const hasAssignedIp = !!(order?.ipAddress?.trim());
+    const isActiveStatus =
+      status.toLowerCase() === 'completed' ||
+      currentStatus.toLowerCase() === 'active' ||
+      (companyAutomated && hasAssignedIp);
     const canShowPowerState =
       (
         provider === 'hostycare' ||
         provider === 'smartvps' ||
-        (provider === 'advps' && !!order?.advpsServiceId)
+        (provider === 'advps' && !!order?.advpsServiceId) ||
+        (companyAutomated && hasAssignedIp)
       ) &&
       isActiveStatus;
 
@@ -1628,12 +1634,16 @@ const OrderDetails = () => {
       );
     }
 
-    // Check for configuration errors first
-    if (order?.provisioningError &&
+    // Legacy hostycare config errors — skip for company-automated orders that
+    // already have a live IP on the reseller / Virtualizor panel.
+    if (
+      !companyAutomated &&
+      order?.provisioningError &&
       (order.provisioningError.includes('Missing hostycareProductId') ||
         order.provisioningError.includes('CONFIG:') ||
         order.provisioningError.includes('Memory configuration not found') ||
-        order.provisioningError.includes('lacks hostycareProductId'))) {
+        order.provisioningError.includes('lacks hostycareProductId'))
+    ) {
       return (
         <Badge className="bg-muted text-muted-foreground border-border">
           <Settings2 className="w-3 h-3 mr-1" />
@@ -1644,14 +1654,16 @@ const OrderDetails = () => {
 
     switch (currentStatus.toLowerCase()) {
       case 'active':
-        // If we're here, powerState is unknown - show loading or default
-        if (powerStateLoading && (provider === 'hostycare' || provider === 'smartvps' || provider === 'advps')) {
+        if (powerStateLoading && canShowPowerState) {
           return (
             <Badge className="bg-muted text-muted-foreground border-border">
               <Loader2 className="w-3 h-3 mr-1 animate-spin" />
               Checking...
             </Badge>
           );
+        }
+        if (canShowPowerState) {
+          return getPowerStateBadge();
         }
         return (
           <Badge className="bg-primary/10 text-green-500 border-primary/20">
@@ -1661,6 +1673,9 @@ const OrderDetails = () => {
         );
       case 'pending':
       case 'confirmed':
+        if (companyAutomated && hasAssignedIp) {
+          return getPowerStateBadge();
+        }
         return (
           <Badge className="bg-muted text-muted-foreground border-border">
             <Clock className="w-3 h-3 mr-1" />
@@ -1784,6 +1799,9 @@ const OrderDetails = () => {
     provider === 'smartvps' ||
     (provider === 'advps' && !!order.advpsServiceId) ||
     isOrderCompanyAutomated(order, ipStock);
+  const currentListPrice = getCurrentListPriceFromStock(ipStock, order.memory);
+  const renewalPrice = getOrderRenewalPrice(order, currentListPrice);
+  const renewalPriceNote = getOrderRenewalPriceNote(order, currentListPrice);
 
   return (
     <div className='min-h-screen bg-background'>
@@ -1824,9 +1842,11 @@ const OrderDetails = () => {
                 variant="outline"
                 size="sm"
                 onClick={() => {
-                  // For ADVPS orders, do a full provider sync (fetches live credentials from ADVPS)
                   if (order && getProviderFromOrder(order, ipStock) === 'advps' && order.advpsServiceId) {
                     loadServiceDetails();
+                  } else if (order && usesLivePowerUi) {
+                    void fetchServerPowerState();
+                    void fetchOrder();
                   } else {
                     fetchOrder();
                   }
@@ -2188,7 +2208,9 @@ const OrderDetails = () => {
                               {usesLivePowerUi ? 'Power Status' : 'Status'}
                             </p>
                             <div className="mt-1">
-                              {getStatusBadge(order.status, order.provisioningStatus, order.lastAction, order)}
+                              {usesLivePowerUi
+                                ? getPowerStateBadge()
+                                : getStatusBadge(order.status, order.provisioningStatus, order.lastAction, order)}
                             </div>
                           </div>
                         </div>
@@ -3154,8 +3176,8 @@ const OrderDetails = () => {
                   </Card>
                 )}
 
-                {/* Billing & Renewal - Hide for manual orders (oceanlinux provider) */}
-                {order.expiryDate && provider !== 'oceanlinux' && (
+                {/* Billing & Renewal — show for all billable orders (incl. manual company stocks) */}
+                {order.expiryDate && !isSlotIpOrder(order) && (
                   <Card className="border-border hover:shadow-md transition-shadow">
                     <CardHeader className="pb-3">
                       <CardTitle className="flex items-center gap-2 text-base lg:text-lg">
@@ -3250,9 +3272,31 @@ const OrderDetails = () => {
 
                         {/* Service Price */}
                         <div className="flex items-center justify-between p-2.5 bg-background/50 rounded-md border border-border mb-3">
-                          <span className="text-xs text-muted-foreground">Service Price</span>
-                          <span className="font-semibold text-sm">₹{order.price}/month</span>
+                          <span className="text-xs text-muted-foreground">Renewal Rate</span>
+                          <span className="font-semibold text-sm">₹{renewalPrice}/month</span>
                         </div>
+
+                        {renewalPriceNote && (
+                          <p className="text-[11px] text-muted-foreground mb-3 px-0.5">
+                            {renewalPriceNote}
+                          </p>
+                        )}
+
+                        {order.price < renewalPrice && (
+                          <div className="flex items-center justify-between p-2.5 bg-muted/40 rounded-md border border-border mb-3 text-xs">
+                            <span className="text-muted-foreground">First purchase paid</span>
+                            <span className="font-medium">₹{order.price}</span>
+                          </div>
+                        )}
+
+                        {provider === 'oceanlinux' && !!ipStock?.company && !hasCompanyAnyAutomation(ipStock) && !order.pendingRenewal?.awaitingCompanyApproval && (
+                          <div className="flex items-start gap-2 mb-3 p-3 rounded-md bg-primary/5 border border-primary/20">
+                            <Building2 className="h-4 w-4 text-primary mt-0.5 flex-shrink-0" />
+                            <p className="text-xs text-muted-foreground">
+                              This service is managed by your provider. After you pay, they approve the renewal from their company dashboard before your expiry is extended.
+                            </p>
+                          </div>
+                        )}
 
                         {/* Awaiting company approval banner — payment received,
                             extension blocked until the linked company approves. */}
@@ -3329,7 +3373,7 @@ const OrderDetails = () => {
                               ) : (
                                 <>
                                   <CreditCard className="h-4 w-4" />
-                                  Renew for ₹{order.price}
+                                  Renew for ₹{renewalPrice}
                                 </>
                               )}
                             </Button>
@@ -3340,7 +3384,7 @@ const OrderDetails = () => {
                           <div className="flex items-start gap-2 mt-3 p-2 bg-destructive/10 border border-destructive/20 rounded-md">
                             <AlertTriangle className="h-3.5 w-3.5 text-destructive mt-0.5 flex-shrink-0" />
                             <p className="text-xs text-destructive/90">
-                              Service renewal available for up to 7 days after expiry
+                              Renewal opens within 2 days of expiry (available for up to 7 days after expiry)
                             </p>
                           </div>
                         )}

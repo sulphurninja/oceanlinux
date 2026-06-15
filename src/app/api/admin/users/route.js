@@ -178,12 +178,6 @@ export async function PATCH(request) {
                 if (data.email) updateData.email = data.email;
                 if (data.phone) updateData.phone = data.phone;
                 break;
-            case 'resetPassword':
-                // Generate a temporary password
-                const tempPassword = Math.random().toString(36).slice(-8);
-                updateData.password = tempPassword; // You should hash this in production
-                updateData.mustChangePassword = true;
-                break;
             default:
                 return new Response(JSON.stringify({ message: 'Invalid action' }), {
                     status: 400,

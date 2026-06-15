@@ -1,10 +1,10 @@
 // src/pages/api/login.js
 
-import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import User from '../../../models/userModel'
-import connectDB from '../../../lib/db'; // Make sure to implement dbConnect to handle your database connection
+import connectDB from '../../../lib/db';
 import { NextRequest, NextResponse } from 'next/server';
+import { verifyUserPassword } from '@/lib/userPassword';
 
 export async function POST(request) {
     await connectDB();
@@ -24,24 +24,7 @@ export async function POST(request) {
             });
         }
 
-        // Verify password using bcrypt
-        let isPasswordValid = false;
-        let needsPasswordUpgrade = false;
-
-        try {
-            // Try bcrypt comparison first (for properly hashed passwords)
-            isPasswordValid = await bcrypt.compare(password, existingUser.password);
-        } catch (bcryptError) {
-            // If bcrypt fails, password might be plain text (legacy users)
-            console.log('Bcrypt comparison failed, checking plain text fallback');
-        }
-
-        // Fallback: Check if it's a plain text password (for users created before bcrypt implementation)
-        if (!isPasswordValid && password === existingUser.password) {
-            console.log('Plain text password match - will upgrade to bcrypt');
-            isPasswordValid = true;
-            needsPasswordUpgrade = true;
-        }
+        const isPasswordValid = await verifyUserPassword(password, existingUser.password);
 
         if (!isPasswordValid) {
             return new NextResponse(JSON.stringify({ message: 'Invalid credentials.' }), {
@@ -50,15 +33,6 @@ export async function POST(request) {
                     'Content-Type': 'application/json'
                 }
             });
-        }
-
-        // If user had plain text password, upgrade it to bcrypt hash
-        if (needsPasswordUpgrade) {
-            console.log('Upgrading plain text password to bcrypt hash');
-            const hashedPassword = await bcrypt.hash(password, 12);
-            existingUser.password = hashedPassword;
-            await existingUser.save();
-            console.log('Password upgraded successfully');
         }
 
         // Generate token

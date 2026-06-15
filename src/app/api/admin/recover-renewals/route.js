@@ -6,6 +6,8 @@ import { Cashfree } from 'cashfree-pg';
 import Razorpay from 'razorpay';
 import { getDataFromToken } from '@/helper/getDataFromToken';
 import User from '@/models/userModel';
+import { resolveOrderRenewalPrice } from '@/lib/orderRenewalPricingServer';
+import { isSlotIpOrder } from '@/lib/slotIpOrder';
 
 const HostycareAPI = require('@/services/hostycareApi');
 const SmartVPSAPI = require('@/services/smartvpsApi');
@@ -89,6 +91,10 @@ async function checkPaymentStatus(pendingRenewal) {
 
 // Process a single renewal
 async function processRenewal(order, paymentInfo) {
+  if (isSlotIpOrder(order)) {
+    throw new Error('Slot IP orders cannot be renewed');
+  }
+
   const provider = await getProviderFromOrder(order);
   const pendingRenewal = order.pendingRenewal;
 
@@ -126,10 +132,12 @@ async function processRenewal(order, paymentInfo) {
     providerRenewalSuccess = true; // OceanLinux - no API call needed
   }
 
+  const resolvedRenewalAmount = await resolveOrderRenewalPrice(order);
+
   // Create renewal record
   const renewalPayment = {
     paymentId: paymentInfo.paymentId,
-    amount: pendingRenewal.amount || order.price,
+    amount: pendingRenewal.amount || resolvedRenewalAmount,
     paidAt: new Date(),
     previousExpiry: currentExpiry,
     newExpiry: newExpiryDate,

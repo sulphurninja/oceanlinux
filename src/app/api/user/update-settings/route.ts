@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDataFromToken } from '@/helper/getDataFromToken';
 import connectDB from '@/lib/db';
 import User from '@/models/userModel';
+import { hashUserPassword, verifyUserPassword } from '@/lib/userPassword';
 
 export async function PUT(request: NextRequest) {
   try {
@@ -53,8 +54,8 @@ export async function PUT(request: NextRequest) {
         return NextResponse.json({ error: 'Current password is required' }, { status: 400 });
       }
 
-      // Verify current password (direct comparison)
-      if (currentPassword !== user.password) {
+      const isCurrentValid = await verifyUserPassword(currentPassword, user.password);
+      if (!isCurrentValid) {
         return NextResponse.json({ error: 'Current password is incorrect' }, { status: 400 });
       }
 
@@ -63,8 +64,7 @@ export async function PUT(request: NextRequest) {
         return NextResponse.json({ error: 'New password must be at least 6 characters long' }, { status: 400 });
       }
 
-      // Store new password directly (no hashing)
-      updateData.password = newPassword;
+      updateData.password = await hashUserPassword(newPassword);
     }
 
     // Update user

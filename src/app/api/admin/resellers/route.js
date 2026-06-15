@@ -3,7 +3,7 @@ import connectDB from '@/lib/db';
 import Reseller from '@/models/resellerModel';
 import User from '@/models/userModel';
 import crypto from 'crypto';
-import bcrypt from 'bcryptjs';
+import { hashUserPassword } from '@/lib/userPassword';
 
 // Generate API credentials
 const generateCredentials = () => {
@@ -95,9 +95,7 @@ export async function POST(request) {
 
         if (!user) {
             // Create new user for the reseller
-            const salt = await bcrypt.genSalt(10);
-            const hashedPassword = await bcrypt.hash(password, salt);
-
+            const hashedPassword = await hashUserPassword(password);
             user = await User.create({
                 name: businessName,
                 email,

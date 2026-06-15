@@ -59,6 +59,14 @@ import {
     isServerListOrder,
     getServerDeliveryStatus,
 } from '@/lib/orderDeliveryStatus';
+import { isWithinRenewalWindow } from '@/lib/expiryHelper';
+import {
+    canShowLivePowerState,
+    fetchPowerStatesForOrders,
+    orderNeedsIpStockForPowerState,
+    type IPStockLike,
+    type PowerState,
+} from '@/lib/orderPowerState';
 
 interface Order {
     _id: string;
@@ -149,7 +157,10 @@ const ViewLinux = () => {
     const [searchQuery, setSearchQuery] = useState('');
     const [filteredOrders, setFilteredOrders] = useState<Order[]>([]);
     const [loading, setLoading] = useState(true);
+    const [refreshing, setRefreshing] = useState(false);
     const [actionBusy, setActionBusy] = useState<string | null>(null);
+    const [ipStockMap, setIpStockMap] = useState<Record<string, IPStockLike>>({});
+    const [powerStates, setPowerStates] = useState<Record<string, PowerState | 'loading'>>({});
 
     // Filter states
     const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -161,18 +172,83 @@ const ViewLinux = () => {
         fetchOrders();
     }, []);
 
-    const fetchOrders = async () => {
-        setLoading(true);
+    const loadIpStocks = async (orderList: Order[]) => {
+        const ids = [
+            ...new Set(
+                orderList
+                    .filter(orderNeedsIpStockForPowerState)
+                    .map((order) => order.ipStockId)
+                    .filter((id): id is string => !!id)
+            ),
+        ];
+
+        if (ids.length === 0) {
+            return {};
+        }
+
+        const entries = await Promise.all(
+            ids.map(async (id) => {
+                try {
+                    const res = await fetch(`/api/ipstock/${id}`);
+                    if (!res.ok) return [id, null] as const;
+                    return [id, (await res.json()) as IPStockLike] as const;
+                } catch {
+                    return [id, null] as const;
+                }
+            })
+        );
+
+        const map = Object.fromEntries(
+            entries.filter((entry): entry is [string, IPStockLike] => !!entry[1])
+        );
+        setIpStockMap((prev) => ({ ...prev, ...map }));
+        return map;
+    };
+
+    const loadServerPowerData = async (serverOrders: Order[]) => {
+        const stocks = await loadIpStocks(serverOrders);
+
+        await fetchPowerStatesForOrders(
+            serverOrders,
+            stocks,
+            (orderId, state) => {
+                setPowerStates((prev) => ({ ...prev, [orderId]: state }));
+            },
+            (orderIds) => {
+                setPowerStates((prev) => {
+                    const next = { ...prev };
+                    for (const id of orderIds) next[id] = 'loading';
+                    return next;
+                });
+            }
+        );
+    };
+
+    const fetchOrders = async (isRefresh = false) => {
+        if (isRefresh) {
+            setRefreshing(true);
+        } else {
+            setLoading(true);
+        }
+
         try {
             const response = await fetch('/api/orders/me');
             if (!response.ok) throw new Error('Failed to fetch orders');
             const data = await response.json();
             setOrders(data);
+
+            const serverOrders = (data as Order[]).filter(isServerListOrder);
+            // Show the list immediately; power status loads in the background.
+            void loadServerPowerData(serverOrders);
         } catch (error) {
             console.error('Failed to fetch orders:', error);
             router.push('/login');
         } finally {
-            setLoading(false);
+            if (isRefresh) {
+                setRefreshing(false);
+            } else {
+                setLoading(false);
+            }
         }
     };
 
@@ -311,8 +387,8 @@ const ViewLinux = () => {
 
     const isRenewalEligible = (order: Order | null) => {
         if (!order || !order.expiryDate) return false;
-        const daysLeft = getDaysUntilExpiryLocal(order.expiryDate);
-        return daysLeft <= 30 && daysLeft >= -7;
+        if (order.slotIpPackageId || order.provider === 'slotip') return false;
+        return isWithinRenewalWindow(order.expiryDate);
     };
 
     const isExpired = (order: Order | null) => {
@@ -320,8 +396,59 @@ const ViewLinux = () => {
         return getDaysUntilExpiry(order.expiryDate) < 0;
     };
 
-const getStatusBadge = (status: string, provisioningStatus?: string, lastAction?: string, order?: Order) => {
-    if (status.toLowerCase() === 'completed') {
+    const getPowerStateBadge = (powerState: PowerState | 'loading' | undefined) => {
+        if (powerState === 'loading' || powerState === undefined) {
+            return (
+                <Badge className="bg-muted text-muted-foreground border-border">
+                    <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                    Checking...
+                </Badge>
+            );
+        }
+
+        switch (powerState) {
+            case 'running':
+                return (
+                    <Badge className="bg-green-50 text-green-700 border border-green-200 dark:bg-green-950 dark:text-green-300 dark:border-green-800">
+                        <div className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></div>
+                        Active
+                    </Badge>
+                );
+            case 'stopped':
+            case 'suspended':
+            case 'unknown':
+                return (
+                    <Badge className="bg-red-50 text-red-700 border border-red-200 dark:bg-red-950 dark:text-red-300 dark:border-red-800">
+                        <div className="w-2 h-2 bg-red-500 rounded-full mr-2"></div>
+                        Offline
+                    </Badge>
+                );
+            case 'busy':
+                return (
+                    <Badge className="bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-800">
+                        <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                        Processing
+                    </Badge>
+                );
+            default:
+                return (
+                    <Badge className="bg-red-50 text-red-700 border border-red-200 dark:bg-red-950 dark:text-red-300 dark:border-red-800">
+                        <div className="w-2 h-2 bg-red-500 rounded-full mr-2"></div>
+                        Offline
+                    </Badge>
+                );
+        }
+    };
+
+    const getStatusBadge = (status: string, provisioningStatus?: string, lastAction?: string, order?: Order) => {
+        if (order) {
+            const stock = order.ipStockId ? ipStockMap[order.ipStockId] : null;
+            if (canShowLivePowerState(order, stock)) {
+                return getPowerStateBadge(powerStates[order._id]);
+            }
+        }
+
+        if (status.toLowerCase() === 'completed') {
         return (
             <Badge className="bg-green-50 text-green-700 border border-green-200 dark:bg-green-950 dark:text-green-300 dark:border-green-800">
                 <div className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></div>
@@ -538,10 +665,10 @@ const getStatusBadge = (status: string, provisioningStatus?: string, lastAction?
                             variant="outline"
                             size="sm"
                             className="gap-1 sm:gap-2 h-8 sm:h-9 px-2 sm:px-3 flex-shrink-0"
-                            onClick={fetchOrders}
-                            disabled={loading}
+                            onClick={() => fetchOrders(true)}
+                            disabled={loading || refreshing}
                         >
-                            <RefreshCw className={`h-3 w-3 sm:h-4 sm:w-4 ${loading ? 'animate-spin' : ''}`} />
+                            <RefreshCw className={`h-3 w-3 sm:h-4 sm:w-4 ${loading || refreshing ? 'animate-spin' : ''}`} />
                             <span className="hidden sm:inline text-xs sm:text-sm">Refresh</span>
                         </Button>
                     </div>

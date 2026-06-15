@@ -1,6 +1,7 @@
 import connectDB from '../../../../lib/db';
 import User from '../../../../models/userModel';
 import { getDataFromToken } from '../../../../helper/getDataFromToken';
+import { hashUserPassword, verifyUserPassword } from '@/lib/userPassword';
 
 export async function POST(request) {
     await connectDB();
@@ -17,15 +18,22 @@ export async function POST(request) {
             });
         }
 
-
-        if (oldPassword !== user.password) {
+        const isOldValid = await verifyUserPassword(oldPassword, user.password);
+        if (!isOldValid) {
             return new Response(JSON.stringify({ message: 'Old password is incorrect' }), {
                 status: 400,
                 headers: { 'Content-Type': 'application/json' }
             });
         }
 
-        user.password = newPassword;
+        if (!newPassword || String(newPassword).length < 6) {
+            return new Response(JSON.stringify({ message: 'New password must be at least 6 characters' }), {
+                status: 400,
+                headers: { 'Content-Type': 'application/json' }
+            });
+        }
+
+        user.password = await hashUserPassword(newPassword);
         await user.save();
 
         return new Response(JSON.stringify({ message: 'Password updated successfully' }), {

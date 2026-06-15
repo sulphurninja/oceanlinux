@@ -190,17 +190,19 @@ function PaymentCallbackContent() {
 
               // Handle different processing scenarios
               if (confirmData.processing) {
-                // Webhook is processing the renewal
                 setMessage("Payment successful! Your renewal is being processed and will be confirmed shortly.");
+              } else if (confirmData.companyApproval?.status === 'pending') {
+                setMessage("Payment received! Your provider will approve the renewal from their dashboard. You'll see the new expiry here once approved.");
+                toast.success("Payment received — awaiting provider approval");
               } else if (confirmData.alreadyProcessed) {
-                // Already processed by webhook
                 setMessage("Renewal successful! Your service has been extended for 30 days.");
               } else {
-                // Processed by this confirmation
                 setMessage("Renewal successful! Your service has been extended for 30 days.");
               }
 
-              toast.success("Service renewed successfully!");
+              if (confirmData.companyApproval?.status !== 'pending') {
+                toast.success("Service renewed successfully!");
+              }
 
               setTimeout(() => {
                 router.push(`/dashboard/order/${orderId}`);

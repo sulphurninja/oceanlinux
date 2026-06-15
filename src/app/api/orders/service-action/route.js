@@ -134,20 +134,7 @@ function classifyResellerIso(iso) {
 }
 
 function normalizeVirtualizorRunningState(raw) {
-  if (!raw) return 'unknown';
-  if (typeof raw === 'string') {
-    const s = raw.toLowerCase().trim();
-    if (['1', 'running', 'on', 'online', 'started', 'active'].includes(s)) return 'running';
-    if (['0', 'stopped', 'off', 'offline', 'shutdown'].includes(s)) return 'stopped';
-    if (['suspended', 'paused'].includes(s)) return 'suspended';
-    return s;
-  }
-  if (typeof raw === 'number') return raw === 1 ? 'running' : 'stopped';
-  if (typeof raw === 'object') {
-    const candidate = raw.status || raw.state || raw.power || raw.running;
-    if (candidate !== undefined) return normalizeVirtualizorRunningState(candidate);
-  }
-  return 'unknown';
+  return VirtualizorAPI.normalizeVpsPowerState(raw);
 }
 
 
@@ -688,26 +675,19 @@ export async function POST(request) {
               }
               case 'status':
               case 'sync': {
-                const { vmId } = await findVm();
-                let powerState = 'unknown';
-                let rawStatus = null;
-                try {
-                  const metrics = await resellerApi.getVmMetrics(vmId);
-                  rawStatus = metrics?.current?.status ?? metrics?.status ?? null;
-                  powerState = ResellerApi.normalizePowerState(rawStatus ?? metrics?.current);
-                } catch (metricsErr) {
-                  console.warn('[SERVICE-ACTION][POST] Reseller metrics lookup failed; falling back to ping:', metricsErr.message);
-                }
-                if (powerState === 'unknown' && ipAddress) {
-                  powerState = isServerReachable(ipAddress) ? 'running' : 'stopped';
-                }
+                const found = await findVm();
+                const { powerState, rawStatus, source } = await resellerApi.resolveVmPowerState(
+                  found.vmId,
+                  { overviewRaw: found.raw }
+                );
                 await Order.findByIdAndUpdate(orderId, { lastSyncTime: new Date() });
                 return NextResponse.json({
                   success: true,
                   powerState,
                   rawStatus,
+                  powerSource: source,
                   provider: 'reseller-api',
-                  vmId,
+                  vmId: found.vmId,
                   lastSync: new Date().toISOString(),
                 });
               }
@@ -872,27 +852,14 @@ export async function POST(request) {
             }
             case 'status':
             case 'sync': {
-              let powerState = 'unknown';
-              let rawStatus = null;
-              try {
-                const { vpsid } = await findVps();
-                const vmRecord = await companyApi.getVpsRecord(vpsid);
-                if (vmRecord) {
-                  rawStatus =
-                    vmRecord.status ?? vmRecord.state ?? vmRecord.running ?? vmRecord.power ?? null;
-                  powerState = normalizeVirtualizorRunningState(rawStatus ?? vmRecord);
-                }
-              } catch (lookupErr) {
-                console.warn('[SERVICE-ACTION][POST] Virtualizor status lookup failed; falling back to ping:', lookupErr.message);
-              }
-              if (powerState === 'unknown' && ipAddress) {
-                powerState = isServerReachable(ipAddress) ? 'running' : 'stopped';
-              }
+              const { vpsid } = await findVps();
+              const { powerState, rawStatus, source } = await companyApi.resolveVpsPowerState(vpsid);
               await Order.findByIdAndUpdate(orderId, { lastSyncTime: new Date() });
               return NextResponse.json({
                 success: true,
                 powerState,
                 rawStatus,
+                powerSource: source,
                 provider: 'virtualizor',
                 lastSync: new Date().toISOString(),
               });
@@ -1720,18 +1687,10 @@ export async function GET(request) {
               }, { status: 404 });
             }
 
-            let powerState = 'unknown';
-            let rawStatus = null;
-            try {
-              const metrics = await resellerApi.getVmMetrics(found.vmId);
-              rawStatus = metrics?.current?.status ?? metrics?.status ?? null;
-              powerState = ResellerApi.normalizePowerState(rawStatus ?? metrics?.current);
-            } catch (metricsErr) {
-              console.warn('[SERVICE-ACTION][GET] Reseller metrics lookup failed:', metricsErr.message);
-            }
-            if (powerState === 'unknown' && ipAddress) {
-              powerState = isServerReachable(ipAddress) ? 'running' : 'stopped';
-            }
+            const { powerState, rawStatus, source } = await resellerApi.resolveVmPowerState(
+              found.vmId,
+              { overviewRaw: found.raw }
+            );
 
             await Order.findByIdAndUpdate(orderId, { lastSyncTime: new Date() });
 
@@ -1745,6 +1704,7 @@ export async function GET(request) {
               status: powerState,
               powerState,
               rawStatus,
+              powerSource: source,
               details: found.raw || null,
               syncResult: {
                 credentialsUpdated: false,
@@ -1799,13 +1759,7 @@ export async function GET(request) {
           }
 
           const vpsid = typeof found === 'object' ? found.vpsid : found;
-          const vmRecord = await companyApi.getVpsRecord(vpsid).catch(() => null);
-          const rawStatus =
-            vmRecord?.status ?? vmRecord?.state ?? vmRecord?.running ?? vmRecord?.power ?? null;
-          let powerState = normalizeVirtualizorRunningState(rawStatus ?? vmRecord);
-          if (powerState === 'unknown' && ipAddress) {
-            powerState = isServerReachable(ipAddress) ? 'running' : 'stopped';
-          }
+          const { powerState, rawStatus, source, vmRecord } = await companyApi.resolveVpsPowerState(vpsid);
 
           await Order.findByIdAndUpdate(orderId, { lastSyncTime: new Date() });
 
@@ -1819,6 +1773,7 @@ export async function GET(request) {
             status: powerState,
             powerState,
             rawStatus,
+            powerSource: source,
             details: vmRecord || null,
             syncResult: {
               credentialsUpdated: false,

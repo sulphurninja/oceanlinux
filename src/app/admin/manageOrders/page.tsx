@@ -20,7 +20,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { 
     Eye, Settings, Play, RotateCcw, Loader2, AlertCircle, CheckCircle, 
     Wrench, Search, Filter, Calendar, X, ChevronLeft, ChevronRight, 
-    ChevronsLeft, ChevronsRight, Edit2, Save, XCircle, Download, RefreshCw, KeyRound
+    ChevronsLeft, ChevronsRight, Edit2, Save, XCircle, Download, RefreshCw, KeyRound, ArrowRightLeft
 } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -97,6 +97,9 @@ const ManageOrders = () => {
     const [batchProvisioning, setBatchProvisioning] = useState(false);
     const [generatingCreds, setGeneratingCreds] = useState(false);
     const [updating, setUpdating] = useState(false);
+    const [transferOrder, setTransferOrder] = useState<Order | null>(null);
+    const [transferEmail, setTransferEmail] = useState('');
+    const [transferring, setTransferring] = useState(false);
     
     // Pagination state
     const [pagination, setPagination] = useState<PaginationState>({
@@ -326,6 +329,56 @@ const ManageOrders = () => {
             toast.error('Failed to update order');
         } finally {
             setUpdating(false);
+        }
+    };
+
+    const handleTransfer = async () => {
+        if (!transferOrder) return;
+
+        const email = transferEmail.trim().toLowerCase();
+        if (!email) {
+            toast.error('Enter the target user email');
+            return;
+        }
+
+        if (transferOrder.user?.email?.toLowerCase() === email) {
+            toast.error('Service is already on this account');
+            return;
+        }
+
+        setTransferring(true);
+        try {
+            const response = await fetch('/api/admin/orders/transfer', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    orderId: transferOrder._id,
+                    targetUserEmail: email,
+                }),
+            });
+            const data = await response.json();
+
+            if (!response.ok || !data.success) {
+                toast.error(data.message || 'Failed to transfer service');
+                return;
+            }
+
+            setOrders((prev) =>
+                prev.map((order) =>
+                    order._id === transferOrder._id
+                        ? { ...order, user: data.order?.user || order.user }
+                        : order
+                )
+            );
+
+            toast.success(data.message || 'Service transferred successfully');
+            setTransferOrder(null);
+            setTransferEmail('');
+        } catch (error) {
+            console.error('Transfer failed:', error);
+            toast.error('Failed to transfer service');
+        } finally {
+            setTransferring(false);
         }
     };
 
@@ -929,6 +982,19 @@ const ManageOrders = () => {
                                                             <Edit2 className="w-3.5 h-3.5" />
                                                             Edit
                                                         </Button>
+                                                        <Button
+                                                            size="sm"
+                                                            variant="outline"
+                                                            onClick={() => {
+                                                                setTransferOrder(order);
+                                                                setTransferEmail('');
+                                                            }}
+                                                            className="gap-1 h-8"
+                                                            title="Transfer VPS to another account"
+                                                        >
+                                                            <ArrowRightLeft className="w-3.5 h-3.5" />
+                                                            Transfer
+                                                        </Button>
 
                                                         {/* Show provision button for: 1) Non-provisioned orders 2) Failed orders that need retry 3) Confirmed orders without IP */}
                                                         {(
@@ -1274,6 +1340,76 @@ const ManageOrders = () => {
                                         Save Changes
                                     </>
                                 )}
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+            )}
+
+            {/* Transfer VPS Dialog */}
+            {transferOrder && (
+                <Dialog
+                    open={!!transferOrder}
+                    onOpenChange={(open) => {
+                        if (!open) {
+                            setTransferOrder(null);
+                            setTransferEmail('');
+                        }
+                    }}
+                >
+                    <DialogContent className="max-w-md">
+                        <DialogHeader>
+                            <DialogTitle>Transfer VPS to Another Account</DialogTitle>
+                            <DialogDescription>
+                                Move this service from one customer account to another. The VPS, IP, and credentials stay the same — only the owner changes.
+                            </DialogDescription>
+                        </DialogHeader>
+
+                        <div className="space-y-4">
+                            <div className="rounded-lg border bg-muted/40 p-3 text-sm space-y-1">
+                                <p className="font-medium">{transferOrder.productName}</p>
+                                <p className="text-muted-foreground">
+                                    IP: <span className="font-mono">{transferOrder.ipAddress || 'Pending'}</span>
+                                </p>
+                                <p className="text-muted-foreground">
+                                    From: {transferOrder.user?.name || 'N/A'} ({transferOrder.user?.email || 'N/A'})
+                                </p>
+                            </div>
+
+                            <div className="space-y-2">
+                                <Label htmlFor="transfer-email">Transfer to user email</Label>
+                                <Input
+                                    id="transfer-email"
+                                    type="email"
+                                    value={transferEmail}
+                                    onChange={(e) => setTransferEmail(e.target.value)}
+                                    placeholder="user5@example.com"
+                                    autoComplete="off"
+                                />
+                                <p className="text-xs text-muted-foreground">
+                                    The target user must already have an OceanLinux account.
+                                </p>
+                            </div>
+                        </div>
+
+                        <DialogFooter className="gap-2">
+                            <Button
+                                variant="outline"
+                                onClick={() => {
+                                    setTransferOrder(null);
+                                    setTransferEmail('');
+                                }}
+                                disabled={transferring}
+                            >
+                                Cancel
+                            </Button>
+                            <Button onClick={handleTransfer} disabled={transferring} className="gap-2">
+                                {transferring ? (
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                ) : (
+                                    <ArrowRightLeft className="w-4 h-4" />
+                                )}
+                                Transfer Service
                             </Button>
                         </DialogFooter>
                     </DialogContent>

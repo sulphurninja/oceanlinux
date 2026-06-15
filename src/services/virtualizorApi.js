@@ -441,6 +441,53 @@ export class VirtualizorAPI {
   }
 
   /**
+   * Read power state from a Virtualizor listvs VM row (0/1 or running/stopped).
+   */
+  static extractVpsPowerCandidate(vm) {
+    if (!vm || typeof vm !== 'object') return null;
+    for (const value of [vm.status, vm.state, vm.running, vm.power, vm.vps_status, vm.cached_status]) {
+      if (value !== undefined && value !== null && value !== '') return value;
+    }
+    return null;
+  }
+
+  static normalizeVpsPowerState(raw) {
+    if (raw === undefined || raw === null || raw === '') return 'unknown';
+    if (typeof raw === 'string') {
+      const s = raw.toLowerCase().trim();
+      if (['1', 'running', 'on', 'online', 'started', 'powered_on'].includes(s)) return 'running';
+      if (['0', 'stopped', 'off', 'offline', 'shutdown', 'shutoff', 'powered_off'].includes(s)) return 'stopped';
+      if (['suspended', 'paused'].includes(s)) return 'suspended';
+      if (['installing', 'rebooting', 'starting', 'stopping', 'busy'].includes(s)) return 'busy';
+      return 'unknown';
+    }
+    if (typeof raw === 'number') return raw === 1 ? 'running' : 'stopped';
+    if (typeof raw === 'boolean') return raw ? 'running' : 'stopped';
+    if (typeof raw === 'object') {
+      const candidate = raw.status ?? raw.state ?? raw.running ?? raw.power ?? raw.vps_status;
+      if (candidate !== undefined) return VirtualizorAPI.normalizeVpsPowerState(candidate);
+    }
+    return 'unknown';
+  }
+
+  /**
+   * Resolve live VPS power from Virtualizor listvs — never uses ping.
+   */
+  async resolveVpsPowerState(vpsid) {
+    const vmRecord = await this.getVpsRecord(vpsid);
+    if (!vmRecord) {
+      return { powerState: 'unknown', rawStatus: null, source: 'none', vmRecord: null };
+    }
+    const rawStatus = VirtualizorAPI.extractVpsPowerCandidate(vmRecord);
+    return {
+      powerState: VirtualizorAPI.normalizeVpsPowerState(rawStatus),
+      rawStatus,
+      source: 'listvs',
+      vmRecord,
+    };
+  }
+
+  /**
    * Locate a VPS across known accounts and return the raw VM record (incl. status).
    * Used by service-action 'status' for company-Virtualizor automation.
    */

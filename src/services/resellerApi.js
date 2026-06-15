@@ -370,6 +370,124 @@ class ResellerApi {
     return this._request(`/api/users/vms/${encodeURIComponent(vmId)}/metrics?${qs.toString()}`);
   }
 
+  /** Order/subscription lifecycle values — not VM power. */
+  static isOrderLifecycleStatus(value) {
+    const s = String(value ?? '').toLowerCase().trim();
+    return [
+      'active', 'completed', 'pending', 'confirmed', 'paid', 'assigned',
+      'provisioned', 'cancelled', 'canceled', 'expired', 'failed', 'processing',
+    ].includes(s);
+  }
+
+  /**
+   * Pull VM power from VM-specific fields only. Hostheaven overview rows often
+   * expose `status: ACTIVE` for the *order*, which must not read as powered on.
+   */
+  static extractVmPowerCandidate(record) {
+    if (!record || typeof record !== 'object') return null;
+
+    const vmFields = [
+      record.liveState,
+      record.live_state,
+      record.vmStatus,
+      record.vm_status,
+      record.powerStatus,
+      record.power_status,
+      record.virtualMachineStatus,
+      record.machineStatus,
+      record.runningStatus,
+      record.running,
+      record.power,
+      record.powerState,
+      record.virtualMachine?.liveState,
+      record.virtualMachine?.status,
+      record.virtualMachine?.state,
+      record.virtualMachine?.powerStatus,
+      record.virtualMachine?.vmStatus,
+      record.vm?.liveState,
+      record.vm?.status,
+      record.vm?.state,
+      record.vm?.powerStatus,
+      record.current?.status,
+      record.current?.state,
+      record.current?.power,
+    ];
+
+    for (const value of vmFields) {
+      if (value !== undefined && value !== null && value !== '') {
+        return value;
+      }
+    }
+
+    // Generic status/state only when clearly a power value (not order lifecycle).
+    for (const value of [record.status, record.state]) {
+      if (value === undefined || value === null || value === '') continue;
+      if (ResellerApi.isOrderLifecycleStatus(value)) continue;
+      const probe = ResellerApi.normalizeVmPowerState(value);
+      if (probe !== 'unknown') return value;
+    }
+
+    return null;
+  }
+
+  /**
+   * VM power normalizer — does NOT treat order lifecycle "active" as running.
+   */
+  static normalizeVmPowerState(raw) {
+    if (raw === undefined || raw === null || raw === '') return 'unknown';
+    if (typeof raw === 'object') {
+      const candidate = raw.status || raw.state || raw.power || raw.running || raw.vmStatus;
+      return ResellerApi.normalizeVmPowerState(candidate);
+    }
+    if (typeof raw === 'boolean') return raw ? 'running' : 'stopped';
+    if (typeof raw === 'number') return raw === 1 ? 'running' : 'stopped';
+    const s = String(raw).toLowerCase().trim();
+    if (ResellerApi.isOrderLifecycleStatus(s)) return 'unknown';
+    if (['running', 'on', 'online', 'started', '1', 'powered_on', 'poweron'].includes(s)) return 'running';
+    if (['stopped', 'off', 'offline', 'shutdown', 'shutoff', '0', 'powered_off', 'poweroff', 'unreachable'].includes(s)) return 'stopped';
+    if (['suspended', 'paused'].includes(s)) return 'suspended';
+    if (['installing', 'rebooting', 'starting', 'stopping', 'busy'].includes(s)) return 'busy';
+    return 'unknown';
+  }
+
+  /**
+   * Resolve live VM power from Hostheaven — details first, then overview, then metrics.
+   * Never uses ping; IP reachability is not a reliable power signal on shared hosts.
+   */
+  async resolveVmPowerState(vmId, { overviewRaw = null } = {}) {
+    const attempt = (record, source) => {
+      const candidate = ResellerApi.extractVmPowerCandidate(record);
+      if (candidate == null) return null;
+      const powerState = ResellerApi.normalizeVmPowerState(candidate);
+      if (powerState === 'unknown') return null;
+      return { powerState, rawStatus: candidate, source };
+    };
+
+    // Hostheaven overview rows carry `liveState` (running/stopped) — check first.
+    const fromOverview = attempt(overviewRaw, 'overview');
+    if (fromOverview) return fromOverview;
+
+    try {
+      const details = await this.getVmDetails(vmId);
+      const fromDetails = attempt(details, 'details');
+      if (fromDetails) return fromDetails;
+    } catch (err) {
+      console.warn('[ResellerApi] getVmDetails for power state failed:', err.message);
+    }
+
+    try {
+      const metrics = await this.getVmMetrics(vmId);
+      const fromMetrics =
+        attempt(metrics, 'metrics') ||
+        attempt(metrics?.current, 'metrics.current');
+      if (fromMetrics) return fromMetrics;
+    } catch (err) {
+      console.warn('[ResellerApi] getVmMetrics for power state failed:', err.message);
+    }
+
+    return { powerState: 'unknown', rawStatus: null, source: 'none' };
+  }
+
   async getVmLockStatus(vmId) {
     return this._request(`/api/vms/${encodeURIComponent(vmId)}/lock-status`);
   }
@@ -421,18 +539,7 @@ class ResellerApi {
    * state vocabulary used everywhere in the order page.
    */
   static normalizePowerState(raw) {
-    if (!raw) return 'unknown';
-    if (typeof raw === 'object') {
-      const candidate = raw.status || raw.state || raw.power || raw.running;
-      return ResellerApi.normalizePowerState(candidate);
-    }
-    if (typeof raw === 'number') return raw === 1 ? 'running' : 'stopped';
-    const s = String(raw).toLowerCase().trim();
-    if (['running', 'on', 'online', 'started', 'active', '1'].includes(s)) return 'running';
-    if (['stopped', 'off', 'offline', 'shutdown', 'shutoff', '0'].includes(s)) return 'stopped';
-    if (['suspended', 'paused'].includes(s)) return 'suspended';
-    if (['installing', 'rebooting', 'starting', 'stopping', 'busy', 'pending'].includes(s)) return 'busy';
-    return s || 'unknown';
+    return ResellerApi.normalizeVmPowerState(raw);
   }
 }
 
