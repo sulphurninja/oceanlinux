@@ -5,7 +5,8 @@ import IPStock from '@/models/ipStockModel';
 import Order from '@/models/orderModel';
 import {
   buildCompanyStockIdVariants,
-  isCompanyPaidOrder,
+  COMPANY_VISIBLE_ORDER_STATUSES,
+  isCompanyVisibleOrder,
 } from '@/lib/companyOrders';
 
 export const dynamic = 'force-dynamic';
@@ -37,13 +38,12 @@ export async function GET() {
 
   const stockIdVariants = buildCompanyStockIdVariants(stockIds);
 
-  // DB-level whitelist: cancelled/failed/pending never leave MongoDB.
   const orders = await Order.find({
     ipStockId: { $in: stockIdVariants },
-    status: { $in: ['confirmed', 'paid', 'active', 'completed'] },
+    status: { $in: COMPANY_VISIBLE_ORDER_STATUSES },
   })
     .select(
-      'productName memory ipAddress username password os status provisioningStatus createdAt expiryDate customerName customerEmail ipStockId panelUsername transactionId walletDeduction paymentDetails paymentMethod clientTxnId'
+      'productName memory ipAddress username password os status provisioningStatus createdAt expiryDate customerName customerEmail ipStockId panelUsername'
     )
     .sort({ createdAt: -1 })
     .lean();
@@ -52,7 +52,7 @@ export async function GET() {
   stocks.forEach(s => { stockMap[s._id.toString()] = s.name; });
 
   const enriched = orders
-    .filter(isCompanyPaidOrder)
+    .filter(isCompanyVisibleOrder)
     .map(o => ({
       ...o,
       stockName: stockMap[String(o.ipStockId)] || 'Unknown',
@@ -80,10 +80,10 @@ export async function PUT(request) {
   const order = await Order.findOne({
     _id: orderId,
     ipStockId: { $in: stockIdVariants },
-    status: { $in: ['confirmed', 'paid', 'active', 'completed'] },
+    status: { $in: COMPANY_VISIBLE_ORDER_STATUSES },
   });
 
-  if (!order || !isCompanyPaidOrder(order)) {
+  if (!order || !isCompanyVisibleOrder(order)) {
     return NextResponse.json({ error: 'Order not found or not authorized' }, { status: 404 });
   }
 
@@ -106,6 +106,6 @@ function responseHeaders() {
     'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
     Pragma: 'no-cache',
     Expires: '0',
-    'X-Company-Orders-Filter': 'paid-only-v2',
+    'X-Company-Orders-Filter': 'confirmed-active-only-v3',
   };
 }

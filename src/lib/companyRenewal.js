@@ -1,4 +1,5 @@
 import IPStock from '@/models/ipStockModel';
+import { isSlotIpOrder } from '@/lib/slotIpOrder';
 
 /**
  * Detect whether an order's renewal must be routed through the company
@@ -12,10 +13,13 @@ import IPStock from '@/models/ipStockModel';
  * existing automated path even if their stock happens to belong to a
  * company — the upstream system handles the actual extension.
  *
+ * Slot IP orders are one-time purchases and never use company renewal.
+ *
  * Returns { isCompany: boolean, companyId?: ObjectId }.
  */
 export async function detectCompanyManagedRenewal(order) {
   if (!order) return { isCompany: false };
+  if (isSlotIpOrder(order)) return { isCompany: false };
   if (order.hostycareServiceId) return { isCompany: false };
   if (order.smartvpsServiceId) return { isCompany: false };
   if (order.advpsServiceId) return { isCompany: false };

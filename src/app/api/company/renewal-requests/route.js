@@ -4,6 +4,7 @@ import connectDB from '@/lib/db';
 import RenewalRequest from '@/models/renewalRequestModel';
 import Order from '@/models/orderModel';
 import { calculateRenewalExpiryDate } from '@/lib/expiryHelper';
+import { isSlotIpOrder, SLOT_IP_NO_RENEWAL_MESSAGE } from '@/lib/slotIpOrder';
 const { getAdvpsRebuildResetFields, isAdvpsOrder } = require('@/lib/advpsRebuildLimit');
 
 async function getCompanySession() {
@@ -79,6 +80,10 @@ export async function POST(request) {
   const order = await Order.findById(renewalReq.orderId);
   if (!order) {
     return NextResponse.json({ error: 'Linked order no longer exists' }, { status: 404 });
+  }
+
+  if (isSlotIpOrder(order)) {
+    return NextResponse.json({ error: SLOT_IP_NO_RENEWAL_MESSAGE }, { status: 400 });
   }
 
   if (action === 'approve') {

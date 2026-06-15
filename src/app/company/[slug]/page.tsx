@@ -22,17 +22,12 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
-  COMPANY_PAID_ORDER_STATUSES,
-  isCompanyPaidOrder,
+  COMPANY_VISIBLE_ORDER_STATUSES,
+  isCompanyVisibleOrder,
 } from '@/lib/companyOrders';
 
-/** Inline guard — never show cancelled/unpaid even if API cache is stale. */
 function visibleCompanyOrder(order: Order): boolean {
-  const status = String(order?.status ?? '').trim().toLowerCase();
-  if (!status) return false;
-  if (status.includes('cancel') || status.includes('fail') || status.includes('pending')) return false;
-  if (!COMPANY_PAID_ORDER_STATUSES.includes(status as typeof COMPANY_PAID_ORDER_STATUSES[number])) return false;
-  return isCompanyPaidOrder(order);
+  return isCompanyVisibleOrder(order);
 }
 
 function orderStatusBadgeProps(status: string): {
@@ -412,7 +407,7 @@ export default function CompanyDashboard() {
     }
 
     if (statusFilter !== 'all') {
-      result = result.filter(o => o.status === statusFilter);
+      result = result.filter(o => String(o.status).toLowerCase() === statusFilter.toLowerCase());
     }
 
     if (dateFilter !== 'all') {
@@ -602,7 +597,7 @@ export default function CompanyDashboard() {
         {tab === 'orders' && (
           <div className="space-y-4">
             <p className="text-xs text-muted-foreground">
-              Only paid orders are shown. Unpaid, cancelled, and failed checkouts are hidden.
+              Only confirmed and active orders are shown. Cancelled, pending, and failed orders are hidden.
             </p>
             {/* Filters */}
             <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
@@ -615,7 +610,7 @@ export default function CompanyDashboard() {
                   <SelectTrigger className="w-28 h-9 text-xs"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Status</SelectItem>
-                    {COMPANY_PAID_ORDER_STATUSES.map((status) => (
+                    {COMPANY_VISIBLE_ORDER_STATUSES.map((status) => (
                       <SelectItem key={status} value={status} className="capitalize">
                         {status}
                       </SelectItem>
