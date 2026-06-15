@@ -36,10 +36,30 @@ function getAdvpsRebuildLimitMessage() {
   return `You can rebuild/format your server up to ${ADVPS_REBUILD_LIMIT} times per billing period. Your allowance resets when you renew and on the 1st of each month.`;
 }
 
+/** Consume one rebuild credit after ADVPS format/rebuild completes successfully. */
+async function consumeAdvpsRebuildCredit(Order, orderId) {
+  const order = await Order.findById(orderId).select('advpsRebuildCount advpsRebuildCountMonth').lean();
+  if (!order) return false;
+
+  const { count, currentMonth } = getAdvpsRebuildUsage(order);
+  if (count >= ADVPS_REBUILD_LIMIT) {
+    console.warn(`[ADVPS-REBUILD] Order ${orderId} already at limit (${count}/${ADVPS_REBUILD_LIMIT}), skipping credit`);
+    return false;
+  }
+
+  await Order.findByIdAndUpdate(orderId, {
+    advpsRebuildCount: count + 1,
+    advpsRebuildCountMonth: currentMonth,
+  });
+  console.log(`[ADVPS-REBUILD] Order ${orderId} rebuild credit used: ${count + 1}/${ADVPS_REBUILD_LIMIT}`);
+  return true;
+}
+
 module.exports = {
   ADVPS_REBUILD_LIMIT,
   isAdvpsOrder,
   getAdvpsRebuildUsage,
   getAdvpsRebuildResetFields,
   getAdvpsRebuildLimitMessage,
+  consumeAdvpsRebuildCredit,
 };

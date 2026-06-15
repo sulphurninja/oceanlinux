@@ -1175,7 +1175,7 @@ const ManageOrders = () => {
                                             className="font-mono text-sm"
                                         />
                                         <p className="text-xs text-muted-foreground">
-                                            Required for renewals. After changing password on ADVPS panel, also paste the new password here — ADVPS read APIs often do not return updated passwords.
+                                            Required for renewals. Users can fix password issues from their order page via Generate New Password; edit here only if that flow cannot recover it.
                                         </p>
                                     </div>
                                     {editingOrder.expiryDate && (

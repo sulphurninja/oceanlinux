@@ -260,6 +260,7 @@ const OrderDetails = () => {
   // Manual server action request states
   const [pendingRequest, setPendingRequest] = useState<any>(null);
   const [requestLoading, setRequestLoading] = useState(false);
+  const [advpsPasswordIssue, setAdvpsPasswordIssue] = useState(false);
 
 
   useEffect(() => {
@@ -806,11 +807,15 @@ const OrderDetails = () => {
             { duration: 8000 }
           );
         } else if (data.syncResult?.passwordStale && provider === 'advps') {
+          setAdvpsPasswordIssue(true);
           toast.warning(
-            'IP synced but ADVPS API still returns the old password. After changing password on ADVPS panel, admin must update it in Manage Orders.',
+            'The password shown may be outdated. Use Generate New Password below to get the current login password automatically.',
             { duration: 10000 }
           );
         } else if (data.syncResult?.credentialsUpdated) {
+          if (data.syncResult.changes?.includes('password')) {
+            setAdvpsPasswordIssue(false);
+          }
           const changed = data.syncResult.changes?.length
             ? data.syncResult.changes.join(', ')
             : 'IP/credentials';
@@ -877,6 +882,15 @@ const OrderDetails = () => {
           } else {
             toast.success('MAC address reset successfully');
           }
+        } else if (action === 'generatepassword') {
+          const newPass = data.result?.password;
+          if (newPass) {
+            setAdvpsPasswordIssue(false);
+            setShowPassword(true);
+            toast.success('New password generated and saved. Copy it from Connection Details above.', { duration: 8000 });
+          } else {
+            toast.success('Password request completed. Check Connection Details for your login password.');
+          }
         } else {
           toast.success(`Action "${action}" executed successfully`);
         }
@@ -890,7 +904,11 @@ const OrderDetails = () => {
           toast.success('Password updated in your records');
         }
       } else {
-        toast.error(data.error || data.message || `Failed to execute "${action}"`);
+        if (action === 'generatepassword' && data.code === 'PASSWORD_ALREADY_EXISTS') {
+          toast.error(data.error || 'Use Format Server to get a new password.', { duration: 10000 });
+        } else {
+          toast.error(data.error || data.message || `Failed to execute "${action}"`);
+        }
         // Refresh power state on error too
         if (['start', 'stop', 'restart'].includes(action) && (provider === 'hostycare' || provider === 'smartvps' || provider === 'advps')) {
           await fetchServerPowerState();
@@ -906,6 +924,19 @@ const OrderDetails = () => {
     } finally {
       setActionBusy(null);
     }
+  };
+
+  const handleAdvpsGeneratePassword = async () => {
+    if (!order || getProviderFromOrder(order, ipStock) !== 'advps' || !order.advpsServiceId) return;
+
+    const ok = window.confirm(
+      'Generate a new login password from ADVPS?\n\n' +
+      'This calls ADVPS directly and saves the password here automatically. ' +
+      'If ADVPS has already generated a password for this server, use Format Server instead (it creates a fresh OS and new password).'
+    );
+    if (!ok) return;
+
+    await runServiceAction('generatepassword');
   };
 
   // Also update the handleAdvancedAction function
@@ -2437,6 +2468,35 @@ const OrderDetails = () => {
                             </Button>
                           </div>
                         </div>
+                        {provider === 'advps' && order.advpsServiceId && (
+                          <div className="space-y-2">
+                            {advpsPasswordIssue && (
+                              <Alert className="bg-amber-500/10 border-amber-500/25">
+                                <AlertTriangle className="h-4 w-4" />
+                                <AlertDescription className="text-xs">
+                                  The password here may not match your server. Use the button below to pull the current password from ADVPS automatically.
+                                </AlertDescription>
+                              </Alert>
+                            )}
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={handleAdvpsGeneratePassword}
+                              disabled={!!actionBusy || order.provisioningStatus === 'provisioning'}
+                              className="w-full h-9 gap-2 text-sm"
+                            >
+                              {actionBusy === 'generatepassword' ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <KeyRound className="h-4 w-4" />
+                              )}
+                              Generate New Password
+                            </Button>
+                            <p className="text-[11px] text-muted-foreground px-0.5">
+                              Password not working? This calls ADVPS and updates your login here — no admin needed. If ADVPS already generated one, use Format Server instead.
+                            </p>
+                          </div>
+                        )}
                       </div>
 
                       {/* SSH/RDP Command */}

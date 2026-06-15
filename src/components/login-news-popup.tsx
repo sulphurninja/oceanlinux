@@ -1,15 +1,27 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ArrowRight, ExternalLink, Megaphone, Sparkles, X } from "lucide-react";
+import {
+  ArrowRight,
+  ExternalLink,
+  Gift,
+  RefreshCw,
+  Shield,
+  Sparkles,
+  Wrench,
+  X,
+} from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+
+type AnnouncementType = "promotion" | "update" | "maintenance" | "feature" | "security";
 
 type LoginPopupAnnouncement = {
   _id: string;
   title: string;
   content: string;
+  type?: AnnouncementType;
   communityLink?: string;
   actionText?: string;
   actionUrl?: string;
@@ -17,6 +29,77 @@ type LoginPopupAnnouncement = {
 
 const JUST_LOGGED_IN_KEY = "justLoggedIn";
 const LOGIN_POPUP_SHOWN_KEY = "loginPopupShownInSession";
+
+const typeThemes: Record<
+  AnnouncementType,
+  {
+    label: string;
+    icon: typeof Gift;
+    headerGradient: string;
+    glowA: string;
+    glowB: string;
+    badgePing: string;
+    badgeDot: string;
+    accentText: string;
+    ctaClass: string;
+  }
+> = {
+  promotion: {
+    label: "Promotion",
+    icon: Gift,
+    headerGradient: "from-rose-500 via-red-500 to-orange-500",
+    glowA: "bg-rose-200/40",
+    glowB: "bg-orange-200/35",
+    badgePing: "bg-rose-200",
+    badgeDot: "bg-rose-100",
+    accentText: "text-rose-600 dark:text-rose-400",
+    ctaClass: "bg-gradient-to-r from-rose-600 to-orange-500 hover:from-rose-500 hover:to-orange-400",
+  },
+  update: {
+    label: "Update",
+    icon: RefreshCw,
+    headerGradient: "from-sky-500 via-blue-600 to-indigo-600",
+    glowA: "bg-sky-200/40",
+    glowB: "bg-indigo-200/35",
+    badgePing: "bg-sky-200",
+    badgeDot: "bg-sky-100",
+    accentText: "text-blue-600 dark:text-blue-400",
+    ctaClass: "bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500",
+  },
+  maintenance: {
+    label: "Maintenance",
+    icon: Wrench,
+    headerGradient: "from-amber-500 via-yellow-500 to-orange-400",
+    glowA: "bg-amber-200/45",
+    glowB: "bg-yellow-200/35",
+    badgePing: "bg-amber-200",
+    badgeDot: "bg-amber-100",
+    accentText: "text-amber-600 dark:text-amber-400",
+    ctaClass: "bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-amber-950",
+  },
+  feature: {
+    label: "New Feature",
+    icon: Sparkles,
+    headerGradient: "from-emerald-500 via-green-500 to-teal-600",
+    glowA: "bg-emerald-200/40",
+    glowB: "bg-teal-200/35",
+    badgePing: "bg-emerald-200",
+    badgeDot: "bg-emerald-100",
+    accentText: "text-emerald-600 dark:text-emerald-400",
+    ctaClass: "bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500",
+  },
+  security: {
+    label: "Security",
+    icon: Shield,
+    headerGradient: "from-violet-600 via-purple-600 to-indigo-700",
+    glowA: "bg-violet-200/40",
+    glowB: "bg-purple-200/35",
+    badgePing: "bg-violet-200",
+    badgeDot: "bg-violet-100",
+    accentText: "text-violet-600 dark:text-violet-400",
+    ctaClass: "bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-500 hover:to-purple-500",
+  },
+};
 
 function WhatsAppIcon({ className }: { className?: string }) {
   return (
@@ -93,11 +176,15 @@ export default function LoginNewsPopup() {
 
   if (!popup) return null;
 
+  const theme = typeThemes[popup.type || "update"] || typeThemes.update;
+  const TypeIcon = theme.icon;
+
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
         className={cn(
-          "p-0 gap-0 overflow-hidden border-0 shadow-2xl bg-background",
+          "p-0 gap-0 overflow-hidden border shadow-2xl",
+          "border-border/80 bg-card text-card-foreground",
           "w-[calc(100vw-1rem)] max-w-none",
           "fixed left-1/2 bottom-2 top-auto translate-x-[-50%] translate-y-0",
           "max-h-[min(92dvh,720px)] rounded-2xl",
@@ -108,27 +195,27 @@ export default function LoginNewsPopup() {
         )}
       >
         <div className="flex max-h-[min(92dvh,720px)] flex-col">
-          {/* Header */}
+          {/* Type-colored header */}
           <div className="relative shrink-0 overflow-hidden px-4 pb-5 pt-4 sm:px-7 sm:pb-7 sm:pt-6">
-            <div className="absolute inset-0 bg-gradient-to-br from-primary via-primary/85 to-violet-600" />
+            <div className={cn("absolute inset-0 bg-gradient-to-br", theme.headerGradient)} />
             <div
-              className="absolute inset-0 opacity-[0.15]"
+              className="absolute inset-0 opacity-20 dark:opacity-[0.15]"
               style={{
                 backgroundImage:
                   "radial-gradient(circle at 1px 1px, white 1px, transparent 0)",
                 backgroundSize: "24px 24px",
               }}
             />
-            <div className="absolute -right-10 -top-10 h-40 w-40 rounded-full bg-white/20 blur-3xl" />
-            <div className="absolute -bottom-8 left-1/4 h-32 w-32 rounded-full bg-violet-300/30 blur-3xl" />
+            <div className={cn("absolute -right-10 -top-10 h-40 w-40 rounded-full blur-3xl", theme.glowA)} />
+            <div className={cn("absolute -bottom-8 left-1/4 h-32 w-32 rounded-full blur-3xl", theme.glowB)} />
 
             <button
               onClick={() => handleOpenChange(false)}
               aria-label="Close announcement"
               className={cn(
                 "absolute right-3 top-3 z-20 flex h-9 w-9 items-center justify-center rounded-full",
-                "bg-black/20 text-white backdrop-blur-md transition-all",
-                "hover:bg-black/30 hover:scale-105 active:scale-95",
+                "bg-black/15 text-white backdrop-blur-md transition-all",
+                "hover:bg-black/25 hover:scale-105 active:scale-95",
                 "sm:right-5 sm:top-5"
               )}
             >
@@ -143,37 +230,48 @@ export default function LoginNewsPopup() {
             >
               <div className="mb-4 flex flex-wrap items-center gap-2.5 pr-10">
                 <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white/20 shadow-lg shadow-black/10 backdrop-blur-sm ring-1 ring-white/30 sm:h-12 sm:w-12">
-                  <Megaphone className="h-5 w-5 text-white sm:h-6 sm:w-6" />
+                  <TypeIcon className="h-5 w-5 text-white sm:h-6 sm:w-6" />
                 </div>
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-white ring-1 ring-white/25 backdrop-blur-sm">
                   <span className="relative flex h-2 w-2">
-                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-300 opacity-75" />
-                    <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-300" />
+                    <span
+                      className={cn(
+                        "absolute inline-flex h-full w-full animate-ping rounded-full opacity-75",
+                        theme.badgePing
+                      )}
+                    />
+                    <span className={cn("relative inline-flex h-2 w-2 rounded-full", theme.badgeDot)} />
                   </span>
-                  Latest News
+                  {theme.label}
                 </span>
               </div>
 
-              <DialogTitle className="pr-8 text-xl font-bold leading-snug tracking-tight text-white sm:text-2xl md:text-[1.65rem]">
+              <DialogTitle className="pr-8 text-xl font-bold leading-snug tracking-tight text-white drop-shadow-sm sm:text-2xl md:text-[1.65rem]">
                 {popup.title}
               </DialogTitle>
             </div>
           </div>
 
-          {/* Scrollable body */}
-          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-7 sm:py-5">
+          {/* Body — tuned for light + dark */}
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-muted/20 px-4 py-4 dark:bg-background sm:px-7 sm:py-5">
             <div
               className={cn(
                 "transition-all duration-500 delay-75 ease-out",
                 entered ? "translate-y-0 opacity-100" : "translate-y-4 opacity-0"
               )}
             >
-              <div className="rounded-xl border border-border/60 bg-muted/30 px-4 py-4 sm:px-5 sm:py-5">
-                <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  <Sparkles className="h-3.5 w-3.5 text-primary" />
+              <div
+                className={cn(
+                  "rounded-xl border px-4 py-4 shadow-sm sm:px-5 sm:py-5",
+                  "border-border bg-background",
+                  "dark:border-border/60 dark:bg-muted/30"
+                )}
+              >
+                <div className={cn("mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wide", theme.accentText)}>
+                  <TypeIcon className="h-3.5 w-3.5" />
                   What&apos;s new
                 </div>
-                <p className="text-sm leading-relaxed text-foreground/90 whitespace-pre-line sm:text-[15px] sm:leading-7">
+                <p className="text-sm leading-relaxed text-foreground whitespace-pre-line sm:text-[15px] sm:leading-7">
                   {popup.content}
                 </p>
               </div>
@@ -185,13 +283,13 @@ export default function LoginNewsPopup() {
                   rel="noopener noreferrer"
                   className={cn(
                     "group mt-4 flex items-center gap-3 rounded-xl border p-3.5 transition-all sm:gap-4 sm:p-4",
-                    "border-emerald-200/80 bg-gradient-to-r from-emerald-50 to-green-50",
-                    "hover:border-emerald-300 hover:shadow-lg hover:shadow-emerald-100/60",
-                    "dark:border-emerald-800/60 dark:from-emerald-950/50 dark:to-green-950/40",
+                    "border-emerald-300/80 bg-emerald-50 shadow-sm",
+                    "hover:border-emerald-400 hover:shadow-md hover:shadow-emerald-100/80",
+                    "dark:border-emerald-800/60 dark:bg-emerald-950/40",
                     "dark:hover:border-emerald-700 dark:hover:shadow-emerald-950/30"
                   )}
                 >
-                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[#25D366] shadow-lg shadow-emerald-200/80 transition-transform group-hover:scale-105 sm:h-12 sm:w-12 dark:shadow-emerald-950/50">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[#25D366] shadow-md shadow-emerald-200/60 transition-transform group-hover:scale-105 sm:h-12 sm:w-12 dark:shadow-emerald-950/50">
                     <WhatsAppIcon className="h-6 w-6" />
                   </div>
 
@@ -199,12 +297,12 @@ export default function LoginNewsPopup() {
                     <p className="truncate text-sm font-semibold text-emerald-900 dark:text-emerald-200 sm:text-base">
                       Join Our Community
                     </p>
-                    <p className="text-xs text-emerald-700 dark:text-emerald-400 sm:text-sm">
+                    <p className="text-xs text-emerald-700/90 dark:text-emerald-400 sm:text-sm">
                       Get updates & support on WhatsApp
                     </p>
                   </div>
 
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-600 transition-all group-hover:bg-emerald-200 group-hover:translate-x-0.5 dark:bg-emerald-900/50 dark:text-emerald-300">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 transition-all group-hover:translate-x-0.5 group-hover:bg-emerald-200 dark:bg-emerald-900/50 dark:text-emerald-300">
                     <ArrowRight className="h-4 w-4" />
                   </div>
                 </a>
@@ -215,7 +313,8 @@ export default function LoginNewsPopup() {
           {/* Footer */}
           <div
             className={cn(
-              "shrink-0 border-t border-border/60 bg-background/95 px-4 py-3 backdrop-blur-sm",
+              "shrink-0 border-t bg-background px-4 py-3",
+              "border-border/80",
               "pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-7 sm:py-4",
               "transition-all duration-500 delay-150 ease-out",
               entered ? "translate-y-0 opacity-100" : "translate-y-3 opacity-0"
@@ -225,12 +324,15 @@ export default function LoginNewsPopup() {
               <Button
                 variant="ghost"
                 onClick={() => handleOpenChange(false)}
-                className="h-11 w-full text-muted-foreground sm:h-10 sm:w-auto"
+                className="h-11 w-full text-muted-foreground hover:text-foreground sm:h-10 sm:w-auto"
               >
                 Dismiss
               </Button>
               {popup.actionUrl && (
-                <Button asChild className="h-11 w-full gap-2 sm:h-10 sm:w-auto sm:px-6">
+                <Button
+                  asChild
+                  className={cn("h-11 w-full gap-2 border-0 text-white sm:h-10 sm:w-auto sm:px-6", theme.ctaClass)}
+                >
                   <a href={popup.actionUrl} target="_blank" rel="noopener noreferrer">
                     {popup.actionText || "Learn More"}
                     <ExternalLink className="h-4 w-4" />
@@ -241,8 +343,7 @@ export default function LoginNewsPopup() {
           </div>
         </div>
 
-        {/* Mobile drag handle hint */}
-        <div className="absolute left-1/2 top-1.5 z-30 h-1 w-10 -translate-x-1/2 rounded-full bg-white/40 sm:hidden" />
+        <div className="absolute left-1/2 top-1.5 z-30 h-1 w-10 -translate-x-1/2 rounded-full bg-white/50 sm:hidden" />
       </DialogContent>
     </Dialog>
   );

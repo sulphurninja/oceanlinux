@@ -82,7 +82,8 @@ export async function GET(request) {
       actionText: latestPopupAnnouncement.actionText || '',
       actionUrl: isValidHttpUrl(latestPopupAnnouncement.actionUrl)
         ? latestPopupAnnouncement.actionUrl
-        : ''
+        : '',
+      type: latestPopupAnnouncement.type || 'update',
     };
 
     return new Response(JSON.stringify({ popup }), {

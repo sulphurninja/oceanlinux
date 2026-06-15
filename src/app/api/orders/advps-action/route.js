@@ -15,11 +15,13 @@ const {
   ADVPS_REBUILD_LIMIT,
   getAdvpsRebuildUsage,
   getAdvpsRebuildLimitMessage,
+  consumeAdvpsRebuildCredit,
 } = require('@/lib/advpsRebuildLimit');
 const {
   syncAdvpsOrderCredentials,
   resolveAdvpsPurchaseOrderId,
 } = require('@/lib/advpsOrderSync');
+const { extractPasswordFromGenerateError } = require('@/lib/advpsPasswordFetch');
 
 export async function GET(request) {
   try {
@@ -217,42 +219,58 @@ export async function POST(request) {
       }
 
       case 'generatepassword': {
+        const saveGeneratedPassword = async (newPassword, source = 'generate-password') => {
+          console.log(`[ADVPS-ACTION] 🔑 PASSWORD for service=${serviceId} order=${orderId} (src: ${source}): ${newPassword}`);
+
+          let saved = false;
+          for (let dbAttempt = 0; dbAttempt < 5; dbAttempt++) {
+            try {
+              await Order.findByIdAndUpdate(orderId, {
+                password: newPassword,
+                lastAction: 'changepassword',
+                lastActionTime: new Date(),
+              });
+              console.log(`[ADVPS-ACTION] ✅ Password SAVED to DB (attempt ${dbAttempt + 1})`);
+              saved = true;
+              break;
+            } catch (dbErr) {
+              console.error(`[ADVPS-ACTION] ❌ DB save attempt ${dbAttempt + 1}/5 FAILED:`, dbErr.message);
+              if (dbAttempt < 4) await new Promise(r => setTimeout(r, 2000));
+            }
+          }
+          if (!saved) {
+            console.error(`[ADVPS-ACTION] 🚨 CRITICAL: Password but ALL DB saves failed! service=${serviceId} order=${orderId} password=${newPassword}`);
+          }
+          return saved;
+        };
+
         try {
           const passRes = await api.generatePassword(serviceId);
           const d = passRes?.data || {};
           const newPassword = d.password || d.newPassword || d.existingPassword;
           if (newPassword) {
-            console.log(`[ADVPS-ACTION] 🔑 PASSWORD for service=${serviceId} order=${orderId}: ${newPassword}`);
-
-            let saved = false;
-            for (let dbAttempt = 0; dbAttempt < 5; dbAttempt++) {
-              try {
-                await Order.findByIdAndUpdate(orderId, {
-                  password: newPassword,
-                  lastAction: 'changepassword',
-                  lastActionTime: new Date(),
-                });
-                console.log(`[ADVPS-ACTION] ✅ Password SAVED to DB (attempt ${dbAttempt + 1})`);
-                saved = true;
-                break;
-              } catch (dbErr) {
-                console.error(`[ADVPS-ACTION] ❌ DB save attempt ${dbAttempt + 1}/5 FAILED:`, dbErr.message);
-                if (dbAttempt < 4) await new Promise(r => setTimeout(r, 2000));
-              }
-            }
-            if (!saved) {
-              console.error(`[ADVPS-ACTION] 🚨 CRITICAL: Password but ALL DB saves failed! service=${serviceId} order=${orderId} password=${newPassword}`);
-            }
-            result = { ...passRes, passwordSaved: saved };
+            const passwordSaved = await saveGeneratedPassword(newPassword);
+            result = { ...passRes, password: newPassword, passwordSaved, passwordSource: 'generate-password' };
           } else {
             result = passRes;
           }
         } catch (passErr) {
           const msg = passErr.message || '';
-          if (msg.includes('already exists') || msg.includes('Password already')) {
+          const extracted = extractPasswordFromGenerateError(passErr);
+          if (extracted) {
+            const passwordSaved = await saveGeneratedPassword(extracted, 'generate-password-error');
+            result = {
+              password: extracted,
+              passwordSaved,
+              passwordSource: 'generate-password-error',
+              message: 'Recovered current password from ADVPS',
+            };
+            break;
+          }
+          if (msg.includes('already exists') || msg.includes('Password already') || msg.includes('cannot be regenerated')) {
             return NextResponse.json({
               success: false,
-              error: 'Password was already generated for this service and cannot be regenerated. If it was not saved, rebuild the server to get a new password.',
+              error: 'ADVPS will not generate another password for this server. Use Format Server below — it will install a fresh OS and generate a new password automatically.',
               code: 'PASSWORD_ALREADY_EXISTS',
             }, { status: 400 });
           }
@@ -266,7 +284,7 @@ export async function POST(request) {
         const os = payload?.templateId || payload?.os;
         if (!os) return NextResponse.json({ message: 'OS template is required for rebuild' }, { status: 400 });
 
-        const { count: currentCount, currentMonth } = getAdvpsRebuildUsage(order);
+        const { count: currentCount } = getAdvpsRebuildUsage(order);
 
         if (currentCount >= ADVPS_REBUILD_LIMIT) {
           return NextResponse.json({
@@ -278,12 +296,6 @@ export async function POST(request) {
             resetsOn: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1).toISOString(),
           }, { status: 429 });
         }
-
-        // Increment count before calling API (optimistic lock)
-        await Order.findByIdAndUpdate(orderId, {
-          advpsRebuildCount: currentCount + 1,
-          advpsRebuildCountMonth: currentMonth,
-        });
 
         const rebuildRes = await api.rebuild(serviceId, os);
         const taskId = rebuildRes?.data?.taskId;
@@ -313,7 +325,9 @@ export async function POST(request) {
                 console.log(`[ADVPS-ACTION] Rebuild poll ${i + 1}: status=${taskStatus}, progress=${taskData.progress}`);
 
                 if (taskStatus === 'COMPLETED' || taskStatus === 'SUCCESS' || taskStatus === 'DONE') {
-                  console.log(`[ADVPS-ACTION] Rebuild task completed for ${rebuildServiceId}; new password only via generate-password → saving to order`);
+                  console.log(`[ADVPS-ACTION] Rebuild task completed for ${rebuildServiceId}; consuming rebuild credit`);
+
+                  await consumeAdvpsRebuildCredit(Order, rebuildOrderId);
 
                   await runAdvpsPostRebuildGeneratePasswordFlow({
                     api,
@@ -325,7 +339,7 @@ export async function POST(request) {
                   return;
                 }
                 if (taskStatus === 'FAILED' || taskStatus === 'ERROR') {
-                  console.error(`[ADVPS-ACTION] Rebuild task FAILED for ${rebuildServiceId}`);
+                  console.error(`[ADVPS-ACTION] Rebuild task FAILED for ${rebuildServiceId} — rebuild credit not consumed`);
                   await Order.findByIdAndUpdate(rebuildOrderId, { provisioningStatus: 'failed', provisioningError: 'Rebuild task failed' });
                   return;
                 }
@@ -334,6 +348,9 @@ export async function POST(request) {
               }
             }
           })();
+        } else {
+          // No async task — treat successful rebuild response as completed
+          await consumeAdvpsRebuildCredit(Order, orderId);
         }
 
         result = rebuildRes;
@@ -365,7 +382,7 @@ export async function POST(request) {
             message: sync.credentialsUpdated
               ? `ADVPS synced — updated: ${sync.changes.join(', ')}`
               : sync.passwordStale
-                ? 'ADVPS API returned the same password. Update it manually in Admin → Manage Orders after changing it on ADVPS panel.'
+                ? 'ADVPS still has the old password on file. Use Generate New Password on your order page, or Format the server if that is unavailable.'
                 : 'ADVPS status synced (no credential changes)',
             runningStatus: pickAdvpsRunningStatusRaw(d) || null,
             credentialsUpdated: sync.credentialsUpdated,
