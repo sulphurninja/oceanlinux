@@ -26,6 +26,15 @@ import {
   isCompanyPaidOrder,
 } from '@/lib/companyOrders';
 
+/** Inline guard — never show cancelled/unpaid even if API cache is stale. */
+function visibleCompanyOrder(order: Order): boolean {
+  const status = String(order?.status ?? '').trim().toLowerCase();
+  if (!status) return false;
+  if (status.includes('cancel') || status.includes('fail') || status.includes('pending')) return false;
+  if (!COMPANY_PAID_ORDER_STATUSES.includes(status as typeof COMPANY_PAID_ORDER_STATUSES[number])) return false;
+  return isCompanyPaidOrder(order);
+}
+
 function orderStatusBadgeProps(status: string): {
   variant: 'default' | 'secondary' | 'outline';
   className?: string;
@@ -214,8 +223,8 @@ export default function CompanyDashboard() {
 
   const loadData = async () => {
     const [stockRes, orderRes] = await Promise.all([
-      fetch('/api/company/stocks'),
-      fetch('/api/company/orders'),
+      fetch('/api/company/stocks', { cache: 'no-store' }),
+      fetch(`/api/company/orders?_=${Date.now()}`, { cache: 'no-store' }),
     ]);
     if (stockRes.ok) {
       const rows: Stock[] = await stockRes.json();
@@ -224,7 +233,7 @@ export default function CompanyDashboard() {
     }
     if (orderRes.ok) {
       const rows: Order[] = await orderRes.json();
-      setOrders(rows.filter(isCompanyPaidOrder));
+      setOrders(rows.filter(visibleCompanyOrder));
     }
     loadActionRequests('pending');
     loadRenewalRequests('pending');
@@ -388,7 +397,7 @@ export default function CompanyDashboard() {
 
   // Filtered and sorted orders
   const filteredOrders = useMemo(() => {
-    let result = orders.filter(isCompanyPaidOrder);
+    let result = orders.filter(visibleCompanyOrder);
 
     if (searchTerm.trim()) {
       const q = searchTerm.toLowerCase();

@@ -8,6 +8,9 @@ import {
   isCompanyPaidOrder,
 } from '@/lib/companyOrders';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 async function getCompanySession() {
   const cookieStore = await cookies();
   const session = cookieStore.get('company_session')?.value;
@@ -29,15 +32,15 @@ export async function GET() {
   const stockIds = stocks.map(s => s._id.toString());
 
   if (stockIds.length === 0) {
-    return NextResponse.json([], {
-      headers: { 'Cache-Control': 'no-store, max-age=0' },
-    });
+    return NextResponse.json([], { headers: responseHeaders() });
   }
 
   const stockIdVariants = buildCompanyStockIdVariants(stockIds);
 
+  // DB-level whitelist: cancelled/failed/pending never leave MongoDB.
   const orders = await Order.find({
     ipStockId: { $in: stockIdVariants },
+    status: { $in: ['confirmed', 'paid', 'active', 'completed'] },
   })
     .select(
       'productName memory ipAddress username password os status provisioningStatus createdAt expiryDate customerName customerEmail ipStockId panelUsername transactionId walletDeduction paymentDetails paymentMethod clientTxnId'
@@ -55,9 +58,7 @@ export async function GET() {
       stockName: stockMap[String(o.ipStockId)] || 'Unknown',
     }));
 
-  return NextResponse.json(enriched, {
-    headers: { 'Cache-Control': 'no-store, max-age=0' },
-  });
+  return NextResponse.json(enriched, { headers: responseHeaders() });
 }
 
 export async function PUT(request) {
@@ -79,6 +80,7 @@ export async function PUT(request) {
   const order = await Order.findOne({
     _id: orderId,
     ipStockId: { $in: stockIdVariants },
+    status: { $in: ['confirmed', 'paid', 'active', 'completed'] },
   });
 
   if (!order || !isCompanyPaidOrder(order)) {
@@ -97,4 +99,13 @@ export async function PUT(request) {
   await Order.updateOne({ _id: orderId }, { $set: updateFields });
 
   return NextResponse.json({ success: true, message: 'Order updated' });
+}
+
+function responseHeaders() {
+  return {
+    'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+    Pragma: 'no-cache',
+    Expires: '0',
+    'X-Company-Orders-Filter': 'paid-only-v2',
+  };
 }
