@@ -70,6 +70,11 @@ import {
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { Label } from '@/components/ui/label';
+import {
+    getOrdersPageStatus,
+    hasDeliveredCredentials,
+    isServerListOrder,
+} from '@/lib/orderDeliveryStatus';
 
 interface Order {
     _id: string;
@@ -102,6 +107,8 @@ interface Order {
     webhookAmount?: string;
     webhookCustomerName?: string;
     webhookCustomerEmail?: string;
+    slotIpPackageId?: string;
+    advpsServiceId?: string;
     provisioningError?: string;
     autoProvisioned?: boolean;
     renewalPayments?: Array<{
@@ -200,6 +207,10 @@ const OrderHistory = () => {
 
     // Get provider display name
     const getProviderDisplayName = (order: Order): string => {
+        if (order.slotIpPackageId || order.provider === 'slotip') {
+            return 'OceanLinux';
+        }
+
         if (order.provider) {
             switch (order.provider) {
                 case 'smartvps':
@@ -226,21 +237,7 @@ const OrderHistory = () => {
         return 'OceanLinux';
     };
 
-    // Get order status for filtering
-    const getOrderStatus = (order: Order): 'completed' | 'pending' | 'failed' | 'cancelled' => {
-        const currentStatus = order.status.toLowerCase();
-
-        if (currentStatus === 'completed' || currentStatus === 'active') {
-            return 'completed';
-        }
-        if (currentStatus === 'failed' || currentStatus === 'terminated') {
-            return 'failed';
-        }
-        if (currentStatus === 'cancelled') {
-            return 'cancelled';
-        }
-        return 'pending';
-    };
+    const getOrderStatus = (order: Order) => getOrdersPageStatus(order);
 
     // Filter orders based on search query, status filter, and tab
     useEffect(() => {
@@ -275,12 +272,12 @@ const OrderHistory = () => {
     // Get counts for tabs
     const getCounts = () => {
         const all = orders.length;
-        const completed = orders.filter(order => getOrderStatus(order) === 'completed').length;
+        const delivered = orders.filter(order => getOrderStatus(order) === 'delivered').length;
         const pending = orders.filter(order => getOrderStatus(order) === 'pending').length;
         const failed = orders.filter(order => getOrderStatus(order) === 'failed').length;
         const cancelled = orders.filter(order => getOrderStatus(order) === 'cancelled').length;
 
-        return { all, completed, pending, failed, cancelled };
+        return { all, delivered, pending, failed, cancelled };
     };
 
     const counts = getCounts();
@@ -299,11 +296,11 @@ const OrderHistory = () => {
         const status = getOrderStatus(order);
 
         switch (status) {
-            case 'completed':
+            case 'delivered':
                 return (
                     <Badge className="bg-green-50 text-green-700 border border-green-200 dark:bg-green-950 dark:text-green-300 dark:border-green-800">
                         <CheckCircle className="w-3 h-3 mr-1" />
-                        Completed
+                        Delivered
                     </Badge>
                 );
             case 'pending':
@@ -387,7 +384,7 @@ const OrderHistory = () => {
                                 </div>
                                 <div className="min-w-0 flex-1">
                                     <h1 className='text-base sm:text-lg lg:text-xl font-bold'>Order History</h1>
-                                    <p className="text-xs sm:text-sm text-muted-foreground hidden xs:block">View all your orders</p>
+                                    <p className="text-xs sm:text-sm text-muted-foreground hidden xs:block">All your orders & order history</p>
                                 </div>
                             </div>
                         </div>
@@ -442,7 +439,7 @@ const OrderHistory = () => {
                                     </SelectTrigger>
                                     <SelectContent>
                                         <SelectItem value="all">All Status</SelectItem>
-                                        <SelectItem value="completed">Completed</SelectItem>
+                                        <SelectItem value="delivered">Delivered</SelectItem>
                                         <SelectItem value="pending">Pending</SelectItem>
                                         <SelectItem value="failed">Failed</SelectItem>
                                         <SelectItem value="cancelled">Cancelled</SelectItem>
@@ -510,18 +507,18 @@ const OrderHistory = () => {
                                         {counts.all}
                                     </Badge>
                                 </TabsTrigger>
-                                <TabsTrigger value="completed" className="flex items-center gap-1 px-2 sm:px-3 py-2 text-xs sm:text-sm whitespace-nowrap">
-                                    <CheckCircle className="h-3 w-3 sm:h-4 sm:w-4" />
-                                    <span>Completed</span>
-                                    <Badge variant="secondary" className="ml-0.5 text-xs h-4 px-1">
-                                        {counts.completed}
-                                    </Badge>
-                                </TabsTrigger>
                                 <TabsTrigger value="pending" className="flex items-center gap-1 px-2 sm:px-3 py-2 text-xs sm:text-sm whitespace-nowrap">
                                     <Clock className="h-3 w-3 sm:h-4 sm:w-4" />
                                     <span>Pending</span>
                                     <Badge variant="secondary" className="ml-0.5 text-xs h-4 px-1">
                                         {counts.pending}
+                                    </Badge>
+                                </TabsTrigger>
+                                <TabsTrigger value="delivered" className="flex items-center gap-1 px-2 sm:px-3 py-2 text-xs sm:text-sm whitespace-nowrap">
+                                    <CheckCircle className="h-3 w-3 sm:h-4 sm:w-4" />
+                                    <span>Delivered</span>
+                                    <Badge variant="secondary" className="ml-0.5 text-xs h-4 px-1">
+                                        {counts.delivered}
                                     </Badge>
                                 </TabsTrigger>
                                 <TabsTrigger value="failed" className="flex items-center gap-1 px-2 sm:px-3 py-2 text-xs sm:text-sm whitespace-nowrap">
@@ -910,14 +907,14 @@ const OrderHistory = () => {
                                             Server Access Details
                                         </CardTitle>
                                         <CardDescription>
-                                            {getOrderStatus(selectedOrder) === 'completed'
+                                            {hasDeliveredCredentials(selectedOrder)
                                                 ? "Your server credentials are ready to use"
                                                 : "Server credentials will be available once setup is complete"
                                             }
                                         </CardDescription>
                                     </CardHeader>
                                     <CardContent>
-                                        {getOrderStatus(selectedOrder) === 'completed' ? (
+                                        {hasDeliveredCredentials(selectedOrder) ? (
                                             <div className="space-y-4">
                                                 {selectedOrder.ipAddress && (
                                                     <div>

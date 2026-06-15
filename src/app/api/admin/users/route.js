@@ -76,7 +76,22 @@ export async function GET(request) {
                     lastOrderDate: { $max: '$orders.createdAt' }
                 }
             },
-            { $project: { password: 0, orders: 0 } },
+            {
+                $lookup: {
+                    from: 'wallets',
+                    localField: '_id',
+                    foreignField: 'userId',
+                    as: 'walletDoc'
+                }
+            },
+            {
+                $addFields: {
+                    walletBalance: {
+                        $ifNull: [{ $arrayElemAt: ['$walletDoc.balance', 0] }, 0]
+                    }
+                }
+            },
+            { $project: { password: 0, orders: 0, walletDoc: 0 } },
             { $sort: { [sortBy]: sortOrder } },
             { $skip: skip },
             { $limit: limit }

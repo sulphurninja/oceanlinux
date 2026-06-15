@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Avatar, AvatarFallback, AvatarInitials } from "@/components/ui/avatar";
 import {
@@ -32,7 +32,8 @@ import {
   XCircle,
   AlertCircle,
   TrendingUp,
-  FileText
+  FileText,
+  Wallet
 } from "lucide-react";
 import { toast } from 'sonner';
 import Link from "next/link";
@@ -55,6 +56,7 @@ interface User {
   createdAt: string;
   orderCount: number;
   totalSpent: number;
+  walletBalance?: number;
   lastOrderDate?: string;
 }
 
@@ -84,6 +86,7 @@ export default function AdminUsersPage() {
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [showUserDialog, setShowUserDialog] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [walletUser, setWalletUser] = useState<User | null>(null);
   const [bulkActionLoading, setBulkActionLoading] = useState(false);
 
   useEffect(() => {
@@ -452,6 +455,10 @@ export default function AdminUsersPage() {
                         <CreditCard className="w-3 h-3 mr-1" />
                         {user.orderCount} orders • ₹{user.totalSpent.toLocaleString()}
                       </span>
+                      <span className="flex items-center">
+                        <Wallet className="w-3 h-3 mr-1" />
+                        ₹{(user.walletBalance ?? 0).toLocaleString('en-IN')}
+                      </span>
                       {user.lastOrderDate && (
                         <span className="text-xs">
                           Last order: {new Date(user.lastOrderDate).toLocaleDateString()}
@@ -485,6 +492,10 @@ export default function AdminUsersPage() {
                       <DropdownMenuItem onClick={() => setSelectedUser(user)}>
                         <Edit className="w-4 h-4 mr-2" />
                         Edit User
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setWalletUser(user)}>
+                        <Wallet className="w-4 h-4 mr-2" />
+                        Adjust Wallet Balance
                       </DropdownMenuItem>
                       <DropdownMenuSeparator />
                       {user.isVerified ? (
@@ -562,6 +573,22 @@ export default function AdminUsersPage() {
             <DialogTitle>Edit User Details</DialogTitle>
           </DialogHeader>
           {selectedUser && <EditUserForm user={selectedUser} onClose={() => setSelectedUser(null)} onUpdate={fetchUsers} />}
+        </DialogContent>
+      </Dialog>
+
+      {/* Adjust Wallet Balance Dialog */}
+      <Dialog open={!!walletUser} onOpenChange={(open) => !open && setWalletUser(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Adjust Wallet Balance</DialogTitle>
+          </DialogHeader>
+          {walletUser && (
+            <AdjustWalletBalanceForm
+              user={walletUser}
+              onClose={() => setWalletUser(null)}
+              onSuccess={fetchUsers}
+            />
+          )}
         </DialogContent>
       </Dialog>
     </div>
@@ -661,6 +688,177 @@ function EditUserForm({ user, onClose, onUpdate }: { user: User, onClose: () => 
           Update User
         </Button>
       </div>
+    </form>
+  );
+}
+
+function AdjustWalletBalanceForm({
+  user,
+  onClose,
+  onSuccess,
+}: {
+  user: User;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [action, setAction] = useState<'add' | 'deduct'>('add');
+  const [amount, setAmount] = useState('');
+  const [description, setDescription] = useState('');
+  const [currentBalance, setCurrentBalance] = useState<number | null>(user.walletBalance ?? null);
+  const [loading, setLoading] = useState(false);
+  const [fetchingBalance, setFetchingBalance] = useState(true);
+
+  useEffect(() => {
+    const fetchBalance = async () => {
+      try {
+        const res = await fetch(`/api/admin/users/${user._id}/wallet`, { credentials: 'include' });
+        if (res.ok) {
+          const data = await res.json();
+          setCurrentBalance(data.wallet?.balance ?? 0);
+        }
+      } catch (error) {
+        console.error('Failed to fetch wallet balance:', error);
+      } finally {
+        setFetchingBalance(false);
+      }
+    };
+    fetchBalance();
+  }, [user._id]);
+
+  const parsedAmount = Number(amount);
+  const projectedBalance =
+    currentBalance != null && Number.isFinite(parsedAmount) && parsedAmount > 0
+      ? action === 'add'
+        ? currentBalance + parsedAmount
+        : Math.max(0, currentBalance - parsedAmount)
+      : null;
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+      toast.error('Enter a valid amount greater than 0');
+      return;
+    }
+
+    if (action === 'deduct' && currentBalance != null && parsedAmount > currentBalance) {
+      toast.error(`Cannot deduct more than current balance (₹${currentBalance.toLocaleString('en-IN')})`);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/admin/users/${user._id}/wallet`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action,
+          amount: parsedAmount,
+          description: description.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+
+      if (res.ok) {
+        toast.success(data.message || 'Wallet updated');
+        onSuccess();
+        onClose();
+      } else {
+        toast.error(data.message || 'Failed to update wallet balance');
+      }
+    } catch (error) {
+      console.error('Error updating wallet balance:', error);
+      toast.error('Failed to update wallet balance');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="rounded-lg border bg-muted/30 p-3 text-sm">
+        <p className="font-medium">{user.name}</p>
+        <p className="text-muted-foreground">{user.email}</p>
+        <p className="mt-2 flex items-center gap-1.5">
+          <Wallet className="w-4 h-4" />
+          Current balance:{' '}
+          {fetchingBalance ? (
+            <Loader2 className="w-3 h-3 animate-spin inline" />
+          ) : (
+            <span className="font-semibold">₹{(currentBalance ?? 0).toLocaleString('en-IN')}</span>
+          )}
+        </p>
+      </div>
+
+      <div>
+        <label className="text-sm font-medium">Action</label>
+        <Select value={action} onValueChange={(v: 'add' | 'deduct') => setAction(v)}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="add">Add balance</SelectItem>
+            <SelectItem value="deduct">Deduct balance</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div>
+        <label className="text-sm font-medium">
+          Amount to {action === 'add' ? 'add' : 'deduct'} (₹)
+        </label>
+        <Input
+          type="number"
+          min="0.01"
+          step="0.01"
+          max={action === 'deduct' && currentBalance != null ? currentBalance : undefined}
+          placeholder={action === 'add' ? 'e.g. 500' : 'e.g. 100'}
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          required
+        />
+        {action === 'deduct' && currentBalance != null && (
+          <p className="text-xs text-muted-foreground mt-1">
+            Max deductible: ₹{currentBalance.toLocaleString('en-IN')}
+          </p>
+        )}
+        {projectedBalance != null && (
+          <p className="text-xs text-muted-foreground mt-1">
+            New balance after {action}: ₹{projectedBalance.toLocaleString('en-IN')}
+          </p>
+        )}
+      </div>
+
+      <div>
+        <label className="text-sm font-medium">Note (optional)</label>
+        <Input
+          placeholder={
+            action === 'add'
+              ? 'Reason for credit, e.g. refund, promo, manual top-up'
+              : 'Reason for deduction, e.g. correction, chargeback'
+          }
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+        />
+      </div>
+
+      <DialogFooter>
+        <Button type="button" variant="outline" onClick={onClose} disabled={loading}>
+          Cancel
+        </Button>
+        <Button
+          type="submit"
+          variant={action === 'deduct' ? 'destructive' : 'default'}
+          disabled={loading || fetchingBalance}
+        >
+          {loading ? (
+            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+          ) : (
+            <Wallet className="w-4 h-4 mr-2" />
+          )}
+          {action === 'add' ? 'Add Balance' : 'Deduct Balance'}
+        </Button>
+      </DialogFooter>
     </form>
   );
 }

@@ -123,8 +123,8 @@ export async function POST(request) {
       // Update order status and store payment details
       order.status = 'confirmed';
       order.transactionId = razorpay_payment_id;
-      order.gatewayOrderId = razorpay_order_id; // Store Razorpay order ID
-      order.paymentMethod = 'razorpay';
+      order.gatewayOrderId = razorpay_order_id;
+      order.paymentMethod = order.walletDeduction?.deducted ? `wallet+razorpay` : 'razorpay';
       order.expiryDate = expiryDate;
       order.paymentDetails = {
         razorpay_payment_id: razorpay_payment_id,
@@ -170,8 +170,8 @@ export async function POST(request) {
         // Update order status and store payment details
         order.status = 'confirmed';
         order.transactionId = payment.cf_payment_id;
-        order.gatewayOrderId = order.clientTxnId; // Cashfree uses clientTxnId as order_id
-        order.paymentMethod = 'cashfree';
+        order.gatewayOrderId = order.clientTxnId;
+        order.paymentMethod = order.walletDeduction?.deducted ? `wallet+cashfree` : 'cashfree';
         order.expiryDate = expiryDate;
         order.paymentDetails = {
           cf_payment_id: payment.cf_payment_id,

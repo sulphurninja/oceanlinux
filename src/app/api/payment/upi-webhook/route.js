@@ -309,13 +309,13 @@ export async function POST(request) {
       });
 
     } else if (status === 'failure') {
-      // Update order status to failed
-      order.status = 'failed';
       order.paymentDetails = {
+        ...(order.paymentDetails || {}),
         remark: webhookData.remark,
-        txnAt: webhookData.txnAt
+        txnAt: webhookData.txnAt,
       };
-      await order.save();
+      const { cancelPendingBuyNowOrder } = await import('@/lib/cancelPendingOrder');
+      await cancelPendingBuyNowOrder(order, 'failed');
 
       console.log(`[UPI Webhook] Order ${order._id} marked as failed`);
 

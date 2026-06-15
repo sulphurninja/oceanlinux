@@ -134,6 +134,15 @@ function PaymentCallbackContent() {
         const isRenewal = clientTxnId.startsWith("RENEWAL_");
         console.log(`Transaction type: ${isRenewal ? 'RENEWAL' : 'NEW ORDER'}`);
 
+        if (statusParam === 'wallet_paid' && !isRenewal && callbackType !== 'cart') {
+          setStatus('success');
+          setMessage('Order paid using wallet balance! Your server is being provisioned.');
+          toast.success('Payment confirmed');
+          fetchWalletSummary().catch(() => { });
+          setTimeout(() => router.push('/dashboard/viewLinux'), 2500);
+          return;
+        }
+
         // HANDLE RENEWAL TRANSACTIONS
         if (isRenewal) {
           console.log(`[RENEWAL-CALLBACK] Processing renewal transaction: ${clientTxnId}`);
@@ -246,6 +255,23 @@ function PaymentCallbackContent() {
           }, 3000);
         } else {
           console.log(`Payment not confirmed for transaction ${clientTxnId}`, data);
+          try {
+            const cancelRes = await fetch('/api/payment/cancel', {
+              method: 'POST',
+              credentials: 'include',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ clientTxnId }),
+            });
+            const cancelData = await cancelRes.json();
+            if (cancelData.success && cancelData.refunded > 0) {
+              fetchWalletSummary().catch(() => { });
+              setStatus("failed");
+              setMessage(`Payment was not completed. ₹${cancelData.refunded.toLocaleString('en-IN')} has been returned to your wallet.`);
+              return;
+            }
+          } catch (cancelErr) {
+            console.error('[CALLBACK] Cancel/refund failed:', cancelErr);
+          }
           setStatus("failed");
           setMessage(data.message || "Payment verification failed. Please check your orders page or contact support.");
         }

@@ -284,8 +284,8 @@ export async function POST(request) {
 
       const order = await Order.findOne({ gatewayOrderId: orderId });
       if (order) {
-        order.status = 'failed';
-        await order.save();
+        const { cancelPendingBuyNowOrder } = await import('@/lib/cancelPendingOrder');
+        await cancelPendingBuyNowOrder(order, 'failed');
         console.log(`[WEBHOOK] ✅ Order ${order._id} marked as failed`);
       }
     }

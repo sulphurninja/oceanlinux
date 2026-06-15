@@ -5,7 +5,13 @@ import Order from '@/models/orderModel';
 import User from '@/models/userModel';
 import IPStock from '@/models/ipStockModel';
 const SlotIPPackage = require('@/models/slotIpPackageModel');
-import { assertIpStockPurchasable } from '@/lib/ipStockAvailability';
+const AutoProvisioningService = require('@/services/autoProvisioningService');
+const WhatsAppService = require('@/services/whatsappService');
+import { assertIpStockPurchasable, decrementIpStockForOrder } from '@/lib/ipStockAvailability';
+import { calculateExpiryDate } from '@/lib/expiryHelper';
+import { assignPanelCredentials } from '@/lib/panelCredentials';
+import userWalletService from '@/services/userWalletService';
+import NotificationService from '@/services/notificationService';
 import { Cashfree } from 'cashfree-pg';
 import Razorpay from 'razorpay';
 import crypto from 'crypto';
@@ -29,6 +35,18 @@ const razorpay = new Razorpay({
 
 // UPI Gateway configuration (URL only - key will be read inside handler)
 const UPI_GATEWAY_URL = 'https://merchant.upigateway.com/api/create_order';
+
+async function refundWalletReservation(userId, amount, clientTxnId) {
+  if (!amount || amount <= 0) return;
+  try {
+    await userWalletService.refund(userId, amount, {
+      description: `Buy-now checkout refund ${clientTxnId}`,
+      reference: clientTxnId,
+    });
+  } catch (err) {
+    console.error('[Payment] Wallet refund failed:', err.message);
+  }
+}
 
 export async function POST(request) {
   await connectDB();
@@ -55,7 +73,8 @@ export async function POST(request) {
       promoCode, 
       ipStockId,
       slotIpPackageId,
-      paymentMethod = 'razorpay'
+      paymentMethod = 'razorpay',
+      useWallet = false,
     } = reqBody;
 
     let originalPrice, price, promoDiscount = 0;
@@ -146,8 +165,30 @@ export async function POST(request) {
 
     console.log(`[Payment] Server-validated price: originalPrice=${originalPrice}, discount=${promoDiscount}, finalPrice=${price}`);
 
-    // 6. Generate a unique order ID
     const clientTxnId = `ORDER_${Date.now()}_${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+
+    let walletApplied = 0;
+    let walletDebit = null;
+    if (useWallet) {
+      const balance = await userWalletService.getBalance(userId);
+      walletApplied = Math.min(balance, price);
+    }
+    const gatewayCharge = Math.max(0, price - walletApplied);
+
+    if (walletApplied > 0) {
+      try {
+        walletDebit = await userWalletService.debit(userId, walletApplied, {
+          description: `Buy now ${productName} - ${memory || 'Slot IP'}`,
+          reference: clientTxnId,
+          metadata: { productName, memory, totalPrice: price, gatewayCharge },
+        });
+      } catch (err) {
+        return NextResponse.json(
+          { message: err.message || 'Insufficient wallet balance' },
+          { status: 400 }
+        );
+      }
+    }
 
     // 7. Calculate expiry date (30 days from now)
     const expiryDate = new Date();
@@ -155,11 +196,14 @@ export async function POST(request) {
 
     console.log(`[Payment] Creating ${paymentMethod} order for user ${userId}`);
 
-    let gatewayOrderId;
+    let gatewayOrderId = walletDebit?.walletTxnId || null;
     let responseData = {
       message: 'Payment initiated',
-      orderId: null, // Will be set after DB creation
+      orderId: null,
       clientTxnId: clientTxnId,
+      totalPrice: price,
+      walletApplied,
+      gatewayCharge,
       customer: {
         name: user.name,
         email: user.email,
@@ -167,162 +211,159 @@ export async function POST(request) {
       }
     };
 
-    // 8. Create order with selected payment gateway (with automatic fallback)
     let actualPaymentMethod = paymentMethod;
     let orderCreationError = null;
 
-    if (paymentMethod === 'upi') {
-      try {
-        // Get UPI Gateway API key from environment
-        const UPI_GATEWAY_KEY = process.env.UPI_GATEWAY_API_KEY;
-        
-        if (!UPI_GATEWAY_KEY) {
-          console.error("[Payment] UPI_GATEWAY_API_KEY not found in environment variables");
-          throw new Error('UPI Gateway API key not configured');
-        }
+    if (gatewayCharge > 0) {
+      if (paymentMethod === 'upi') {
+        try {
+          const UPI_GATEWAY_KEY = process.env.UPI_GATEWAY_API_KEY;
+          
+          if (!UPI_GATEWAY_KEY) {
+            console.error("[Payment] UPI_GATEWAY_API_KEY not found in environment variables");
+            throw new Error('UPI Gateway API key not configured');
+          }
 
-        console.log("[Payment] UPI Gateway API key found, length:", UPI_GATEWAY_KEY.length);
+          const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://oceanlinux.com';
+          const returnUrl = baseUrl.startsWith('http') ? baseUrl : `https://${baseUrl}`;
 
-        // Create UPI Gateway order
-        const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://oceanlinux.com';
-        const returnUrl = baseUrl.startsWith('http') ? baseUrl : `https://${baseUrl}`;
-
-        const upiPayload = {
-          key: UPI_GATEWAY_KEY,
-          client_txn_id: clientTxnId,
-          amount: price.toString(),
-          p_info: `${productName} - ${memory}`,
-          customer_name: user.name,
-          customer_email: user.email,
-          customer_mobile: user.phone || '9999999999',
-          redirect_url: `${returnUrl}/payment/callback?client_txn_id=${clientTxnId}`,
-          udf1: productName,
-          udf2: memory,
-          udf3: promoCode || ''
-        };
-
-        console.log("[Payment] Creating UPI Gateway order");
-        
-        const upiResponse = await fetch(UPI_GATEWAY_URL, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(upiPayload)
-        });
-
-        const upiData = await upiResponse.json();
-        
-        if (!upiResponse.ok || upiData.status === false) {
-          throw new Error(upiData.msg || 'UPI Gateway order creation failed');
-        }
-
-        console.log("[Payment] UPI Gateway order created:", upiData.data.order_id);
-
-        gatewayOrderId = upiData.data.order_id;
-        responseData.upi = {
-          order_id: upiData.data.order_id,
-          payment_url: upiData.data.payment_url,
-          amount: price,
-          currency: 'INR'
-        };
-      } catch (upiError) {
-        console.error("[Payment] UPI Gateway order creation failed:", upiError.message);
-        orderCreationError = upiError;
-        
-        // Fallback to Cashfree
-        console.log("[Payment] Falling back to Cashfree...");
-        actualPaymentMethod = 'cashfree';
-      }
-    }
-
-    if (actualPaymentMethod === 'cashfree') {
-      try {
-        // Helper function to sanitize strings for Cashfree (remove emojis and special chars)
-        const sanitizeForCashfree = (str) => {
-          if (!str) return '';
-          return String(str).replace(/[^\w\s\-\.,:]/g, '').trim();
-        };
-
-        // Ensure full URLs for Cashfree
-        const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://oceanlinux.com';
-        const returnUrl = baseUrl.startsWith('http') ? baseUrl : `https://${baseUrl}`;
-
-        const cashfreeRequest = {
-          order_id: clientTxnId,
-          order_amount: Math.round(price * 100) / 100,
-          order_currency: 'INR',
-          customer_details: {
-            customer_id: userId,
+          const upiPayload = {
+            key: UPI_GATEWAY_KEY,
+            client_txn_id: clientTxnId,
+            amount: gatewayCharge.toString(),
+            p_info: `${productName} - ${memory}`,
             customer_name: user.name,
             customer_email: user.email,
-            customer_phone: user.phone || '9999999999'
-          },
-          order_meta: {
-            return_url: `${returnUrl}/payment/callback?client_txn_id=${clientTxnId}`,
-            notify_url: `${returnUrl}/api/payment/webhook`
-          },
-          order_note: sanitizeForCashfree(`${productName} - ${memory}`),
-          order_tags: {
-            product_name: sanitizeForCashfree(productName),
-            memory: sanitizeForCashfree(memory),
-            promo_code: sanitizeForCashfree(promoCode || ''),
-            original_price: String(originalPrice || price),
-            discount: String(promoDiscount || 0)
+            customer_mobile: user.phone || '9999999999',
+            redirect_url: `${returnUrl}/payment/callback?client_txn_id=${clientTxnId}`,
+            udf1: productName,
+            udf2: memory,
+            udf3: promoCode || ''
+          };
+
+          const upiResponse = await fetch(UPI_GATEWAY_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(upiPayload)
+          });
+
+          const upiData = await upiResponse.json();
+          
+          if (!upiResponse.ok || upiData.status === false) {
+            throw new Error(upiData.msg || 'UPI Gateway order creation failed');
           }
-        };
 
-        console.log("[Payment] Creating Cashfree order");
-        console.log("[Payment] Return URL:", cashfreeRequest.order_meta.return_url);
-        const cashfreeOrder = await Cashfree.PGCreateOrder('2023-08-01', cashfreeRequest);
-        console.log("[Payment] Cashfree order created:", cashfreeOrder.data.order_id);
-
-        gatewayOrderId = clientTxnId;
-        responseData.cashfree = {
-          order_id: clientTxnId,
-          payment_session_id: cashfreeOrder.data.payment_session_id,
-          order_token: cashfreeOrder.data.payment_session_id,
-          amount: Math.round(price * 100) / 100,
-          currency: 'INR'
-        };
-      } catch (cashfreeError) {
-        console.error("[Payment] Cashfree order creation failed:", cashfreeError.message);
-        console.error("[Payment] Cashfree error details:", cashfreeError.response?.data);
-        orderCreationError = cashfreeError;
-        
-        // Fallback to Razorpay
-        console.log("[Payment] Falling back to Razorpay...");
-        actualPaymentMethod = 'razorpay';
+          gatewayOrderId = upiData.data.order_id;
+          responseData.upi = {
+            order_id: upiData.data.order_id,
+            payment_url: upiData.data.payment_url,
+            amount: gatewayCharge,
+            currency: 'INR'
+          };
+        } catch (upiError) {
+          console.error("[Payment] UPI Gateway order creation failed:", upiError.message);
+          orderCreationError = upiError;
+          actualPaymentMethod = 'cashfree';
+        }
       }
+
+      if (actualPaymentMethod === 'cashfree') {
+        try {
+          const sanitizeForCashfree = (str) => {
+            if (!str) return '';
+            return String(str).replace(/[^\w\s\-\.,:]/g, '').trim();
+          };
+
+          const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://oceanlinux.com';
+          const returnUrl = baseUrl.startsWith('http') ? baseUrl : `https://${baseUrl}`;
+
+          const cashfreeRequest = {
+            order_id: clientTxnId,
+            order_amount: Math.round(gatewayCharge * 100) / 100,
+            order_currency: 'INR',
+            customer_details: {
+              customer_id: userId,
+              customer_name: user.name,
+              customer_email: user.email,
+              customer_phone: user.phone || '9999999999'
+            },
+            order_meta: {
+              return_url: `${returnUrl}/payment/callback?client_txn_id=${clientTxnId}`,
+              notify_url: `${returnUrl}/api/payment/webhook`
+            },
+            order_note: sanitizeForCashfree(`${productName} - ${memory}`),
+            order_tags: {
+              product_name: sanitizeForCashfree(productName),
+              memory: sanitizeForCashfree(memory),
+              promo_code: sanitizeForCashfree(promoCode || ''),
+              original_price: String(originalPrice || price),
+              discount: String(promoDiscount || 0),
+              wallet_applied: String(walletApplied || 0),
+            }
+          };
+
+          const cashfreeOrder = await Cashfree.PGCreateOrder('2023-08-01', cashfreeRequest);
+          gatewayOrderId = clientTxnId;
+          responseData.cashfree = {
+            order_id: clientTxnId,
+            payment_session_id: cashfreeOrder.data.payment_session_id,
+            order_token: cashfreeOrder.data.payment_session_id,
+            amount: Math.round(gatewayCharge * 100) / 100,
+            currency: 'INR'
+          };
+        } catch (cashfreeError) {
+          console.error("[Payment] Cashfree order creation failed:", cashfreeError.message);
+          orderCreationError = cashfreeError;
+          actualPaymentMethod = 'razorpay';
+        }
+      }
+
+      if (actualPaymentMethod === 'razorpay') {
+        try {
+          const razorpayOrderOptions = {
+            amount: Math.round(gatewayCharge * 100),
+            currency: 'INR',
+            receipt: clientTxnId,
+            notes: {
+              product_name: String(productName).replace(/[^\x20-\x7E]/g, '').trim(),
+              memory: memory,
+              customer_email: user.email,
+              customer_name: String(user.name).replace(/[^\x20-\x7E]/g, '').trim(),
+              promo_code: promoCode || '',
+              original_price: originalPrice || price,
+              discount: promoDiscount || 0,
+              wallet_applied: walletApplied || 0,
+            }
+          };
+
+          const razorpayOrder = await razorpay.orders.create(razorpayOrderOptions);
+          gatewayOrderId = razorpayOrder.id;
+          responseData.razorpay = {
+            order_id: razorpayOrder.id,
+            amount: razorpayOrder.amount,
+            currency: razorpayOrder.currency,
+            key: process.env.RAZORPAY_KEY_ID
+          };
+        } catch (razorpayError) {
+          console.error('[Payment] Razorpay order creation failed:', razorpayError.message);
+          orderCreationError = razorpayError;
+        }
+      }
+    } else {
+      actualPaymentMethod = 'wallet';
+      gatewayOrderId = walletDebit?.walletTxnId || `WALLET_${clientTxnId}`;
     }
 
-    if (actualPaymentMethod === 'razorpay') {
-      const razorpayOrderOptions = {
-        amount: Math.round(price * 100), // Razorpay expects amount in paise
-        currency: 'INR',
-        receipt: clientTxnId,
-        notes: {
-          product_name: String(productName).replace(/[^\x20-\x7E]/g, '').trim(),
-          memory: memory,
-          customer_email: user.email,
-          customer_name: String(user.name).replace(/[^\x20-\x7E]/g, '').trim(),
-          promo_code: promoCode || '',
-          original_price: originalPrice || price,
-          discount: promoDiscount || 0
-        }
-      };
+    const paymentMethodLabel =
+      walletApplied >= price
+        ? 'wallet'
+        : walletApplied > 0
+          ? `wallet+${actualPaymentMethod}`
+          : actualPaymentMethod;
 
-      console.log("Creating Razorpay order");
-      const razorpayOrder = await razorpay.orders.create(razorpayOrderOptions);
-      console.log("Razorpay order created:", razorpayOrder.id);
-
-      gatewayOrderId = razorpayOrder.id;
-      responseData.razorpay = {
-        order_id: razorpayOrder.id,
-        amount: razorpayOrder.amount,
-        currency: razorpayOrder.currency,
-        key: process.env.RAZORPAY_KEY_ID
-      };
+    if (gatewayCharge > 0 && !gatewayOrderId) {
+      await refundWalletReservation(userId, walletApplied, clientTxnId);
+      return NextResponse.json({ message: 'Failed to create payment order' }, { status: 500 });
     }
 
     // 9. Create a pending order in our database
@@ -338,12 +379,34 @@ export async function POST(request) {
       promoDiscount: promoDiscount,
       clientTxnId,
       gatewayOrderId: gatewayOrderId,
-      paymentMethod: actualPaymentMethod,
-      status: 'pending',
+      paymentMethod: paymentMethodLabel,
+      status: gatewayCharge === 0 ? 'confirmed' : 'pending',
       customerName: user.name,
       customerEmail: user.email,
-      expiryDate: expiryDate,
+      expiryDate: gatewayCharge === 0 ? calculateExpiryDate() : expiryDate,
+      paymentDetails: {
+        gatewayAmount: gatewayCharge,
+        walletAmount: walletApplied,
+      },
     };
+
+    if (walletApplied > 0 && walletDebit) {
+      orderData.walletDeduction = {
+        deducted: true,
+        amount: walletApplied,
+        transactionId: walletDebit.walletTxnId,
+        timestamp: new Date(),
+      };
+    }
+
+    if (gatewayCharge === 0) {
+      orderData.transactionId = walletDebit?.walletTxnId || `WALLET_${clientTxnId}`;
+      orderData.paymentDetails = {
+        ...orderData.paymentDetails,
+        walletOnly: true,
+        confirmedAt: new Date(),
+      };
+    }
 
     if (isSlotIpPurchase) {
       orderData.slotIpPackageId = slotIpPackageId;
@@ -354,11 +417,90 @@ export async function POST(request) {
     
     const newOrder = await Order.create(orderData);
 
+    if (gatewayCharge === 0) {
+      await assignPanelCredentials(newOrder);
+      await newOrder.save();
+      if (!isSlotIpPurchase) {
+        await decrementIpStockForOrder(newOrder);
+      }
+
+      if (isSlotIpPurchase && newOrder.slotIpPackageId) {
+        try {
+          const allocated = await SlotIPPackage.findOneAndUpdate(
+            { _id: newOrder.slotIpPackageId, 'ips.allocated': false },
+            {
+              $set: {
+                'ips.$.allocated': true,
+                'ips.$.orderId': newOrder._id,
+                'ips.$.allocatedAt': new Date(),
+              },
+            },
+            { new: true }
+          );
+          if (allocated) {
+            const slotIp = allocated.ips.find(
+              (ip) => ip.orderId && ip.orderId.toString() === newOrder._id.toString()
+            );
+            if (slotIp) {
+              newOrder.slotIpId = slotIp._id.toString();
+              newOrder.ipAddress = `${slotIp.ip}:${slotIp.port}`;
+              newOrder.username = slotIp.username;
+              newOrder.password = slotIp.password;
+              newOrder.provisioningStatus = 'active';
+              newOrder.autoProvisioned = true;
+              await newOrder.save();
+            }
+          }
+        } catch (slotErr) {
+          console.error('[Payment] Slot IP allocation failed:', slotErr.message);
+        }
+      }
+
+      try {
+        await NotificationService.notifyOrderConfirmed(newOrder.user, newOrder);
+      } catch (notifError) {
+        console.error('[Payment] notifyOrderConfirmed failed:', notifError.message);
+      }
+
+      if (!isSlotIpPurchase) {
+        try {
+          const provisioningService = new AutoProvisioningService();
+          await NotificationService.notifyOrderProvisioning(newOrder.user, newOrder);
+          provisioningService.provisionServer(newOrder._id.toString())
+            .then(async (result) => {
+              if (result.success && !result.alreadyProvisioned && !result.alreadyProvisioning) {
+                await NotificationService.notifyOrderCompleted(newOrder.user, newOrder, {
+                  ipAddress: result.ipAddress || 'Available in dashboard',
+                  username: result.username || 'root',
+                  password: result.password || 'Check dashboard',
+                });
+                WhatsAppService.notifyOrderViaWhatsApp(newOrder.user, newOrder).catch(() => {});
+              } else if (!result.success && !result.alreadyProvisioning && !result.advpsPending) {
+                await NotificationService.notifyOrderFailed(newOrder.user, newOrder, result.error);
+              }
+            })
+            .catch(async (error) => {
+              if (!String(error.message).startsWith('ADVPS_PENDING')) {
+                await NotificationService.notifyOrderFailed(newOrder.user, newOrder, error.message);
+              }
+            });
+        } catch (provErr) {
+          console.error('[Payment] Auto-provisioning start failed:', provErr.message);
+        }
+      }
+    }
+
     console.log("[Payment] Order created in database:", newOrder._id);
-    console.log("[Payment] Using payment method:", actualPaymentMethod);
+    console.log("[Payment] Using payment method:", paymentMethodLabel);
 
     responseData.orderId = newOrder._id;
-    responseData.actualPaymentMethod = actualPaymentMethod; // Tell frontend which method was used
+    responseData.actualPaymentMethod = actualPaymentMethod;
+    responseData.paymentMethodLabel = paymentMethodLabel;
+    
+    if (gatewayCharge === 0) {
+      responseData.walletOnly = true;
+      responseData.message = 'Order paid using wallet balance';
+    }
     
     // If there was a fallback, include a flag
     if (orderCreationError && actualPaymentMethod !== paymentMethod) {

@@ -9,6 +9,7 @@ const {
   getAdvpsRebuildUsage,
   getAdvpsRebuildLimitMessage,
 } = require('@/lib/advpsRebuildLimit');
+const { syncAdvpsOrderCredentials } = require('@/lib/advpsOrderSync');
 
 function validateInternalKey(request) {
   const key = request.headers.get('x-internal-key');
@@ -99,40 +100,10 @@ export async function POST(request) {
           const statusRes = await api.status(serviceId);
           const d = unwrapAdvpsEnvelope(statusRes) || {};
           const powerState = normalizeAdvpsPowerState(d);
-
-          const syncUpdates = { lastSyncTime: new Date() };
-          let syncCredentialsUpdated = false;
-
-          if (order.advpsOrderId) {
-            try {
-              const detailsRes = await api.getOrderDetails(order.advpsOrderId);
-              const orderDetails = detailsRes?.data || detailsRes;
-              const services = orderDetails?.services || [];
-
-              if (services.length > 0) {
-                const svc = services[0];
-                const freshIp = svc.ip || '';
-                const freshUsername = svc.username || '';
-                const freshPassword = svc.password || '';
-                const freshOs = svc.os || '';
-
-                if (freshIp && freshIp !== order.ipAddress) { syncUpdates.ipAddress = freshIp; syncCredentialsUpdated = true; }
-                if (freshUsername && freshUsername !== order.username) { syncUpdates.username = freshUsername; syncCredentialsUpdated = true; }
-                if (freshPassword && freshPassword !== order.password) { syncUpdates.password = freshPassword; syncCredentialsUpdated = true; }
-                if (freshOs && freshOs !== order.os) { syncUpdates.os = freshOs; syncCredentialsUpdated = true; }
-
-                if (syncCredentialsUpdated) {
-                  console.log(`[INTERNAL-ADVPS][SYNC] Credentials updated from getOrderDetails for order ${orderId}`);
-                }
-              }
-            } catch (detailsErr) {
-              console.error('[INTERNAL-ADVPS][SYNC] getOrderDetails error:', detailsErr.message);
-            }
-          }
-
-          await Order.findByIdAndUpdate(orderId, syncUpdates);
+          const sync = await syncAdvpsOrderCredentials(api, order, { statusPayload: statusRes });
+          await Order.findByIdAndUpdate(orderId, sync.dbUpdates);
           const orderSnapshot = await Order.findById(orderId)
-            .select('ipAddress username password os provisioningStatus provisioningError lastSyncTime advpsRebuildCount advpsRebuildCountMonth status')
+            .select('ipAddress username password os provisioningStatus provisioningError lastSyncTime advpsRebuildCount advpsRebuildCountMonth status advpsOrderId advpsServiceId')
             .lean();
 
           return NextResponse.json({
@@ -143,8 +114,12 @@ export async function POST(request) {
             lastSync: new Date().toISOString(),
             result: {
               synced: true,
-              message: syncCredentialsUpdated ? 'ADVPS synced; credentials updated' : 'ADVPS synced',
-              credentialsUpdated: syncCredentialsUpdated,
+              message: sync.credentialsUpdated
+                ? `ADVPS synced — updated: ${sync.changes.join(', ')}`
+                : 'ADVPS synced',
+              credentialsUpdated: sync.credentialsUpdated,
+              changes: sync.changes,
+              advpsOrderIdMissing: sync.advpsOrderIdMissing,
             },
             order: orderSnapshot,
           });

@@ -53,6 +53,12 @@ import {
 } from "@/components/ui/select";
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import {
+    hasDeliveredCredentials,
+    getDaysUntilExpiry,
+    isServerListOrder,
+    getServerDeliveryStatus,
+} from '@/lib/orderDeliveryStatus';
 
 interface Order {
     _id: string;
@@ -170,32 +176,13 @@ const ViewLinux = () => {
         }
     };
 
-    const getDaysUntilExpiry = (expiryDate: Date | string | null | undefined) => {
-        if (!expiryDate) return 0;
-        const now = new Date();
-        const expiry = new Date(expiryDate);
-        const diffTime = expiry.getTime() - now.getTime();
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-        return diffDays;
-    };
-
-
-    /**
-     * True when the customer has been delivered a working server: a real IP
-     * plus login credentials. Used to override the status badge for orders
-     * that the admin manually fulfilled (or that were filled by company-
-     * Virtualizor automation) but whose `provisioningStatus` was never
-     * flipped from the default 'pending'. The terminal/suspended/expired
-     * states still take precedence over this — see callers.
-     */
-    const hasDeliveredCredentials = (order: Order): boolean => {
-        const ip = (order.ipAddress || '').trim();
-        const user = (order.username || '').trim();
-        const pwd = (order.password || '').trim();
-        return !!(ip && user && pwd);
-    };
+    const getDaysUntilExpiryLocal = getDaysUntilExpiry;
 
     const getProviderDisplayName = (order: Order): string => {
+        if (order.slotIpPackageId || order.provider === 'slotip') {
+            return 'OceanLinux';
+        }
+
         if (order.provider) {
             switch (order.provider) {
                 case 'smartvps':
@@ -204,8 +191,6 @@ const ViewLinux = () => {
                     return 'Hostycare';
                 case 'oceanlinux':
                     return 'OceanLinux';
-                case 'slotip':
-                    return 'Slot IP';
                 case 'advps':
                     return 'ADVPS';
                 default:
@@ -232,104 +217,11 @@ const ViewLinux = () => {
 
 
 
-    // Get server status for filtering - Customer-friendly status logic
-    const getServerStatus = (order: Order): 'active' | 'expired' | 'pending' | 'failed' => {
-        const currentStatus = order.provisioningStatus || order.status;
-
-        // Check if expired first
-        if (order.expiryDate && getDaysUntilExpiry(order.expiryDate) < 0) {
-            return 'expired';
-        }
-
-        // Check for active states
-        if (currentStatus.toLowerCase() === 'completed' || currentStatus.toLowerCase() === 'active') {
-            return 'active';
-        }
-
-        // If the customer already has a working server (IP + credentials
-        // delivered) and the order isn't explicitly suspended/terminated/
-        // failed-with-real-error, treat it as active. This catches manual
-        // fulfillments and company-Virtualizor automated orders whose
-        // `provisioningStatus` was never flipped from the default 'pending',
-        // as well as orders carrying a stale `provisioningError` from an
-        // earlier failed attempt that was later resolved by hand.
-        const lowerStatus = currentStatus.toLowerCase();
-        const isExplicitlyBad =
-            lowerStatus === 'suspended' ||
-            lowerStatus === 'terminated' ||
-            lowerStatus === 'cancelled' ||
-            lowerStatus === 'canceled';
-        if (hasDeliveredCredentials(order) && !isExplicitlyBad) {
-            return 'active';
-        }
-
-        // 🆕 NEW: Check if order is fresh (created within last 10 minutes)
-        // Fresh orders should NEVER show as failed - they're still being processed
-        const orderAge = order.createdAt ? Date.now() - new Date(order.createdAt).getTime() : 0;
-        const isFreshOrder = orderAge < 10 * 60 * 1000; // 10 minutes
-
-        if (isFreshOrder && currentStatus.toLowerCase() !== 'active' && currentStatus.toLowerCase() !== 'completed') {
-            return 'pending'; // Always show fresh orders as pending
-        }
-
-        const provider = getProviderDisplayName(order);
-        const isAutoProvisionedProvider = provider === 'Hostycare' || provider === 'SmartVPS' || provider === 'Slot IP' || provider === 'ADVPS';
-
-        if (!isAutoProvisionedProvider) {
-            // Only consider it failed if it's explicitly marked as terminated or has a real API failure
-            if (currentStatus.toLowerCase() === 'terminated' ||
-                (currentStatus.toLowerCase() === 'failed' &&
-                    order.provisioningError &&
-                    !order.provisioningError.includes('CONFIG:') &&
-                    !order.provisioningError.includes('Missing hostycareProductId') &&
-                    !order.provisioningError.includes('Memory configuration not found') &&
-                    !order.provisioningError.includes('lacks hostycareProductId') &&
-                    !order.provisioningError.includes('not found') &&
-                    !order.provisioningError.includes('Lock acquisition'))) {
-                return 'failed';
-            }
-            // All other non-auto-provisioned services should be pending (awaiting manual setup)
-            return 'pending';
-        }
-
-        // For auto-provisioned services, continue with existing logic
-
-        // Special handling for configuration/temporary errors - these should be pending, not failed
-        if (order.provisioningError &&
-            (order.provisioningError.includes('Missing hostycareProductId') ||
-                order.provisioningError.includes('CONFIG:') ||
-                order.provisioningError.includes('Memory configuration not found') ||
-                order.provisioningError.includes('lacks hostycareProductId') ||
-                order.provisioningError.includes('not found') ||
-                order.provisioningError.includes('Lock acquisition') ||
-                order.provisioningError.includes('IPStock') ||
-                order.provisioningError.includes('timeout'))) {
-            return 'pending';
-        }
-
-        // Check for explicitly failed states (actual API failures, not config issues)
-        if (currentStatus.toLowerCase() === 'failed' || currentStatus.toLowerCase() === 'terminated') {
-            // But if it's just a config issue, treat as pending
-            if (order.provisioningError && order.provisioningError.includes('CONFIG:')) {
-                return 'pending';
-            }
-            return 'failed';
-        }
-
-        // Check for pending/provisioning states
-        if (currentStatus.toLowerCase() === 'pending' ||
-            currentStatus.toLowerCase() === 'provisioning' ||
-            currentStatus.toLowerCase() === 'confirmed') {
-            return 'pending';
-        }
-
-        // Default to pending for unknown states on auto-provisioned providers
-        return 'pending';
-    };
+    const getServerStatus = (order: Order) => getServerDeliveryStatus(order);
 
     // Filter orders based on search query, status filter, and tab
     useEffect(() => {
-        let filtered = orders;
+        let filtered = orders.filter(isServerListOrder);
 
         // Apply search filter
         if (searchQuery.trim()) {
@@ -358,13 +250,12 @@ const ViewLinux = () => {
 
     // Get counts for tabs
     const getCounts = () => {
-        const all = orders.length;
-        const active = orders.filter(order => getServerStatus(order) === 'active').length;
-        const expired = orders.filter(order => getServerStatus(order) === 'expired').length;
-        const pending = orders.filter(order => getServerStatus(order) === 'pending').length;
-        const failed = orders.filter(order => getServerStatus(order) === 'failed').length;
+        const delivered = orders.filter(isServerListOrder);
+        const all = delivered.length;
+        const active = delivered.filter(order => getServerStatus(order) === 'active').length;
+        const expired = delivered.filter(order => getServerStatus(order) === 'expired').length;
 
-        return { all, active, expired, pending, failed };
+        return { all, active, expired };
     };
 
     const counts = getCounts();
@@ -420,7 +311,7 @@ const ViewLinux = () => {
 
     const isRenewalEligible = (order: Order | null) => {
         if (!order || !order.expiryDate) return false;
-        const daysLeft = getDaysUntilExpiry(order.expiryDate);
+        const daysLeft = getDaysUntilExpiryLocal(order.expiryDate);
         return daysLeft <= 30 && daysLeft >= -7;
     };
 
@@ -466,7 +357,8 @@ const getStatusBadge = (status: string, provisioningStatus?: string, lastAction?
     }
 
     const provider = order ? getProviderDisplayName(order) : 'Unknown';
-    const isAutoProvisionedProvider = provider === 'Hostycare' || provider === 'SmartVPS' || provider === 'Slot IP' || provider === 'ADVPS';
+    const isSlotIp = !!(order?.slotIpPackageId || order?.provider === 'slotip');
+    const isAutoProvisionedProvider = isSlotIp || provider === 'Hostycare' || provider === 'SmartVPS' || provider === 'ADVPS';
 
     // If the order has delivered credentials and isn't explicitly in a bad
     // state, render Active regardless of the underlying provisioningStatus.
@@ -659,7 +551,7 @@ const getStatusBadge = (status: string, provisioningStatus?: string, lastAction?
             {/* Main Content with responsive container */}
             <div className='container mx-auto  px-3 sm:px-4 md:px-6 lg:px-8 py-4 sm:py-6'>
                 {/* Search and Filters Section - Enhanced */}
-                {!loading && orders.length > 0 && (
+                {!loading && orders.filter(isServerListOrder).length > 0 && (
                     <div className="mb-4 sm:mb-6 space-y-3 sm:space-y-4">
                         <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 items-stretch sm:items-center">
                             {/* Search Bar */}
@@ -694,8 +586,6 @@ const getStatusBadge = (status: string, provisioningStatus?: string, lastAction?
                                         <SelectItem value="all">All Status</SelectItem>
                                         <SelectItem value="active">Active</SelectItem>
                                         <SelectItem value="expired">Expired</SelectItem>
-                                        <SelectItem value="pending">Pending</SelectItem>
-                                        <SelectItem value="failed">Failed</SelectItem>
                                     </SelectContent>
                                 </Select>
 
@@ -716,7 +606,7 @@ const getStatusBadge = (status: string, provisioningStatus?: string, lastAction?
                         {/* Show filter summary */}
                         {(searchQuery || statusFilter !== 'all') && (
                             <p className="text-xs sm:text-sm text-muted-foreground">
-                                {filteredOrders.length} of {orders.length} servers
+                                {filteredOrders.length} of {orders.filter(isServerListOrder).length} servers
                                 {searchQuery && ` matching "${searchQuery}"`}
                                 {statusFilter !== 'all' && ` with status "${statusFilter}"`}
                             </p>
@@ -734,25 +624,33 @@ const getStatusBadge = (status: string, provisioningStatus?: string, lastAction?
                             <p className="text-muted-foreground text-sm sm:text-base font-medium">Loading your servers...</p>
                         </div>
                     </div>
-                ) : orders.length === 0 ? (
+                ) : orders.filter(isServerListOrder).length === 0 ? (
                     <div className="text-center py-12 sm:py-16 px-4 min-h-[50vh] flex flex-col justify-center">
                         <div className="w-16 h-16 sm:w-20 sm:h-20 mx-auto mb-4 sm:mb-6 bg-muted rounded-full flex items-center justify-center">
                             <Server className="h-8 w-8 sm:h-10 sm:w-10 text-muted-foreground" />
                         </div>
-                        <h3 className="text-lg sm:text-xl font-semibold mb-2">No servers found</h3>
+                        <h3 className="text-lg sm:text-xl font-semibold mb-2">No active servers yet</h3>
                         <p className="text-muted-foreground mb-4 sm:mb-6 max-w-md mx-auto text-sm sm:text-base">
-                            Get started by ordering your first Linux server.
+                            Delivered servers appear here. Orders still being set up are on the Orders page.
                         </p>
+                        <div className="flex flex-col sm:flex-row gap-2 justify-center">
                         <Button onClick={() => router.push('/dashboard/ipStock')} className="gap-2 mx-auto" size="sm">
                             <Server className="h-4 w-4" />
                             Browse Plans
                         </Button>
+                        {orders.length > 0 && (
+                            <Button variant="outline" onClick={() => router.push('/dashboard/orders')} className="gap-2 mx-auto" size="sm">
+                                <Clock className="h-4 w-4" />
+                                View Pending Orders
+                            </Button>
+                        )}
+                        </div>
                     </div>
                 ) : (
                     <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4 sm:space-y-6">
                         {/* Enhanced Tab Navigation with Counts */}
                         <div className="flex justify-center overflow-x-auto scrollbar-hide">
-                            <TabsList className="grid grid-cols-5 h-fit w-fit min-w-0">
+                            <TabsList className="grid grid-cols-3 h-fit w-fit min-w-0">
                                 <TabsTrigger value="all" className="flex items-center h- gap-1 px-2 sm:px-3 py-2 text-xs sm:text-sm whitespace-nowrap">
                                     <Server className="h-3 w-3 sm:h-4 sm:w-4" />
                                     <span>All</span>
@@ -774,20 +672,6 @@ const getStatusBadge = (status: string, provisioningStatus?: string, lastAction?
                                         {counts.expired}
                                     </Badge>
                                 </TabsTrigger>
-                                <TabsTrigger value="pending" className="flex items-center gap-1 px-2 sm:px-3 py-2 text-xs sm:text-sm whitespace-nowrap">
-                                    <Clock className="h-3 w-3 sm:h-4 sm:w-4" />
-                                    <span>Pending</span>
-                                    <Badge variant="secondary" className="ml-0.5 text-xs h-4 px-1">
-                                        {counts.pending}
-                                    </Badge>
-                                </TabsTrigger>
-                                <TabsTrigger value="failed" className="flex items-center gap-1 px-2 sm:px-3 py-2 text-xs sm:text-sm whitespace-nowrap">
-                                    <XCircle className="h-3 w-3 sm:h-4 sm:w-4" />
-                                    <span>Failed</span>
-                                    <Badge variant="secondary" className="ml-0.5 text-xs h-4 px-1">
-                                        {counts.failed}
-                                    </Badge>
-                                </TabsTrigger>
                             </TabsList>
                         </div>
 
@@ -795,11 +679,7 @@ const getStatusBadge = (status: string, provisioningStatus?: string, lastAction?
                             {filteredOrders.length === 0 ? (
                                 <div className="text-center py-12 sm:py-16 px-4 min-h-[50vh] flex flex-col justify-center">
                                     <div className="w-16 h-16 sm:w-20 sm:h-20 mx-auto mb-4 sm:mb-6 bg-muted rounded-full flex items-center justify-center">
-                                        {activeTab === 'failed' ? (
-                                            <XCircle className="h-8 w-8 sm:h-10 sm:w-10 text-muted-foreground" />
-                                        ) : activeTab === 'pending' ? (
-                                            <Clock className="h-8 w-8 sm:h-10 sm:w-10 text-muted-foreground" />
-                                        ) : activeTab === 'expired' ? (
+                                        {activeTab === 'expired' ? (
                                             <Calendar className="h-8 w-8 sm:h-10 sm:w-10 text-muted-foreground" />
                                         ) : activeTab === 'active' ? (
                                             <CheckCircle className="h-8 w-8 sm:h-10 sm:w-10 text-muted-foreground" />
@@ -816,15 +696,11 @@ const getStatusBadge = (status: string, provisioningStatus?: string, lastAction?
                                     <p className="text-muted-foreground mb-4 sm:mb-6 max-w-md mx-auto text-sm sm:text-base">
                                         {searchQuery || statusFilter !== 'all'
                                             ? "Try adjusting your search terms or filters."
-                                            : activeTab === 'failed'
-                                                ? "No failed servers found. All systems are running smoothly!"
-                                                : activeTab === 'pending'
-                                                    ? "No pending servers. All orders have been processed!"
-                                                    : activeTab === 'expired'
-                                                        ? "No expired servers. All your services are up to date!"
-                                                        : activeTab === 'active'
-                                                            ? "No active servers. Order a new server to get started!"
-                                                            : "No servers found."
+                                            : activeTab === 'expired'
+                                                ? "No expired servers. All your services are up to date!"
+                                                : activeTab === 'active'
+                                                    ? "No active servers. Order a new server to get started!"
+                                                    : "No delivered servers found."
                                         }
                                     </p>
                                     <div className="flex gap-2 justify-center">
@@ -844,32 +720,6 @@ const getStatusBadge = (status: string, provisioningStatus?: string, lastAction?
                                 </div>
                             ) : (
                                 <div className="space-y-3 sm:space-y-4 pb-4 sm:pb-6">
-                                    {/* Special notice for failed tab */}
-                                    {activeTab === 'failed' && filteredOrders.length > 0 && (
-                                        <Card className="border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950/30">
-                                            <CardContent className="p-3 sm:p-4">
-                                                <div className="flex items-start gap-3">
-                                                    <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
-                                                    <div className="flex-1">
-                                                        <h4 className="font-semibold text-red-800 dark:text-red-200 mb-1">Server Issues Detected</h4>
-                                                        <p className="text-sm text-red-700 dark:text-red-300 mb-3">
-                                                            Some of your servers have encountered issues. Our technical team can help resolve these problems.
-                                                        </p>
-                                                        <Button
-                                                            variant="outline"
-                                                            size="sm"
-                                                            onClick={() => router.push('/support/tickets')}
-                                                            className="gap-2 bg-red-500 text-white border-red-200 hover:bg-red-100 dark:border-red-800 dark:text-white -300 dark:hover:bg-red-950/50"
-                                                        >
-                                                            <LifeBuoy className="h-4 w-4" />
-                                                            Create Support Ticket
-                                                            <ExternalLink className="h-3 w-3" />
-                                                        </Button>
-                                                    </div>
-                                                </div>
-                                            </CardContent>
-                                        </Card>
-                                    )}
 
                                     {filteredOrders.map((order) => (
                                         <Card

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, Suspense } from "react";
+import { useEffect, useState, Suspense, useMemo } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
@@ -47,11 +47,16 @@ import {
   ChevronRight,
   Package,
   Search,
-  Copy
+  Copy,
+  ShoppingCart,
+  Wallet as WalletIcon
 } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
 import { z } from "zod";
 import { cn } from "@/lib/utils";
+import Link from "next/link";
 import AddToCartButton from "@/components/cart/AddToCartButton";
+import { fetchWalletSummary } from "@/lib/walletClient";
 
 // Keep all existing interfaces and global declarations unchanged...
 
@@ -150,6 +155,8 @@ function IPStockContent() {
 
   // Payment method selection
   const [paymentMethod, setPaymentMethod] = useState<'cashfree' | 'razorpay' | 'upi'>('razorpay');
+  const [walletBalance, setWalletBalance] = useState(0);
+  const [useWallet, setUseWallet] = useState(true);
 
   // Tab filter state — read initial category from URL
   const searchParams = useSearchParams();
@@ -284,17 +291,23 @@ function IPStockContent() {
       });
     }
 
-    // Sort
+    // Sort: in-stock first, then user-selected order
     filtered.sort((a, b) => {
+      const aInStock = isStockPurchasable(a) ? 0 : 1;
+      const bInStock = isStockPurchasable(b) ? 0 : 1;
+      if (aInStock !== bInStock) return aInStock - bInStock;
+
       switch (sortBy) {
-        case 'price-low':
+        case 'price-low': {
           const aMinPrice = Math.min(...Object.values(a.memoryOptions).map(o => o.price || Infinity));
           const bMinPrice = Math.min(...Object.values(b.memoryOptions).map(o => o.price || Infinity));
           return aMinPrice - bMinPrice;
-        case 'price-high':
+        }
+        case 'price-high': {
           const aMaxPrice = Math.max(...Object.values(a.memoryOptions).map(o => o.price || 0));
           const bMaxPrice = Math.max(...Object.values(b.memoryOptions).map(o => o.price || 0));
           return bMaxPrice - aMaxPrice;
+        }
         case 'name':
         default:
           return a.name.localeCompare(b.name);
@@ -342,6 +355,13 @@ function IPStockContent() {
 
     return { grouped, untagged };
   };
+
+  useEffect(() => {
+    if (!showDialog) return;
+    fetchWalletSummary().then((w) => {
+      if (w) setWalletBalance(w.balance);
+    });
+  }, [showDialog]);
 
   // Handle buy now with ipStockId (regular) or slotIpPackageId (slot)
   const handleBuyNow = (productName: string, memory: string, price: number, ipStockId: string, slotIpPackageId?: string, stockAvailable = true) => {
@@ -413,8 +433,17 @@ function IPStockContent() {
   // Update the getDiscountedPrice function
   const getDiscountedPrice = () => {
     if (!selectedProduct || !promoApplied) return selectedProduct?.price || 0;
-    return Math.max(0, selectedProduct.price - promoDiscount); // Ensure price doesn't go below 0
+    return Math.max(0, selectedProduct.price - promoDiscount);
   };
+
+  const paymentTotals = useMemo(() => {
+    const total = selectedProduct
+      ? (promoApplied ? Math.max(0, selectedProduct.price - promoDiscount) : selectedProduct.price)
+      : 0;
+    const walletApplied = useWallet ? Math.min(walletBalance, total) : 0;
+    const gatewayCharge = Math.max(0, total - walletApplied);
+    return { total, walletApplied, gatewayCharge };
+  }, [selectedProduct, promoApplied, promoDiscount, walletBalance, useWallet]);
 
 
   const sanitizeForRazorpay = (str: string) => {
@@ -424,6 +453,25 @@ function IPStockContent() {
       .replace(/\s+/g, ' ') // Replace multiple spaces with single space
       .trim() // Remove leading/trailing spaces
       .substring(0, 255); // Limit length to 255 characters (Razorpay limit)
+  };
+
+  const cancelPendingPayment = async (clientTxnId: string) => {
+    if (!clientTxnId) return;
+    try {
+      const res = await fetch('/api/payment/cancel', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientTxnId }),
+      });
+      const result = await res.json();
+      if (result.success && result.refunded > 0) {
+        toast.info(`Payment cancelled. ₹${result.refunded.toLocaleString('en-IN')} returned to your wallet.`);
+        fetchWalletSummary().catch(() => {});
+      }
+    } catch (err) {
+      console.error('[Payment] Cancel/refund failed:', err);
+    }
   };
 
   const handleProceedToPayment = async () => {
@@ -441,6 +489,7 @@ function IPStockContent() {
         promoCode: promoApplied ? promoCode : null,
         promoDiscount: promoApplied ? promoDiscount : 0,
         paymentMethod: paymentMethod,
+        useWallet,
       };
 
       if (selectedProduct.slotIpPackageId) {
@@ -470,6 +519,15 @@ function IPStockContent() {
       }
 
       console.log("Payment data received:", data);
+
+      if (data.walletOnly) {
+        toast.success('Order paid using wallet balance!');
+        fetchWalletSummary().catch(() => {});
+        setShowDialog(false);
+        setPaymentInitiating(false);
+        router.push(`/payment/callback?client_txn_id=${data.clientTxnId}&status=wallet_paid`);
+        return;
+      }
 
       // Check if backend used fallback
       if (data.fallbackUsed) {
@@ -516,6 +574,7 @@ function IPStockContent() {
               promoCode: promoApplied ? promoCode : null,
               promoDiscount: promoApplied ? promoDiscount : 0,
               paymentMethod: fallbackMethod,
+              useWallet,
             };
             if (selectedProduct.slotIpPackageId) {
               fallbackBody.slotIpPackageId = selectedProduct.slotIpPackageId;
@@ -591,7 +650,14 @@ function IPStockContent() {
     
     if (result.error) {
       console.error("[Cashfree] Checkout error:", result.error);
+      await cancelPendingPayment(data.clientTxnId);
       throw new Error('Cashfree checkout failed: ' + (result.error.message || 'Unknown error'));
+    }
+
+    if (!result.paymentDetails) {
+      await cancelPendingPayment(data.clientTxnId);
+      setPaymentInitiating(false);
+      return;
     }
 
     if (result.paymentDetails) {
@@ -733,6 +799,7 @@ function IPStockContent() {
           ondismiss: function () {
             console.log('Razorpay payment modal dismissed');
             setPaymentInitiating(false);
+            cancelPendingPayment(data.clientTxnId);
           }
         }
       };
@@ -871,6 +938,12 @@ function IPStockContent() {
                     Clear
                   </Button>
                 )}
+                <Button asChild variant="outline" size="sm" className="h-9 gap-2 hidden sm:inline-flex">
+                  <Link href="/dashboard/cart">
+                    <ShoppingCart className="h-4 w-4" />
+                    View Cart
+                  </Link>
+                </Button>
               </div>
             </div>
 
@@ -934,7 +1007,7 @@ function IPStockContent() {
                                 size="sm"
                                 variant="outline"
                                 className="h-8 px-2.5"
-                                iconOnly
+                                label="Cart"
                               />
                             )}
                             <Button
@@ -1154,39 +1227,90 @@ function IPStockContent() {
               </CardContent>
             </Card>
 
+            {/* Wallet balance */}
+            <Card className="border-primary/20">
+              <CardContent className="pt-4 pb-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <WalletIcon className="h-4 w-4 text-primary" />
+                    <div>
+                      <p className="text-sm font-medium">Use wallet balance</p>
+                      <p className="text-xs text-muted-foreground">
+                        Available: ₹{walletBalance.toLocaleString('en-IN')}
+                      </p>
+                    </div>
+                  </div>
+                  <Switch
+                    checked={useWallet}
+                    onCheckedChange={setUseWallet}
+                    disabled={walletBalance <= 0 || paymentInitiating}
+                  />
+                </div>
+                {useWallet && paymentTotals.walletApplied > 0 && (
+                  <div className="mt-3 space-y-1 text-sm border-t border-border/60 pt-3">
+                    <div className="flex justify-between text-muted-foreground">
+                      <span>Order total</span>
+                      <span>₹{paymentTotals.total.toLocaleString('en-IN')}</span>
+                    </div>
+                    <div className="flex justify-between text-green-600">
+                      <span>From wallet</span>
+                      <span>−₹{paymentTotals.walletApplied.toLocaleString('en-IN')}</span>
+                    </div>
+                    <div className="flex justify-between font-semibold">
+                      <span>{paymentTotals.gatewayCharge > 0 ? 'Pay via gateway' : 'Fully covered by wallet'}</span>
+                      <span>₹{paymentTotals.gatewayCharge.toLocaleString('en-IN')}</span>
+                    </div>
+                  </div>
+                )}
+                {walletBalance < paymentTotals.total && useWallet && paymentTotals.gatewayCharge > 0 && (
+                  <p className="text-[11px] text-muted-foreground mt-2">
+                    Only ₹{paymentTotals.gatewayCharge.toLocaleString('en-IN')} will be charged on {paymentMethod === 'upi' ? 'UPI' : paymentMethod === 'cashfree' ? 'Cashfree' : 'Razorpay'}.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+
             {/* Payment Method Selection - Inline & Minimal */}
             <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">Payment via:</span>
+              <span className="text-muted-foreground">
+                {paymentTotals.gatewayCharge > 0 ? 'Pay remainder via:' : 'Payment method:'}
+              </span>
               <div className="flex gap-1.5">
                 <button
                   onClick={() => setPaymentMethod('razorpay')}
+                  disabled={paymentTotals.gatewayCharge === 0}
                   className={cn(
                     "px-3 py-1.5 rounded-md border transition-all text-xs font-medium",
                     paymentMethod === 'razorpay'
                       ? "border-primary bg-primary text-primary-foreground"
-                      : "border-border hover:border-primary/50"
+                      : "border-border hover:border-primary/50",
+                    paymentTotals.gatewayCharge === 0 && "opacity-40 cursor-not-allowed"
                   )}
                 >
                   Razorpay
                 </button>
                 <button
                   onClick={() => setPaymentMethod('upi')}
+                  disabled={paymentTotals.gatewayCharge === 0}
                   className={cn(
                     "px-3 py-1.5 rounded-md border transition-all text-xs font-medium",
                     paymentMethod === 'upi'
                       ? "border-primary bg-primary text-primary-foreground"
-                      : "border-border hover:border-primary/50"
+                      : "border-border hover:border-primary/50",
+                    paymentTotals.gatewayCharge === 0 && "opacity-40 cursor-not-allowed"
                   )}
                 >
                   UPI
                 </button>
                 <button
                   onClick={() => setPaymentMethod('cashfree')}
+                  disabled={paymentTotals.gatewayCharge === 0}
                   className={cn(
                     "px-3 py-1.5 rounded-md border transition-all text-xs font-medium",
                     paymentMethod === 'cashfree'
                       ? "border-primary bg-primary text-primary-foreground"
-                      : "border-border hover:border-primary/50"
+                      : "border-border hover:border-primary/50",
+                    paymentTotals.gatewayCharge === 0 && "opacity-40 cursor-not-allowed"
                   )}
                 >
                   Cashfree
@@ -1202,8 +1326,9 @@ function IPStockContent() {
                   <div className="space-y-2 text-sm">
                     <p className="font-medium">Secure Payment</p>
                     <p className="text-muted-foreground">
-                      You'll be redirected to a secure payment gateway. Complete your payment using UPI, 
-                      Cards, Net Banking, or Wallets.
+                      {paymentTotals.gatewayCharge > 0
+                        ? `You'll pay ₹${paymentTotals.gatewayCharge.toLocaleString('en-IN')} via the gateway${paymentTotals.walletApplied > 0 ? ` (₹${paymentTotals.walletApplied.toLocaleString('en-IN')} from wallet)` : ''}.`
+                        : 'Your wallet balance covers the full order amount.'}
                     </p>
                   </div>
                 </div>
@@ -1229,10 +1354,18 @@ function IPStockContent() {
                   <Loader2 className="h-4 w-4 animate-spin" />
                   Processing...
                 </span>
+              ) : paymentTotals.gatewayCharge === 0 ? (
+                <span className="flex items-center gap-2">
+                  <WalletIcon className="h-4 w-4" />
+                  Pay with Wallet (₹{paymentTotals.total.toLocaleString('en-IN')})
+                </span>
               ) : (
                 <span className="flex items-center gap-2">
                   <CreditCard className="h-4 w-4" />
-                  Pay ₹{getDiscountedPrice().toFixed(2)}
+                  Pay ₹{paymentTotals.gatewayCharge.toLocaleString('en-IN')}
+                  {paymentTotals.walletApplied > 0 && (
+                    <span className="text-xs opacity-80">(+ ₹{paymentTotals.walletApplied.toLocaleString('en-IN')} wallet)</span>
+                  )}
                 </span>
               )}
             </Button>
@@ -1358,7 +1491,7 @@ function CompactServerPlanRow({
                           size="sm"
                           variant="outline"
                           className="h-8 px-2.5"
-                          iconOnly
+                          label="Cart"
                           disabled={!inStock}
                         />
                         <Button

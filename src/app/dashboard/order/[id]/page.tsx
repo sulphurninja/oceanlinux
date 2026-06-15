@@ -35,7 +35,8 @@ import {
   Info,
   Wallet,
   LifeBuoy,
-  Download
+  Download,
+  Hash
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -81,6 +82,51 @@ interface IPStock {
   // ... other ipStock fields
 }
 
+type SlotIpConnection = {
+  ip: string;
+  port: string;
+  username: string;
+  password: string;
+};
+
+function isSlotIpOrder(order: Order): boolean {
+  return order.provider === 'slotip' || !!order.slotIpPackageId;
+}
+
+function parseSlotIpConnection(order: Order): SlotIpConnection | null {
+  const raw = (order.ipAddress || '').trim();
+  if (!raw) return null;
+
+  // Normal storage: ipAddress = "ip:port", username/password on order
+  const storedMatch = raw.match(/^([^:]+):(\d+)$/);
+  if (storedMatch) {
+    return {
+      ip: storedMatch[1],
+      port: storedMatch[2],
+      username: order.username || '',
+      password: order.password || '',
+    };
+  }
+
+  // Fallback: full proxy string "ip:port:user:pass" in one field
+  const parts = raw.split(':');
+  if (parts.length >= 4) {
+    return {
+      ip: parts[0],
+      port: parts[1],
+      username: parts[2],
+      password: parts.slice(3).join(':'),
+    };
+  }
+
+  return {
+    ip: raw,
+    port: '',
+    username: order.username || '',
+    password: order.password || '',
+  };
+}
+
 interface Order {
   _id: string;
   productName: string;
@@ -97,6 +143,7 @@ interface Order {
   hostycareServiceId?: string;
   smartvpsServiceId?: string;
   advpsServiceId?: string;
+  advpsOrderId?: string;
   netbayServiceId?: string;
   netbayPlanId?: string;
   netbayTaskId?: string;
@@ -109,8 +156,6 @@ interface Order {
   lastActionTime?: Date;
   lastSyncTime?: Date;
   ipStockId?: string;
-  panelUsername?: string;
-  panelPassword?: string;
   renewalPayments?: Array<{
     paymentId: string;
     amount: number;
@@ -354,9 +399,13 @@ const OrderDetails = () => {
       advpsServiceId: order.advpsServiceId,
       netbayServiceId: order.netbayServiceId,
       ipStockId: order.ipStockId,
+      slotIpPackageId: order.slotIpPackageId,
       ipStockTags: ipStock?.tags || 'No IPStock data',
       productName: order.productName
     });
+
+    // Slot IP proxies are OceanLinux-managed inventory
+    if (isSlotIpOrder(order)) return 'oceanlinux';
 
     if (order.provider === 'netbay') return 'netbay';
     if (order.provider === 'advps') return 'advps';
@@ -746,7 +795,14 @@ const OrderDetails = () => {
 
         // Show success message if credentials were updated during sync
         if (data.syncResult?.credentialsUpdated) {
-          toast.success('Server information updated from provider');
+          const changed = data.syncResult.changes?.length
+            ? data.syncResult.changes.join(', ')
+            : 'IP/credentials';
+          toast.success(`Updated from ADVPS: ${changed}`);
+        } else if (data.syncResult?.advpsOrderIdMissing) {
+          toast.warning('ADVPS purchase order ID is not linked — credential auto-sync unavailable');
+        } else if (provider === 'advps') {
+          toast.success('Synced with ADVPS — credentials already up to date');
         }
       }
     } catch (error) {
@@ -1160,7 +1216,7 @@ const OrderDetails = () => {
 
   const isRenewalEligible = (order: Order | null) => {
     if (!order || !order.expiryDate) return false;
-    if (order.provider === 'slotip') return false;
+    if (isSlotIpOrder(order)) return false;
     const daysLeft = getDaysUntilExpiry(order.expiryDate);
 
     // ADVPS upstream enforces a tighter window: services are renewable only
@@ -1671,6 +1727,11 @@ const OrderDetails = () => {
 
   const provider = getProviderFromOrder(order, ipStock);
   const canManageServer = isServerManagementAvailable(order, ipStock);
+  const slotIpOrder = isSlotIpOrder(order);
+  const slotIpConnection = slotIpOrder ? parseSlotIpConnection(order) : null;
+  const hasConnectionDetails = slotIpOrder
+    ? !!(slotIpConnection?.ip && slotIpConnection?.username)
+    : !!(order.ipAddress && order.username);
   const usesLivePowerUi =
     provider === 'hostycare' ||
     provider === 'smartvps' ||
@@ -2104,20 +2165,158 @@ const OrderDetails = () => {
                 </Card>
 
                 {/* Connection Details */}
-                {order.ipAddress && order.username ? (
+                {hasConnectionDetails ? (
                   <Card className="border-border hover:shadow-md transition-shadow">
                     <CardHeader className="pb-3">
                       <CardTitle className="flex items-center gap-2 text-base lg:text-lg">
                         <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
                           <Network className="h-4 w-4 text-primary" />
                         </div>
-                        Connection Details
+                        {slotIpOrder ? 'Proxy Connection Details' : 'Connection Details'}
                       </CardTitle>
                       <CardDescription className="text-xs lg:text-sm">
-                        Use these credentials to connect to your server
+                        {slotIpOrder
+                          ? 'Use these credentials to connect to your slot IP proxy'
+                          : 'Use these credentials to connect to your server'}
                       </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-3">
+                      {slotIpOrder && slotIpConnection ? (
+                        <>
+                          {/* Slot IP — IP */}
+                          <div className="space-y-2">
+                            <div className="p-3 bg-primary/5 rounded-lg border border-primary/20">
+                              <Label className="flex items-center gap-2 text-xs font-medium mb-2">
+                                <div className="h-6 w-6 rounded-md bg-primary/15 flex items-center justify-center">
+                                  <Globe className="h-3.5 w-3.5 text-primary" />
+                                </div>
+                                <span className="text-muted-foreground">IP Address</span>
+                              </Label>
+                              <div className="flex gap-2">
+                                <Input
+                                  readOnly
+                                  value={slotIpConnection.ip}
+                                  className="font-mono bg-background/50 border-border text-sm min-w-0 h-9"
+                                />
+                                <Button
+                                  variant="outline"
+                                  size="icon"
+                                  onClick={() => copyToClipboard(slotIpConnection.ip, 'IP Address')}
+                                  className="shrink-0 h-9 w-9 hover:bg-primary/10 hover:border-primary/30"
+                                >
+                                  {copied === 'IP Address' ? <Check className="h-4 w-4 text-primary" /> : <Copy className="h-4 w-4" />}
+                                </Button>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Slot IP — Port */}
+                          {slotIpConnection.port && (
+                            <div className="space-y-2">
+                              <div className="p-3 bg-primary/5 rounded-lg border border-primary/20">
+                                <Label className="flex items-center gap-2 text-xs font-medium mb-2">
+                                  <div className="h-6 w-6 rounded-md bg-primary/15 flex items-center justify-center">
+                                    <Hash className="h-3.5 w-3.5 text-primary" />
+                                  </div>
+                                  <span className="text-muted-foreground">Port</span>
+                                </Label>
+                                <div className="flex gap-2">
+                                  <Input
+                                    readOnly
+                                    value={slotIpConnection.port}
+                                    className="font-mono bg-background/50 border-border text-sm min-w-0 h-9"
+                                  />
+                                  <Button
+                                    variant="outline"
+                                    size="icon"
+                                    onClick={() => copyToClipboard(slotIpConnection.port, 'Port')}
+                                    className="shrink-0 h-9 w-9 hover:bg-primary/10 hover:border-primary/30"
+                                  >
+                                    {copied === 'Port' ? <Check className="h-4 w-4 text-primary" /> : <Copy className="h-4 w-4" />}
+                                  </Button>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Slot IP — Username */}
+                          <div className="space-y-2">
+                            <div className="p-3 bg-primary/5 rounded-lg border border-primary/20">
+                              <Label className="flex items-center gap-2 text-xs font-medium mb-2">
+                                <div className="h-6 w-6 rounded-md bg-primary/15 flex items-center justify-center">
+                                  <User className="h-3.5 w-3.5 text-primary" />
+                                </div>
+                                <span className="text-muted-foreground">Username</span>
+                              </Label>
+                              <div className="flex gap-2">
+                                <Input
+                                  readOnly
+                                  value={slotIpConnection.username}
+                                  className="font-mono bg-background/50 border-border text-sm min-w-0 h-9"
+                                />
+                                <Button
+                                  variant="outline"
+                                  size="icon"
+                                  onClick={() => copyToClipboard(slotIpConnection.username, 'Username')}
+                                  className="shrink-0 h-9 w-9 hover:bg-primary/10 hover:border-primary/30"
+                                >
+                                  {copied === 'Username' ? <Check className="h-4 w-4 text-primary" /> : <Copy className="h-4 w-4" />}
+                                </Button>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Slot IP — Password */}
+                          <div className="space-y-2">
+                            <div className="p-3 bg-primary/5 rounded-lg border border-primary/20">
+                              <Label className="flex items-center gap-2 text-xs font-medium mb-2">
+                                <div className="h-6 w-6 rounded-md bg-primary/15 flex items-center justify-center">
+                                  <Lock className="h-3.5 w-3.5 text-primary" />
+                                </div>
+                                <span className="text-muted-foreground">Password</span>
+                              </Label>
+                              <div className="flex gap-2">
+                                <Input
+                                  readOnly
+                                  type={showPassword ? 'text' : 'password'}
+                                  value={slotIpConnection.password}
+                                  className="font-mono bg-background/50 border-border text-sm min-w-0 h-9"
+                                />
+                                <Button
+                                  variant="outline"
+                                  size="icon"
+                                  onClick={() => setShowPassword(!showPassword)}
+                                  className="shrink-0 h-9 w-9 hover:bg-primary/10 hover:border-primary/30"
+                                >
+                                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="icon"
+                                  onClick={() => copyToClipboard(slotIpConnection.password, 'Password')}
+                                  className="shrink-0 h-9 w-9 hover:bg-primary/10 hover:border-primary/30"
+                                >
+                                  {copied === 'Password' ? <Check className="h-4 w-4 text-primary" /> : <Copy className="h-4 w-4" />}
+                                </Button>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Copy full proxy string */}
+                          <Button
+                            variant="outline"
+                            className="w-full gap-2 h-9 text-sm"
+                            onClick={() => {
+                              const proxy = `${slotIpConnection.ip}:${slotIpConnection.port}:${slotIpConnection.username}:${slotIpConnection.password}`;
+                              copyToClipboard(proxy, 'Proxy String');
+                            }}
+                          >
+                            {copied === 'Proxy String' ? <Check className="h-4 w-4 text-primary" /> : <Copy className="h-4 w-4" />}
+                            Copy Full Proxy String
+                          </Button>
+                        </>
+                      ) : (
+                        <>
                       {/* IP Address */}
                       <div className="space-y-2">
                         <div className="p-3 bg-primary/5 rounded-lg border border-primary/20">
@@ -2251,7 +2450,7 @@ const OrderDetails = () => {
                                   variant="ghost"
                                   onClick={() => {
                                     if (order.os.toLowerCase().includes('windows')) {
-                                      copyToClipboard(order.ipAddress, 'RDP Address');
+                                      copyToClipboard(order.ipAddress!, 'RDP Address');
                                     } else {
                                       copyToClipboard(`ssh ${order.username}@${order.ipAddress}`, 'SSH Command');
                                     }
@@ -2285,6 +2484,8 @@ const OrderDetails = () => {
                           </div>
                         </div>
                       </div>
+                        </>
+                      )}
                     </CardContent>
                   </Card>
                 ) : (
@@ -2301,47 +2502,6 @@ const OrderDetails = () => {
                         <Clock className="h-3 w-3 mr-1.5" />
                         Est. setup time: 5-10 minutes
                       </Badge>
-                    </CardContent>
-                  </Card>
-                )}
-
-                {/* Panel Access */}
-                {order.panelUsername && order.panelPassword && (
-                  <Card className="border-border hover:shadow-md transition-shadow">
-                    <CardHeader className="pb-3">
-                      <CardTitle className="flex items-center gap-2 text-base lg:text-lg">
-                        <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
-                          <Globe className="h-4 w-4 text-primary" />
-                        </div>
-                        Panel Access
-                      </CardTitle>
-                      <CardDescription className="text-xs lg:text-sm">
-                        Use these credentials to access the server management panel
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg border border-border">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <User className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                            <span className="text-sm text-muted-foreground">Username:</span>
-                            <code className="font-mono text-sm font-medium">{order.panelUsername}</code>
-                          </div>
-                          <Button variant="ghost" size="icon" className="h-7 w-7 flex-shrink-0" onClick={() => { navigator.clipboard.writeText(order.panelUsername); toast.success('Username copied'); }}>
-                            <Copy className="h-3.5 w-3.5" />
-                          </Button>
-                        </div>
-                        <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg border border-border">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <Lock className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                            <span className="text-sm text-muted-foreground">Password:</span>
-                            <code className="font-mono text-sm font-medium">{order.panelPassword}</code>
-                          </div>
-                          <Button variant="ghost" size="icon" className="h-7 w-7 flex-shrink-0" onClick={() => { navigator.clipboard.writeText(order.panelPassword); toast.success('Password copied'); }}>
-                            <Copy className="h-3.5 w-3.5" />
-                          </Button>
-                        </div>
-                      </div>
                     </CardContent>
                   </Card>
                 )}
@@ -3216,6 +3376,12 @@ const OrderDetails = () => {
                         <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1 sm:gap-2 py-2">
                           <span className="text-xs text-muted-foreground">ADVPS Service ID</span>
                           <span className="font-mono text-xs bg-muted/50 px-2 py-0.5 rounded break-all">{order.advpsServiceId}</span>
+                        </div>
+                      )}
+                      {provider === 'advps' && order.advpsOrderId && (
+                        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1 sm:gap-2 py-2">
+                          <span className="text-xs text-muted-foreground">ADVPS Order ID</span>
+                          <span className="font-mono text-xs bg-muted/50 px-2 py-0.5 rounded break-all">{order.advpsOrderId}</span>
                         </div>
                       )}
                     </div>
