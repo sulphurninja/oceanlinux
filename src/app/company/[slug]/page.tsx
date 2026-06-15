@@ -22,6 +22,24 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
+const COMPANY_ORDER_STATUSES = ['confirmed', 'paid', 'active', 'completed'] as const;
+
+function orderStatusBadgeProps(status: string): {
+  variant: 'default' | 'secondary' | 'outline';
+  className?: string;
+} {
+  if (status === 'active') return { variant: 'default', className: 'text-[10px] h-4 capitalize' };
+  if (status === 'confirmed' || status === 'paid') {
+    return {
+      variant: 'outline',
+      className:
+        'text-[10px] h-4 capitalize text-emerald-700 border-emerald-200 bg-emerald-50 dark:bg-emerald-950/30 dark:text-emerald-400 dark:border-emerald-800',
+    };
+  }
+  if (status === 'completed') return { variant: 'secondary', className: 'text-[10px] h-4 capitalize' };
+  return { variant: 'outline', className: 'text-[10px] h-4 capitalize' };
+}
+
 interface Stock {
   _id: string;
   name: string;
@@ -365,7 +383,7 @@ export default function CompanyDashboard() {
 
   // Filtered and sorted orders
   const filteredOrders = useMemo(() => {
-    let result = [...orders];
+    let result = orders.filter(o => COMPANY_ORDER_STATUSES.includes(o.status as typeof COMPANY_ORDER_STATUSES[number]));
 
     if (searchTerm.trim()) {
       const q = searchTerm.toLowerCase();
@@ -580,10 +598,9 @@ export default function CompanyDashboard() {
                   <SelectTrigger className="w-28 h-9 text-xs"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Status</SelectItem>
-                    <SelectItem value="active">Active</SelectItem>
                     <SelectItem value="confirmed">Confirmed</SelectItem>
                     <SelectItem value="paid">Paid</SelectItem>
-                    <SelectItem value="failed">Failed</SelectItem>
+                    <SelectItem value="active">Active</SelectItem>
                     <SelectItem value="completed">Completed</SelectItem>
                   </SelectContent>
                 </Select>
@@ -632,7 +649,7 @@ export default function CompanyDashboard() {
                           <h3 className="font-medium text-sm">{order.productName}</h3>
                           <Badge variant="outline" className="text-[10px] h-4">{order.memory}</Badge>
                           <Badge variant="secondary" className="text-[10px] h-4">{order.stockName}</Badge>
-                          <Badge variant={order.status === 'active' ? 'default' : 'destructive'} className="text-[10px] h-4">{order.status}</Badge>
+                          <Badge {...orderStatusBadgeProps(order.status)}>{order.status}</Badge>
                         </div>
                         <div className="flex items-center gap-4 mt-1.5 text-xs text-muted-foreground flex-wrap">
                           {order.customerName && <span>{order.customerName}</span>}

@@ -4,6 +4,9 @@ import connectDB from '@/lib/db';
 import IPStock from '@/models/ipStockModel';
 import Order from '@/models/orderModel';
 
+/** Orders visible in company portal — paid/confirmed only, no cancelled/failed/pending. */
+const COMPANY_ORDER_STATUSES = ['confirmed', 'paid', 'active', 'completed'];
+
 async function getCompanySession() {
   const cookieStore = await cookies();
   const session = cookieStore.get('company_session')?.value;
@@ -30,7 +33,7 @@ export async function GET() {
 
   const orders = await Order.find({
     ipStockId: { $in: stockIds },
-    status: { $nin: ['pending'] },
+    status: { $in: COMPANY_ORDER_STATUSES },
   })
     .select('productName memory ipAddress username password os status provisioningStatus createdAt expiryDate customerName customerEmail ipStockId panelUsername')
     .sort({ createdAt: -1 })
@@ -65,7 +68,7 @@ export async function PUT(request) {
   const order = await Order.findOne({
     _id: orderId,
     ipStockId: { $in: stockIds },
-    status: { $nin: ['pending'] },
+    status: { $in: COMPANY_ORDER_STATUSES },
   });
 
   if (!order) {
