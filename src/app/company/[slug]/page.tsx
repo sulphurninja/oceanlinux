@@ -24,7 +24,6 @@ import { cn } from '@/lib/utils';
 
 const COMPANY_FILTER_VERSION = 'confirmed-only-v5';
 
-/** Only paid+confirmed orders — hides cancelled, pending, failed, active, everything else. */
 function isConfirmedOrder(order: Order): boolean {
   return String(order?.status ?? '').trim().toLowerCase() === 'confirmed';
 }

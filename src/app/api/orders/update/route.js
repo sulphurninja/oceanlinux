@@ -6,6 +6,15 @@ const AdvpsAPI = require('@/services/advpsApi');
 const WhatsAppService = require('@/services/whatsappService');
 const { syncAdvpsOrderCredentials } = require('@/lib/advpsOrderSync');
 
+const ADMIN_ORDER_STATUSES = new Set(['pending', 'confirmed', 'active']);
+
+function normalizeAdminOrderStatus(status) {
+  const value = String(status || 'pending').trim().toLowerCase();
+  if (value === 'paid' || value === 'completed') return 'confirmed';
+  if (ADMIN_ORDER_STATUSES.has(value)) return value;
+  return 'pending';
+}
+
 export async function POST(request) {
   await connectDB();
 
@@ -23,7 +32,7 @@ export async function POST(request) {
       username: username || '',
       password: password || '',
       os: os || 'CentOS 7',
-      status: status || 'pending',
+      status: normalizeAdminOrderStatus(status),
     };
     if (provider) updateFields.provider = provider;
     if (provisioningStatus !== undefined) updateFields.provisioningStatus = provisioningStatus || 'pending';

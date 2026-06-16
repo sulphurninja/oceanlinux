@@ -29,11 +29,15 @@ function serializeStock(stock) {
 
 export async function GET() {
   const company = await getCompanySession();
-  if (!company) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!company) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers: { 'X-Deploy-Version': 'confirmed-only-v5' } });
+  }
 
   await connectDB();
   const stocks = await IPStock.find({ company: company.id }).sort({ name: 1 }).lean();
-  return NextResponse.json(stocks.map(serializeStock));
+  return NextResponse.json(stocks.map(serializeStock), {
+    headers: { 'X-Deploy-Version': 'confirmed-only-v5' },
+  });
 }
 
 export async function PUT(request) {

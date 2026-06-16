@@ -29,6 +29,17 @@ import { Calendar as CalendarComponent } from '@/components/ui/calendar';
 import { format } from 'date-fns';
 import { Textarea } from '@/components/ui/textarea';
 
+const ADMIN_ORDER_STATUSES = ['pending', 'confirmed', 'active'] as const;
+
+function normalizeAdminOrderStatus(status?: string): (typeof ADMIN_ORDER_STATUSES)[number] {
+    const value = String(status ?? '').trim().toLowerCase();
+    if (value === 'paid' || value === 'completed') return 'confirmed';
+    if ((ADMIN_ORDER_STATUSES as readonly string[]).includes(value)) {
+        return value as (typeof ADMIN_ORDER_STATUSES)[number];
+    }
+    return 'pending';
+}
+
 interface Order {
     _id: string;
     user: {
@@ -133,17 +144,19 @@ const ManageOrders = () => {
     const filteredOrders = useMemo(() => {
         return orders.filter(order => {
             // Text search
+            const displayStatus = normalizeAdminOrderStatus(order.status);
             const matchesSearch = !searchTerm ||
                 order.user?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                 order.user?.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                 order.productName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                displayStatus.includes(searchTerm.toLowerCase()) ||
                 order.status.toLowerCase().includes(searchTerm.toLowerCase()) ||
                 order.transactionId?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                 order._id.toLowerCase().includes(searchTerm.toLowerCase()) ||
                 (order.ipAddress && order.ipAddress.toLowerCase().includes(searchTerm.toLowerCase()));
 
-            // Status filter
-            const matchesStatus = !filters.status || order.status === filters.status;
+            // Status filter (cancelled/failed legacy rows count as pending)
+            const matchesStatus = !filters.status || displayStatus === filters.status;
 
             // Provider filter
             const matchesProvider = !filters.provider || 
@@ -200,8 +213,9 @@ const ManageOrders = () => {
     }, [filteredOrders.length]);
 
     const handleEdit = useCallback((order: Order) => {
-        setCurrentOrder({ ...order });
-        setEditingOrder({ ...order });
+        const normalized = { ...order, status: normalizeAdminOrderStatus(order.status) };
+        setCurrentOrder(normalized);
+        setEditingOrder(normalized);
         setIsDialogOpen(true);
     }, []);
 
@@ -383,20 +397,16 @@ const ManageOrders = () => {
     };
 
     const getStatusBadge = (status: string) => {
+        const displayStatus = normalizeAdminOrderStatus(status);
         const variants: Record<string, string> = {
             active: 'bg-green-500/10 text-green-700 dark:text-green-400 border-green-500/20',
             confirmed: 'bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/20',
-            completed: 'bg-purple-500/10 text-purple-700 dark:text-purple-400 border-purple-500/20',
             pending: 'bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 border-yellow-500/20',
-            paid: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20',
-            invalid: 'bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/20',
-            expired: 'bg-gray-500/10 text-gray-700 dark:text-gray-400 border-gray-500/20',
-            failed: 'bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/20',
         };
         
         return (
-            <Badge className={`${variants[status] || variants.pending} font-medium`}>
-                {status}
+            <Badge className={`${variants[displayStatus]} font-medium`}>
+                {displayStatus}
             </Badge>
         );
     };
@@ -450,11 +460,11 @@ const ManageOrders = () => {
     // Stats calculations
     const stats = useMemo(() => ({
         total: orders.length,
-        pending: orders.filter(o => o.status === 'pending').length,
-        confirmed: orders.filter(o => o.status === 'confirmed').length,
-        active: orders.filter(o => o.status === 'active').length,
+        pending: orders.filter(o => normalizeAdminOrderStatus(o.status) === 'pending').length,
+        confirmed: orders.filter(o => normalizeAdminOrderStatus(o.status) === 'confirmed').length,
+        active: orders.filter(o => normalizeAdminOrderStatus(o.status) === 'active').length,
         failed: orders.filter(o => o.provisioningStatus === 'failed').length,
-        totalRevenue: orders.filter(o => ['active', 'paid', 'confirmed'].includes(o.status)).reduce((sum, o) => sum + o.price, 0),
+        totalRevenue: orders.filter(o => ['active', 'confirmed'].includes(normalizeAdminOrderStatus(o.status))).reduce((sum, o) => sum + o.price, 0),
     }), [orders]);
 
     const clearFilters = () => {
@@ -480,7 +490,7 @@ const ManageOrders = () => {
             'Product': order.productName,
             'Memory': order.memory,
             'Price': order.price,
-            'Status': order.status,
+            'Status': normalizeAdminOrderStatus(order.status),
             'Provisioning Status': order.provisioningStatus || 'N/A',
             'Provider': order.provider || 'hostycare',
             'IP Address': order.ipAddress || 'N/A',
@@ -695,13 +705,8 @@ const ManageOrders = () => {
                                                 <SelectContent>
                                                     <SelectItem value="All">All statuses</SelectItem>
                                                     <SelectItem value="pending">Pending</SelectItem>
-                                                    <SelectItem value="paid">Paid</SelectItem>
                                                     <SelectItem value="confirmed">Confirmed</SelectItem>
                                                     <SelectItem value="active">Active</SelectItem>
-                                                    <SelectItem value="completed">Completed</SelectItem>
-                                                    <SelectItem value="invalid">Invalid</SelectItem>
-                                                    <SelectItem value="expired">Expired</SelectItem>
-                                                    <SelectItem value="failed">Failed</SelectItem>
                                                 </SelectContent>
                                             </Select>
                                         </div>
@@ -1075,13 +1080,8 @@ const ManageOrders = () => {
                                             </SelectTrigger>
                                             <SelectContent>
                                                 <SelectItem value="pending">Pending</SelectItem>
-                                                <SelectItem value="paid">Paid</SelectItem>
                                                 <SelectItem value="confirmed">Confirmed</SelectItem>
                                                 <SelectItem value="active">Active</SelectItem>
-                                                <SelectItem value="completed">Completed</SelectItem>
-                                                <SelectItem value="invalid">Invalid</SelectItem>
-                                                <SelectItem value="expired">Expired</SelectItem>
-                                                <SelectItem value="failed">Failed</SelectItem>
                                             </SelectContent>
                                         </Select>
                                     </div>

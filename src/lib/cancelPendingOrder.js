@@ -1,7 +1,8 @@
 import userWalletService from '@/services/userWalletService';
 
 /**
- * Cancel a pending buy-now order and refund any wallet reservation.
+ * Release a pending buy-now order when payment is abandoned or fails.
+ * Refunds any wallet reservation and keeps status as pending (never cancelled).
  * Idempotent — safe to call multiple times for the same order.
  */
 export async function cancelPendingBuyNowOrder(order, reason = 'cancelled') {
@@ -11,12 +12,27 @@ export async function cancelPendingBuyNowOrder(order, reason = 'cancelled') {
     return { success: false, reason: 'already confirmed' };
   }
 
-  if (order.status === 'cancelled' || order.status === 'failed') {
+  if (order.paymentDetails?.unpaidReleased) {
     return { success: true, alreadyProcessed: true, refunded: 0 };
   }
 
-  if (order.status !== 'pending') {
-    return { success: false, reason: `cannot cancel status ${order.status}` };
+  const legacyUnpaid = ['cancelled', 'canceled', 'failed'].includes(
+    String(order.status || '').trim().toLowerCase()
+  );
+  if (legacyUnpaid && !order.walletDeduction?.deducted) {
+    order.status = 'pending';
+    order.paymentDetails = {
+      ...(order.paymentDetails || {}),
+      unpaidReleased: true,
+      unpaidReason: reason,
+      unpaidReleasedAt: new Date(),
+    };
+    await order.save();
+    return { success: true, alreadyProcessed: true, refunded: 0 };
+  }
+
+  if (order.status !== 'pending' && !legacyUnpaid) {
+    return { success: false, reason: `cannot release status ${order.status}` };
   }
 
   const walletAmount =
@@ -47,7 +63,16 @@ export async function cancelPendingBuyNowOrder(order, reason = 'cancelled') {
     }
   }
 
-  order.status = reason === 'cancelled' ? 'cancelled' : 'failed';
+  order.status = 'pending';
+  order.paymentDetails = {
+    ...(order.paymentDetails || {}),
+    unpaidReleased: true,
+    unpaidReason: reason,
+    unpaidReleasedAt: new Date(),
+  };
+  if (refunded > 0 && order.walletDeduction) {
+    order.walletDeduction.deducted = false;
+  }
   await order.save();
 
   return { success: true, orderId: order._id, refunded };

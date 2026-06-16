@@ -10,7 +10,7 @@ import { cancelPendingBuyNowOrder } from '@/lib/cancelPendingOrder';
  * Body: { clientTxnId }
  *
  * User-initiated cancel of a pending buy-now order before gateway payment lands.
- * Refunds wallet reservation and marks the order cancelled. Idempotent.
+ * Refunds wallet reservation and keeps the order pending. Idempotent.
  */
 export async function POST(request) {
   await connectDB();
@@ -52,10 +52,10 @@ export async function POST(request) {
     refunded: result.refunded || 0,
     message: result.success
       ? result.alreadyProcessed
-        ? 'Order already cancelled'
+        ? 'Payment already released'
         : result.refunded > 0
-          ? `Order cancelled and ₹${result.refunded} returned to wallet`
-          : 'Order cancelled'
+          ? `Payment released and ₹${result.refunded} returned to wallet`
+          : 'Payment released — order remains pending'
       : result.reason || 'Cancel failed',
   });
 }
