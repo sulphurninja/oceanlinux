@@ -912,6 +912,11 @@ const OrderDetails = () => {
       } else {
         if (action === 'generatepassword' && data.code === 'PASSWORD_ALREADY_EXISTS') {
           toast.error(data.error || 'Use Format Server to get a new password.', { duration: 10000 });
+        } else if (provider === 'advps' && data.code === 'ADVPS_IP_BLOCKED') {
+          toast.error(
+            data.error || 'ADVPS blocked this request. Whitelist your OceanLinux server IP in ADVPS API settings.',
+            { duration: 10000 }
+          );
         } else {
           toast.error(data.error || data.message || `Failed to execute "${action}"`);
         }

@@ -3,6 +3,10 @@ const HostycareAPI = require('@/services/hostycareApi');
 
 export async function GET(request) {
   try {
+    const { searchParams } = new URL(request.url);
+    const serviceId = searchParams.get('serviceId');
+    const action = (searchParams.get('action') || 'connection').toLowerCase();
+
     console.log('[DEBUG] Environment check:');
     console.log('  HOSTYCARE_USERNAME:', process.env.HOSTYCARE_USERNAME ? 'SET' : 'MISSING');
     console.log('  HOSTYCARE_API_KEY:', process.env.HOSTYCARE_API_KEY ? 'SET' : 'MISSING');
@@ -17,13 +21,49 @@ export async function GET(request) {
       }, { status: 400 });
     }
     const hostycareApi = new HostycareAPI();
-    // Test connection only (simplify for debugging)
-    console.log('[DEBUG] Testing connection only...');
-    const connectionTest = await hostycareApi.testConnection();
+
+    if (action === 'connection' || !serviceId) {
+      console.log('[DEBUG] Testing connection only...');
+      const connectionTest = await hostycareApi.testConnection();
+      return NextResponse.json({
+        success: true,
+        message: 'Connection test successful',
+        connection: connectionTest
+      });
+    }
+
+    console.log(`[DEBUG] Testing Hostycare action=${action} serviceId=${serviceId}`);
+    let powerResult;
+    switch (action) {
+      case 'info':
+        powerResult = await hostycareApi.getServiceInfo(serviceId);
+        break;
+      case 'details':
+        powerResult = await hostycareApi.getServiceDetails(serviceId);
+        break;
+      case 'start':
+        powerResult = await hostycareApi.startService(serviceId);
+        break;
+      case 'stop':
+        powerResult = await hostycareApi.stopService(serviceId);
+        break;
+      case 'reboot':
+      case 'restart':
+        powerResult = await hostycareApi.rebootService(serviceId);
+        break;
+      default:
+        return NextResponse.json({
+          success: false,
+          error: `Unknown action "${action}". Use: connection, info, details, start, stop, reboot`,
+        }, { status: 400 });
+    }
+
     return NextResponse.json({
       success: true,
-      message: 'Connection test successful',
-      connection: connectionTest
+      message: `Hostycare ${action} OK`,
+      action,
+      serviceId,
+      result: powerResult,
     });
   } catch (error) {
     console.error('[DEBUG] Hostycare API test failed:', error);

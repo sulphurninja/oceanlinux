@@ -377,13 +377,16 @@ export async function POST(request) {
     let hostycareApi = null;
     let smartvpsApi = null;
 
-    // Detect provider type
-    const isSmartVps = order.provider === 'smartvps' || 
-                       order.smartvpsDetails?.ip || 
-                       (order.productName && order.productName.includes('🌊'));
+    // Detect provider type — never treat a Hostycare-provisioned order as SmartVPS
+    const isSmartVps = !order.hostycareServiceId && (
+      order.provider === 'smartvps' ||
+      order.smartvpsDetails?.ip ||
+      (order.productName && order.productName.includes('🌊'))
+    );
     const isNetbay = order.provider === 'netbay' || !!order.netbayServiceId;
+    const hasHostycareService = !!order.hostycareServiceId;
 
-    console.log(`[SERVICE-ACTION][POST] Provider detection: isSmartVps=${isSmartVps}, isNetbay=${isNetbay}, order.provider=${order.provider}`);
+    console.log(`[SERVICE-ACTION][POST] Provider detection: isSmartVps=${isSmartVps}, isNetbay=${isNetbay}, hasHostycareService=${hasHostycareService}, order.provider=${order.provider}`);
 
     // -------------------- Netbay branch --------------------
     // Routed FIRST when the order is Netbay-backed: Netbay has its own
@@ -972,9 +975,9 @@ export async function POST(request) {
     if (isSmartVps) {
       smartvpsApi = new SmartVpsAPI();
       console.log('[SERVICE-ACTION][POST] Using SmartVPS API');
-    } else if (order.provider === 'hostycare' || !order.provider) {
+    } else if (hasHostycareService || order.provider === 'hostycare' || !order.provider) {
       hostycareApi = new HostycareAPI();
-      console.log('[SERVICE-ACTION][POST] Using Hostycare API');
+      console.log('[SERVICE-ACTION][POST] Using Hostycare API', hasHostycareService ? `(serviceId=${order.hostycareServiceId})` : '(no serviceId yet)');
 
       // Only initialize VirtualizorAPI for actions that need it (reinstall, templates)
       if (action === 'reinstall' || action === 'templates') {
@@ -1002,7 +1005,11 @@ export async function POST(request) {
             apiResponse: result
           };
         } else {
-          throw new Error('No valid API configured for this order (missing service ID or provider)');
+          throw new Error(
+            order.hostycareServiceId
+              ? 'Hostycare API is not configured for this order. Check server logs for [HOSTYCARE] errors.'
+              : 'No valid API configured for this order (missing hostycareServiceId or provider)'
+          );
         }
         break;
 
@@ -1025,7 +1032,11 @@ export async function POST(request) {
             apiResponse: result
           };
         } else {
-          throw new Error('No valid API configured for this order (missing service ID or provider)');
+          throw new Error(
+            order.hostycareServiceId
+              ? 'Hostycare API is not configured for this order. Check server logs for [HOSTYCARE] errors.'
+              : 'No valid API configured for this order (missing hostycareServiceId or provider)'
+          );
         }
         break;
 
@@ -1051,7 +1062,11 @@ export async function POST(request) {
             apiResponse: result
           };
         } else {
-          throw new Error('No valid API configured for this order (missing service ID or provider)');
+          throw new Error(
+            order.hostycareServiceId
+              ? 'Hostycare API is not configured for this order. Check server logs for [HOSTYCARE] errors.'
+              : 'No valid API configured for this order (missing hostycareServiceId or provider)'
+          );
         }
         break;
 

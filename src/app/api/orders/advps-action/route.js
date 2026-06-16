@@ -19,9 +19,30 @@ const {
 } = require('@/lib/advpsRebuildLimit');
 const {
   syncAdvpsOrderCredentials,
-  resolveAdvpsPurchaseOrderId,
+  resolveAdvpsServiceIdForPower,
+  formatAdvpsActionError,
 } = require('@/lib/advpsOrderSync');
 const { extractPasswordFromGenerateError } = require('@/lib/advpsPasswordFetch');
+
+async function resolveServiceIdForOrder(api, order, orderId) {
+  const resolved = await resolveAdvpsServiceIdForPower(api, order, { Order });
+  if (!resolved.serviceId) {
+    return { error: resolved.error || 'No ADVPS service ID attached', status: 400 };
+  }
+
+  if (resolved.corrected) {
+    await Order.findByIdAndUpdate(orderId, {
+      advpsServiceId: resolved.serviceId,
+      ...(resolved.advpsOrderId && !order.advpsOrderId ? { advpsOrderId: resolved.advpsOrderId } : {}),
+    });
+    order.advpsServiceId = resolved.serviceId;
+    console.log(
+      `[ADVPS-ACTION] Corrected service id ${resolved.previousServiceId} → ${resolved.serviceId}`
+    );
+  }
+
+  return { serviceId: resolved.serviceId, statusRes: resolved.statusRes };
+}
 
 export async function GET(request) {
   try {
@@ -36,17 +57,40 @@ export async function GET(request) {
     const order = await Order.findOne({ _id: orderId, user: userId });
     if (!order) return NextResponse.json({ message: 'Order not found' }, { status: 404 });
 
-    const serviceId = order.advpsServiceId;
-    if (!serviceId) return NextResponse.json({ message: 'No ADVPS service ID attached' }, { status: 400 });
-
     const api = new AdvpsAPI();
+    const resolved = await resolveServiceIdForOrder(api, order, orderId);
+    if (resolved.error) {
+      return NextResponse.json({ message: resolved.error }, { status: resolved.status });
+    }
+    const serviceId = resolved.serviceId;
+
     let details = null;
-    let statusRes = null;
+    let statusRes = resolved.statusRes || null;
     let statusError = null;
 
-    // Fetch live running status
-    try {
-      statusRes = await api.status(serviceId);
+    // Fetch live running status (reuse resolver status when available)
+    if (!statusRes) {
+      try {
+        statusRes = await api.status(serviceId);
+        const d = unwrapAdvpsEnvelope(statusRes) || {};
+        details = {
+          serviceId: d.serviceId || d.service?.serviceId || serviceId,
+          serviceType: d.serviceType,
+          runningStatus: pickAdvpsRunningStatusRaw(d) || undefined,
+          ip: pickAdvpsIp(d, order.ipAddress),
+          uptime: pickAdvpsUptime(d),
+          powerState: normalizeAdvpsPowerState(d),
+        };
+      } catch (err) {
+        statusError = err.message;
+        console.error('[ADVPS-ACTION][GET] Status error:', err.message);
+        details = {
+          serviceId,
+          ip: order.ipAddress || '',
+          runningStatus: 'UNKNOWN',
+        };
+      }
+    } else {
       const d = unwrapAdvpsEnvelope(statusRes) || {};
       details = {
         serviceId: d.serviceId || d.service?.serviceId || serviceId,
@@ -55,14 +99,6 @@ export async function GET(request) {
         ip: pickAdvpsIp(d, order.ipAddress),
         uptime: pickAdvpsUptime(d),
         powerState: normalizeAdvpsPowerState(d),
-      };
-    } catch (err) {
-      statusError = err.message;
-      console.error('[ADVPS-ACTION][GET] Status error:', err.message);
-      details = {
-        serviceId,
-        ip: order.ipAddress || '',
-        runningStatus: 'UNKNOWN',
       };
     }
 
@@ -88,7 +124,7 @@ export async function GET(request) {
         credentialsUpdated: sync.credentialsUpdated,
         changes: sync.changes,
         advpsOrderIdMissing: sync.advpsOrderIdMissing,
-        advpsOrderId: sync.purchaseOrderId || resolveAdvpsPurchaseOrderId(order) || null,
+        advpsOrderId: sync.purchaseOrderId || order.advpsOrderId || null,
         lastSyncTime: sync.dbUpdates.lastSyncTime,
         statusApiOk: sync.statusApiOk,
         purchaseApiOk: sync.purchaseApiOk,
@@ -120,10 +156,12 @@ export async function POST(request) {
     const order = await Order.findOne({ _id: orderId, user: userId });
     if (!order) return NextResponse.json({ message: 'Order not found' }, { status: 404 });
 
-    const serviceId = order.advpsServiceId;
-    if (!serviceId) return NextResponse.json({ message: 'No ADVPS service ID attached' }, { status: 400 });
-
     const api = new AdvpsAPI();
+    const resolved = await resolveServiceIdForOrder(api, order, orderId);
+    if (resolved.error) {
+      return NextResponse.json({ success: false, message: resolved.error, error: resolved.error }, { status: resolved.status });
+    }
+    const serviceId = resolved.serviceId;
     let result;
 
     switch (action) {
@@ -404,6 +442,10 @@ export async function POST(request) {
     return NextResponse.json({ success: true, action, result });
   } catch (error) {
     console.error('[ADVPS-ACTION][POST] Error:', error.message);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    const formatted = formatAdvpsActionError(error);
+    return NextResponse.json(
+      { success: false, error: formatted.message, message: formatted.message, code: formatted.code },
+      { status: formatted.status }
+    );
   }
 }

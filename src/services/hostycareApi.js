@@ -1,3 +1,36 @@
+function extractHostycareApiError(data) {
+  if (!data || typeof data !== 'object') return null;
+
+  if (data.success === false) {
+    return data.message || (typeof data.error === 'string' ? data.error : null) || 'Hostycare API returned success=false';
+  }
+
+  if (typeof data.error === 'string' && data.error.trim()) {
+    return data.error.trim();
+  }
+
+  // ModulesGarden action responses use status: "success" | "error" (not VM power state)
+  if (typeof data.status === 'string') {
+    const s = data.status.toLowerCase();
+    if (s === 'error' || s === 'failed' || s === 'fail') {
+      return data.message || `Hostycare API status=${data.status}`;
+    }
+  }
+
+  if (typeof data.result === 'string') {
+    const r = data.result.toLowerCase();
+    if (r === 'error' || r === 'failed' || r === 'fail') {
+      return data.message || `Hostycare API result=${data.result}`;
+    }
+  }
+
+  return null;
+}
+
+function encodeHostycareServiceId(serviceId) {
+  return encodeURIComponent(String(serviceId));
+}
+
 class HostycareAPI {
   constructor() {
     this.endpoint = "https://www.hostycare.com/manage/modules/addons/ProductsReseller/api/index.php";
@@ -62,6 +95,12 @@ class HostycareAPI {
 
   async makeRequest(action, method = 'GET', params = {}) {
     try {
+      if (!this.username || !this.apiKey) {
+        throw new Error(
+          'Hostycare API credentials missing. Restore HOSTYCARE_USERNAME and HOSTYCARE_API_KEY in .env on the server, then pm2 restart oceanlinux.'
+        );
+      }
+
       console.log(`[HOSTYCARE] Making ${method} request to: ${this.endpoint}${action}`);
 
       const token = this.generateToken();
@@ -76,8 +115,15 @@ class HostycareAPI {
       const config = { method, headers };
 
       if (method === 'POST') {
-        config.body = params instanceof URLSearchParams ? params : this.buildFormParams(params);
-        console.log('[HOSTYCARE] Encoded form body (debug):', config.body?.toString());
+        const bodyParams = params instanceof URLSearchParams ? params : this.buildFormParams(params);
+        const encoded = bodyParams.toString();
+        if (encoded) {
+          config.body = bodyParams;
+          console.log('[HOSTYCARE] Encoded form body (debug):', encoded);
+        } else {
+          // start/stop/reboot have no params — omit empty form body (some WAF rules block it)
+          delete headers['Content-Type'];
+        }
       }
 
       const response = await fetch(`${this.endpoint}${action}`, config);
@@ -90,15 +136,19 @@ class HostycareAPI {
         // Cloudflare challenge pages return HTML instead of JSON
         if (responseText.includes('Just a moment') || responseText.includes('cf_chl_opt') || responseText.includes('challenge-platform')) {
           console.error('[HOSTYCARE] Cloudflare challenge detected — server IP may need whitelisting');
-          throw new Error('Hostycare API blocked by Cloudflare protection. Server IP may need whitelisting.');
+          const postHint = method === 'POST'
+            ? ' GET calls (test/status) may work while POST power actions (start/stop/reboot) are blocked — ask Hostycare to whitelist your server IP for POST requests.'
+            : '';
+          throw new Error(`Hostycare API blocked by Cloudflare protection. Server IP may need whitelisting.${postHint}`);
         }
         throw new Error(`Invalid response from Hostycare API (status ${response.status})`);
       }
 
-      // Throw if Hostycare embeds error in JSON even with HTTP 200
-      if (!response.ok || data?.error || data?.success === false) {
-        const msg = data?.error || data?.message || `API request failed with status ${response.status}`;
-        throw new Error(msg);
+      console.log('[HOSTYCARE] Response:', JSON.stringify(data).substring(0, 500));
+
+      const embeddedError = extractHostycareApiError(data);
+      if (!response.ok || embeddedError) {
+        throw new Error(embeddedError || data?.message || `API request failed with status ${response.status}`);
       }
 
       return data;
@@ -185,51 +235,51 @@ class HostycareAPI {
 
   // Get service details
   async getServiceDetails(serviceId) {
-    return await this.makeRequest(`/services/${serviceId}`);
+    return await this.makeRequest(`/services/${encodeHostycareServiceId(serviceId)}`);
   }
 
   async getServiceInfo(serviceId) {
-    return await this.makeRequest(`/services/${serviceId}/getInfo`);
+    return await this.makeRequest(`/services/${encodeHostycareServiceId(serviceId)}/getInfo`);
   }
 
   // Start a service
   async startService(serviceId) {
-    return await this.makeRequest(`/services/${serviceId}/start`, 'POST');
+    return await this.makeRequest(`/services/${encodeHostycareServiceId(serviceId)}/start`, 'POST');
   }
 
   // Stop a service
   async stopService(serviceId) {
-    return await this.makeRequest(`/services/${serviceId}/stop`, 'POST');
+    return await this.makeRequest(`/services/${encodeHostycareServiceId(serviceId)}/stop`, 'POST');
   }
 
   // Reboot a service
   async rebootService(serviceId) {
-    return await this.makeRequest(`/services/${serviceId}/reboot`, 'POST');
+    return await this.makeRequest(`/services/${encodeHostycareServiceId(serviceId)}/reboot`, 'POST');
   }
 
   // Suspend a service
   async suspendService(serviceId) {
-    return await this.makeRequest(`/services/${serviceId}/suspend`, 'POST');
+    return await this.makeRequest(`/services/${encodeHostycareServiceId(serviceId)}/suspend`, 'POST');
   }
 
   // Unsuspend a service
   async unsuspendService(serviceId) {
-    return await this.makeRequest(`/services/${serviceId}/unsuspend`, 'POST');
+    return await this.makeRequest(`/services/${encodeHostycareServiceId(serviceId)}/unsuspend`, 'POST');
   }
 
   // Terminate a service
   async terminateService(serviceId) {
-    return await this.makeRequest(`/services/${serviceId}/terminate`, 'POST');
+    return await this.makeRequest(`/services/${encodeHostycareServiceId(serviceId)}/terminate`, 'POST');
   }
 
   // Renew a service
   async renewService(serviceId) {
-    return await this.makeRequest(`/services/${serviceId}/renew`, 'POST');
+    return await this.makeRequest(`/services/${encodeHostycareServiceId(serviceId)}/renew`, 'POST');
   }
 
   // Change password
   async changePassword(serviceId, newPassword) {
-    return await this.makeRequest(`/services/${serviceId}/changepassword`, 'POST', {
+    return await this.makeRequest(`/services/${encodeHostycareServiceId(serviceId)}/changepassword`, 'POST', {
       password: newPassword
     });
   }
@@ -237,7 +287,7 @@ class HostycareAPI {
   // Get templates for reinstall - Using proper API endpoint
   async getReinstallTemplates(serviceId) {
     console.log(`[HOSTYCARE] Getting reinstall templates for service: ${serviceId}`);
-    return await this.makeRequest(`/services/${serviceId}/reinstall`, 'GET');
+    return await this.makeRequest(`/services/${encodeHostycareServiceId(serviceId)}/reinstall`, 'GET');
   }
 
   // Reinstall service - Using proper API endpoint
@@ -254,7 +304,7 @@ class HostycareAPI {
       // You might need to adjust this field name based on actual API requirements
     }
 
-    return await this.makeRequest(`/services/${serviceId}/reinstall`, 'POST', body);
+    return await this.makeRequest(`/services/${encodeHostycareServiceId(serviceId)}/reinstall`, 'POST', body);
   }
 
   // Get account credit

@@ -365,6 +365,93 @@ async function syncAdvpsOrderCredentials(api, order, { statusPayload, statusErro
   };
 }
 
+/**
+ * Resolve the ADVPS service id used by /api/v1/services/:id/*.
+ * Fixes orders that stored a Mongo document id instead of serviceId.
+ */
+async function resolveAdvpsServiceIdForPower(api, order, { Order } = {}) {
+  const stored = String(order?.advpsServiceId || '').trim();
+  if (!stored) {
+    return { serviceId: '', error: 'No ADVPS service ID attached' };
+  }
+
+  const readCanonicalId = (statusRes, fallbackId) => {
+    const d = unwrapAdvpsEnvelope(statusRes) || {};
+    return String(d.service?.serviceId || d.serviceId || fallbackId).trim() || fallbackId;
+  };
+
+  const tryStatus = async (id) => {
+    const statusRes = await api.status(id);
+    return {
+      serviceId: readCanonicalId(statusRes, id),
+      statusRes,
+    };
+  };
+
+  try {
+    return await tryStatus(stored);
+  } catch (firstErr) {
+    const isNotFound =
+      firstErr.status === 404 ||
+      /not found|invalid service|does not exist/i.test(firstErr.message || '');
+
+    if (!isNotFound) throw firstErr;
+
+    let purchaseOrderId = resolveAdvpsPurchaseOrderId(order);
+    if (!purchaseOrderId && Order) {
+      purchaseOrderId = await resolveAdvpsPurchaseOrderIdForService(api, order, { Order });
+    }
+    if (!purchaseOrderId) throw firstErr;
+
+    const detailsRes = await api.getOrderDetails(purchaseOrderId);
+    const { services } = normalizePurchaseOrderDetails(detailsRes);
+    const orderIp = String(order.ipAddress || '').trim();
+    const svc =
+      pickAdvpsService(services, stored) ||
+      (orderIp
+        ? services.find((s) => String(s?.ip || s?.ipv4 || '').trim() === orderIp)
+        : null) ||
+      services[0];
+
+    const extracted = AdvpsAPI.extractServiceIdFromPurchaseService(svc);
+    if (!extracted) throw firstErr;
+
+    const fixed = await tryStatus(extracted);
+    return {
+      ...fixed,
+      corrected: extracted !== stored,
+      previousServiceId: stored,
+      advpsOrderId: purchaseOrderId,
+    };
+  }
+}
+
+function formatAdvpsActionError(error) {
+  const msg = error?.message || 'ADVPS action failed';
+  if (/IP address not allowed/i.test(msg)) {
+    return {
+      message: 'ADVPS blocked this request. Whitelist your server public IP in ADVPS API settings.',
+      code: 'ADVPS_IP_BLOCKED',
+      status: 403,
+    };
+  }
+  if (error?.status === 404 || /not found|invalid service/i.test(msg)) {
+    return {
+      message: 'ADVPS service not found. Sync the order or contact support to relink the service ID.',
+      code: 'ADVPS_SERVICE_NOT_FOUND',
+      status: 404,
+    };
+  }
+  if (error?.status === 429) {
+    return {
+      message: msg,
+      code: 'ADVPS_RATE_LIMIT',
+      status: 429,
+    };
+  }
+  return { message: msg, code: 'ADVPS_ACTION_FAILED', status: error?.status || 500 };
+}
+
 module.exports = {
   normalizePurchaseOrderDetails,
   pickAdvpsService,
@@ -373,4 +460,6 @@ module.exports = {
   pickAdvpsPurchaseOrderId,
   resolveAdvpsPurchaseOrderIdForService,
   syncAdvpsOrderCredentials,
+  resolveAdvpsServiceIdForPower,
+  formatAdvpsActionError,
 };

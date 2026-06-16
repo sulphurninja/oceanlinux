@@ -7,6 +7,9 @@ const listOsCache = new Map();
 function getApiKey() {
   const key = process.env.ADVPS_API_KEY;
   if (!key) throw new Error('ADVPS_API_KEY is not set');
+  if (String(key).startsWith('sk_test_')) {
+    console.warn('[ADVPS] ⚠️ Using TEST API key — provisions/renewals may run in sandbox mode only');
+  }
   return key;
 }
 
@@ -39,8 +42,16 @@ async function httpFetch(path, { method = 'GET', jsonBody, timeoutMs = 60_000 } 
     let data;
     try { data = text ? JSON.parse(text) : {}; } catch { data = text; }
 
-    if (!res.ok) {
-      const detail = typeof data === 'string' ? data : (data?.message || `HTTP ${res.status}`);
+    const bodyFailed =
+      data &&
+      typeof data === 'object' &&
+      (data.success === false || data.status === false || data.status === 'error');
+
+    if (!res.ok || bodyFailed) {
+      const detail =
+        typeof data === 'string'
+          ? data
+          : data?.message || data?.error || data?.data?.message || `HTTP ${res.status}`;
       const rateHint = res.status === 429 ? ' [ADVPS limit: 100 requests / 15 min per API key]' : '';
       const err = new Error(`ADVPS ${method} ${path} failed: ${detail}${rateHint}`);
       err.status = res.status;
@@ -59,6 +70,15 @@ async function httpFetch(path, { method = 'GET', jsonBody, timeoutMs = 60_000 } 
 }
 
 class AdvpsAPI {
+  static encodeServiceId(serviceId) {
+    return encodeURIComponent(String(serviceId || '').trim());
+  }
+
+  servicePath(serviceId, suffix = '') {
+    const id = AdvpsAPI.encodeServiceId(serviceId);
+    return `/api/v1/services/${id}${suffix}`;
+  }
+
   /**
    * Order-details `data.services[]` (ADVPS docs): each item has `id` (Mongo-style document id) and
    * `serviceId` (e.g. "vps_service_1") — the latter is what /api/v1/services/:id uses. Never prefer `id`
@@ -90,36 +110,35 @@ class AdvpsAPI {
   }
 
   start(serviceId) {
-    return httpFetch(`/api/v1/services/${serviceId}/start`, { method: 'POST' });
+    return httpFetch(this.servicePath(serviceId, '/start'), { method: 'POST' });
   }
 
   stop(serviceId) {
-    return httpFetch(`/api/v1/services/${serviceId}/stop`, { method: 'POST' });
+    return httpFetch(this.servicePath(serviceId, '/stop'), { method: 'POST' });
   }
 
   reboot(serviceId) {
-    return httpFetch(`/api/v1/services/${serviceId}/reboot`, { method: 'POST' });
+    return httpFetch(this.servicePath(serviceId, '/reboot'), { method: 'POST' });
   }
 
   status(serviceId) {
-    return httpFetch(`/api/v1/services/${serviceId}/status`, { method: 'GET' });
+    return httpFetch(this.servicePath(serviceId, '/status'), { method: 'GET' });
   }
 
   getIp(serviceId) {
-    return httpFetch(`/api/v1/services/${serviceId}/get-ip`, { method: 'POST' });
+    return httpFetch(this.servicePath(serviceId, '/get-ip'), { method: 'POST' });
   }
 
   generatePassword(serviceId, { timeoutMs = 60_000 } = {}) {
-    return httpFetch(`/api/v1/services/${serviceId}/generate-password`, { method: 'POST', timeoutMs });
+    return httpFetch(this.servicePath(serviceId, '/generate-password'), { method: 'POST', timeoutMs });
   }
 
   resetMac(serviceId) {
-    const id = encodeURIComponent(String(serviceId));
-    return httpFetch(`/api/v1/services/${id}/reset-mac`, { method: 'POST' });
+    return httpFetch(this.servicePath(serviceId, '/reset-mac'), { method: 'POST' });
   }
 
   rebuild(serviceId, os) {
-    return httpFetch(`/api/v1/services/${serviceId}/rebuild`, { method: 'POST', jsonBody: { os } });
+    return httpFetch(this.servicePath(serviceId, '/rebuild'), { method: 'POST', jsonBody: { os } });
   }
 
   taskStatus(taskId) {
