@@ -417,9 +417,8 @@ export class VirtualizorAPI {
    * containing `do=1` (the confirmation token). Without this, the VPS visibly
    * doesn't change state even though the API call appears successful.
    *
-   * Note: this only runs for the company-Virtualizor automation path. The
-   * Hostycare flow handles power actions via HostycareAPI directly and is
-   * not affected.
+   * Note: this only runs for the company-Virtualizor automation path and for
+   * Hostycare reinstall/templates. Hostycare start/stop/restart use HostycareAPI.
    */
   async start(vpsid) {
     const idx = await this._resolveAccountIndexForVps(vpsid);

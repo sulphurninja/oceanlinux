@@ -979,7 +979,7 @@ export async function POST(request) {
       hostycareApi = new HostycareAPI();
       console.log('[SERVICE-ACTION][POST] Using Hostycare API', hasHostycareService ? `(serviceId=${order.hostycareServiceId})` : '(no serviceId yet)');
 
-      // Only initialize VirtualizorAPI for actions that need it (reinstall, templates)
+      // Virtualizor is only for reinstall/templates on Hostycare orders — power uses Hostycare API
       if (action === 'reinstall' || action === 'templates') {
         virtualizorApi = new VirtualizorAPI();
       }
@@ -998,11 +998,11 @@ export async function POST(request) {
           };
         } else if (hostycareApi && order.hostycareServiceId) {
           console.log('[START] Using Hostycare API with service ID:', order.hostycareServiceId);
-          result = await hostycareApi.startService(order.hostycareServiceId);
+          const apiRes = await hostycareApi.startService(order.hostycareServiceId);
           result = {
             success: true,
             message: 'VPS start command sent successfully',
-            apiResponse: result
+            apiResponse: apiRes
           };
         } else {
           throw new Error(
@@ -1025,11 +1025,11 @@ export async function POST(request) {
           };
         } else if (hostycareApi && order.hostycareServiceId) {
           console.log('[STOP] Using Hostycare API with service ID:', order.hostycareServiceId);
-          result = await hostycareApi.stopService(order.hostycareServiceId);
+          const apiRes = await hostycareApi.stopService(order.hostycareServiceId);
           result = {
             success: true,
             message: 'VPS stop command sent successfully',
-            apiResponse: result
+            apiResponse: apiRes
           };
         } else {
           throw new Error(
@@ -1055,11 +1055,11 @@ export async function POST(request) {
           };
         } else if (hostycareApi && order.hostycareServiceId) {
           console.log('[RESTART] Using Hostycare API with service ID:', order.hostycareServiceId);
-          result = await hostycareApi.rebootService(order.hostycareServiceId);
+          const apiRes = await hostycareApi.rebootService(order.hostycareServiceId);
           result = {
             success: true,
             message: 'VPS restart command sent successfully',
-            apiResponse: result
+            apiResponse: apiRes
           };
         } else {
           throw new Error(

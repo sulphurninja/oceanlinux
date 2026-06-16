@@ -1,5 +1,16 @@
+function isHostycareSuccessResponse(data) {
+  if (!data || typeof data !== 'object') return true;
+  if (data.success === true) return true;
+  if (typeof data.status === 'string' && data.status.toLowerCase() === 'success') return true;
+  if (data.result === true || data.result === 1 || data.result === '1') return true;
+  if (typeof data.result === 'string' && data.result.toLowerCase() === 'success') return true;
+  return false;
+}
+
 function extractHostycareApiError(data) {
   if (!data || typeof data !== 'object') return null;
+
+  if (isHostycareSuccessResponse(data)) return null;
 
   if (data.success === false) {
     return data.message || (typeof data.error === 'string' ? data.error : null) || 'Hostycare API returned success=false';
@@ -116,14 +127,8 @@ class HostycareAPI {
 
       if (method === 'POST') {
         const bodyParams = params instanceof URLSearchParams ? params : this.buildFormParams(params);
-        const encoded = bodyParams.toString();
-        if (encoded) {
-          config.body = bodyParams;
-          console.log('[HOSTYCARE] Encoded form body (debug):', encoded);
-        } else {
-          // start/stop/reboot have no params — omit empty form body (some WAF rules block it)
-          delete headers['Content-Type'];
-        }
+        config.body = bodyParams;
+        console.log('[HOSTYCARE] Encoded form body (debug):', bodyParams.toString() || '(empty)');
       }
 
       const response = await fetch(`${this.endpoint}${action}`, config);
