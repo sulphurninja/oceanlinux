@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+function getOpenAIClient() {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return null;
+  return new OpenAI({ apiKey });
+}
 
 const SYSTEM_PROMPT = `You are an AI assistant for OceanLinux, a premium yet affordable Linux hosting provider. Here's key information about the company:
 
@@ -49,6 +51,14 @@ export async function POST(req: NextRequest) {
     const { messages } = await req.json();
 
     if (!process.env.OPENAI_API_KEY) {
+      return NextResponse.json(
+        { error: 'OpenAI API key not configured' },
+        { status: 500 }
+      );
+    }
+
+    const openai = getOpenAIClient();
+    if (!openai) {
       return NextResponse.json(
         { error: 'OpenAI API key not configured' },
         { status: 500 }

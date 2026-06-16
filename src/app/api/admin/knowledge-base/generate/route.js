@@ -5,9 +5,11 @@ import User from '@/models/userModel';
 import KnowledgeBase from '@/models/knowledgeBaseModel';
 import { getDataFromToken } from '@/helper/getDataFromToken';
 
-const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY
-});
+function getOpenAIClient() {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) return null;
+    return new OpenAI({ apiKey });
+}
 
 // Helper function to generate slug
 const generateSlug = (title) => {
@@ -42,6 +44,14 @@ export async function POST(request) {
 
         if (!prompt) {
             return NextResponse.json({ error: 'Prompt is required' }, { status: 400 });
+        }
+
+        const openai = getOpenAIClient();
+        if (!openai) {
+            return NextResponse.json(
+                { error: 'OpenAI API key not configured. Set OPENAI_API_KEY in environment.' },
+                { status: 503 }
+            );
         }
 
         // Build the AI prompt based on parameters
