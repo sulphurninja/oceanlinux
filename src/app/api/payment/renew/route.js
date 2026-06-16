@@ -4,7 +4,7 @@ import { getDataFromToken } from '@/helper/getDataFromToken';
 import Order from '@/models/orderModel';
 import User from '@/models/userModel';
 import { Cashfree } from 'cashfree-pg';
-import Razorpay from 'razorpay';
+import { getRazorpayClient } from '@/lib/razorpayClient';
 import axios from 'axios';
 import { detectCompanyManagedRenewal, resolveRenewalProvider } from '@/lib/companyRenewal';
 import {
@@ -21,12 +21,6 @@ Cashfree.XClientSecret = process.env.CASHFREE_SECRET_KEY;
 Cashfree.XEnvironment = process.env.CASHFREE_ENVIRONMENT === 'SANDBOX' 
   ? Cashfree.Environment.SANDBOX 
   : Cashfree.Environment.PRODUCTION;
-
-// Initialize Razorpay
-const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID,
-  key_secret: process.env.RAZORPAY_KEY_SECRET
-});
 
 export async function POST(request) {
   await connectDB();
@@ -181,6 +175,11 @@ export async function POST(request) {
     if (actualPaymentMethod === 'razorpay') {
       try {
         console.log('[RENEWAL-INIT] Creating Razorpay renewal order');
+        const razorpay = getRazorpayClient();
+        if (!razorpay) {
+          throw new Error('Razorpay credentials not configured');
+        }
+
         const razorpayOrder = await razorpay.orders.create({
           amount: Math.round(renewalPrice * 100),
           currency: 'INR',

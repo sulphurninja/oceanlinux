@@ -1,5 +1,5 @@
 import { Cashfree } from 'cashfree-pg';
-import Razorpay from 'razorpay';
+import { getRazorpayClient } from '@/lib/razorpayClient';
 
 /**
  * Shared gateway-order plumbing used by:
@@ -20,11 +20,6 @@ Cashfree.XClientSecret = process.env.CASHFREE_SECRET_KEY;
 Cashfree.XEnvironment = process.env.CASHFREE_ENVIRONMENT === 'SANDBOX'
   ? Cashfree.Environment.SANDBOX
   : Cashfree.Environment.PRODUCTION;
-
-const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID,
-  key_secret: process.env.RAZORPAY_KEY_SECRET,
-});
 
 const UPI_GATEWAY_URL = 'https://merchant.upigateway.com/api/create_order';
 
@@ -171,6 +166,11 @@ export async function createGatewayOrder({
 
   // ----- Razorpay (final fallback) -----
   if (actualMethod === 'razorpay') {
+    const razorpay = getRazorpayClient();
+    if (!razorpay) {
+      throw new Error('Razorpay credentials not configured');
+    }
+
     const razorpayOptions = {
       amount: Math.round(amount * 100),
       currency: 'INR',

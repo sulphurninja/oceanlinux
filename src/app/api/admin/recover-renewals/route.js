@@ -3,7 +3,7 @@ import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 import IPStock from '@/models/ipStockModel';
 import { Cashfree } from 'cashfree-pg';
-import Razorpay from 'razorpay';
+import { getRazorpayClient } from '@/lib/razorpayClient';
 import { getDataFromToken } from '@/helper/getDataFromToken';
 import User from '@/models/userModel';
 import { resolveOrderRenewalPrice } from '@/lib/orderRenewalPricingServer';
@@ -19,11 +19,6 @@ Cashfree.XClientSecret = process.env.CASHFREE_SECRET_KEY;
 Cashfree.XEnvironment = process.env.CASHFREE_ENVIRONMENT === 'SANDBOX'
   ? Cashfree.Environment.SANDBOX
   : Cashfree.Environment.PRODUCTION;
-
-const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID,
-  key_secret: process.env.RAZORPAY_KEY_SECRET
-});
 
 // Helper to determine provider
 async function getProviderFromOrder(order) {
@@ -54,6 +49,9 @@ async function checkPaymentStatus(pendingRenewal) {
   // Check Razorpay
   if (paymentMethod === 'razorpay' && gatewayOrderId) {
     try {
+      const razorpay = getRazorpayClient();
+      if (!razorpay) return { success: false, error: 'Razorpay not configured' };
+
       const razorpayOrder = await razorpay.orders.fetch(gatewayOrderId);
       if (razorpayOrder.status === 'paid') {
         const payments = await razorpay.orders.fetchPayments(gatewayOrderId);

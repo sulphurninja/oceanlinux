@@ -13,7 +13,7 @@ import { assignPanelCredentials } from '@/lib/panelCredentials';
 import userWalletService from '@/services/userWalletService';
 import NotificationService from '@/services/notificationService';
 import { Cashfree } from 'cashfree-pg';
-import Razorpay from 'razorpay';
+import { getRazorpayClient } from '@/lib/razorpayClient';
 import crypto from 'crypto';
 
 // Initialize Cashfree with your credentials
@@ -26,12 +26,6 @@ Cashfree.XEnvironment = process.env.CASHFREE_ENVIRONMENT === 'SANDBOX'
 
 console.log('[Cashfree Init] Environment:', process.env.CASHFREE_ENVIRONMENT);
 console.log('[Cashfree Init] Using:', Cashfree.XEnvironment === Cashfree.Environment.PRODUCTION ? 'PRODUCTION' : 'SANDBOX');
-
-// Initialize Razorpay with your credentials
-const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID,
-  key_secret: process.env.RAZORPAY_KEY_SECRET,
-});
 
 // UPI Gateway configuration (URL only - key will be read inside handler)
 const UPI_GATEWAY_URL = 'https://merchant.upigateway.com/api/create_order';
@@ -320,6 +314,11 @@ export async function POST(request) {
 
       if (actualPaymentMethod === 'razorpay') {
         try {
+          const razorpay = getRazorpayClient();
+          if (!razorpay) {
+            throw new Error('Razorpay credentials not configured');
+          }
+
           const razorpayOrderOptions = {
             amount: Math.round(gatewayCharge * 100),
             currency: 'INR',

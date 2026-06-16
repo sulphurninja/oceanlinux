@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 import { Cashfree } from 'cashfree-pg';
-import Razorpay from 'razorpay';
+import { getRazorpayClient } from '@/lib/razorpayClient';
 import NotificationService from '@/services/notificationService';
 import { calculateExpiryDate } from '@/lib/expiryHelper';
 import { assignPanelCredentials } from '@/lib/panelCredentials';
@@ -16,12 +16,6 @@ Cashfree.XClientSecret = process.env.CASHFREE_SECRET_KEY;
 Cashfree.XEnvironment = process.env.CASHFREE_ENVIRONMENT === 'SANDBOX' 
   ? Cashfree.Environment.SANDBOX 
   : Cashfree.Environment.PRODUCTION;
-
-// Initialize Razorpay
-const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID,
-  key_secret: process.env.RAZORPAY_KEY_SECRET
-});
 
 export async function POST(request) {
   await connectDB();
@@ -82,6 +76,11 @@ export async function POST(request) {
       if (paymentMethod === 'razorpay' && razorpayOrderId) {
         console.log(`[PAYMENT-STATUS] Checking Razorpay order status: ${razorpayOrderId}`);
         try {
+          const razorpay = getRazorpayClient();
+          if (!razorpay) {
+            throw new Error('Razorpay credentials not configured');
+          }
+
           const razorpayOrder = await razorpay.orders.fetch(razorpayOrderId);
           console.log(`[PAYMENT-STATUS] Razorpay order status:`, razorpayOrder.status);
 
