@@ -1,15 +1,16 @@
 import { NextResponse } from 'next/server';
+import { COMPANY_FILTER_VERSION, COMPANY_VISIBLE_ORDER_STATUSES } from '@/lib/companyOrders';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 export async function GET() {
   return NextResponse.json(
-    { ordersFilter: 'confirmed-only-v5', visibleStatuses: ['confirmed'] },
+    { ordersFilter: COMPANY_FILTER_VERSION, visibleStatuses: COMPANY_VISIBLE_ORDER_STATUSES },
     {
       headers: {
         'Cache-Control': 'no-store',
-        'X-Company-Orders-Filter': 'confirmed-only-v5',
+        'X-Company-Orders-Filter': COMPANY_FILTER_VERSION,
       },
     }
   );

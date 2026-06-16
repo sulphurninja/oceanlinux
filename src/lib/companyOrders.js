@@ -1,11 +1,13 @@
-/** Company portal: confirmed (paid) orders only. */
-export const COMPANY_VISIBLE_ORDER_STATUSES = ['confirmed'];
+/** Company portal: paid/provisioned orders only — hide pending, cancelled, failed. */
+export const COMPANY_FILTER_VERSION = 'paid-orders-v6';
+
+export const COMPANY_VISIBLE_ORDER_STATUSES = ['confirmed', 'active', 'paid'];
 
 export function isCompanyVisibleOrder(orderOrStatus) {
   const status = String(
     typeof orderOrStatus === 'string' ? orderOrStatus : orderOrStatus?.status ?? ''
   ).trim().toLowerCase();
-  return status === 'confirmed';
+  return COMPANY_VISIBLE_ORDER_STATUSES.includes(status);
 }
 
 export function buildCompanyStockIdVariants(stockIds = []) {

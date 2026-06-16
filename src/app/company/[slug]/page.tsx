@@ -21,12 +21,7 @@ import {
   MessageSquare, RefreshCw, IndianRupee,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-
-const COMPANY_FILTER_VERSION = 'confirmed-only-v5';
-
-function isConfirmedOrder(order: Order): boolean {
-  return String(order?.status ?? '').trim().toLowerCase() === 'confirmed';
-}
+import { COMPANY_FILTER_VERSION, isCompanyVisibleOrder } from '@/lib/companyOrders';
 
 function orderStatusBadgeProps(status: string): {
   variant: 'default' | 'secondary' | 'outline';
@@ -153,7 +148,7 @@ export default function CompanyDashboard() {
   const [deployOutdated, setDeployOutdated] = useState(false);
 
   const visibleOrders = useMemo(
-    () => orders.filter(isConfirmedOrder),
+    () => orders.filter(isCompanyVisibleOrder),
     [orders]
   );
   const [editOrder, setEditOrder] = useState<Order | null>(null);
@@ -231,7 +226,7 @@ export default function CompanyDashboard() {
     if (orderRes.ok) {
       const data = await orderRes.json();
       const rows: Order[] = Array.isArray(data) ? data : (data.orders ?? []);
-      setOrders(rows.filter(isConfirmedOrder));
+      setOrders(rows.filter(isCompanyVisibleOrder));
       if (data?.filterVersion) {
         setDeployOutdated(data.filterVersion !== COMPANY_FILTER_VERSION);
       }
@@ -511,7 +506,7 @@ export default function CompanyDashboard() {
           <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Total Stocks</p><p className="text-2xl font-bold">{stocks.length}</p></CardContent></Card>
           <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Total Units</p><p className="text-2xl font-bold">{stocks.reduce((sum, s) => sum + (s.stockCount ?? 0), 0)}</p></CardContent></Card>
           <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Out of Stock</p><p className="text-2xl font-bold text-red-500">{stocks.filter(s => (s.stockCount ?? 0) === 0).length}</p></CardContent></Card>
-          <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Confirmed Orders</p><p className="text-2xl font-bold">{visibleOrders.length}</p></CardContent></Card>
+          <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Paid Orders</p><p className="text-2xl font-bold">{visibleOrders.length}</p></CardContent></Card>
         </div>
 
         {/* Tabs */}
@@ -606,12 +601,12 @@ export default function CompanyDashboard() {
                   <code className="block mt-2 rounded bg-black/5 dark:bg-white/10 px-2 py-1 text-xs">
                     cd /home/ec2-user/oceanlinux &amp;&amp; git pull &amp;&amp; rm -rf .next &amp;&amp; bun run build &amp;&amp; pm2 delete oceanlinux &amp;&amp; pm2 start ecosystem.config.cjs
                   </code>
-                  Then verify: <strong>/api/company/version</strong> must return <strong>confirmed-only-v5</strong>
+                  Then verify: <strong>/api/company/version</strong> must return <strong>paid-orders-v6</strong>
                 </CardContent>
               </Card>
             )}
             <p className="text-xs text-muted-foreground">
-              Only confirmed (paid) orders are shown. Cancelled, pending, and failed orders are hidden.
+              Paid orders (confirmed &amp; active) are shown. Pending and unpaid orders are hidden.
             </p>
             {/* Filters */}
             <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
@@ -656,7 +651,7 @@ export default function CompanyDashboard() {
             <div className="space-y-2">
               {filteredOrders.length === 0 ? (
                 <Card><CardContent className="py-12 text-center"><Package className="h-10 w-10 mx-auto text-muted-foreground mb-3" /><p className="text-sm text-muted-foreground">{visibleOrders.length === 0 ? 'No orders yet.' : 'No orders match your filters.'}</p></CardContent></Card>
-              ) : filteredOrders.filter(isConfirmedOrder).map((order) => (
+              ) : filteredOrders.filter(isCompanyVisibleOrder).map((order) => (
                 <Card key={order._id}>
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between gap-4">

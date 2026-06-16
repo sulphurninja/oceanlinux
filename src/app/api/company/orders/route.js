@@ -3,35 +3,23 @@ import { cookies } from 'next/headers';
 import connectDB from '@/lib/db';
 import IPStock from '@/models/ipStockModel';
 import Order from '@/models/orderModel';
+import {
+  COMPANY_FILTER_VERSION,
+  COMPANY_VISIBLE_ORDER_STATUSES,
+  isCompanyVisibleOrder,
+  buildCompanyStockIdVariants,
+} from '@/lib/companyOrders';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
-
-/** Company portal orders tab: confirmed (paid) only — never cancelled/pending/failed/active. */
-const FILTER_VERSION = 'confirmed-only-v5';
 
 function responseHeaders() {
   return {
     'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
     Pragma: 'no-cache',
     Expires: '0',
-    'X-Company-Orders-Filter': FILTER_VERSION,
+    'X-Company-Orders-Filter': COMPANY_FILTER_VERSION,
   };
-}
-
-function isConfirmedOrder(order) {
-  return String(order?.status ?? '').trim().toLowerCase() === 'confirmed';
-}
-
-function stockIdVariants(stockIds) {
-  const variants = new Set();
-  for (const id of stockIds) {
-    const value = String(id || '').trim();
-    if (!value) continue;
-    variants.add(value);
-    if (/^[a-f0-9]{24}$/i.test(value)) variants.add(value.toLowerCase());
-  }
-  return [...variants];
 }
 
 async function getCompanySession() {
@@ -58,14 +46,14 @@ export async function GET() {
 
   if (stockIds.length === 0) {
     return NextResponse.json(
-      { orders: [], filterVersion: FILTER_VERSION },
+      { orders: [], filterVersion: COMPANY_FILTER_VERSION },
       { headers: responseHeaders() }
     );
   }
 
   const orders = await Order.find({
-    ipStockId: { $in: stockIdVariants(stockIds) },
-    status: 'confirmed',
+    ipStockId: { $in: buildCompanyStockIdVariants(stockIds) },
+    status: { $in: COMPANY_VISIBLE_ORDER_STATUSES },
   })
     .select(
       'productName memory ipAddress username password os status provisioningStatus createdAt expiryDate customerName customerEmail ipStockId panelUsername'
@@ -77,14 +65,14 @@ export async function GET() {
   stocks.forEach(s => { stockMap[s._id.toString()] = s.name; });
 
   const enriched = orders
-    .filter(isConfirmedOrder)
+    .filter(isCompanyVisibleOrder)
     .map(o => ({
       ...o,
       stockName: stockMap[String(o.ipStockId)] || 'Unknown',
     }));
 
   return NextResponse.json(
-    { orders: enriched, filterVersion: FILTER_VERSION },
+    { orders: enriched, filterVersion: COMPANY_FILTER_VERSION },
     { headers: responseHeaders() }
   );
 }
@@ -107,11 +95,11 @@ export async function PUT(request) {
 
   const order = await Order.findOne({
     _id: orderId,
-    ipStockId: { $in: stockIdVariants(stockIds) },
-    status: 'confirmed',
+    ipStockId: { $in: buildCompanyStockIdVariants(stockIds) },
+    status: { $in: COMPANY_VISIBLE_ORDER_STATUSES },
   });
 
-  if (!order || !isConfirmedOrder(order)) {
+  if (!order || !isCompanyVisibleOrder(order)) {
     return NextResponse.json({ error: 'Order not found or not authorized' }, { status: 404, headers: responseHeaders() });
   }
 

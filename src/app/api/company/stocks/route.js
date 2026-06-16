@@ -3,6 +3,7 @@ import { cookies } from 'next/headers';
 import connectDB from '@/lib/db';
 import IPStock from '@/models/ipStockModel';
 import { getIpStockRemaining, setIpStockCount, usesStockCount } from '@/lib/ipStockAvailability';
+import { COMPANY_FILTER_VERSION } from '@/lib/companyOrders';
 
 async function getCompanySession() {
   const cookieStore = await cookies();
@@ -30,13 +31,13 @@ function serializeStock(stock) {
 export async function GET() {
   const company = await getCompanySession();
   if (!company) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers: { 'X-Deploy-Version': 'confirmed-only-v5' } });
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers: { 'X-Deploy-Version': COMPANY_FILTER_VERSION } });
   }
 
   await connectDB();
   const stocks = await IPStock.find({ company: company.id }).sort({ name: 1 }).lean();
   return NextResponse.json(stocks.map(serializeStock), {
-    headers: { 'X-Deploy-Version': 'confirmed-only-v5' },
+    headers: { 'X-Deploy-Version': COMPANY_FILTER_VERSION },
   });
 }
 

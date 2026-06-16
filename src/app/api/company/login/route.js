@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import connectDB from '@/lib/db';
 import Company from '@/models/companyModel';
+import { COMPANY_FILTER_VERSION } from '@/lib/companyOrders';
 
 export async function POST(request) {
   await connectDB();
@@ -29,6 +30,6 @@ export async function POST(request) {
     success: true,
     name: company.name,
     slug: company.slug,
-    ordersFilter: 'confirmed-only-v5',
+    ordersFilter: COMPANY_FILTER_VERSION,
   });
 }
