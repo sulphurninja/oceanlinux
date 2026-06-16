@@ -25,5 +25,10 @@ export async function POST(request) {
     path: '/',
   });
 
-  return NextResponse.json({ success: true, name: company.name, slug: company.slug });
+  return NextResponse.json({
+    success: true,
+    name: company.name,
+    slug: company.slug,
+    ordersFilter: 'confirmed-only-v5',
+  });
 }

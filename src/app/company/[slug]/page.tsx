@@ -22,15 +22,11 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-const COMPANY_FILTER_VERSION = 'confirmed-active-only-v4';
+const COMPANY_FILTER_VERSION = 'confirmed-only-v5';
 
-function visibleCompanyOrder(order: Order): boolean {
-  const status = String(order?.status ?? '').trim().toLowerCase();
-  if (!status) return false;
-  if (status.includes('cancel')) return false;
-  if (status.includes('fail')) return false;
-  if (status.includes('pending')) return false;
-  return status === 'confirmed' || status === 'active';
+/** Only paid+confirmed orders — hides cancelled, pending, failed, active, everything else. */
+function isConfirmedOrder(order: Order): boolean {
+  return String(order?.status ?? '').trim().toLowerCase() === 'confirmed';
 }
 
 function orderStatusBadgeProps(status: string): {
@@ -153,11 +149,14 @@ export default function CompanyDashboard() {
 
   // Order filters
   const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('all');
   const [sortBy, setSortBy] = useState('newest');
+  const [deployOutdated, setDeployOutdated] = useState(false);
 
-  // Edit order
+  const visibleOrders = useMemo(
+    () => orders.filter(isConfirmedOrder),
+    [orders]
+  );
   const [editOrder, setEditOrder] = useState<Order | null>(null);
   const [editIp, setEditIp] = useState('');
   const [editUsername, setEditUsername] = useState('');
@@ -210,6 +209,7 @@ export default function CompanyDashboard() {
       if (res.ok) {
         setAuthed(true);
         setCompanyName(data.name);
+        setDeployOutdated(data.ordersFilter !== COMPANY_FILTER_VERSION);
         toast.success(`Welcome, ${data.name}`);
         loadData();
       } else {
@@ -232,9 +232,9 @@ export default function CompanyDashboard() {
     if (orderRes.ok) {
       const data = await orderRes.json();
       const rows: Order[] = Array.isArray(data) ? data : (data.orders ?? []);
-      setOrders(rows.filter(visibleCompanyOrder));
-      if (data?.filterVersion && data.filterVersion !== COMPANY_FILTER_VERSION) {
-        console.warn('[company] API filter version mismatch', data.filterVersion);
+      setOrders(rows.filter(isConfirmedOrder));
+      if (data?.filterVersion) {
+        setDeployOutdated(data.filterVersion !== COMPANY_FILTER_VERSION);
       }
     }
     loadActionRequests('pending');
@@ -400,7 +400,7 @@ export default function CompanyDashboard() {
 
   // Filtered and sorted orders
   const filteredOrders = useMemo(() => {
-    let result = orders.filter(visibleCompanyOrder);
+    let result = visibleOrders;
 
     if (searchTerm.trim()) {
       const q = searchTerm.toLowerCase();
@@ -412,10 +412,6 @@ export default function CompanyDashboard() {
         o.stockName?.toLowerCase().includes(q) ||
         o.memory?.toLowerCase().includes(q)
       );
-    }
-
-    if (statusFilter !== 'all') {
-      result = result.filter(o => String(o.status).toLowerCase() === statusFilter.toLowerCase());
     }
 
     if (dateFilter !== 'all') {
@@ -441,7 +437,7 @@ export default function CompanyDashboard() {
     });
 
     return result;
-  }, [orders, searchTerm, statusFilter, dateFilter, sortBy]);
+  }, [visibleOrders, searchTerm, dateFilter, sortBy]);
 
   const pendingRequestCount = useMemo(() => {
     if (requestStatusFilter === 'pending') return actionRequests.length;
@@ -516,14 +512,14 @@ export default function CompanyDashboard() {
           <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Total Stocks</p><p className="text-2xl font-bold">{stocks.length}</p></CardContent></Card>
           <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Total Units</p><p className="text-2xl font-bold">{stocks.reduce((sum, s) => sum + (s.stockCount ?? 0), 0)}</p></CardContent></Card>
           <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Out of Stock</p><p className="text-2xl font-bold text-red-500">{stocks.filter(s => (s.stockCount ?? 0) === 0).length}</p></CardContent></Card>
-          <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Active Orders</p><p className="text-2xl font-bold">{orders.length}</p></CardContent></Card>
+          <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Confirmed Orders</p><p className="text-2xl font-bold">{visibleOrders.length}</p></CardContent></Card>
         </div>
 
         {/* Tabs */}
         <div className="flex gap-2 mb-5 overflow-x-auto pb-1 scrollbar-hide">
           {([
             { id: 'stocks' as const, icon: <Server className="h-4 w-4" />, label: 'IP Stocks', count: stocks.length, badgeColor: '' },
-            { id: 'orders' as const, icon: <Package className="h-4 w-4" />, label: 'Orders', count: orders.length, badgeColor: '' },
+            { id: 'orders' as const, icon: <Package className="h-4 w-4" />, label: 'Orders', count: visibleOrders.length, badgeColor: '' },
             { id: 'requests' as const, icon: <ClipboardList className="h-4 w-4" />, label: 'Action Requests', count: null, badgeColor: '' },
             { id: 'renewals' as const, icon: <RefreshCw className="h-4 w-4" />, label: 'Renewals', count: pendingRenewalCount, badgeColor: pendingRenewalCount > 0 ? 'bg-amber-500 text-white' : '' },
           ]).map(t => (
@@ -604,8 +600,19 @@ export default function CompanyDashboard() {
         {/* ── Orders Tab ── */}
         {tab === 'orders' && (
           <div className="space-y-4">
+            {deployOutdated && (
+              <Card className="border-amber-500 bg-amber-50 dark:bg-amber-950/20">
+                <CardContent className="p-4 text-sm text-amber-800 dark:text-amber-300">
+                  Production is running an old build. SSH to server and run:
+                  <code className="block mt-2 rounded bg-black/5 dark:bg-white/10 px-2 py-1 text-xs">
+                    cd /home/ec2-user/oceanlinux &amp;&amp; git pull &amp;&amp; rm -rf .next &amp;&amp; bun run build &amp;&amp; pm2 delete oceanlinux &amp;&amp; pm2 start ecosystem.config.cjs
+                  </code>
+                  Then verify: <strong>/api/company/version</strong> must return <strong>confirmed-only-v5</strong>
+                </CardContent>
+              </Card>
+            )}
             <p className="text-xs text-muted-foreground">
-              Only confirmed and active orders are shown. Cancelled orders are hidden. ({COMPANY_FILTER_VERSION})
+              Only confirmed (paid) orders are shown. Cancelled, pending, and failed orders are hidden.
             </p>
             {/* Filters */}
             <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
@@ -614,14 +621,6 @@ export default function CompanyDashboard() {
                 <Input placeholder="Search orders..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-9 h-9" />
               </div>
               <div className="flex gap-2 flex-wrap">
-                <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger className="w-28 h-9 text-xs"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Status</SelectItem>
-                    <SelectItem value="confirmed">Confirmed</SelectItem>
-                    <SelectItem value="active">Active</SelectItem>
-                  </SelectContent>
-                </Select>
                 <Select value={dateFilter} onValueChange={setDateFilter}>
                   <SelectTrigger className="w-28 h-9 text-xs"><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -641,8 +640,8 @@ export default function CompanyDashboard() {
                     <SelectItem value="status">Status</SelectItem>
                   </SelectContent>
                 </Select>
-                {(searchTerm || statusFilter !== 'all' || dateFilter !== 'all' || sortBy !== 'newest') && (
-                  <Button variant="ghost" size="sm" className="h-9 text-xs" onClick={() => { setSearchTerm(''); setStatusFilter('all'); setDateFilter('all'); setSortBy('newest'); }}>
+                {(searchTerm || dateFilter !== 'all' || sortBy !== 'newest') && (
+                  <Button variant="ghost" size="sm" className="h-9 text-xs" onClick={() => { setSearchTerm(''); setDateFilter('all'); setSortBy('newest'); }}>
                     Clear
                   </Button>
                 )}
@@ -651,14 +650,14 @@ export default function CompanyDashboard() {
 
             {/* Results count */}
             <p className="text-xs text-muted-foreground">
-              {filteredOrders.length} of {orders.length} orders
+              {filteredOrders.length} of {visibleOrders.length} orders
             </p>
 
             {/* Order cards */}
             <div className="space-y-2">
               {filteredOrders.length === 0 ? (
-                <Card><CardContent className="py-12 text-center"><Package className="h-10 w-10 mx-auto text-muted-foreground mb-3" /><p className="text-sm text-muted-foreground">{orders.length === 0 ? 'No orders yet.' : 'No orders match your filters.'}</p></CardContent></Card>
-              ) : filteredOrders.map((order) => (
+                <Card><CardContent className="py-12 text-center"><Package className="h-10 w-10 mx-auto text-muted-foreground mb-3" /><p className="text-sm text-muted-foreground">{visibleOrders.length === 0 ? 'No orders yet.' : 'No orders match your filters.'}</p></CardContent></Card>
+              ) : filteredOrders.filter(isConfirmedOrder).map((order) => (
                 <Card key={order._id}>
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between gap-4">

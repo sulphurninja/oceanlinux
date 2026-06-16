@@ -31,8 +31,8 @@ echo "==> build..."
 $BUILD_CMD
 
 echo "==> verify new company orders filter is in build..."
-if ! grep -R "confirmed-active-only-v4" .next/server/app/api/company/orders 2>/dev/null | head -1; then
-  echo "ERROR: Build does NOT contain confirmed-active-only-v4."
+if ! grep -R "confirmed-only-v5" .next/server/app/api/company/orders 2>/dev/null | head -1; then
+  echo "ERROR: Build does NOT contain confirmed-only-v5."
   echo "       Wrong directory or build failed. Fix before restarting PM2."
   exit 1
 fi
@@ -50,5 +50,5 @@ curl -sI "http://127.0.0.1:3000/api/company/orders" | grep -i "x-company-orders-
 
 echo ""
 echo "Done. Open https://oceanlinux.com/api/company/version"
-echo "You must see: confirmed-active-only-v4"
+echo "You must see: confirmed-only-v5"
 echo "Then hard-refresh /company/rockybhai"

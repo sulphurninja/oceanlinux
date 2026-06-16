@@ -7,8 +7,8 @@ import Order from '@/models/orderModel';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-const FILTER_VERSION = 'confirmed-active-only-v4';
-const VISIBLE_STATUSES = ['confirmed', 'active'];
+/** Company portal orders tab: confirmed (paid) only — never cancelled/pending/failed/active. */
+const FILTER_VERSION = 'confirmed-only-v5';
 
 function responseHeaders() {
   return {
@@ -19,17 +19,8 @@ function responseHeaders() {
   };
 }
 
-function normalizeStatus(status) {
-  return String(status || '').trim().toLowerCase();
-}
-
-function isVisibleCompanyOrder(order) {
-  const status = normalizeStatus(order?.status);
-  if (!status) return false;
-  if (status.includes('cancel')) return false;
-  if (status.includes('fail')) return false;
-  if (status.includes('pending')) return false;
-  return status === 'confirmed' || status === 'active';
+function isConfirmedOrder(order) {
+  return String(order?.status ?? '').trim().toLowerCase() === 'confirmed';
 }
 
 function stockIdVariants(stockIds) {
@@ -67,14 +58,14 @@ export async function GET() {
 
   if (stockIds.length === 0) {
     return NextResponse.json(
-      { orders: [], filterVersion: FILTER_VERSION, visibleStatuses: VISIBLE_STATUSES },
+      { orders: [], filterVersion: FILTER_VERSION },
       { headers: responseHeaders() }
     );
   }
 
   const orders = await Order.find({
     ipStockId: { $in: stockIdVariants(stockIds) },
-    status: { $in: VISIBLE_STATUSES },
+    status: 'confirmed',
   })
     .select(
       'productName memory ipAddress username password os status provisioningStatus createdAt expiryDate customerName customerEmail ipStockId panelUsername'
@@ -86,18 +77,14 @@ export async function GET() {
   stocks.forEach(s => { stockMap[s._id.toString()] = s.name; });
 
   const enriched = orders
-    .filter(isVisibleCompanyOrder)
+    .filter(isConfirmedOrder)
     .map(o => ({
       ...o,
       stockName: stockMap[String(o.ipStockId)] || 'Unknown',
     }));
 
   return NextResponse.json(
-    {
-      orders: enriched,
-      filterVersion: FILTER_VERSION,
-      visibleStatuses: VISIBLE_STATUSES,
-    },
+    { orders: enriched, filterVersion: FILTER_VERSION },
     { headers: responseHeaders() }
   );
 }
@@ -121,10 +108,10 @@ export async function PUT(request) {
   const order = await Order.findOne({
     _id: orderId,
     ipStockId: { $in: stockIdVariants(stockIds) },
-    status: { $in: VISIBLE_STATUSES },
+    status: 'confirmed',
   });
 
-  if (!order || !isVisibleCompanyOrder(order)) {
+  if (!order || !isConfirmedOrder(order)) {
     return NextResponse.json({ error: 'Order not found or not authorized' }, { status: 404, headers: responseHeaders() });
   }
 
