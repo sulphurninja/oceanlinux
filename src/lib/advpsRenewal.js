@@ -1,5 +1,5 @@
 const AdvpsAPI = require('@/services/advpsApi');
-const { resolveAdvpsServiceIdForPower } = require('@/lib/advpsOrderSync');
+const { resolveAdvpsIdsForRenewal } = require('@/lib/advpsOrderSync');
 
 function isAdvpsTestApiKey() {
   const key = String(process.env.ADVPS_API_KEY || '').trim();
@@ -32,7 +32,7 @@ function validateAdvpsRenewalResult(result) {
  * Returns { success, result, error, serviceId, advpsOrderId, testMode, correctedServiceId }
  */
 async function executeAdvpsUpstreamRenewal(api, order, { Order } = {}) {
-  const resolved = await resolveAdvpsServiceIdForPower(api, order, { Order });
+  const resolved = await resolveAdvpsIdsForRenewal(api, order, { Order });
   if (!resolved.serviceId) {
     return {
       success: false,
@@ -41,17 +41,22 @@ async function executeAdvpsUpstreamRenewal(api, order, { Order } = {}) {
     };
   }
 
-  const advpsOrderId = order.advpsOrderId || resolved.advpsOrderId;
+  const advpsOrderId = resolved.advpsOrderId;
   if (!advpsOrderId) {
     return {
       success: false,
-      error: 'Missing ADVPS purchase order ID (advpsOrderId)',
+      error: resolved.error || 'Missing ADVPS purchase order ID (advpsOrderId)',
       result: null,
       serviceId: resolved.serviceId,
     };
   }
 
   const serviceId = resolved.serviceId;
+
+  console.log('[ADVPS-RENEW] Calling POST /api/v1/services/renew', {
+    orderId: advpsOrderId,
+    serviceIds: [serviceId],
+  });
 
   try {
     const result = await api.renewServices({

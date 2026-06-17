@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import { toast } from 'sonner';
 
 const AdminOrders = () => {
     const [orders, setOrders] = useState([]);
@@ -37,7 +38,7 @@ const AdminOrders = () => {
             })
                 .then(response => response.json())
                 .then(() => {
-                    alert('Order updated successfully');
+                    toast.success('Order updated successfully');
                     setSelectedOrder(null);
                     dialogRef.current.close();
                 })

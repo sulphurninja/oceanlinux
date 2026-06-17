@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import { toast } from 'sonner';
 
 interface Order {
   _id: string;
@@ -60,7 +61,7 @@ const AdminOrders = () => {
     })
       .then(res => res.json())
       .then(() => {
-        alert('Order updated successfully');
+        toast.success('Order updated successfully');
         setSelectedOrder(null);
         if (dialogRef.current) {
           dialogRef.current.close();

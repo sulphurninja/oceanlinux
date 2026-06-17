@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import {
   ArrowLeft,
@@ -47,13 +47,26 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Separator } from '@/components/ui/separator';
 import { Progress } from '@/components/ui/progress';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { toast } from 'sonner';
+import { Switch } from '@/components/ui/switch';
+import { fetchWalletSummary } from '@/lib/walletClient';
 import { cn } from '@/lib/utils';
 import { ADVPS_REBUILD_LIMIT, getAdvpsRebuildUsage } from '@/lib/advpsRebuildLimit';
 import { isWithinRenewalWindow } from '@/lib/expiryHelper';
 import { getOrderRenewalPrice, getOrderRenewalPriceNote, getCurrentListPriceFromStock } from '@/lib/orderRenewalPricing';
 import { useSessionAlert } from '@/components/session-alert';
+import { useConfirmDialog } from '@/hooks/useConfirmDialog';
+import OrderNewsPopup from '@/components/order-news-popup';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 declare global {
@@ -158,6 +171,14 @@ interface Order {
   slotIpPackageId?: string;
   slotIpId?: string;
   provisioningStatus?: string;
+  provisioningError?: string;
+  serverDetails?: {
+    pendingFormatTarget?: {
+      osType?: string;
+      osLabel?: string;
+      startedAt?: string;
+    };
+  };
   lastAction?: string;
   lastActionTime?: Date;
   lastSyncTime?: Date;
@@ -226,11 +247,45 @@ function styleText(content: string) {
   });
 }
 
+function getOsTemplateLabel(name: unknown, id: string): string {
+  if (typeof name === 'string') return name;
+  if (name && typeof name === 'object') {
+    const template = name as { name?: string; os?: string; distro?: string };
+    return template.name || template.os || template.distro || `Template ${id}`;
+  }
+  return `Template ${id}`;
+}
+
+function orderOsMatchesTemplate(orderOs: string | undefined, templateId: string): boolean {
+  const os = (orderOs || '').toLowerCase();
+  switch (templateId) {
+    case 'ubuntu':
+      return os.includes('ubuntu');
+    case 'centos':
+      return os.includes('centos');
+    case '2012':
+      return os.includes('2012');
+    case '2016':
+      return os.includes('2016');
+    case '2019':
+      return os.includes('2019');
+    case '2022':
+      return os.includes('2022');
+    case '11':
+      return os.includes('windows 11') || /\bwin\s*11\b/.test(os);
+    case '2025':
+      return os.includes('2025');
+    default:
+      return os.includes(templateId.toLowerCase());
+  }
+}
+
 const OrderDetails = () => {
   const params = useParams();
   const router = useRouter();
   const orderId = params.id as string;
   const { showAlert } = useSessionAlert();
+  const { confirm, ConfirmDialog } = useConfirmDialog();
 
   const [order, setOrder] = useState<Order | null>(null);
   const [ipStock, setIpStock] = useState<IPStock | null>(null);
@@ -247,6 +302,8 @@ const OrderDetails = () => {
 
   // Payment method for renewals
   const [renewalPaymentMethod, setRenewalPaymentMethod] = useState<'cashfree' | 'razorpay' | 'upi'>('cashfree');
+  const [walletBalance, setWalletBalance] = useState(0);
+  const [useWalletRenewal, setUseWalletRenewal] = useState(true);
 
   // Format dialog state
   const [formatDialogOpen, setFormatDialogOpen] = useState(false);
@@ -263,6 +320,18 @@ const OrderDetails = () => {
   const [osProgress, setOsProgress] = useState<string>('');
   const [osMode, setOsMode] = useState<'reinstall' | 'format'>('reinstall'); // label + behavior
 
+  const [reinstallConfirmOpen, setReinstallConfirmOpen] = useState(false);
+  const [pendingReinstallAction, setPendingReinstallAction] = useState<'reinstall' | 'format' | null>(null);
+  const [renewConfirmOpen, setRenewConfirmOpen] = useState(false);
+
+  const [legacyActionOpen, setLegacyActionOpen] = useState(false);
+  const [legacyAction, setLegacyAction] = useState<'reinstall' | 'format'>('reinstall');
+  const [legacyActionLabel, setLegacyActionLabel] = useState('');
+  const [legacyTemplates, setLegacyTemplates] = useState<Record<string, string>>({});
+  const [legacySelectedTemplate, setLegacySelectedTemplate] = useState('');
+  const [legacyPassword, setLegacyPassword] = useState('');
+  const [legacyTemplateWarning, setLegacyTemplateWarning] = useState<string | null>(null);
+
   // Manual server action request states
   const [pendingRequest, setPendingRequest] = useState<any>(null);
   const [requestLoading, setRequestLoading] = useState(false);
@@ -274,6 +343,12 @@ const OrderDetails = () => {
       fetchOrder();
     }
   }, [orderId]);
+
+  useEffect(() => {
+    fetchWalletSummary().then((wallet) => {
+      if (wallet) setWalletBalance(wallet.balance);
+    });
+  }, []);
   useEffect(() => {
     if (orderId) {
       fetchOrderAndIPStock();
@@ -304,14 +379,19 @@ const OrderDetails = () => {
     }
   }, [order?.hostycareServiceId, order?.smartvpsServiceId, order?.advpsServiceId, order?.ipAddress, ipStock, loading]);
 
-  // Auto-refresh while ADVPS is provisioning (poll every 15s)
+  // Auto-refresh while ADVPS or SmartVPS is provisioning (poll every 15s)
   useEffect(() => {
     if (!order) return;
-    const isProvisioning = order.provisioningStatus === 'provisioning' && getProviderFromOrder(order, ipStock) === 'advps';
+    const providerNow = getProviderFromOrder(order, ipStock);
+    const isProvisioning = order.provisioningStatus === 'provisioning' &&
+      (providerNow === 'advps' || providerNow === 'smartvps');
     if (!isProvisioning) return;
 
     const interval = setInterval(async () => {
       try {
+        if (providerNow === 'smartvps') {
+          await fetch(`/api/orders/smartvps-action?orderId=${orderId}`, { cache: 'no-store' });
+        }
         const res = await fetch(`/api/orders/${orderId}`, { cache: 'no-store' });
         if (res.ok) {
           const updated = await res.json();
@@ -319,9 +399,12 @@ const OrderDetails = () => {
           if (updated.provisioningStatus !== 'provisioning') {
             clearInterval(interval);
             if (updated.provisioningStatus === 'active' && updated.password) {
-              toast.success('Server is ready! Credentials are now available.');
+              const targetOs = updated.serverDetails?.pendingFormatTarget?.osLabel;
+              toast.success(targetOs
+                ? `Server is ready on ${updated.os || targetOs}!`
+                : 'Server is ready! Credentials are now available.');
             } else if (updated.provisioningStatus === 'failed') {
-              toast.error('Provisioning failed. Check the order details.');
+              toast.error(updated.provisioningError || 'Provisioning failed. Check the order details.');
             }
           }
         }
@@ -331,7 +414,7 @@ const OrderDetails = () => {
     }, 15000);
 
     return () => clearInterval(interval);
-  }, [order?.provisioningStatus, order?._id]);
+  }, [order?.provisioningStatus, order?._id, orderId, ipStock]);
 
   const fetchOrderAndIPStock = async () => {
     setLoading(true);
@@ -459,7 +542,7 @@ const OrderDetails = () => {
     }
   };
 
-  const OS_DIALOG_AUTO_CLOSE_MS = 120_000; // 2 minutes
+  const OS_DIALOG_AUTO_CLOSE_MS = 600_000; // 10 minutes — cross-OS SmartVPS changes are slow
   const osAutoCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const startOsAutoCloseTimer = () => {
@@ -486,6 +569,17 @@ const OrderDetails = () => {
       if (osAutoCloseTimer.current) clearTimeout(osAutoCloseTimer.current);
     };
   }, []);
+
+  const renewalPaymentTotals = useMemo(() => {
+    if (!order) {
+      return { total: 0, walletApplied: 0, gatewayCharge: 0 };
+    }
+    const currentListPrice = getCurrentListPriceFromStock(ipStock, order.memory);
+    const total = getOrderRenewalPrice(order, currentListPrice);
+    const walletApplied = useWalletRenewal ? Math.min(walletBalance, total) : 0;
+    const gatewayCharge = Math.max(0, total - walletApplied);
+    return { total, walletApplied, gatewayCharge };
+  }, [order, ipStock, walletBalance, useWalletRenewal]);
 
   const openOsDialog = async (provider: 'hostycare' | 'smartvps' | 'advps' | 'oceanlinux' | 'netbay') => {
     if (osAutoCloseTimer.current) {
@@ -548,12 +642,15 @@ const OrderDetails = () => {
       if (!data.success) throw new Error(data.error || 'Failed');
       startOsAutoCloseTimer();
       setOsProgress(osMode === 'format'
-        ? 'Format initiated. Waiting for server to update...'
+        ? 'OS change started. This can take 5–10 minutes — please keep this dialog open.'
         : 'Reinstall submitted. Waiting for server to update...'
       );
 
       // re-use your existing poller
-      await pollForServerUpdates();
+      await pollForServerUpdates({
+        expectedTemplateId: selectedOs,
+        useOsDialog: true,
+      });
 
     } catch (err: any) {
       setOsProgress(`Error: ${err.message || 'unknown error'}`);
@@ -588,9 +685,11 @@ const OrderDetails = () => {
   const requestServerAction = async (action: string) => {
     if (!order) return;
 
-    const confirmed = confirm(
-      `Request ${action} action? An admin will review your request and perform the action.`
-    );
+    const confirmed = await confirm({
+      title: `Request ${action}`,
+      description: `Submit a ${action} request? An admin will review and perform the action for you.`,
+      confirmLabel: 'Submit Request',
+    });
     if (!confirmed) return;
 
     setRequestLoading(true);
@@ -865,7 +964,11 @@ const OrderDetails = () => {
         // For power actions, show a more informative message
         if (['start', 'stop', 'restart'].includes(action)) {
           const actionLabel = action === 'start' ? 'Starting' : action === 'stop' ? 'Stopping' : 'Restarting';
-          toast.success(`${actionLabel} server... This may take a few moments.`, {
+          const ipNote =
+            action === 'start' && provider === 'advps' && data.result?.ipConfig?.ok && data.result?.ipConfig?.ip
+              ? ` IP configured after start (${data.result.ipConfig.ip}).`
+              : '';
+          toast.success(`${actionLabel} server...${ipNote} This may take a few moments.`, {
             duration: 4000,
           });
 
@@ -940,29 +1043,83 @@ const OrderDetails = () => {
   const handleAdvpsGeneratePassword = async () => {
     if (!order || getProviderFromOrder(order, ipStock) !== 'advps' || !order.advpsServiceId) return;
 
-    const ok = window.confirm(
-      'Generate a new login password from ADVPS?\n\n' +
-      'This calls ADVPS directly and saves the password here automatically. ' +
-      'If ADVPS has already generated a password for this server, use Format Server instead (it creates a fresh OS and new password).'
-    );
+    const ok = await confirm({
+      title: 'Generate New Password',
+      description: (
+        <div className="space-y-2">
+          <p>Generate a new login password from ADVPS? This calls ADVPS directly and saves the password here automatically.</p>
+          <p className="text-xs">If ADVPS has already generated a password for this server, use Format Server instead — it creates a fresh OS and new password.</p>
+        </div>
+      ),
+      confirmLabel: 'Generate Password',
+    });
     if (!ok) return;
 
     await runServiceAction('generatepassword');
   };
 
-  // Also update the handleAdvancedAction function
-  // Updated handleAdvancedAction function
-  const handleAdvancedAction = async (action: 'reinstall' | 'format') => {
+  const promptReinstallAction = (action: 'reinstall' | 'format') => {
+    if (!order || !isServerManagementAvailable(order, ipStock)) return;
+    setPendingReinstallAction(action);
+    setReinstallConfirmOpen(true);
+  };
+
+  const openLegacyActionDialog = (
+    action: 'reinstall' | 'format',
+    actionLabel: string,
+    templateList: Record<string, any>,
+    warning?: string | null,
+  ) => {
+    const templates: Record<string, string> = {};
+    Object.entries(templateList).forEach(([id, template]) => {
+      const name = typeof template === 'string'
+        ? template
+        : (template?.name || template?.os || template?.distro || `Template ${id}`);
+      templates[id] = name;
+    });
+    setLegacyAction(action);
+    setLegacyActionLabel(actionLabel);
+    setLegacyTemplates(templates);
+    setLegacySelectedTemplate('');
+    setLegacyPassword('');
+    setLegacyTemplateWarning(warning ?? null);
+    setLegacyActionOpen(true);
+  };
+
+  const submitLegacyAction = async () => {
+    if (legacyPassword.length < 6) {
+      toast.error('Password must be at least 6 characters long');
+      return;
+    }
+    setLegacyActionOpen(false);
+    setActionBusy(legacyAction);
+    await runServiceAction(legacyAction, {
+      password: legacyPassword,
+      templateId: legacySelectedTemplate || undefined,
+    });
+    setLegacyPassword('');
+    setLegacySelectedTemplate('');
+    setLegacyTemplateWarning(null);
+  };
+
+  const handleResetMac = async (variant: 'advps' | 'reseller') => {
+    const ok = await confirm({
+      title: 'Reset MAC Address',
+      description: variant === 'advps'
+        ? 'Generate and apply a new MAC address on ADVPS? Without a MAC reset subscription this is limited to once per 24 hours. You may need to renew DHCP or adjust networking inside the VM.'
+        : 'Generate a new MAC address on the reseller panel? The VM will be stopped, the MAC updated, and then restarted. You may need to renew DHCP inside the guest OS.',
+      confirmLabel: 'Reset MAC',
+      destructive: true,
+    });
+    if (ok) void runServiceAction('resetmac');
+  };
+
+  const executeAdvancedAction = async (action: 'reinstall' | 'format') => {
     if (!order || !isServerManagementAvailable(order, ipStock)) return;
 
     const provider = getProviderFromOrder(order, ipStock);
-    const actionName = action === 'format' ? 'format' : 'reinstall';
     const actionLabel = action === 'format' ? 'Format' : 'Reinstall OS';
 
-    const confirmed = confirm(`Are you sure you want to ${actionName}? This will erase all data!`);
-    if (!confirmed) return;
-
-    // NEW
     if ((provider === 'smartvps' && action === 'format') ||
       (provider === 'advps' && action === 'format') ||
       (provider === 'hostycare' && action === 'reinstall' && order.hostycareServiceId) ||
@@ -972,7 +1129,7 @@ const OrderDetails = () => {
     }
 
 
-    // For other providers, use the existing prompt-based approach
+    // For other providers, open the legacy template/password dialog
     try {
       setActionBusy(action);
 
@@ -987,74 +1144,39 @@ const OrderDetails = () => {
 
       if (templatesData.success && templatesData.result) {
         const templates = templatesData.result;
-        let templateOptions = '';
-        let templateList = {};
+        const templateList: Record<string, any> = {};
 
         if (Array.isArray(templates)) {
           templates.forEach((template, index) => {
-            const name = template.name || template.os || template.distro || `Template ${index + 1}`;
             const id = template.id || template.templateId || index.toString();
             templateList[id] = template;
-            templateOptions += `${id}: ${name}\n`;
           });
         } else if (typeof templates === 'object' && templates !== null) {
           Object.entries(templates).forEach(([id, template]) => {
-            const name = typeof template === 'string' ? template :
-              (template?.name || template?.os || template?.distro || `Template ${id}`);
             templateList[id] = template;
-            templateOptions += `${id}: ${name}\n`;
           });
         }
 
-        if (templateOptions && Object.keys(templateList).length > 0) {
-          const selectedTemplateId = prompt(
-            `Select OS Template for ${actionLabel}:\n\n${templateOptions}\nEnter template ID (or leave blank for default):`
-          );
-
-          if (selectedTemplateId === null) {
-            setActionBusy(null);
-            return;
-          }
-
-          if (selectedTemplateId && !templateList[selectedTemplateId]) {
-            toast.error('Invalid template ID selected');
-            setActionBusy(null);
-            return;
-          }
-
-          const pwd = prompt(`Enter new root/administrator password for ${actionLabel} (minimum 6 characters):`);
-          if (pwd && pwd.length >= 6) {
-            await runServiceAction(action, {
-              password: pwd,
-              templateId: selectedTemplateId || undefined
-            });
-          } else if (pwd !== null) {
-            toast.error('Password must be at least 6 characters long');
-            setActionBusy(null);
-          } else {
-            setActionBusy(null);
-          }
+        if (Object.keys(templateList).length > 0) {
+          setActionBusy(null);
+          openLegacyActionDialog(action, actionLabel, templateList);
         } else {
-          const pwd = prompt(`No templates available. Proceed with default ${actionLabel}?\n\nEnter new root/administrator password (minimum 6 characters):`);
-          if (pwd && pwd.length >= 6) {
-            await runServiceAction(action, { password: pwd });
-          } else if (pwd !== null) {
-            toast.error('Password must be at least 6 characters long');
-            setActionBusy(null);
-          } else {
-            setActionBusy(null);
-          }
+          setActionBusy(null);
+          openLegacyActionDialog(
+            action,
+            actionLabel,
+            {},
+            `No templates available. Proceed with default ${actionLabel}.`,
+          );
         }
       } else {
-        const pwd = prompt(`Failed to load templates. Proceed with default ${actionLabel}?\n\nEnter new root/administrator password (minimum 6 characters):`);
-        if (pwd && pwd.length >= 6) {
-          await runServiceAction(action, { password: pwd });
-        } else if (pwd !== null) {
-          toast.error('Password must be at least 6 characters long');
-          setActionBusy(null);
-        } else {
-          setActionBusy(null);
-        }
+        setActionBusy(null);
+        openLegacyActionDialog(
+          action,
+          actionLabel,
+          {},
+          `Failed to load templates. Proceed with default ${actionLabel}.`,
+        );
       }
     } catch (error) {
       console.error(`Error in ${action} process:`, error);
@@ -1143,10 +1265,32 @@ const OrderDetails = () => {
     }
   };
 
-  // Function to poll for server updates after format
-  const pollForServerUpdates = async () => {
-    console.log('[FORMAT-DIALOG] Starting enhanced polling for server updates');
-    const maxAttempts = 24; // 4 minutes max (10 seconds * 24)
+  // Function to poll for server updates after format / OS change
+  const pollForServerUpdates = async (options?: {
+    expectedTemplateId?: string;
+    useOsDialog?: boolean;
+  }) => {
+    const expectedTemplateId = options?.expectedTemplateId;
+    const useOsDialog = options?.useOsDialog ?? false;
+    const setProgress = useOsDialog ? setOsProgress : setFormatProgress;
+    const closeDialog = () => {
+      if (useOsDialog) {
+        setOsDialogOpen(false);
+        setOsLoading(false);
+        setOsProgress('');
+        setSelectedOs('');
+      } else {
+        setFormatDialogOpen(false);
+        setFormatLoading(false);
+        setFormatProgress('');
+      }
+    };
+
+    console.log('[FORMAT-DIALOG] Starting enhanced polling for server updates', {
+      expectedTemplateId,
+      useOsDialog,
+    });
+    const maxAttempts = expectedTemplateId ? 54 : 24;
     let attempts = 0;
     const originalOrder = { ...order! };
 
@@ -1154,39 +1298,27 @@ const OrderDetails = () => {
       attempts++;
       console.log(`[FORMAT-DIALOG] Polling attempt ${attempts}/${maxAttempts}`);
 
-      setFormatProgress(`Checking server status... (${attempts}/${maxAttempts})`);
+      setProgress(`Checking server status... (${attempts}/${maxAttempts})`);
 
       try {
-        // First, try to sync from SmartVPS
         console.log('[FORMAT-DIALOG] Triggering service sync...');
         const syncRes = await fetch(`/api/orders/smartvps-action?orderId=${order!._id}`);
         if (syncRes.ok) {
           const syncData = await syncRes.json();
           console.log('[FORMAT-DIALOG] Sync response:', {
             success: syncData.success,
-            credentialsUpdated: syncData.syncResult?.credentialsUpdated
+            credentialsUpdated: syncData.syncResult?.credentialsUpdated,
           });
         }
 
-        // Then fetch the latest order data
         const orderRes = await fetch(`/api/orders/${order!._id}`, { cache: 'no-store' });
         if (!orderRes.ok) throw new Error('Failed to fetch order');
         const latestOrder = await orderRes.json();
 
-        console.log('[FORMAT-DIALOG] Order comparison:', {
-          original: {
-            username: originalOrder.username,
-            password: originalOrder.password ? '[PASSWORD SET]' : 'null',
-            os: originalOrder.os
-          },
-          latest: {
-            username: latestOrder.username,
-            password: latestOrder.password ? '[PASSWORD SET]' : 'null',
-            os: latestOrder.os
-          }
-        });
+        const targetOsReached = expectedTemplateId
+          ? orderOsMatchesTemplate(latestOrder.os, expectedTemplateId)
+          : false;
 
-        // Check if credentials have been updated (indicating format completion)
         const credentialsUpdated = (
           latestOrder.username !== originalOrder.username ||
           latestOrder.password !== originalOrder.password ||
@@ -1198,59 +1330,54 @@ const OrderDetails = () => {
           originalOrder.provisioningStatus !== 'active'
         );
 
-        if (credentialsUpdated || statusImproved) {
-          console.log('[FORMAT-DIALOG] Server format completed - credentials or status updated');
-          setFormatProgress('Server format completed successfully!');
+        const formatComplete = expectedTemplateId
+          ? targetOsReached && latestOrder.provisioningStatus === 'active'
+          : (credentialsUpdated || statusImproved);
 
-          // Update local order state
+        if (formatComplete || (!expectedTemplateId && (credentialsUpdated || statusImproved))) {
+          console.log('[FORMAT-DIALOG] Server format/OS change completed');
+          setProgress(targetOsReached
+            ? `Installed ${getOsTemplateLabel(osTemplates[expectedTemplateId!] || expectedTemplateId, expectedTemplateId!)} successfully!`
+            : 'Server format completed successfully!');
+
           setOrder(latestOrder);
 
-          // Show appropriate success message
-          if (credentialsUpdated) {
-            toast.success('Server format completed! New credentials have been generated.');
+          if (targetOsReached || credentialsUpdated) {
+            toast.success(targetOsReached
+              ? `Server is now running ${latestOrder.os}. New credentials are ready.`
+              : 'Server format completed! New credentials have been generated.');
           } else {
             toast.success('Server format completed! Server is now active.');
           }
 
-          setTimeout(() => {
-            setFormatDialogOpen(false);
-            setFormatLoading(false);
-            setFormatProgress('');
-          }, 2000);
+          setTimeout(closeDialog, 2000);
           return;
         }
 
-        // Continue polling if not complete and haven't exceeded max attempts
         if (attempts < maxAttempts) {
-          setTimeout(poll, 10000); // Poll every 10 seconds
+          setTimeout(poll, 10000);
         } else {
           console.log('[FORMAT-DIALOG] Polling timeout reached');
-          setFormatProgress('Format is taking longer than expected. Please check back in a few minutes or use the sync button.');
+          setProgress(expectedTemplateId
+            ? 'OS change is taking longer than expected. Use Sync in a few minutes to refresh credentials.'
+            : 'Format is taking longer than expected. Please check back in a few minutes or use the sync button.');
           setTimeout(() => {
-            setFormatDialogOpen(false);
-            setFormatLoading(false);
-            setFormatProgress('');
-            // Refresh order data one final time
+            closeDialog();
             fetchOrder();
           }, 5000);
         }
       } catch (error) {
         console.error('[FORMAT-DIALOG] Polling error:', error);
         if (attempts < maxAttempts) {
-          setTimeout(poll, 10000); // Continue polling despite error
+          setTimeout(poll, 10000);
         } else {
-          setFormatProgress('Unable to verify format completion. Please refresh the page or use the sync button to check status.');
-          setTimeout(() => {
-            setFormatDialogOpen(false);
-            setFormatLoading(false);
-            setFormatProgress('');
-          }, 5000);
+          setProgress('Unable to verify completion. Please refresh the page or use the sync button.');
+          setTimeout(closeDialog, 5000);
         }
       }
     };
 
-    // Start first poll after a short delay
-    setTimeout(poll, 8000); // Wait 8 seconds for format to start
+    setTimeout(poll, expectedTemplateId ? 15000 : 8000);
   };
 
 
@@ -1318,26 +1445,41 @@ const OrderDetails = () => {
     }
   };
 
-  const handleRenewService = async (selectedMethod?: 'cashfree' | 'razorpay' | 'upi') => {
+  const cancelPendingRenewal = async (renewalTxnId: string) => {
+    try {
+      const res = await fetch('/api/payment/cancel', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clientTxnId: renewalTxnId,
+          orderId: order?._id,
+          userInitiated: true,
+        }),
+      });
+      const result = await res.json();
+      if (result.success) {
+        fetchWalletSummary().then((wallet) => {
+          if (wallet) setWalletBalance(wallet.balance);
+        }).catch(() => {});
+        if (result.refunded > 0) {
+          toast.info(`Renewal cancelled. ₹${result.refunded.toLocaleString('en-IN')} returned to your wallet.`);
+        } else {
+          toast.info('Renewal cancelled.');
+        }
+      }
+      return result;
+    } catch (err) {
+      console.error('[RENEWAL] Cancel/refund failed:', err);
+      return null;
+    }
+  };
+
+  const executeRenewService = async (selectedMethod?: 'cashfree' | 'razorpay' | 'upi') => {
     if (!order || !order.expiryDate) {
       toast.error('Order has no expiry date');
       return;
     }
-
-    const daysLeft = getDaysUntilExpiry(order.expiryDate);
-    const isExpiredService = daysLeft < 0;
-
-    const confirmed = confirm(
-      `Renew service for ₹${renewalPrice}?\n\n` +
-      `Service: ${order.productName}\n` +
-      `Configuration: ${order.memory}\n` +
-      `Current Expiry: ${formatDate(order.expiryDate)}\n` +
-      `${isExpiredService ? 'Service is expired' : `${daysLeft} days remaining`}\n\n` +
-      `After payment, service will be extended for 30 days.\n` +
-      `Proceed to payment?`
-    );
-
-    if (!confirmed) return;
 
     setActionBusy('renew');
 
@@ -1347,10 +1489,12 @@ const OrderDetails = () => {
     try {
       const res = await fetch("/api/payment/renew", {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           orderId: order._id,
-          paymentMethod: paymentMethod
+          paymentMethod: paymentMethod,
+          useWallet: useWalletRenewal,
         })
       });
 
@@ -1378,6 +1522,38 @@ const OrderDetails = () => {
       }
 
       console.log("Renewal payment data received:", data);
+
+      if (data.walletOnly) {
+        const confirmRes = await fetch("/api/payment/renew-confirm", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            renewalTxnId: data.renewalTxnId,
+            orderId: order._id,
+            paymentMethod: 'wallet',
+          }),
+        });
+        const confirmData = await confirmRes.json();
+        if (!confirmRes.ok || !confirmData.success) {
+          await cancelPendingRenewal(data.renewalTxnId);
+          toast.error(confirmData.message || "Wallet renewal failed. Amount refunded to wallet.");
+          setActionBusy(null);
+          return;
+        }
+        fetchWalletSummary().then((wallet) => {
+          if (wallet) setWalletBalance(wallet.balance);
+        }).catch(() => {});
+        if (confirmData.companyApproval?.status === 'pending') {
+          toast.success('Renewal paid from wallet — awaiting provider approval');
+        } else {
+          toast.success('Service renewed successfully using wallet balance!');
+        }
+        await fetchOrder();
+        setActionBusy(null);
+        return;
+      }
+
       const actualMethod = data.paymentMethod || paymentMethod;
       console.log(`[RENEWAL] Backend returned payment method: ${actualMethod}`);
 
@@ -1418,14 +1594,25 @@ const OrderDetails = () => {
       };
 
       console.log("[RENEWAL] Opening Cashfree checkout");
-      await cashfree.checkout(checkoutOptions);
+      const result = await cashfree.checkout(checkoutOptions);
+
+      if (result?.error) {
+        console.error("[RENEWAL] Cashfree checkout error:", result.error);
+        await cancelPendingRenewal(data.renewalTxnId);
+        setActionBusy(null);
+        return;
+      }
+
+      if (!result?.paymentDetails) {
+        await cancelPendingRenewal(data.renewalTxnId);
+        setActionBusy(null);
+      }
 
     } catch (error: any) {
       console.error("[RENEWAL] Cashfree renewal error:", error);
-      toast.error("Cashfree payment failed. Trying Razorpay...");
-
-      // Fallback to Razorpay
-      await handleRenewService('razorpay');
+      await cancelPendingRenewal(data.renewalTxnId);
+      toast.error("Payment cancelled. Wallet amount has been refunded if applicable.");
+      setActionBusy(null);
     }
   };
 
@@ -1451,6 +1638,7 @@ const OrderDetails = () => {
           try {
             const confirmRes = await fetch("/api/payment/renew-confirm", {
               method: "POST",
+              credentials: "include",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 renewalTxnId: data.renewalTxnId,
@@ -1487,28 +1675,32 @@ const OrderDetails = () => {
         },
         theme: {
           color: "#3399cc"
-        }
+        },
+        modal: {
+          ondismiss: function () {
+            console.log('[RENEWAL] Razorpay modal dismissed');
+            cancelPendingRenewal(data.renewalTxnId);
+            setActionBusy(null);
+          },
+        },
       };
 
       const rzp = new window.Razorpay(options);
 
       rzp.on('payment.failed', function (response: any) {
         console.error("[RENEWAL] Razorpay payment failed:", response);
-        toast.error("Razorpay payment failed. Trying UPI Gateway...");
+        cancelPendingRenewal(data.renewalTxnId);
+        toast.error("Payment failed. Wallet amount returned if it was used.");
         setActionBusy(null);
-
-        // Fallback to UPI Gateway
-        handleRenewService('upi');
       });
 
       rzp.open();
 
     } catch (error: any) {
       console.error("[RENEWAL] Razorpay renewal error:", error);
-      toast.error("Razorpay payment failed. Trying UPI Gateway...");
-
-      // Fallback to UPI Gateway
-      await handleRenewService('upi');
+      await cancelPendingRenewal(data.renewalTxnId);
+      toast.error("Payment could not be started. Wallet amount returned if it was used.");
+      setActionBusy(null);
     }
   };
 
@@ -1525,10 +1717,9 @@ const OrderDetails = () => {
 
     } catch (error: any) {
       console.error("[RENEWAL] UPI Gateway renewal error:", error);
-      toast.error("UPI Gateway payment failed. Trying Cashfree...");
-
-      // Fallback to Cashfree
-      await handleRenewService('cashfree');
+      await cancelPendingRenewal(data.renewalTxnId);
+      toast.error("UPI payment could not be started. Wallet amount returned if it was used.");
+      setActionBusy(null);
     }
   };
 
@@ -1805,7 +1996,7 @@ const OrderDetails = () => {
     (provider === 'advps' && !!order.advpsServiceId) ||
     isOrderCompanyAutomated(order, ipStock);
   const currentListPrice = getCurrentListPriceFromStock(ipStock, order.memory);
-  const renewalPrice = getOrderRenewalPrice(order, currentListPrice);
+  const renewalPrice = renewalPaymentTotals.total;
   const renewalPriceNote = getOrderRenewalPriceNote(order, currentListPrice);
 
   return (
@@ -2135,6 +2326,34 @@ const OrderDetails = () => {
                               <span>Starting server & generating password...</span>
                             </div>
                           </div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+              )}
+
+              {/* SmartVPS format / OS change banner */}
+              {provider === 'smartvps' && order.provisioningStatus === 'provisioning' && order.lastAction === 'format' && (
+                <div className="xl:col-span-3">
+                  <Card className="border-primary/30 bg-primary/5">
+                    <CardContent className="p-4 sm:p-6">
+                      <div className="flex items-center gap-4">
+                        <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                          <Loader2 className="h-6 w-6 text-primary animate-spin" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <h3 className="font-semibold text-base mb-1">
+                            {order.serverDetails?.pendingFormatTarget?.osLabel
+                              ? `Installing ${order.serverDetails.pendingFormatTarget.osLabel}...`
+                              : 'Formatting your server...'}
+                          </h3>
+                          <p className="text-sm text-muted-foreground">
+                            SmartVPS is reinstalling the operating system. OS may still show the old version until finished — this usually takes 5–10 minutes. This page updates automatically.
+                          </p>
+                          <p className="text-xs text-muted-foreground mt-2">
+                            Current OS on panel: <strong>{order.os || 'Unknown'}</strong> — will update when complete.
+                          </p>
                         </div>
                       </div>
                     </CardContent>
@@ -2766,7 +2985,10 @@ const OrderDetails = () => {
                   }
                 }}
               >
-                <DialogContent className="sm:max-w-[425px]">
+                <DialogContent
+                  className="sm:max-w-[480px]"
+                  onOpenAutoFocus={(e) => e.preventDefault()}
+                >
                   <DialogHeader>
                     <DialogTitle className="flex items-center gap-2">
                       <HardDriveIcon className="h-5 w-5 text-primary" />
@@ -2792,21 +3014,32 @@ const OrderDetails = () => {
                     ) : (
                       <>
                         <div className="space-y-2">
-                          <Label htmlFor="os-select" className="text-sm font-medium">
+                          <Label className="text-sm font-medium">
                             Select Operating System
                           </Label>
-                          <Select value={selectedOs} onValueChange={setSelectedOs}>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Choose an operating system" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {Object.entries(osTemplates).map(([id, name]) => (
-                                <SelectItem key={id} value={id}>
-                                  {typeof name === 'string' ? name : (name as any)?.name || `Template ${id}`}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-72 overflow-y-auto pr-1">
+                            {Object.entries(osTemplates).map(([id, name]) => {
+                              const label = getOsTemplateLabel(name, id);
+                              const isSelected = selectedOs === id;
+                              return (
+                                <button
+                                  key={id}
+                                  type="button"
+                                  onClick={() => setSelectedOs(id)}
+                                  className={cn(
+                                    'flex items-center gap-3 rounded-lg border p-3 text-left transition-colors',
+                                    isSelected
+                                      ? 'border-primary bg-primary/10 ring-2 ring-primary'
+                                      : 'border-border hover:bg-muted/50'
+                                  )}
+                                >
+                                  <OSIcon os={label} className="h-8 w-8 shrink-0" />
+                                  <span className="min-w-0 flex-1 text-sm font-medium leading-tight">{label}</span>
+                                  {isSelected && <Check className="h-4 w-4 shrink-0 text-primary" />}
+                                </button>
+                              );
+                            })}
+                          </div>
                         </div>
 
                         <Alert>
@@ -2839,7 +3072,9 @@ const OrderDetails = () => {
                             disabled={!selectedOs || osLoading}
                             className="flex-1 bg-destructive hover:bg-destructive/90"
                           >
-                            {osMode === 'format' ? 'Format Server' : 'Reinstall OS'}
+                            {osMode === 'format'
+                              ? `Format to ${getOsTemplateLabel(osTemplates[selectedOs] || selectedOs, selectedOs)}`
+                              : 'Reinstall OS'}
                           </Button>
                         </div>
                       </>
@@ -3038,12 +3273,7 @@ const OrderDetails = () => {
                                 <>
                                   <Button
                                     variant="outline"
-                                    onClick={() => {
-                                      const ok = window.confirm(
-                                        'Generate and apply a new MAC address on ADVPS? Without a MAC reset subscription this is limited to once per 24 hours. You may need to renew DHCP or adjust networking inside the VM.'
-                                      );
-                                      if (ok) void runServiceAction('resetmac');
-                                    }}
+                                    onClick={() => void handleResetMac('advps')}
                                     disabled={!!actionBusy}
                                     className="w-full h-10 gap-2 text-sm"
                                   >
@@ -3064,12 +3294,7 @@ const OrderDetails = () => {
                                 <>
                                   <Button
                                     variant="outline"
-                                    onClick={() => {
-                                      const ok = window.confirm(
-                                        'Generate a new MAC address on the reseller panel? The VM will be stopped, the MAC updated, and then restarted. You may need to renew DHCP inside the guest OS.'
-                                      );
-                                      if (ok) void runServiceAction('resetmac');
-                                    }}
+                                    onClick={() => void handleResetMac('reseller')}
                                     disabled={!!actionBusy}
                                     className="w-full h-10 gap-2 text-sm"
                                   >
@@ -3088,7 +3313,7 @@ const OrderDetails = () => {
 
                               <Button
                                 variant="destructive"
-                                onClick={() => handleAdvancedAction((provider === 'smartvps' || provider === 'advps') ? 'format' : 'reinstall')}
+                                onClick={() => promptReinstallAction((provider === 'smartvps' || provider === 'advps') ? 'format' : 'reinstall')}
                                 disabled={!!actionBusy || rebuildLimitReached}
                                 className="w-full h-10 gap-2 text-sm"
                               >
@@ -3320,6 +3545,48 @@ const OrderDetails = () => {
                         {/* Renewal Payment Method Selection */}
                         {isRenewalEligible(order) && !order.pendingRenewal?.awaitingCompanyApproval && (
                           <>
+                            <div className="mb-3 p-3 rounded-md border border-primary/20 bg-primary/5">
+                              <div className="flex items-center justify-between gap-3">
+                                <div className="flex items-center gap-2">
+                                  <Wallet className="h-4 w-4 text-primary" />
+                                  <div>
+                                    <p className="text-sm font-medium">Use wallet balance</p>
+                                    <p className="text-xs text-muted-foreground">
+                                      Available: ₹{walletBalance.toLocaleString('en-IN')}
+                                    </p>
+                                  </div>
+                                </div>
+                                <Switch
+                                  checked={useWalletRenewal}
+                                  onCheckedChange={setUseWalletRenewal}
+                                  disabled={walletBalance <= 0 || actionBusy === 'renew'}
+                                />
+                              </div>
+                              {useWalletRenewal && renewalPaymentTotals.walletApplied > 0 && (
+                                <div className="mt-3 space-y-1 text-xs border-t border-border/60 pt-3">
+                                  <div className="flex justify-between text-muted-foreground">
+                                    <span>Renewal total</span>
+                                    <span>₹{renewalPaymentTotals.total.toLocaleString('en-IN')}</span>
+                                  </div>
+                                  <div className="flex justify-between text-green-600 dark:text-green-400">
+                                    <span>From wallet</span>
+                                    <span>-₹{renewalPaymentTotals.walletApplied.toLocaleString('en-IN')}</span>
+                                  </div>
+                                  {renewalPaymentTotals.gatewayCharge > 0 ? (
+                                    <div className="flex justify-between font-medium">
+                                      <span>Pay via gateway</span>
+                                      <span>₹{renewalPaymentTotals.gatewayCharge.toLocaleString('en-IN')}</span>
+                                    </div>
+                                  ) : (
+                                    <p className="text-green-600 dark:text-green-400 font-medium">
+                                      Fully covered by wallet — no gateway payment needed.
+                                    </p>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+
+                            {renewalPaymentTotals.gatewayCharge > 0 && (
                             <div className="flex items-center gap-2 mb-2">
                               <button
                                 onClick={() => setRenewalPaymentMethod('cashfree')}
@@ -3358,9 +3625,10 @@ const OrderDetails = () => {
                                 UPI
                               </button>
                             </div>
+                            )}
 
                             <Button
-                              onClick={() => handleRenewService()}
+                              onClick={() => setRenewConfirmOpen(true)}
                               disabled={actionBusy === 'renew'}
                               className={cn(
                                 "w-full gap-2 h-10 text-sm shadow-sm",
@@ -3374,6 +3642,11 @@ const OrderDetails = () => {
                                   <Loader2 className="h-4 w-4 animate-spin" />
                                   <span className="hidden sm:inline">Processing Payment...</span>
                                   <span className="sm:hidden">Processing...</span>
+                                </>
+                              ) : renewalPaymentTotals.gatewayCharge === 0 && useWalletRenewal ? (
+                                <>
+                                  <Wallet className="h-4 w-4" />
+                                  Renew with Wallet (₹{renewalPrice})
                                 </>
                               ) : (
                                 <>
@@ -3517,6 +3790,240 @@ const OrderDetails = () => {
           )}
         </div>
       </div>
+
+      <AlertDialog
+        open={reinstallConfirmOpen}
+        onOpenChange={(open) => {
+          setReinstallConfirmOpen(open);
+          if (!open) setPendingReinstallAction(null);
+        }}
+      >
+        <AlertDialogContent className="sm:max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-destructive" />
+              {pendingReinstallAction === 'format'
+                ? (order && getProviderFromOrder(order, ipStock) === 'advps'
+                  ? 'Rebuild/Format Server'
+                  : 'Format Server')
+                : 'Reinstall OS'}
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3 text-sm text-muted-foreground">
+                <p>
+                  This will <strong className="text-foreground">permanently erase all data</strong> on your server
+                  and install a fresh operating system. This action cannot be undone.
+                </p>
+                <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-xs">
+                  Make sure you have backed up any important files before continuing.
+                </div>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                const action = pendingReinstallAction;
+                setReinstallConfirmOpen(false);
+                setPendingReinstallAction(null);
+                if (action) void executeAdvancedAction(action);
+              }}
+            >
+              Yes, continue
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <Dialog open={renewConfirmOpen} onOpenChange={setRenewConfirmOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <RefreshCw className="h-5 w-5 text-primary" />
+              Renew Service
+            </DialogTitle>
+            <DialogDescription>
+              Review your renewal details before proceeding to payment.
+            </DialogDescription>
+          </DialogHeader>
+
+          {order?.expiryDate && (
+            <div className="space-y-4">
+              <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-2.5 text-sm">
+                <div className="flex justify-between gap-3">
+                  <span className="text-muted-foreground">Service</span>
+                  <span className="font-medium text-right">{order.productName}</span>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <span className="text-muted-foreground">Configuration</span>
+                  <span className="font-medium text-right">{order.memory}</span>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <span className="text-muted-foreground">Current expiry</span>
+                  <span className="font-medium text-right">{formatDate(order.expiryDate)}</span>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <span className="text-muted-foreground">Status</span>
+                  <span className="font-medium text-right">
+                    {getDaysUntilExpiry(order.expiryDate) < 0
+                      ? 'Expired'
+                      : `${getDaysUntilExpiry(order.expiryDate)} days remaining`}
+                  </span>
+                </div>
+                <Separator />
+                <div className="flex justify-between gap-3">
+                  <span className="text-muted-foreground">Renewal price</span>
+                  <span className="font-semibold text-primary text-base">₹{renewalPrice}</span>
+                </div>
+                {useWalletRenewal && renewalPaymentTotals.walletApplied > 0 && (
+                  <>
+                    <div className="flex justify-between gap-3">
+                      <span className="text-muted-foreground flex items-center gap-1.5">
+                        <Wallet className="h-3.5 w-3.5" />
+                        Wallet
+                      </span>
+                      <span className="font-medium">₹{renewalPaymentTotals.walletApplied.toLocaleString('en-IN')}</span>
+                    </div>
+                    {renewalPaymentTotals.gatewayCharge > 0 && (
+                      <div className="flex justify-between gap-3">
+                        <span className="text-muted-foreground flex items-center gap-1.5">
+                          <CreditCard className="h-3.5 w-3.5" />
+                          Gateway ({renewalPaymentMethod})
+                        </span>
+                        <span className="font-medium">₹{renewalPaymentTotals.gatewayCharge.toLocaleString('en-IN')}</span>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+
+              <Alert>
+                <Info className="h-4 w-4" />
+                <AlertDescription className="text-sm">
+                  After payment, your service will be extended for <strong>30 days</strong>.
+                </AlertDescription>
+              </Alert>
+
+              <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2">
+                <Button variant="outline" onClick={() => setRenewConfirmOpen(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  className={cn(
+                    isExpired(order)
+                      ? "bg-destructive hover:bg-destructive/90"
+                      : "dark:bg-green-700 bg-green-500 hover:bg-green-600"
+                  )}
+                  onClick={() => {
+                    setRenewConfirmOpen(false);
+                    void executeRenewService();
+                  }}
+                >
+                  {renewalPaymentTotals.gatewayCharge === 0 && useWalletRenewal ? (
+                    <>
+                      <Wallet className="h-4 w-4 mr-2" />
+                      Pay with Wallet
+                    </>
+                  ) : (
+                    <>
+                      <CreditCard className="h-4 w-4 mr-2" />
+                      Proceed to Payment
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={legacyActionOpen}
+        onOpenChange={(open) => {
+          setLegacyActionOpen(open);
+          if (!open) {
+            setLegacyPassword('');
+            setLegacySelectedTemplate('');
+            setLegacyTemplateWarning(null);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <HardDriveIcon className="h-5 w-5 text-primary" />
+              {legacyActionLabel}
+            </DialogTitle>
+            <DialogDescription>
+              Choose an OS template and set a new root/administrator password.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            {legacyTemplateWarning && (
+              <Alert>
+                <AlertTriangle className="h-4 w-4" />
+                <AlertDescription className="text-sm">{legacyTemplateWarning}</AlertDescription>
+              </Alert>
+            )}
+
+            {Object.keys(legacyTemplates).length > 0 && (
+              <div className="space-y-2">
+                <Label htmlFor="legacy-template">OS Template (optional)</Label>
+                <Select value={legacySelectedTemplate} onValueChange={setLegacySelectedTemplate}>
+                  <SelectTrigger id="legacy-template">
+                    <SelectValue placeholder="Use default template" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(legacyTemplates).map(([id, name]) => (
+                      <SelectItem key={id} value={id}>
+                        {name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label htmlFor="legacy-password">New Password</Label>
+              <Input
+                id="legacy-password"
+                type="password"
+                value={legacyPassword}
+                onChange={(e) => setLegacyPassword(e.target.value)}
+                placeholder="Minimum 6 characters"
+                minLength={6}
+              />
+            </div>
+
+            <Alert>
+              <AlertTriangle className="h-4 w-4" />
+              <AlertDescription className="text-sm">
+                This will erase all data on the server and cannot be undone.
+              </AlertDescription>
+            </Alert>
+
+            <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2">
+              <Button variant="outline" onClick={() => setLegacyActionOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() => void submitLegacyAction()}
+                disabled={legacyPassword.length < 6}
+              >
+                {legacyAction === 'format' ? 'Format Server' : 'Reinstall OS'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <ConfirmDialog />
+      {orderId && <OrderNewsPopup orderId={orderId} />}
     </div>
   );
 };

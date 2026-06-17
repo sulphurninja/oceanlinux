@@ -1,7 +1,7 @@
 /**
  * Shared helpers for splitting orders between:
- *  - /dashboard/viewLinux  → only delivered/active servers (IP + credentials)
- *  - /dashboard/orders     → ALL orders (full history + in-progress)
+ *  - /dashboard/viewLinux  → paid + delivered servers (even if password still syncing)
+ *  - /dashboard/orders     → ALL orders (pending / failed / delivered history)
  */
 
 export type OrderLike = {
@@ -19,13 +19,43 @@ export type OrderLike = {
   advpsServiceId?: string;
   provisioningError?: string;
   productName?: string;
+  transactionId?: string;
 };
 
+/** Payment completed — awaiting or past delivery. */
+export function isOrderPaid(order: OrderLike): boolean {
+  const status = (order.status || '').toLowerCase();
+  if (['confirmed', 'active', 'completed'].includes(status)) return true;
+  // Wallet-only / webhook edge cases
+  if (status !== 'pending' && status !== 'cancelled' && status !== 'canceled' && order.transactionId) {
+    return true;
+  }
+  return false;
+}
+
+/** Full login details ready (IP + username + password). */
 export function hasDeliveredCredentials(order: OrderLike): boolean {
   const ip = (order.ipAddress || '').trim();
   const user = (order.username || '').trim();
   const pwd = (order.password || '').trim();
   return !!(ip && user && pwd);
+}
+
+/**
+ * Admin/upstream has handed the service to the customer — IP, service ID, or active status.
+ * Does not require password (ADVPS often delivers before password sync).
+ */
+export function hasOrderBeenDelivered(order: OrderLike): boolean {
+  const status = (order.status || '').toLowerCase();
+  const ip = (order.ipAddress || '').trim();
+
+  if (status === 'active' || status === 'completed') return true;
+  if (ip) return true;
+  if ((order.advpsServiceId || '').trim()) return true;
+  if ((order.hostycareServiceId || '').trim()) return true;
+  if ((order.smartvpsServiceId || '').trim()) return true;
+
+  return false;
 }
 
 export function getDaysUntilExpiry(expiryDate: Date | string | null | undefined): number {
@@ -36,8 +66,8 @@ export function getDaysUntilExpiry(expiryDate: Date | string | null | undefined)
 }
 
 /**
- * True when the order is delivered and should appear on /dashboard/viewLinux.
- * Requires IP + username + password. Paid-but-not-delivered stays off this page.
+ * True when the order belongs on /dashboard/viewLinux.
+ * Paid + delivered — even if still provisioning or password not fetched yet.
  */
 export function isServerListOrder(order: OrderLike): boolean {
   const currentStatus = (order.provisioningStatus || order.status || '').toLowerCase();
@@ -46,7 +76,7 @@ export function isServerListOrder(order: OrderLike): boolean {
     return false;
   }
 
-  return hasDeliveredCredentials(order);
+  return isOrderPaid(order) && hasOrderBeenDelivered(order);
 }
 
 export type ServerStatus = 'active' | 'expired' | 'pending' | 'failed';
@@ -59,8 +89,8 @@ export function getServerDeliveryStatus(order: OrderLike): ServerStatus {
     return 'expired';
   }
 
-  if (currentStatus === 'completed' || currentStatus === 'active') {
-    return 'active';
+  if (currentStatus === 'failed' && !hasOrderBeenDelivered(order)) {
+    return 'failed';
   }
 
   const isExplicitlyBad =
@@ -69,12 +99,16 @@ export function getServerDeliveryStatus(order: OrderLike): ServerStatus {
     currentStatus === 'cancelled' ||
     currentStatus === 'canceled';
 
-  if (hasDeliveredCredentials(order) && !isExplicitlyBad) {
+  if (isOrderPaid(order) && hasOrderBeenDelivered(order) && !isExplicitlyBad) {
     return 'active';
   }
 
-  if (currentStatus === 'failed') {
-    return 'failed';
+  if (currentStatus === 'completed' || currentStatus === 'active') {
+    return 'active';
+  }
+
+  if (hasDeliveredCredentials(order) && !isExplicitlyBad) {
+    return 'active';
   }
 
   return 'pending';
@@ -83,8 +117,9 @@ export function getServerDeliveryStatus(order: OrderLike): ServerStatus {
 export type OrdersPageStatus = 'delivered' | 'pending' | 'failed' | 'cancelled';
 
 /**
- * Status for /dashboard/orders — covers every order including paid-but-not-delivered.
- * `pending` = payment may be done but server/proxy not delivered yet.
+ * Status for /dashboard/orders.
+ * `pending` = paid (or awaiting payment) but server not delivered yet.
+ * `delivered` = handed to customer — even without password.
  */
 export function getOrdersPageStatus(order: OrderLike): OrdersPageStatus {
   const currentStatus = (order.provisioningStatus || order.status || '').toLowerCase();
@@ -93,18 +128,15 @@ export function getOrdersPageStatus(order: OrderLike): OrdersPageStatus {
     return 'cancelled';
   }
 
-  if (currentStatus === 'failed' || currentStatus === 'terminated') {
-    if (hasDeliveredCredentials(order)) {
-      return 'delivered';
-    }
-    return 'failed';
-  }
-
-  if (hasDeliveredCredentials(order)) {
+  if (isOrderPaid(order) && hasOrderBeenDelivered(order)) {
     return 'delivered';
   }
 
-  // pending, confirmed, provisioning, etc. — paid or unpaid, not yet delivered
+  if (currentStatus === 'failed' || currentStatus === 'terminated') {
+    return 'failed';
+  }
+
+  // pending, confirmed (not delivered), provisioning (no IP/service yet), unpaid, etc.
   return 'pending';
 }
 

@@ -1,8 +1,7 @@
 import connectDB from '@/lib/db';
 import KnowledgeBase from '@/models/knowledgeBaseModel';
-import User from '@/models/userModel';
-import { getDataFromToken } from '@/helper/getDataFromToken';
 import { NextResponse } from 'next/server';
+import { enforceAdmin } from '@/lib/apiSecurity';
 
 // Helper function to generate slug
 const generateSlug = (title) => {
@@ -16,6 +15,9 @@ const generateSlug = (title) => {
 
 export async function GET(request, { params }) {
     try {
+        const denied = await enforceAdmin(request);
+        if (denied) return denied;
+
         await connectDB();
 
         const article = await KnowledgeBase.findById(params.id)
@@ -36,16 +38,10 @@ export async function GET(request, { params }) {
 
 export async function PUT(request, { params }) {
     try {
+        const denied = await enforceAdmin(request);
+        if (denied) return denied;
+
         await connectDB();
-
-        // Check authentication and admin role
-        const userId = getDataFromToken(request);
-        if (!userId) {
-            return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
-        }
-
-        const user = await User.findById(userId);
-     
 
         const {
             title,
@@ -126,18 +122,10 @@ export async function PUT(request, { params }) {
 
 export async function DELETE(request, { params }) {
     try {
+        const denied = await enforceAdmin(request);
+        if (denied) return denied;
+
         await connectDB();
-
-        // Check authentication and admin role
-        const userId = getDataFromToken(request);
-        if (!userId) {
-            return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
-        }
-
-        const user = await User.findById(userId);
-        if (!user || user.role !== 'Admin') {
-            return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
-        }
 
         const article = await KnowledgeBase.findByIdAndDelete(params.id);
         if (!article) {

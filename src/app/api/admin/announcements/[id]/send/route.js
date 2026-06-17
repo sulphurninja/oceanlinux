@@ -2,29 +2,15 @@ import connectDB from '@/lib/db';
 import Announcement from '@/models/announcementModel';
 import User from '@/models/userModel';
 import NotificationService from '@/services/notificationService';
-import { getDataFromToken } from '@/helper/getDataFromToken';
+import { enforceAdmin } from '@/lib/apiSecurity';
 const EmailService = require('@/lib/sendgrid');
 
 export async function POST(request, { params }) {
   try {
+    const denied = await enforceAdmin(request);
+    if (denied) return denied;
+
     await connectDB();
-
-    const userId = await getDataFromToken(request);
-    if (!userId) {
-      return new Response(JSON.stringify({ message: 'Unauthorized' }), {
-        status: 401,
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
-
-    // Check if user is admin
-    const adminUser = await User.findById(userId);
-    if (!adminUser?.isAdmin) {
-      return new Response(JSON.stringify({ message: 'Admin access required' }), {
-        status: 403,
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
 
     const announcement = await Announcement.findById(params.id);
     if (!announcement) {

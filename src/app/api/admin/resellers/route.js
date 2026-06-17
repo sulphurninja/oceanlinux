@@ -4,6 +4,7 @@ import Reseller from '@/models/resellerModel';
 import User from '@/models/userModel';
 import crypto from 'crypto';
 import { hashUserPassword } from '@/lib/userPassword';
+import { enforceAdmin } from '@/lib/apiSecurity';
 
 // Generate API credentials
 const generateCredentials = () => {
@@ -13,6 +14,9 @@ const generateCredentials = () => {
 };
 
 export async function GET(request) {
+    const denied = await enforceAdmin(request);
+    if (denied) return denied;
+
     await connectDB();
 
     try {
@@ -54,6 +58,9 @@ export async function GET(request) {
 }
 
 export async function POST(request) {
+    const denied = await enforceAdmin(request);
+    if (denied) return denied;
+
     await connectDB();
 
     try {

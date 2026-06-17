@@ -2,12 +2,14 @@ const AdvpsAPI = require('@/services/advpsApi');
 const {
   unwrapAdvpsEnvelope,
   extractAdvpsStatusCredentials,
+  pickAdvpsIp,
 } = require('@/lib/advpsStatusNormalize');
 const {
   deepCollectPasswords,
   pickPasswordCandidate,
   tryFetchAdvpsPasswordViaGenerate,
 } = require('@/lib/advpsPasswordFetch');
+const { pickAdvpsExpiryDate } = require('@/lib/advpsOrderExpiry');
 
 /**
  * Normalize GET /api/v1/purchase/{orderId} payloads.
@@ -61,7 +63,8 @@ function extractServiceCredentials(svc, order) {
     svc?.password || svc?.pass || svc?.rootPassword || svc?.adminPassword || svc?.newPassword || ''
   ).trim();
   const os = String(svc?.os || svc?.osName || '').trim();
-  return { ip, username, password, os };
+  const expiryDate = pickAdvpsExpiryDate(svc?.expiryDate, svc?.expiresAt);
+  return { ip, username, password, os, expiryDate };
 }
 
 function resolveAdvpsPurchaseOrderId(order) {
@@ -327,10 +330,17 @@ async function syncAdvpsOrderCredentials(api, order, { statusPayload, statusErro
     }
   }
 
-  if (statusCreds.expiryDate && !order.expiryDate) {
-    dbUpdates.expiryDate = new Date(statusCreds.expiryDate);
-    changes.push('expiryDate');
-    credentialsUpdated = true;
+  const mergedExpiry = pickAdvpsExpiryDate(statusCreds.expiryDate, purchaseCreds.expiryDate);
+  if (mergedExpiry) {
+    const prevMs = order.expiryDate ? new Date(order.expiryDate).getTime() : null;
+    if (prevMs !== mergedExpiry.getTime()) {
+      dbUpdates.expiryDate = mergedExpiry;
+      changes.push('expiryDate');
+      credentialsUpdated = true;
+      console.log(
+        `[ADVPS-SYNC] Order ${order._id} expiry from ADVPS: ${mergedExpiry.toISOString()} (was ${order.expiryDate ? new Date(order.expiryDate).toISOString() : 'unset'})`
+      );
+    }
   }
 
   if (credentialsUpdated) {
@@ -352,6 +362,7 @@ async function syncAdvpsOrderCredentials(api, order, { statusPayload, statusErro
     advpsOrderIdMissing,
     purchaseOrderId: purchaseOrderId || resolveAdvpsPurchaseOrderId(order) || null,
     freshIp: dbUpdates.ipAddress || order.ipAddress,
+    freshExpiry: dbUpdates.expiryDate || order.expiryDate || null,
     statusApiOk,
     purchaseApiOk,
     statusError: statusError || null,
@@ -366,8 +377,82 @@ async function syncAdvpsOrderCredentials(api, order, { statusPayload, statusErro
 }
 
 /**
+ * Resolve ADVPS purchase orderId + serviceId for POST /api/v1/services/renew.
+ * Does NOT call GET .../status (renew docs only need orderId + serviceIds).
+ */
+async function resolveAdvpsIdsForRenewal(api, order, { Order } = {}) {
+  const storedServiceId = String(order?.advpsServiceId || '').trim();
+  if (!storedServiceId) {
+    return { serviceId: '', advpsOrderId: '', error: 'No ADVPS service ID attached' };
+  }
+
+  const resolved = await resolveAdvpsServiceIdFromPurchase(api, order, storedServiceId, { Order });
+  if (!resolved.advpsOrderId) {
+    return {
+      serviceId: storedServiceId,
+      advpsOrderId: '',
+      error: 'Missing ADVPS purchase order ID (advpsOrderId). Open the order and click Sync, or contact support.',
+    };
+  }
+
+  return {
+    serviceId: resolved.serviceId,
+    advpsOrderId: resolved.advpsOrderId,
+    corrected: resolved.corrected,
+    previousServiceId: resolved.corrected ? resolved.previousServiceId : undefined,
+  };
+}
+
+/** Shared: resolve canonical serviceId + purchase orderId from ADVPS purchase API (no /status). */
+async function resolveAdvpsServiceIdFromPurchase(api, order, storedServiceId, { Order } = {}) {
+  let purchaseOrderId = resolveAdvpsPurchaseOrderId(order);
+  if (!purchaseOrderId && Order) {
+    purchaseOrderId = await resolveAdvpsPurchaseOrderIdForService(api, order, { Order });
+  }
+  if (!purchaseOrderId) {
+    return { serviceId: storedServiceId, advpsOrderId: '', corrected: false };
+  }
+
+  try {
+    const detailsRes = await api.getOrderDetails(purchaseOrderId);
+    const { services } = normalizePurchaseOrderDetails(detailsRes);
+    const orderIp = String(order.ipAddress || '').split(':')[0].trim();
+    const svc =
+      pickAdvpsService(services, storedServiceId) ||
+      (orderIp
+        ? services.find((s) => String(s?.ip || s?.ipv4 || '').split(':')[0].trim() === orderIp)
+        : null) ||
+      (services.length === 1 ? services[0] : null);
+
+    if (svc) {
+      const extracted = AdvpsAPI.extractServiceIdFromPurchaseService(svc);
+      if (extracted) {
+        return {
+          serviceId: extracted,
+          advpsOrderId: purchaseOrderId,
+          corrected: extracted !== storedServiceId,
+          previousServiceId: storedServiceId,
+        };
+      }
+    }
+
+    console.warn(
+      `[ADVPS-RESOLVE] No service row on ${purchaseOrderId} (ip=${orderIp || 'n/a'}) — using stored ${storedServiceId}`
+    );
+  } catch (err) {
+    console.warn(`[ADVPS-RESOLVE] getOrderDetails(${purchaseOrderId}) failed:`, err.message);
+  }
+
+  return {
+    serviceId: storedServiceId,
+    advpsOrderId: purchaseOrderId,
+    corrected: false,
+  };
+}
+
+/**
  * Resolve the ADVPS service id used by /api/v1/services/:id/*.
- * Fixes orders that stored a Mongo document id instead of serviceId.
+ * Prefers purchase order details over GET /status (status often 404 while renew/power work).
  */
 async function resolveAdvpsServiceIdForPower(api, order, { Order } = {}) {
   const stored = String(order?.advpsServiceId || '').trim();
@@ -375,54 +460,51 @@ async function resolveAdvpsServiceIdForPower(api, order, { Order } = {}) {
     return { serviceId: '', error: 'No ADVPS service ID attached' };
   }
 
+  const fromPurchase = await resolveAdvpsServiceIdFromPurchase(api, order, stored, { Order });
+  if (fromPurchase.advpsOrderId) {
+    const out = {
+      serviceId: fromPurchase.serviceId,
+      advpsOrderId: fromPurchase.advpsOrderId,
+    };
+    if (fromPurchase.corrected) {
+      out.corrected = true;
+      out.previousServiceId = fromPurchase.previousServiceId;
+    }
+    return out;
+  }
+
   const readCanonicalId = (statusRes, fallbackId) => {
     const d = unwrapAdvpsEnvelope(statusRes) || {};
     return String(d.service?.serviceId || d.serviceId || fallbackId).trim() || fallbackId;
   };
 
-  const tryStatus = async (id) => {
-    const statusRes = await api.status(id);
+  try {
+    const statusRes = await api.status(stored);
     return {
-      serviceId: readCanonicalId(statusRes, id),
+      serviceId: readCanonicalId(statusRes, stored),
       statusRes,
     };
-  };
-
-  try {
-    return await tryStatus(stored);
   } catch (firstErr) {
     const isNotFound =
       firstErr.status === 404 ||
-      /not found|invalid service|does not exist/i.test(firstErr.message || '');
+      /not found|invalid service|not accessible|does not exist/i.test(firstErr.message || '');
 
     if (!isNotFound) throw firstErr;
 
-    let purchaseOrderId = resolveAdvpsPurchaseOrderId(order);
-    if (!purchaseOrderId && Order) {
-      purchaseOrderId = await resolveAdvpsPurchaseOrderIdForService(api, order, { Order });
+    const retry = await resolveAdvpsServiceIdFromPurchase(api, order, stored, { Order });
+    if (retry.serviceId) {
+      const out = {
+        serviceId: retry.serviceId,
+        advpsOrderId: retry.advpsOrderId || undefined,
+      };
+      if (retry.corrected) {
+        out.corrected = true;
+        out.previousServiceId = retry.previousServiceId;
+      }
+      return out;
     }
-    if (!purchaseOrderId) throw firstErr;
 
-    const detailsRes = await api.getOrderDetails(purchaseOrderId);
-    const { services } = normalizePurchaseOrderDetails(detailsRes);
-    const orderIp = String(order.ipAddress || '').trim();
-    const svc =
-      pickAdvpsService(services, stored) ||
-      (orderIp
-        ? services.find((s) => String(s?.ip || s?.ipv4 || '').trim() === orderIp)
-        : null) ||
-      services[0];
-
-    const extracted = AdvpsAPI.extractServiceIdFromPurchaseService(svc);
-    if (!extracted) throw firstErr;
-
-    const fixed = await tryStatus(extracted);
-    return {
-      ...fixed,
-      corrected: extracted !== stored,
-      previousServiceId: stored,
-      advpsOrderId: purchaseOrderId,
-    };
+    throw firstErr;
   }
 }
 
@@ -452,6 +534,23 @@ function formatAdvpsActionError(error) {
   return { message: msg, code: 'ADVPS_ACTION_FAILED', status: error?.status || 500 };
 }
 
+/**
+ * POST /api/v1/services/{serviceId}/get-ip — configure VPS IP after power-on.
+ * Safe to call when IP is already set; failures are logged but non-fatal.
+ */
+async function configureAdvpsServiceIp(api, serviceId, { logPrefix = '[ADVPS]' } = {}) {
+  try {
+    const ipRes = await api.getIp(serviceId);
+    const d = unwrapAdvpsEnvelope(ipRes) || ipRes?.data || {};
+    const ip = pickAdvpsIp(d, '') || String(d.ip || '').trim();
+    console.log(`${logPrefix} get-ip OK service=${serviceId} ip=${ip || '(empty)'}`);
+    return { ok: true, ip, response: ipRes };
+  } catch (err) {
+    console.warn(`${logPrefix} get-ip failed service=${serviceId}: ${err.message}`);
+    return { ok: false, ip: '', error: err.message };
+  }
+}
+
 module.exports = {
   normalizePurchaseOrderDetails,
   pickAdvpsService,
@@ -460,6 +559,8 @@ module.exports = {
   pickAdvpsPurchaseOrderId,
   resolveAdvpsPurchaseOrderIdForService,
   syncAdvpsOrderCredentials,
+  resolveAdvpsIdsForRenewal,
   resolveAdvpsServiceIdForPower,
   formatAdvpsActionError,
+  configureAdvpsServiceIp,
 };

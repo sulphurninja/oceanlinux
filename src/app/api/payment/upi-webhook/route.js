@@ -2,9 +2,9 @@ import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 import NotificationService from '@/services/notificationService';
-import { calculateExpiryDate } from '@/lib/expiryHelper';
 import { assignPanelCredentials } from '@/lib/panelCredentials';
 import { decrementIpStockForOrder } from '@/lib/ipStockAvailability';
+const { resolveOrderExpiryOnPayment } = require('@/lib/advpsOrderExpiry');
 import {
   findDispatchTarget,
   confirmRechargeFromWebhook,
@@ -205,7 +205,9 @@ export async function POST(request) {
       }
 
       // SECURITY: Verify the amount matches what we expected
-      const expectedAmount = order.price;
+      const expectedAmount =
+        Number(order.paymentDetails?.gatewayAmount) ||
+        Math.max(0, Number(order.price) - (Number(order.walletDeduction?.amount) || 0));
       const paidAmount = verification.amount || parseFloat(webhookAmount);
       
       if (Math.abs(paidAmount - expectedAmount) > 1) { // Allow ₹1 tolerance for rounding
@@ -218,14 +220,13 @@ export async function POST(request) {
 
       console.log(`[UPI Webhook] Payment verified! Amount: ${paidAmount}, Expected: ${expectedAmount}`);
 
-      // Calculate expiry based on the number of days in the current month
-      const expiryDate = calculateExpiryDate();
+      const expiryDate = await resolveOrderExpiryOnPayment(order);
 
       // Update order status
       order.status = 'confirmed';
       order.transactionId = verification.upi_txn_id || upi_txn_id || id;
       order.gatewayOrderId = id; // Store UPI Gateway order ID
-      order.expiryDate = expiryDate;
+      if (expiryDate) order.expiryDate = expiryDate;
       order.paymentDetails = {
         upi_txn_id: verification.upi_txn_id || upi_txn_id,
         customer_vpa: webhookData.customer_vpa,
@@ -239,7 +240,7 @@ export async function POST(request) {
       await decrementIpStockForOrder(order);
 
       console.log(`[UPI Webhook] Order ${order._id} confirmed with UPI txn ${upi_txn_id}`);
-      console.log(`[UPI Webhook] Order expiry set to: ${expiryDate.toISOString()}`);
+      console.log(`[UPI Webhook] Order expiry set to: ${expiryDate ? expiryDate.toISOString() : 'deferred (ADVPS upstream)'}`);
 
       // Send notifications
       try {
@@ -309,15 +310,21 @@ export async function POST(request) {
       });
 
     } else if (status === 'failure') {
-      order.paymentDetails = {
-        ...(order.paymentDetails || {}),
-        remark: webhookData.remark,
-        txnAt: webhookData.txnAt,
-      };
-      const { cancelPendingBuyNowOrder } = await import('@/lib/cancelPendingOrder');
-      await cancelPendingBuyNowOrder(order, 'failed');
-
-      console.log(`[UPI Webhook] Order ${order._id} marked as failed`);
+      const { probeGatewayPayment, confirmPendingOrderPayment } = await import('@/lib/confirmPendingOrderPayment');
+      const probe = await probeGatewayPayment(order);
+      if (probe.success) {
+        await confirmPendingOrderPayment(order, probe);
+        console.log(`[UPI Webhook] Order ${order._id} was actually paid — confirmed instead of failing`);
+      } else {
+        order.paymentDetails = {
+          ...(order.paymentDetails || {}),
+          remark: webhookData.remark,
+          txnAt: webhookData.txnAt,
+        };
+        const { cancelPendingBuyNowOrder } = await import('@/lib/cancelPendingOrder');
+        await cancelPendingBuyNowOrder(order, 'failed');
+        console.log(`[UPI Webhook] Order ${order._id} payment release recorded`);
+      }
 
       return NextResponse.json({
         success: true,

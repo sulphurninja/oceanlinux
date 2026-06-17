@@ -10,12 +10,16 @@ import { assignPanelCredentials } from '@/lib/panelCredentials';
 import { detectCompanyManagedRenewal, resolveRenewalProvider } from '@/lib/companyRenewal';
 import { isSlotIpOrder, SLOT_IP_NO_RENEWAL_MESSAGE } from '@/lib/slotIpOrder';
 import { resolveOrderRenewalPrice } from '@/lib/orderRenewalPricingServer';
-const HostycareAPI = require('@/services/hostycareApi');
+import { debitPendingRenewalWallet } from '@/lib/renewalWallet';
+import { enforceOrderAccess } from '@/lib/apiSecurity';
 const SmartVPSAPI = require('@/services/smartvpsApi');
 const AdvpsAPI = require('@/services/advpsApi');
 const RenewalLogger = require('@/services/renewalLogger');
 const { getAdvpsRebuildResetFields, isAdvpsOrder } = require('@/lib/advpsRebuildLimit');
 const { executeAdvpsUpstreamRenewal } = require('@/lib/advpsRenewal');
+const { pickAdvpsExpiryDate } = require('@/lib/advpsOrderExpiry');
+const { extractAdvpsStatusCredentials } = require('@/lib/advpsStatusNormalize');
+const HostycareAPI = require('@/services/hostycareApi');
 
 // Initialize Cashfree
 Cashfree.XClientId = process.env.CASHFREE_APP_ID;
@@ -71,6 +75,9 @@ export async function POST(request) {
       );
     }
 
+    const accessDenied = await enforceOrderAccess(request, order);
+    if (accessDenied) return accessDenied;
+
     const renewalPrice = await resolveOrderRenewalPrice(order);
     console.log(`[RENEWAL-CONFIRM] Locked renewal price: ₹${renewalPrice} (paid=${order.price}, originalPrice=${order.originalPrice ?? 'n/a'}, promoDiscount=${order.promoDiscount ?? 0})`);
 
@@ -117,13 +124,41 @@ export async function POST(request) {
       }
     }
 
-    console.log(`[RENEWAL-CONFIRM] Payment method: ${actualPaymentMethod}`);
+    const gatewayPaymentMethod =
+      actualPaymentMethod === 'wallet'
+        ? 'wallet'
+        : String(actualPaymentMethod || '').startsWith('wallet+')
+          ? String(actualPaymentMethod).slice('wallet+'.length)
+          : actualPaymentMethod;
+
+    console.log(`[RENEWAL-CONFIRM] Payment method: ${actualPaymentMethod} (gateway=${gatewayPaymentMethod})`);
 
     let payment_id = null;
     let paymentVerified = false;
 
+    // Wallet-only renewals debit at /api/payment/renew; wallet+gateway debits on confirm.
+    if (gatewayPaymentMethod === 'wallet') {
+      if (!order.pendingRenewal?.walletDeducted || !order.pendingRenewal?.walletTxnId) {
+        return NextResponse.json(
+          { success: false, message: 'Wallet payment not found for this renewal' },
+          { status: 400 }
+        );
+      }
+      console.log('[RENEWAL-CONFIRM] ✅ Wallet renewal payment accepted');
+      actualPaymentMethod = 'wallet';
+      payment_id = order.pendingRenewal.walletTxnId;
+      paymentVerified = true;
+      logger.setPaymentInfo('wallet', payment_id, renewalPrice);
+    } else if (
+      order.pendingRenewal?.walletDeducted &&
+      order.pendingRenewal?.walletTxnId &&
+      String(order.pendingRenewal?.paymentMethod || '').startsWith('wallet+')
+    ) {
+      console.log('[RENEWAL-CONFIRM] Partial wallet renewal — wallet already debited, verifying gateway payment');
+    }
+
     // Verify payment based on method
-    if (actualPaymentMethod === 'razorpay') {
+    if (!paymentVerified && gatewayPaymentMethod === 'razorpay') {
       console.log('[RENEWAL-CONFIRM] Verifying Razorpay renewal payment');
 
       if (!razorpayPaymentId || !razorpaySignature) {
@@ -169,14 +204,21 @@ export async function POST(request) {
           { status: 400 }
         );
       }
-    } else if (actualPaymentMethod === 'upi') {
-      console.log('[RENEWAL-CONFIRM] UPI Gateway renewal - payment verified via webhook');
-      // UPI Gateway payments are verified via webhook
-      // If we reach here, payment was already verified
-      payment_id = renewalTxnId;
+    } else if (!paymentVerified && gatewayPaymentMethod === 'upi') {
+      const { verifyUPIPayment } = await import('@/lib/confirmPendingOrderPayment');
+      const upiCheck = await verifyUPIPayment(renewalTxnId);
+      if (!upiCheck.verified) {
+        console.error('[RENEWAL-CONFIRM] UPI payment not verified:', upiCheck);
+        await logger.finalize(false, null, 'UPI payment not verified');
+        return NextResponse.json(
+          { success: false, message: 'UPI payment not verified. Please wait for confirmation or contact support.' },
+          { status: 400 }
+        );
+      }
+      payment_id = upiCheck.upi_txn_id || renewalTxnId;
       paymentVerified = true;
-    } else {
-      // Default to Cashfree
+      logger.setPaymentInfo('upi', payment_id, renewalPrice);
+    } else if (!paymentVerified) {
       console.log('[RENEWAL-CONFIRM] Processing Cashfree renewal payment');
 
       // For Cashfree renewals, we rely on the webhook to process the renewal
@@ -273,6 +315,16 @@ export async function POST(request) {
       );
     }
 
+    try {
+      await debitPendingRenewalWallet(order, renewalTxnId);
+    } catch (walletErr) {
+      console.error('[RENEWAL-CONFIRM] Wallet debit failed:', walletErr);
+      return NextResponse.json(
+        { success: false, message: walletErr.message || 'Insufficient wallet balance for renewal' },
+        { status: 400 }
+      );
+    }
+
     const cf_payment_id = payment_id;
 
     // Determine the provider for this order using the enhanced function with IPStock lookup
@@ -282,7 +334,7 @@ export async function POST(request) {
 
     // Calculate new expiry based on the number of days in the base month
     const currentExpiry = order.expiryDate;
-    const newExpiryDate = calculateRenewalExpiryDate(currentExpiry);
+    let newExpiryDate = calculateRenewalExpiryDate(currentExpiry);
 
     // ─── Company-managed renewal branch ───────────────────────────────────
     // For orders whose IPStock is linked to a Company AND that have no
@@ -375,6 +427,15 @@ export async function POST(request) {
     console.log(`  New expiry: ${newExpiryDate}`);
     console.log(`  Payment ID: ${cf_payment_id}`);
 
+    const walletAmount = Number(order.pendingRenewal?.walletAmount) || 0;
+    const gatewayAmount = Number(order.pendingRenewal?.gatewayAmount) || renewalPrice;
+    const paymentMethodLabel =
+      walletAmount > 0 && gatewayAmount > 0
+        ? `wallet+${gatewayPaymentMethod}`
+        : walletAmount > 0
+          ? 'wallet'
+          : gatewayPaymentMethod;
+
     // Create renewal payment record with full payment details
     const renewalPayment = {
       paymentId: cf_payment_id,
@@ -384,12 +445,15 @@ export async function POST(request) {
       newExpiry: newExpiryDate,
       renewalTxnId: renewalTxnId,
       provider: provider,
-      paymentMethod: actualPaymentMethod,
+      paymentMethod: paymentMethodLabel,
       gatewayOrderId: actualPaymentMethod === 'razorpay' ? razorpayPaymentId : renewalTxnId,
       paymentDetails: {
-        method: actualPaymentMethod,
+        method: paymentMethodLabel,
         payment_id: cf_payment_id,
         order_id: actualPaymentMethod === 'razorpay' ? razorpayPaymentId : renewalTxnId,
+        walletAmount,
+        gatewayAmount,
+        walletTxnId: order.pendingRenewal?.walletTxnId || '',
         confirmedAt: new Date()
       }
     };
@@ -507,36 +571,56 @@ export async function POST(request) {
         advpsServiceId: order.advpsServiceId,
       });
 
-      const apiStart = Date.now();
-      const advpsApi = new AdvpsAPI();
-      const advpsRenew = await executeAdvpsUpstreamRenewal(advpsApi, order, { Order });
-      const apiDuration = Date.now() - apiStart;
+      try {
+        const apiStart = Date.now();
+        const advpsApi = new AdvpsAPI();
+        const advpsRenew = await executeAdvpsUpstreamRenewal(advpsApi, order, { Order });
+        const apiDuration = Date.now() - apiStart;
 
-      if (advpsRenew.correctedServiceId) {
-        await Order.findByIdAndUpdate(orderId, {
-          advpsServiceId: advpsRenew.correctedServiceId,
-          ...(order.advpsOrderId ? {} : { advpsOrderId: advpsRenew.advpsOrderId }),
-        });
-        order.advpsServiceId = advpsRenew.correctedServiceId;
-        console.log(
-          `[RENEWAL-CONFIRM] Corrected ADVPS service id for renew: ${advpsRenew.previousServiceId} → ${advpsRenew.correctedServiceId}`
-        );
-      }
+        if (advpsRenew.correctedServiceId) {
+          await Order.findByIdAndUpdate(orderId, {
+            advpsServiceId: advpsRenew.correctedServiceId,
+            ...(order.advpsOrderId ? {} : { advpsOrderId: advpsRenew.advpsOrderId }),
+          });
+          order.advpsServiceId = advpsRenew.correctedServiceId;
+          console.log(
+            `[RENEWAL-CONFIRM] Corrected ADVPS service id for renew: ${advpsRenew.previousServiceId} → ${advpsRenew.correctedServiceId}`
+          );
+        }
 
-      providerRenewalResult = advpsRenew.result || {
-        error: advpsRenew.error,
-        testMode: advpsRenew.testMode,
-        serviceId: advpsRenew.serviceId,
-        advpsOrderId: advpsRenew.advpsOrderId,
-      };
-      providerRenewalSuccess = advpsRenew.success;
+        providerRenewalResult = advpsRenew.result || {
+          error: advpsRenew.error,
+          testMode: advpsRenew.testMode,
+          serviceId: advpsRenew.serviceId,
+          advpsOrderId: advpsRenew.advpsOrderId,
+        };
+        providerRenewalSuccess = advpsRenew.success;
 
-      if (advpsRenew.success) {
-        console.log('[RENEWAL-CONFIRM] ✅ ADVPS renewal API success:', JSON.stringify(advpsRenew.result, null, 2));
-        logger.setProviderApiResult('advps', true, advpsRenew.result, null, apiDuration);
-      } else {
-        console.error('[RENEWAL-CONFIRM] ❌ ADVPS renewal API failed:', advpsRenew.error);
-        logger.setProviderApiResult('advps', false, advpsRenew.result, { message: advpsRenew.error }, apiDuration);
+        if (advpsRenew.success) {
+          console.log('[RENEWAL-CONFIRM] ✅ ADVPS renewal API success:', JSON.stringify(advpsRenew.result, null, 2));
+          logger.setProviderApiResult('advps', true, advpsRenew.result, null, apiDuration);
+
+          try {
+            const statusRes = await advpsApi.status(order.advpsServiceId);
+            const statusCreds = extractAdvpsStatusCredentials(statusRes, order);
+            const advpsExpiry = pickAdvpsExpiryDate(statusCreds.expiryDate);
+            if (advpsExpiry) {
+              newExpiryDate = advpsExpiry;
+              console.log(`[RENEWAL-CONFIRM] ADVPS expiry after renew: ${newExpiryDate.toISOString()}`);
+            }
+          } catch (statusErr) {
+            console.warn('[RENEWAL-CONFIRM] Could not fetch ADVPS expiry after renew:', statusErr.message);
+          }
+        } else {
+          console.error('[RENEWAL-CONFIRM] ❌ ADVPS renewal API failed:', advpsRenew.error);
+          logger.setProviderApiResult('advps', false, advpsRenew.result, { message: advpsRenew.error }, apiDuration);
+        }
+      } catch (advpsErr) {
+        console.error('[RENEWAL-CONFIRM] ❌ ADVPS renewal threw:', advpsErr.message);
+        logger.setProviderApiResult('advps', false, null, advpsErr);
+        providerRenewalResult = { error: advpsErr.message };
+        providerRenewalSuccess = false;
+        console.log('[RENEWAL-CONFIRM] Continuing — customer payment succeeded; expiry will still be extended');
       }
 
       console.log('[RENEWAL-CONFIRM] === ADVPS RENEWAL PROCESS END ===');
@@ -572,7 +656,7 @@ export async function POST(request) {
       // Update main payment fields with latest renewal payment
       transactionId: cf_payment_id,
       gatewayOrderId: renewalPayment.gatewayOrderId,
-      paymentMethod: actualPaymentMethod,
+      paymentMethod: paymentMethodLabel,
       paymentDetails: renewalPayment.paymentDetails,
       ...(isAdvpsOrder(order) ? getAdvpsRebuildResetFields() : {}),
       // Store renewal payment info for record keeping

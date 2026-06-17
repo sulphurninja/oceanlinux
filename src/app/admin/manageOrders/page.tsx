@@ -20,9 +20,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { 
     Eye, Settings, Play, RotateCcw, Loader2, AlertCircle, CheckCircle, 
     Wrench, Search, Filter, Calendar, X, ChevronLeft, ChevronRight, 
-    ChevronsLeft, ChevronsRight, Edit2, Save, XCircle, Download, RefreshCw, KeyRound, ArrowRightLeft
+    ChevronsLeft, ChevronsRight, Edit2, Save, XCircle, Download, RefreshCw, KeyRound, ArrowRightLeft, Wallet, CreditCard, Clock
 } from 'lucide-react';
-import { ScrollArea } from '@/components/ui/scroll-area';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar as CalendarComponent } from '@/components/ui/calendar';
@@ -64,10 +64,143 @@ interface Order {
     password?: string;
     os: string;
     transactionId: string;
+    clientTxnId?: string;
+    gatewayOrderId?: string;
+    paymentMethod?: string;
+    paymentDetails?: {
+        gatewayAmount?: number;
+        walletAmount?: number;
+        walletOnly?: boolean;
+        confirmedAt?: string;
+        [key: string]: unknown;
+    };
+    walletDeduction?: {
+        deducted?: boolean;
+        amount?: number;
+        transactionId?: string;
+        timestamp?: string;
+    };
     createdAt: string;
     expiryDate?: string;
     lastAction?: string;
     lastActionTime?: string;
+}
+
+function formatPaymentGatewayName(method: string): string {
+    const value = method.toLowerCase();
+    if (value === 'razorpay') return 'Razorpay';
+    if (value === 'cashfree') return 'Cashfree';
+    if (value === 'upi') return 'UPI';
+    if (value === 'wallet') return 'Wallet';
+    return method;
+}
+
+type OrderPaymentBreakdown =
+    | { type: 'pending'; label: string }
+    | { type: 'wallet'; label: string; walletAmt?: number }
+    | { type: 'gateway'; label: string; gatewayAmt?: number; gatewayName: string }
+    | { type: 'mixed'; label: string; walletAmt?: number; gatewayAmt?: number; gatewayName: string }
+    | { type: 'unknown'; label: string };
+
+function isOrderPaid(order: Order): boolean {
+    const rawStatus = String(order.status || '').toLowerCase();
+    return ['confirmed', 'active', 'paid', 'completed'].includes(rawStatus);
+}
+
+function getOrderPaymentBreakdown(order: Order): OrderPaymentBreakdown {
+    if (!isOrderPaid(order)) {
+        return { type: 'pending', label: 'Unpaid' };
+    }
+
+    const method = String(order.paymentMethod || '').toLowerCase();
+    const walletAmt =
+        Number(order.paymentDetails?.walletAmount) ||
+        (order.walletDeduction?.deducted ? Number(order.walletDeduction.amount) : 0) ||
+        0;
+    let gatewayAmt = Number(order.paymentDetails?.gatewayAmount) || 0;
+    const mixedMatch = method.match(/^wallet\+(.+)$/);
+    const gatewayFromMethod = mixedMatch?.[1] || '';
+
+    const walletOnly =
+        order.paymentDetails?.walletOnly === true ||
+        method === 'wallet' ||
+        (walletAmt > 0 && gatewayAmt === 0 && !order.gatewayOrderId && !mixedMatch);
+
+    if (walletOnly || (walletAmt > 0 && !gatewayAmt && !gatewayFromMethod && !order.gatewayOrderId)) {
+        return {
+            type: 'wallet',
+            label: 'Wallet',
+            walletAmt: walletAmt || order.price,
+        };
+    }
+
+    if (mixedMatch || (walletAmt > 0 && (gatewayAmt > 0 || gatewayFromMethod))) {
+        const gatewayName = formatPaymentGatewayName(gatewayFromMethod || method.replace('wallet+', '') || 'gateway');
+        if (!gatewayAmt && walletAmt > 0) {
+            gatewayAmt = Math.max(0, order.price - walletAmt);
+        }
+        return {
+            type: 'mixed',
+            label: `Wallet + ${gatewayName}`,
+            walletAmt,
+            gatewayAmt,
+            gatewayName,
+        };
+    }
+
+    if (walletAmt > 0 && gatewayAmt > 0) {
+        return {
+            type: 'mixed',
+            label: `Wallet + ${formatPaymentGatewayName(method)}`,
+            walletAmt,
+            gatewayAmt,
+            gatewayName: formatPaymentGatewayName(method),
+        };
+    }
+
+    if (method) {
+        return {
+            type: 'gateway',
+            label: formatPaymentGatewayName(method),
+            gatewayAmt: gatewayAmt || order.price,
+            gatewayName: formatPaymentGatewayName(method),
+        };
+    }
+
+    if (order.walletDeduction?.deducted) {
+        return {
+            type: 'wallet',
+            label: 'Wallet',
+            walletAmt: order.walletDeduction.amount || order.price,
+        };
+    }
+
+    return { type: 'unknown', label: '—' };
+}
+
+interface WalletRecharge {
+    _id: string;
+    entryType?: 'recharge' | 'admin_credit';
+    user: {
+        _id?: string;
+        name?: string;
+        email?: string;
+        phone?: string;
+    };
+    amount: number;
+    currency?: string;
+    clientTxnId: string;
+    paymentMethod: string;
+    gatewayOrderId?: string;
+    transactionId?: string;
+    walletTxnId?: string;
+    status: 'pending' | 'confirmed' | 'failed' | 'refunded';
+    failureReason?: string;
+    creditedAt?: string;
+    description?: string;
+    performedByEmail?: string;
+    paymentDetails?: Record<string, unknown>;
+    createdAt: string;
 }
 
 interface FilterState {
@@ -87,8 +220,11 @@ interface PaginationState {
 }
 
 const ManageOrders = () => {
+    const [activeTab, setActiveTab] = useState<'orders' | 'wallet'>('orders');
     const [orders, setOrders] = useState<Order[]>([]);
+    const [walletRecharges, setWalletRecharges] = useState<WalletRecharge[]>([]);
     const [loading, setLoading] = useState(true);
+    const [walletLoading, setWalletLoading] = useState(false);
     const [currentOrder, setCurrentOrder] = useState<Order | null>(null);
     const [editingOrder, setEditingOrder] = useState<Order | null>(null);
     const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -121,7 +257,33 @@ const ManageOrders = () => {
 
     useEffect(() => {
         fetchOrders();
+        fetchWalletRecharges();
     }, []);
+
+    const fetchWalletRecharges = async () => {
+        setWalletLoading(true);
+        try {
+            const response = await fetch(`/api/admin/wallet-recharges?t=${Date.now()}`, {
+                cache: 'no-store',
+                credentials: 'include',
+                headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
+            });
+            if (!response.ok) {
+                const err = await response.json().catch(() => ({}));
+                throw new Error(err?.message || 'Failed to load wallet recharges');
+            }
+            const data = await response.json();
+            setWalletRecharges(Array.isArray(data) ? data : []);
+        } catch {
+            toast.error('Failed to fetch wallet top-up transactions');
+        } finally {
+            setWalletLoading(false);
+        }
+    };
+
+    const refreshAll = async () => {
+        await Promise.all([fetchOrders(), fetchWalletRecharges()]);
+    };
 
     const fetchOrders = async () => {
         setLoading(true);
@@ -197,6 +359,24 @@ const ManageOrders = () => {
                    matchesProvisioningStatus && matchesAutoProvisioned && matchesDateFrom && matchesDateTo;
         });
     }, [orders, searchTerm, filters]);
+
+    const filteredWalletRecharges = useMemo(() => {
+        return walletRecharges.filter((recharge) => {
+            if (!searchTerm) return true;
+            const q = searchTerm.toLowerCase();
+            return (
+                recharge.user?.name?.toLowerCase().includes(q) ||
+                recharge.user?.email?.toLowerCase().includes(q) ||
+                recharge.clientTxnId?.toLowerCase().includes(q) ||
+                recharge.transactionId?.toLowerCase().includes(q) ||
+                recharge.gatewayOrderId?.toLowerCase().includes(q) ||
+                recharge.walletTxnId?.toLowerCase().includes(q) ||
+                recharge.paymentMethod?.toLowerCase().includes(q) ||
+                recharge.status?.toLowerCase().includes(q) ||
+                String(recharge.amount).includes(q)
+            );
+        });
+    }, [walletRecharges, searchTerm]);
 
     // Paginated orders
     const paginatedOrders = useMemo(() => {
@@ -457,6 +637,151 @@ const ManageOrders = () => {
         );
     };
 
+    const formatInr = (amount?: number) =>
+        amount != null ? `₹${amount.toLocaleString('en-IN')}` : '';
+
+    const renderOrderPaymentCell = (order: Order, compact = false) => {
+        const info = getOrderPaymentBreakdown(order);
+
+        if (info.type === 'pending') {
+            return (
+                <div className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/25 bg-amber-500/10 px-2.5 py-1">
+                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber-500/15">
+                        <Clock className="h-3 w-3 text-amber-600 dark:text-amber-400" />
+                    </span>
+                    <span className="text-[11px] font-semibold text-amber-700 dark:text-amber-300">Unpaid</span>
+                </div>
+            );
+        }
+
+        if (info.type === 'wallet') {
+            return (
+                <div className={`flex ${compact ? 'flex-row items-center gap-2' : 'flex-col gap-1'} min-w-0`}>
+                    <div className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-gradient-to-r from-emerald-500/15 to-teal-500/10 px-2.5 py-1 shadow-sm">
+                        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/20">
+                            <Wallet className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
+                        </span>
+                        <span className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">Wallet</span>
+                    </div>
+                    {info.walletAmt ? (
+                        <span className="text-[11px] font-semibold tabular-nums text-foreground/80">
+                            {formatInr(info.walletAmt)}
+                        </span>
+                    ) : null}
+                </div>
+            );
+        }
+
+        if (info.type === 'mixed') {
+            const total = (info.walletAmt || 0) + (info.gatewayAmt || 0) || order.price;
+            const walletPct = total > 0 ? Math.round(((info.walletAmt || 0) / total) * 100) : 50;
+            const gatewayPct = 100 - walletPct;
+
+            return (
+                <div className={`flex flex-col gap-1.5 min-w-0 w-full ${compact ? '' : ''}`}>
+                    <div className="flex h-1.5 w-full overflow-hidden rounded-full bg-muted/80 ring-1 ring-border/50">
+                        <div
+                            className="bg-gradient-to-r from-emerald-500 to-emerald-400 transition-all"
+                            style={{ width: `${walletPct}%` }}
+                            title={`Wallet ${walletPct}%`}
+                        />
+                        <div
+                            className="bg-gradient-to-r from-blue-500 to-indigo-500 transition-all"
+                            style={{ width: `${gatewayPct}%` }}
+                            title={`Gateway ${gatewayPct}%`}
+                        />
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                        {info.walletAmt ? (
+                            <span className="inline-flex items-center gap-0.5 rounded-md border border-emerald-500/20 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">
+                                <Wallet className="h-2.5 w-2.5 shrink-0" />
+                                {formatInr(info.walletAmt)}
+                            </span>
+                        ) : null}
+                        {info.gatewayAmt ? (
+                            <span className="inline-flex items-center gap-0.5 rounded-md border border-blue-500/20 bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700 dark:text-blue-300">
+                                <CreditCard className="h-2.5 w-2.5 shrink-0" />
+                                {formatInr(info.gatewayAmt)}
+                            </span>
+                        ) : null}
+                    </div>
+                    <span className="truncate text-[10px] font-medium text-muted-foreground">
+                        via {info.gatewayName}
+                    </span>
+                </div>
+            );
+        }
+
+        if (info.type === 'gateway') {
+            return (
+                <div className={`flex ${compact ? 'flex-row items-center gap-2' : 'flex-col gap-1'} min-w-0`}>
+                    <div className="inline-flex items-center gap-1.5 rounded-full border border-blue-500/30 bg-gradient-to-r from-blue-500/15 to-indigo-500/10 px-2.5 py-1 shadow-sm">
+                        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-500/20">
+                            <CreditCard className="h-3 w-3 text-blue-600 dark:text-blue-400" />
+                        </span>
+                        <span className="truncate text-[11px] font-semibold text-blue-700 dark:text-blue-300">
+                            {info.label}
+                        </span>
+                    </div>
+                    {info.gatewayAmt ? (
+                        <span className="text-[11px] font-semibold tabular-nums text-foreground/80">
+                            {formatInr(info.gatewayAmt)}
+                        </span>
+                    ) : null}
+                </div>
+            );
+        }
+
+        return <span className="text-xs text-muted-foreground">—</span>;
+    };
+
+    const renderOrderActions = (order: Order) => (
+        <div className="flex flex-wrap items-center gap-2">
+            <Button
+                size="sm"
+                variant="outline"
+                onClick={() => handleEdit(order)}
+                className="gap-1 h-8"
+            >
+                <Edit2 className="w-3.5 h-3.5" />
+                Edit
+            </Button>
+            <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                    setTransferOrder(order);
+                    setTransferEmail('');
+                }}
+                className="gap-1 h-8"
+                title="Transfer VPS to another account"
+            >
+                <ArrowRightLeft className="w-3.5 h-3.5" />
+                Transfer
+            </Button>
+            {(
+                ((order.status === 'paid' || order.status === 'confirmed') && !order.autoProvisioned) ||
+                (order.provisioningStatus === 'failed') ||
+                ((order.provider === 'hostycare' || order.provider === 'smartvps') && order.status === 'confirmed' && !order.ipAddress)
+            ) && (
+                <Button
+                    size="sm"
+                    onClick={() => handleProvision(order)}
+                    disabled={provisioning === order._id}
+                    className="gap-1 h-8"
+                    variant={order.provisioningStatus === 'failed' ? 'destructive' : 'default'}
+                >
+                    {provisioning === order._id ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                        <Play className="w-3.5 h-3.5" />
+                    )}
+                    {order.provisioningStatus === 'failed' ? 'Retry' : 'Provision'}
+                </Button>
+            )}
+        </div>
+    );
+
     // Stats calculations
     const stats = useMemo(() => ({
         total: orders.length,
@@ -466,6 +791,31 @@ const ManageOrders = () => {
         failed: orders.filter(o => o.provisioningStatus === 'failed').length,
         totalRevenue: orders.filter(o => ['active', 'confirmed'].includes(normalizeAdminOrderStatus(o.status))).reduce((sum, o) => sum + o.price, 0),
     }), [orders]);
+
+    const walletStats = useMemo(() => ({
+        total: walletRecharges.length,
+        confirmed: walletRecharges.filter((r) => r.status === 'confirmed').length,
+        pending: walletRecharges.filter((r) => r.status === 'pending').length,
+        failed: walletRecharges.filter((r) => r.status === 'failed').length,
+        totalCredited: walletRecharges
+            .filter((r) => r.status === 'confirmed')
+            .reduce((sum, r) => sum + (r.amount || 0), 0),
+    }), [walletRecharges]);
+
+    const getWalletStatusBadge = (status: WalletRecharge['status']) => {
+        switch (status) {
+            case 'confirmed':
+                return <Badge className="bg-green-600">Confirmed</Badge>;
+            case 'pending':
+                return <Badge variant="secondary">Pending</Badge>;
+            case 'failed':
+                return <Badge variant="destructive">Failed</Badge>;
+            case 'refunded':
+                return <Badge variant="outline">Refunded</Badge>;
+            default:
+                return <Badge variant="outline">{status}</Badge>;
+        }
+    };
 
     const clearFilters = () => {
         setFilters({
@@ -517,21 +867,18 @@ const ManageOrders = () => {
     };
 
     return (
-        <div className="h-full flex flex-col">
-            {/* Mobile Header Spacer */}
-            <div className="lg:hidden h-16" />
-
+        <div className="w-full min-w-0">
             {/* Page Header */}
             <div className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-                <div className="flex flex-col gap-6 p-6">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                        <div>
-                            <h1 className="text-3xl font-bold tracking-tight">Manage Orders</h1>
-                            <p className="text-muted-foreground mt-1">
-                                Advanced order management with full editability
+                <div className="flex flex-col gap-4 p-4 sm:gap-6 sm:p-6">
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="min-w-0">
+                            <h1 className="text-xl font-bold tracking-tight sm:text-2xl lg:text-3xl">Manage Orders</h1>
+                            <p className="mt-1 text-sm text-muted-foreground sm:text-base">
+                                VPS orders and customer wallet top-up transactions
                             </p>
                         </div>
-                        <div className="flex items-center gap-2 flex-wrap">
+                        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
                             <Button
                                 variant="outline"
                                 onClick={exportToCSV}
@@ -582,12 +929,12 @@ const ManageOrders = () => {
                             </Button>
                             <Button 
                                 variant="outline" 
-                                onClick={fetchOrders} 
-                                disabled={loading}
+                                onClick={refreshAll} 
+                                disabled={loading || walletLoading}
                                 className="gap-2"
                                 size="sm"
                             >
-                                {loading ? (
+                                {(loading || walletLoading) ? (
                                     <Loader2 className="w-4 h-4 animate-spin" />
                                 ) : (
                                     <RotateCcw className="w-4 h-4" />
@@ -597,8 +944,20 @@ const ManageOrders = () => {
                         </div>
                     </div>
 
-                    {/* Stats Cards */}
-                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                    <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'orders' | 'wallet')}>
+                        <TabsList>
+                            <TabsTrigger value="orders">VPS Orders</TabsTrigger>
+                            <TabsTrigger value="wallet" className="gap-2">
+                                <Wallet className="w-4 h-4" />
+                                Wallet Top-ups
+                                {walletStats.confirmed > 0 && (
+                                    <Badge variant="secondary" className="ml-1">{walletStats.confirmed}</Badge>
+                                )}
+                            </TabsTrigger>
+                        </TabsList>
+
+                        <TabsContent value="orders" className="mt-4 space-y-4 sm:mt-6 sm:space-y-6">
+                    <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 xl:grid-cols-6">
                         <Card>
                             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                                 <CardTitle className="text-sm font-medium">Total</CardTitle>
@@ -828,7 +1187,7 @@ const ManageOrders = () => {
                         )}
 
                         {/* Results summary and Pagination Controls */}
-                        <div className="flex items-center justify-between text-sm">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between text-sm">
                             <span className="text-muted-foreground">
                                 Showing {Math.min((pagination.page - 1) * pagination.limit + 1, filteredOrders.length)}-
                                 {Math.min(pagination.page * pagination.limit, filteredOrders.length)} of {filteredOrders.length} orders
@@ -836,7 +1195,7 @@ const ManageOrders = () => {
                             </span>
                             
                             {totalPages > 1 && (
-                                <div className="flex items-center gap-2">
+                                <div className="flex flex-wrap items-center gap-2">
                                     <Select
                                         value={pagination.limit.toString()}
                                         onValueChange={(value) => setPagination(prev => ({ ...prev, limit: parseInt(value), page: 1 }))}
@@ -898,33 +1257,99 @@ const ManageOrders = () => {
                             )}
                         </div>
                     </div>
-                </div>
-            </div>
 
-            {/* Table Container */}
-            <div className="flex-1 overflow-hidden">
-                <ScrollArea className="h-full">
-                    <div className="p-6">
-                        <div className="rounded-lg border bg-card">
-                            <Table>
+                    {/* Orders list */}
+                    <div className="w-full min-w-0">
+                        {/* Mobile & tablet cards */}
+                        <div className="space-y-3 xl:hidden">
+                            {loading ? (
+                                <Card>
+                                    <CardContent className="flex h-32 items-center justify-center gap-2 py-8">
+                                        <Loader2 className="h-6 w-6 animate-spin" />
+                                        <span>Loading orders...</span>
+                                    </CardContent>
+                                </Card>
+                            ) : paginatedOrders.length === 0 ? (
+                                <Card>
+                                    <CardContent className="flex h-32 items-center justify-center py-8 text-muted-foreground">
+                                        {hasActiveFilters ? 'No orders match your search criteria.' : 'No orders found.'}
+                                    </CardContent>
+                                </Card>
+                            ) : (
+                                paginatedOrders.map((order) => (
+                                    <Card key={order._id} className="overflow-hidden border-border/60 shadow-sm">
+                                        <CardContent className="space-y-3 p-4">
+                                            <div className="flex items-start justify-between gap-3">
+                                                <div className="min-w-0 flex-1">
+                                                    <p className="truncate text-sm font-semibold">{order.user?.name || 'N/A'}</p>
+                                                    <p className="truncate text-xs text-muted-foreground">{order.user?.email}</p>
+                                                </div>
+                                                <div className="shrink-0">{getStatusBadge(order.status)}</div>
+                                            </div>
+
+                                            <p className="text-sm font-medium leading-snug break-words">{order.productName}</p>
+
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                <Badge variant="outline" className="text-xs">{order.memory}</Badge>
+                                                <span className="text-sm font-bold tabular-nums">₹{order.price.toLocaleString('en-IN')}</span>
+                                                <Badge variant="secondary" className="text-xs capitalize">
+                                                    {order.provider || 'hostycare'}
+                                                </Badge>
+                                            </div>
+
+                                            <div className="rounded-xl border border-border/60 bg-gradient-to-br from-muted/40 to-muted/10 p-3">
+                                                <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                                                    Payment
+                                                </p>
+                                                {renderOrderPaymentCell(order, true)}
+                                            </div>
+
+                                            <div className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
+                                                <div className="rounded-lg bg-muted/40 px-2.5 py-2">
+                                                    <p className="text-[10px] text-muted-foreground">Provisioning</p>
+                                                    <div className="mt-1">{getProvisioningStatusBadge(order)}</div>
+                                                </div>
+                                                <div className="rounded-lg bg-muted/40 px-2.5 py-2">
+                                                    <p className="text-[10px] text-muted-foreground">IP Address</p>
+                                                    <code className="mt-1 block break-all text-[11px] font-medium">
+                                                        {order.ipAddress || 'Pending'}
+                                                    </code>
+                                                </div>
+                                            </div>
+
+                                            <p className="text-[11px] text-muted-foreground">
+                                                {format(new Date(order.createdAt), 'MMM dd, yyyy')}
+                                            </p>
+
+                                            {renderOrderActions(order)}
+                                        </CardContent>
+                                    </Card>
+                                ))
+                            )}
+                        </div>
+
+                        {/* Desktop table — only when sidebar + table fit */}
+                        <div className="hidden xl:block w-full min-w-0 overflow-x-auto rounded-xl border bg-card shadow-sm">
+                            <Table className="min-w-[1100px]">
                                 <TableHeader>
-                                    <TableRow>
-                                        <TableHead className="w-[180px]">Customer</TableHead>
-                                        <TableHead className="w-[200px]">Product</TableHead>
-                                        <TableHead className="w-[80px]">Memory</TableHead>
-                                        <TableHead className="w-[90px]">Price</TableHead>
-                                        <TableHead className="w-[100px]">Status</TableHead>
-                                        <TableHead className="w-[140px]">Provisioning</TableHead>
-                                        <TableHead className="w-[90px]">Provider</TableHead>
-                                        <TableHead className="w-[120px]">IP Address</TableHead>
-                                        <TableHead className="w-[100px]">Date</TableHead>
-                                        <TableHead className="w-[180px]">Actions</TableHead>
+                                    <TableRow className="bg-muted/40 hover:bg-muted/40">
+                                        <TableHead className="font-semibold">Customer</TableHead>
+                                        <TableHead className="font-semibold">Product</TableHead>
+                                        <TableHead className="font-semibold">Memory</TableHead>
+                                        <TableHead className="font-semibold">Price</TableHead>
+                                        <TableHead className="font-semibold">Payment</TableHead>
+                                        <TableHead className="font-semibold">Status</TableHead>
+                                        <TableHead className="font-semibold">Provisioning</TableHead>
+                                        <TableHead className="font-semibold">Provider</TableHead>
+                                        <TableHead className="font-semibold">IP Address</TableHead>
+                                        <TableHead className="font-semibold">Date</TableHead>
+                                        <TableHead className="font-semibold">Actions</TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
                                     {loading ? (
                                         <TableRow>
-                                            <TableCell colSpan={10} className="h-32 text-center">
+                                            <TableCell colSpan={11} className="h-32 text-center">
                                                 <div className="flex items-center justify-center gap-2">
                                                     <Loader2 className="h-6 w-6 animate-spin" />
                                                     <span>Loading orders...</span>
@@ -933,97 +1358,47 @@ const ManageOrders = () => {
                                         </TableRow>
                                     ) : paginatedOrders.length === 0 ? (
                                         <TableRow>
-                                            <TableCell colSpan={10} className="h-32 text-center text-muted-foreground">
+                                            <TableCell colSpan={11} className="h-32 text-center text-muted-foreground">
                                                 {hasActiveFilters ? 'No orders match your search criteria.' : 'No orders found.'}
                                             </TableCell>
                                         </TableRow>
                                     ) : (
                                         paginatedOrders.map(order => (
-                                            <TableRow key={order._id} className="hover:bg-muted/50">
+                                            <TableRow key={order._id} className="transition-colors hover:bg-muted/30">
                                                 <TableCell>
                                                     <div className="space-y-0.5">
-                                                        <div className="font-medium text-sm">{order.user?.name || 'N/A'}</div>
-                                                        <div className="text-xs text-muted-foreground truncate max-w-[160px]">
+                                                        <div className="text-sm font-medium">{order.user?.name || 'N/A'}</div>
+                                                        <div className="max-w-[160px] truncate text-xs text-muted-foreground">
                                                             {order.user?.email}
                                                         </div>
                                                     </div>
                                                 </TableCell>
                                                 <TableCell>
-                                                    <div className="text-sm font-medium line-clamp-2">{order.productName}</div>
+                                                    <div className="line-clamp-2 text-sm font-medium">{order.productName}</div>
                                                 </TableCell>
                                                 <TableCell>
                                                     <Badge variant="outline">{order.memory}</Badge>
                                                 </TableCell>
-                                                <TableCell className="font-medium">₹{order.price}</TableCell>
+                                                <TableCell className="font-semibold tabular-nums">₹{order.price.toLocaleString('en-IN')}</TableCell>
+                                                <TableCell className="align-top py-3">{renderOrderPaymentCell(order)}</TableCell>
+                                                <TableCell>{getStatusBadge(order.status)}</TableCell>
+                                                <TableCell>{getProvisioningStatusBadge(order)}</TableCell>
                                                 <TableCell>
-                                                    {getStatusBadge(order.status)}
-                                                </TableCell>
-                                                <TableCell>
-                                                    {getProvisioningStatusBadge(order)}
-                                                </TableCell>
-                                                <TableCell>
-                                                    <Badge variant="secondary" className="text-xs">
+                                                    <Badge variant="secondary" className="text-xs capitalize">
                                                         {order.provider || 'hostycare'}
                                                     </Badge>
                                                 </TableCell>
                                                 <TableCell>
-                                                    <code className="text-xs bg-muted px-1.5 py-0.5 rounded">
+                                                    <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
                                                         {order.ipAddress || 'Pending'}
                                                     </code>
                                                 </TableCell>
                                                 <TableCell>
-                                                    <div className="text-xs">
-                                                        {format(new Date(order.createdAt), "MMM dd, yyyy")}
+                                                    <div className="text-xs whitespace-nowrap">
+                                                        {format(new Date(order.createdAt), 'MMM dd, yyyy')}
                                                     </div>
                                                 </TableCell>
-                                                <TableCell>
-                                                    <div className="flex items-center gap-2">
-                                                        <Button
-                                                            size="sm"
-                                                            variant="outline"
-                                                            onClick={() => handleEdit(order)}
-                                                            className="gap-1 h-8"
-                                                        >
-                                                            <Edit2 className="w-3.5 h-3.5" />
-                                                            Edit
-                                                        </Button>
-                                                        <Button
-                                                            size="sm"
-                                                            variant="outline"
-                                                            onClick={() => {
-                                                                setTransferOrder(order);
-                                                                setTransferEmail('');
-                                                            }}
-                                                            className="gap-1 h-8"
-                                                            title="Transfer VPS to another account"
-                                                        >
-                                                            <ArrowRightLeft className="w-3.5 h-3.5" />
-                                                            Transfer
-                                                        </Button>
-
-                                                        {/* Show provision button for: 1) Non-provisioned orders 2) Failed orders that need retry 3) Confirmed orders without IP */}
-                                                        {(
-                                                            ((order.status === 'paid' || order.status === 'confirmed') && !order.autoProvisioned) ||
-                                                            (order.provisioningStatus === 'failed') ||
-                                                            ((order.provider === 'hostycare' || order.provider === 'smartvps') && order.status === 'confirmed' && !order.ipAddress)
-                                                        ) && (
-                                                            <Button
-                                                                size="sm"
-                                                                onClick={() => handleProvision(order)}
-                                                                disabled={provisioning === order._id}
-                                                                className="gap-1 h-8"
-                                                                variant={order.provisioningStatus === 'failed' ? 'destructive' : 'default'}
-                                                            >
-                                                                {provisioning === order._id ? (
-                                                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                                                ) : (
-                                                                    <Play className="w-3.5 h-3.5" />
-                                                                )}
-                                                                {order.provisioningStatus === 'failed' ? 'Retry' : 'Provision'}
-                                                            </Button>
-                                                        )}
-                                                    </div>
-                                                </TableCell>
+                                                <TableCell>{renderOrderActions(order)}</TableCell>
                                             </TableRow>
                                         ))
                                     )}
@@ -1031,7 +1406,173 @@ const ManageOrders = () => {
                             </Table>
                         </div>
                     </div>
-                </ScrollArea>
+                        </TabsContent>
+
+                        <TabsContent value="wallet" className="mt-4 space-y-4 sm:mt-6 sm:space-y-6">
+                            <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 xl:grid-cols-5">
+                                <Card>
+                                    <CardHeader className="pb-2">
+                                        <CardTitle className="text-sm font-medium">Total Top-ups</CardTitle>
+                                    </CardHeader>
+                                    <CardContent>
+                                        <div className="text-2xl font-bold">{walletStats.total}</div>
+                                    </CardContent>
+                                </Card>
+                                <Card>
+                                    <CardHeader className="pb-2">
+                                        <CardTitle className="text-sm font-medium">Confirmed</CardTitle>
+                                    </CardHeader>
+                                    <CardContent>
+                                        <div className="text-2xl font-bold text-green-600">{walletStats.confirmed}</div>
+                                    </CardContent>
+                                </Card>
+                                <Card>
+                                    <CardHeader className="pb-2">
+                                        <CardTitle className="text-sm font-medium">Pending</CardTitle>
+                                    </CardHeader>
+                                    <CardContent>
+                                        <div className="text-2xl font-bold text-yellow-600">{walletStats.pending}</div>
+                                    </CardContent>
+                                </Card>
+                                <Card>
+                                    <CardHeader className="pb-2">
+                                        <CardTitle className="text-sm font-medium">Failed</CardTitle>
+                                    </CardHeader>
+                                    <CardContent>
+                                        <div className="text-2xl font-bold text-red-600">{walletStats.failed}</div>
+                                    </CardContent>
+                                </Card>
+                                <Card>
+                                    <CardHeader className="pb-2">
+                                        <CardTitle className="text-sm font-medium">Credited</CardTitle>
+                                    </CardHeader>
+                                    <CardContent>
+                                        <div className="text-2xl font-bold">₹{walletStats.totalCredited.toLocaleString('en-IN')}</div>
+                                    </CardContent>
+                                </Card>
+                            </div>
+
+                            <div className="relative w-full max-w-xl">
+                                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                                <Input
+                                    placeholder="Search customer, txn ID, gateway ID, amount..."
+                                    value={searchTerm}
+                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                    className="pl-9"
+                                />
+                            </div>
+
+                            {/* Mobile wallet cards */}
+                            <div className="space-y-3 xl:hidden">
+                                {walletLoading ? (
+                                    <Card>
+                                        <CardContent className="flex h-32 items-center justify-center py-8">
+                                            <Loader2 className="h-6 w-6 animate-spin" />
+                                        </CardContent>
+                                    </Card>
+                                ) : filteredWalletRecharges.length === 0 ? (
+                                    <Card>
+                                        <CardContent className="py-8 text-center text-muted-foreground">
+                                            No wallet top-up transactions found
+                                        </CardContent>
+                                    </Card>
+                                ) : (
+                                    filteredWalletRecharges.map((recharge) => (
+                                        <Card key={recharge._id}>
+                                            <CardContent className="space-y-3 p-4">
+                                                <div className="flex items-start justify-between gap-3">
+                                                    <div className="min-w-0">
+                                                        <p className="truncate text-sm font-semibold">{recharge.user?.name || 'Unknown'}</p>
+                                                        <p className="truncate text-xs text-muted-foreground">{recharge.user?.email || '—'}</p>
+                                                    </div>
+                                                    {getWalletStatusBadge(recharge.status)}
+                                                </div>
+                                                <div className="flex flex-wrap items-center gap-2">
+                                                    <span className="text-lg font-bold tabular-nums">₹{recharge.amount.toLocaleString('en-IN')}</span>
+                                                    {recharge.entryType === 'admin_credit' ? (
+                                                        <Badge variant="secondary">Admin panel</Badge>
+                                                    ) : (
+                                                        <Badge variant="outline" className="capitalize">{recharge.paymentMethod}</Badge>
+                                                    )}
+                                                </div>
+                                                <div className="space-y-1.5 rounded-lg bg-muted/40 p-3 text-xs">
+                                                    <div className="break-all"><span className="text-muted-foreground">Payment Txn: </span>{recharge.transactionId || '—'}</div>
+                                                    <div className="break-all"><span className="text-muted-foreground">Client Txn: </span>{recharge.clientTxnId}</div>
+                                                    <div className="break-all"><span className="text-muted-foreground">Wallet Txn: </span>{recharge.walletTxnId || '—'}</div>
+                                                </div>
+                                                <p className="text-[11px] text-muted-foreground">
+                                                    {format(new Date(recharge.creditedAt || recharge.createdAt), 'MMM dd, yyyy HH:mm')}
+                                                </p>
+                                            </CardContent>
+                                        </Card>
+                                    ))
+                                )}
+                            </div>
+
+                            <div className="hidden xl:block w-full min-w-0 overflow-x-auto rounded-lg border">
+                                <Table className="min-w-[900px]">
+                                        <TableHeader>
+                                            <TableRow>
+                                                <TableHead>Customer</TableHead>
+                                                <TableHead>Amount</TableHead>
+                                                <TableHead>Status</TableHead>
+                                                <TableHead>Gateway</TableHead>
+                                                <TableHead>Payment Txn ID</TableHead>
+                                                <TableHead>Client Txn ID</TableHead>
+                                                <TableHead>Wallet Txn ID</TableHead>
+                                                <TableHead>Date</TableHead>
+                                            </TableRow>
+                                        </TableHeader>
+                                        <TableBody>
+                                            {walletLoading ? (
+                                                <TableRow>
+                                                    <TableCell colSpan={8} className="text-center py-8">
+                                                        <Loader2 className="w-6 h-6 animate-spin mx-auto" />
+                                                    </TableCell>
+                                                </TableRow>
+                                            ) : filteredWalletRecharges.length === 0 ? (
+                                                <TableRow>
+                                                    <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                                                        No wallet top-up transactions found
+                                                    </TableCell>
+                                                </TableRow>
+                                            ) : (
+                                                filteredWalletRecharges.map((recharge) => (
+                                                    <TableRow key={recharge._id}>
+                                                        <TableCell>
+                                                            <div className="text-sm font-medium">{recharge.user?.name || 'Unknown'}</div>
+                                                            <div className="text-xs text-muted-foreground">{recharge.user?.email || '—'}</div>
+                                                        </TableCell>
+                                                        <TableCell className="font-semibold">₹{recharge.amount.toLocaleString('en-IN')}</TableCell>
+                                                        <TableCell>{getWalletStatusBadge(recharge.status)}</TableCell>
+                                                        <TableCell>
+                                                            {recharge.entryType === 'admin_credit' ? (
+                                                                <Badge variant="secondary">Admin panel</Badge>
+                                                            ) : (
+                                                                <Badge variant="outline" className="capitalize">{recharge.paymentMethod}</Badge>
+                                                            )}
+                                                        </TableCell>
+                                                        <TableCell>
+                                                            <code className="text-xs">{recharge.transactionId || '—'}</code>
+                                                        </TableCell>
+                                                        <TableCell>
+                                                            <code className="text-xs">{recharge.clientTxnId}</code>
+                                                        </TableCell>
+                                                        <TableCell>
+                                                            <code className="text-xs">{recharge.walletTxnId || '—'}</code>
+                                                        </TableCell>
+                                                        <TableCell className="text-xs whitespace-nowrap">
+                                                            {format(new Date(recharge.creditedAt || recharge.createdAt), 'MMM dd, yyyy HH:mm')}
+                                                        </TableCell>
+                                                    </TableRow>
+                                                ))
+                                            )}
+                                        </TableBody>
+                                    </Table>
+                            </div>
+                        </TabsContent>
+                    </Tabs>
+                </div>
             </div>
 
             {/* Edit Dialog - FULLY EDITABLE */}
@@ -1104,6 +1645,59 @@ const ManageOrders = () => {
                                             </SelectContent>
                                         </Select>
                                     </div>
+                                </div>
+                            </div>
+
+                            {/* Payment & Transaction Details */}
+                            <div className="space-y-4">
+                                <h3 className="text-lg font-semibold border-b pb-2">Payment & Transaction Details</h3>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div className="space-y-2">
+                                        <Label>Payment Method</Label>
+                                        <Input value={editingOrder.paymentMethod || 'N/A'} readOnly className="bg-muted capitalize" />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label>Client Transaction ID</Label>
+                                        <Input value={editingOrder.clientTxnId || 'N/A'} readOnly className="bg-muted font-mono text-xs" />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label>Gateway Order ID</Label>
+                                        <Input value={editingOrder.gatewayOrderId || 'N/A'} readOnly className="bg-muted font-mono text-xs" />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label>Payment Transaction ID</Label>
+                                        <Input value={editingOrder.transactionId || 'N/A'} readOnly className="bg-muted font-mono text-xs" />
+                                    </div>
+                                    {(editingOrder.paymentDetails?.walletAmount ?? 0) > 0 && (
+                                        <div className="space-y-2">
+                                            <Label>Wallet Used</Label>
+                                            <Input
+                                                value={`₹${Number(editingOrder.paymentDetails?.walletAmount || 0).toLocaleString('en-IN')}`}
+                                                readOnly
+                                                className="bg-muted"
+                                            />
+                                        </div>
+                                    )}
+                                    {(editingOrder.paymentDetails?.gatewayAmount ?? 0) > 0 && (
+                                        <div className="space-y-2">
+                                            <Label>Gateway Paid</Label>
+                                            <Input
+                                                value={`₹${Number(editingOrder.paymentDetails?.gatewayAmount || 0).toLocaleString('en-IN')}`}
+                                                readOnly
+                                                className="bg-muted"
+                                            />
+                                        </div>
+                                    )}
+                                    {editingOrder.walletDeduction?.amount ? (
+                                        <div className="space-y-2 md:col-span-2">
+                                            <Label>Wallet Debit Txn ID</Label>
+                                            <Input
+                                                value={editingOrder.walletDeduction.transactionId || 'N/A'}
+                                                readOnly
+                                                className="bg-muted font-mono text-xs"
+                                            />
+                                        </div>
+                                    ) : null}
                                 </div>
                             </div>
 

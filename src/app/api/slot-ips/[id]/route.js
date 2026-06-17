@@ -1,17 +1,20 @@
 import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
+import { requireAdmin } from '@/lib/adminAuth';
+import { sanitizeSlotPackage } from '@/lib/apiSecurity';
 const SlotIPPackage = require('@/models/slotIpPackageModel');
 
 export async function GET(request, { params }) {
   await connectDB();
 
   try {
+    const admin = await requireAdmin(request);
     const { id } = await params;
-    const pkg = await SlotIPPackage.findById(id);
+    const pkg = await SlotIPPackage.findById(id).lean();
     if (!pkg) {
       return NextResponse.json({ error: 'Package not found' }, { status: 404 });
     }
-    return NextResponse.json(pkg);
+    return NextResponse.json(sanitizeSlotPackage(pkg, { includeIps: !!admin }));
   } catch (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
@@ -19,6 +22,11 @@ export async function GET(request, { params }) {
 
 export async function PUT(request, { params }) {
   await connectDB();
+
+  const admin = await requireAdmin(request);
+  if (!admin) {
+    return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
+  }
 
   try {
     const { id } = await params;
@@ -74,6 +82,11 @@ export async function PUT(request, { params }) {
 
 export async function DELETE(request, { params }) {
   await connectDB();
+
+  const admin = await requireAdmin(request);
+  if (!admin) {
+    return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
+  }
 
   try {
     const { id } = await params;

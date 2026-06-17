@@ -10,23 +10,9 @@ import {
   type WalletSummary,
 } from '@/lib/walletClient';
 
-/**
- * Compact wallet balance pill for the dashboard top bar. Clicks through
- * to `/dashboard/wallet`. The "+" stub on the right opens the recharge
- * page directly.
- *
- * Hydrates the balance on mount and listens to the global
- * `wallet:updated` event so any successful recharge / checkout / refund
- * elsewhere in the app refreshes the pill instantly.
- *
- * Renders nothing if the user is unauthenticated (the GET 401s) or
- * explicitly hidden via the `hidden` prop (we hide for resellers since
- * they have their own `/dashboard/reseller-wallet`).
- */
 export default function WalletBadge({
   className,
   hidden = false,
-  compact = false,
 }: {
   className?: string;
   hidden?: boolean;
@@ -57,31 +43,28 @@ export default function WalletBadge({
   });
 
   return (
-    <div className={cn('flex items-center', className)}>
+    <div className={cn('group/wallet flex items-center rounded-lg overflow-hidden shadow-sm hover:shadow-md hover:shadow-primary/15 transition-shadow duration-200', className)}>
       <Link
         href="/dashboard/wallet"
         className={cn(
-          'group flex items-center gap-1.5 h-8 pl-2 pr-2 rounded-l-full',
-          'border border-r-0 border-primary/30 bg-primary/5 hover:bg-primary/10 transition-colors',
+          'flex items-center gap-1 h-8 pl-2 pr-1.5 sm:pr-2',
+          'border border-r-0 border-primary/35 bg-gradient-to-r from-primary/20 to-primary/10',
+          'hover:from-primary/30 hover:to-primary/15 transition-all',
           'text-xs font-semibold'
         )}
         title={`Wallet balance: ₹${formatted}`}
       >
-        <Wallet className="h-3.5 w-3.5 text-primary" />
-        {!compact && (
-          <span className="text-primary">
-            ₹{formatted}
-          </span>
-        )}
-        {compact && (
-          <span className="text-primary">₹{formatted}</span>
-        )}
+        <Wallet className="h-3.5 w-3.5 text-primary-foreground/80 dark:text-primary shrink-0" />
+        <span className="text-primary-foreground dark:text-primary-foreground tabular-nums">
+          ₹{formatted}
+        </span>
       </Link>
       <Link
         href="/dashboard/wallet"
         className={cn(
-          'flex items-center justify-center h-8 w-7 rounded-r-full',
-          'border border-primary/30 bg-primary text-primary-foreground hover:bg-primary/90 transition-colors'
+          'flex items-center justify-center h-8 w-7 sm:w-8',
+          'border border-primary/35 bg-gradient-to-br from-primary to-primary/85 text-primary-foreground',
+          'hover:from-primary/95 hover:to-primary/75 hover:scale-105 transition-all duration-200'
         )}
         title="Add money to wallet"
       >

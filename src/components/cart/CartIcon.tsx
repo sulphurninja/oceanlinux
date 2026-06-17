@@ -60,17 +60,23 @@ export default function CartIcon({
   return (
     <Link href="/dashboard/cart" className={cn('relative inline-flex', className)}>
       <Button
-        variant={variant}
+        variant="ghost"
         size={showLabel ? 'sm' : 'icon'}
-        className={cn('relative', showLabel && 'gap-2')}
+        className={cn(
+          'relative h-8 w-8 rounded-lg border transition-all duration-200',
+          count > 0
+            ? 'border-primary/30 bg-primary/5 hover:bg-primary/15 hover:border-primary/50 hover:scale-105'
+            : 'border-border/60 hover:bg-muted/50 hover:border-primary/30',
+          showLabel && 'gap-2 px-3 w-auto'
+        )}
       >
-        <ShoppingCart className="h-4 w-4" />
+        <ShoppingCart className={cn('h-4 w-4', count > 0 ? 'text-primary' : 'text-foreground/80')} />
         {showLabel && <span className="text-sm">Cart</span>}
         {count > 0 && (
           <span className={cn(
-            'absolute -top-1 -right-1 min-w-[18px] h-[18px] flex items-center justify-center',
-            'rounded-full bg-primary text-primary-foreground text-[10px] font-bold px-1',
-            'border-2 border-background'
+            'absolute -top-1 -right-1 min-w-[17px] h-[17px] flex items-center justify-center',
+            'rounded-full bg-primary text-primary-foreground text-[10px] font-semibold px-1',
+            'border-2 border-background shadow-sm'
           )}>
             {count > 99 ? '99+' : count}
           </span>

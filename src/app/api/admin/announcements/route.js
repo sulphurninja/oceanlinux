@@ -3,32 +3,34 @@ import Announcement from '@/models/announcementModel';
 import User from '@/models/userModel';
 import EmailService from '@/lib/sendgrid';
 import NotificationService from '@/services/notificationService'; // Add this import
-import { getDataFromToken } from '@/helper/getDataFromToken';
+import { enforceAdmin } from '@/lib/apiSecurity';
+import { requireAdmin } from '@/lib/adminAuth';
+import {
+  normalizeOrderPopupFields,
+  prepareOrderPopupCreate,
+} from '@/lib/announcementOrderPopup';
 
 export async function GET(request) {
   try {
+    const denied = await enforceAdmin(request);
+    if (denied) return denied;
+
     await connectDB();
 
-    const userId = await getDataFromToken(request);
-    if (!userId) {
-      return new Response(JSON.stringify({ message: 'Unauthorized' }), {
-        status: 401,
-        headers: { 'Content-Type': 'application/json' }
-      });
+    let announcements;
+    try {
+      announcements = await Announcement.find()
+        .populate('targetCompany', 'name slug')
+        .sort({ createdAt: -1 })
+        .limit(100)
+        .lean();
+    } catch (populateErr) {
+      console.warn('[announcements] populate failed, returning without company names:', populateErr.message);
+      announcements = await Announcement.find()
+        .sort({ createdAt: -1 })
+        .limit(100)
+        .lean();
     }
-
-    // Check if user is admin (you might want to add admin check logic here)
-    const user = await User.findById(userId);
-    if (!user) {
-      return new Response(JSON.stringify({ message: 'User not found' }), {
-        status: 404,
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
-
-    const announcements = await Announcement.find()
-      .sort({ createdAt: -1 })
-      .limit(50);
 
     return new Response(JSON.stringify(announcements), {
       status: 200,
@@ -46,15 +48,12 @@ export async function GET(request) {
 
 export async function POST(request) {
   try {
+    const denied = await enforceAdmin(request);
+    if (denied) return denied;
+
     await connectDB();
 
-    const userId = await getDataFromToken(request);
-    if (!userId) {
-      return new Response(JSON.stringify({ message: 'Unauthorized' }), {
-        status: 401,
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
+    const adminUser = await requireAdmin(request);
 
     const {
       title,
@@ -66,11 +65,26 @@ export async function POST(request) {
       actionText,
       scheduledFor,
       showAsLoginPopup,
-      communityLink
+      communityLink,
+      showOnOrderPage,
+      targetProvider,
+      targetCompany,
     } = await request.json();
 
     if (!title || !content) {
       return new Response(JSON.stringify({ message: 'Title and content are required' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
+    const orderPopupFields = normalizeOrderPopupFields({
+      showOnOrderPage,
+      targetProvider,
+      targetCompany,
+    });
+    if (orderPopupFields.error) {
+      return new Response(JSON.stringify({ message: orderPopupFields.error }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' }
       });
@@ -87,7 +101,8 @@ export async function POST(request) {
       showAsLoginPopup: Boolean(showAsLoginPopup),
       communityLink: communityLink || '',
       scheduledFor: scheduledFor ? new Date(scheduledFor) : null,
-      createdBy: userId
+      createdBy: adminUser._id,
+      ...orderPopupFields,
     });
 
     await announcement.save();
@@ -95,8 +110,8 @@ export async function POST(request) {
     // If status is 'sent', send emails/notifications only for normal announcements.
     // Login popup announcements are published without broadcasting.
     if (status === 'sent') {
-      if (announcement.showAsLoginPopup) {
-        announcement.sentAt = new Date();
+      if (announcement.showAsLoginPopup || announcement.showOnOrderPage) {
+        await prepareOrderPopupCreate(announcement, 'sent');
         announcement.status = 'sent';
         await announcement.save();
       } else {
@@ -108,7 +123,9 @@ export async function POST(request) {
     const responseMessage =
       status === 'sent' && announcement.showAsLoginPopup
         ? 'Login popup published successfully'
-        : 'Announcement created successfully';
+        : status === 'sent' && announcement.showOnOrderPage
+          ? 'Manage order news published successfully'
+          : 'Announcement created successfully';
 
     return new Response(JSON.stringify({
       message: responseMessage,

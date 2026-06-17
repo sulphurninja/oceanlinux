@@ -1,12 +1,16 @@
 import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import { checkAdvpsPendingOrders } from '@/lib/advpsPendingOrdersCron';
+import { enforceCronSecret } from '@/lib/apiSecurity';
 
 /**
  * ADVPS-only follow-up cron: completes orders stuck in ADVPS_PENDING (awaiting IP/assignment).
  * Use from AWS Lambda every ~15 min to stay under ADVPS rate limits; main auto-provision-cron still runs Phase 0 too unless you remove it there later.
  */
-export async function POST() {
+export async function POST(request) {
+  const cronDenied = enforceCronSecret(request);
+  if (cronDenied) return cronDenied;
+
   const cronId = Math.random().toString(36).substring(2, 8);
   const started = Date.now();
   try {
@@ -40,6 +44,6 @@ export async function POST() {
   }
 }
 
-export async function GET() {
-  return POST();
+export async function GET(request) {
+  return POST(request);
 }

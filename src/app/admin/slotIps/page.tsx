@@ -22,6 +22,7 @@ import {
   Collapsible, CollapsibleContent, CollapsibleTrigger,
 } from '@/components/ui/collapsible';
 import { toast } from 'sonner';
+import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 import { cn } from '@/lib/utils';
 
 interface SlotIP {
@@ -58,6 +59,7 @@ interface SlotIPPackage {
 }
 
 export default function AdminSlotIpsPage() {
+  const { confirm, ConfirmDialog } = useConfirmDialog();
   const [packages, setPackages] = useState<SlotIPPackage[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
@@ -212,7 +214,13 @@ export default function AdminSlotIpsPage() {
   };
 
   const handleDelete = async (pkg: SlotIPPackage) => {
-    if (!confirm(`Delete "${pkg.name}"? This cannot be undone.`)) return;
+    const ok = await confirm({
+      title: 'Delete Package',
+      description: <>Delete <strong>{pkg.name}</strong>? This cannot be undone.</>,
+      confirmLabel: 'Delete',
+      destructive: true,
+    });
+    if (!ok) return;
 
     try {
       const res = await fetch(`/api/slot-ips/${pkg._id}`, { method: 'DELETE' });
@@ -620,6 +628,7 @@ export default function AdminSlotIpsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <ConfirmDialog />
     </div>
   );
 }

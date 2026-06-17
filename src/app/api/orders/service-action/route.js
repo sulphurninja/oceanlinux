@@ -3,7 +3,9 @@ import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 import IPStock from '@/models/ipStockModel';
 import Company from '@/models/companyModel';
+import User from '@/models/userModel';
 import { getDataFromToken } from '@/helper/getDataFromToken';
+import { isAdminUser } from '@/lib/adminAuth';
 import { execSync } from 'child_process';
 
 /** Hostycare reinstall probes multiple Virtualizor panels + may POST reinstall. */
@@ -22,6 +24,30 @@ const { getCompanyResellerApiConfig } = require('@/lib/companyResellerApi');
 const ResellerApi = require('@/services/resellerApi');
 const { getCompanyNetbayApiConfig } = require('@/lib/companyNetbayApi');
 const NetbayApi = require('@/services/netbayApi');
+
+async function resolveOrderForAction(request, orderId) {
+  let userId;
+  try {
+    userId = await getDataFromToken(request);
+  } catch {
+    return { error: NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 }) };
+  }
+
+  const user = await User.findById(userId).lean();
+  if (!user) {
+    return { error: NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 }) };
+  }
+
+  const order = isAdminUser(user)
+    ? await Order.findById(orderId)
+    : await Order.findOne({ _id: orderId, user: userId });
+
+  if (!order) {
+    return { error: NextResponse.json({ success: false, error: 'Order not found' }, { status: 404 }) };
+  }
+
+  return { order, userId };
+}
 
 /**
  * Resolve every per-company Virtualizor panel configured against the order's
@@ -298,17 +324,14 @@ export async function POST(request) {
   try {
     await connectDB();
 
-    // ✅ Read ONCE
     const body = await request.json();
     const { orderId, action, templateId, newPassword, payload } = body;
 
-    console.log(`[SERVICE-ACTION][POST] Action: ${action}, Order: ${orderId}, Template: ${templateId}`);
+    const resolved = await resolveOrderForAction(request, orderId);
+    if (resolved.error) return resolved.error;
+    const order = resolved.order;
 
-    // Get order details
-    const order = await Order.findById(orderId);
-    if (!order) {
-      return NextResponse.json({ success: false, error: 'Order not found' }, { status: 404 });
-    }
+    console.log(`[SERVICE-ACTION][POST] Action: ${action}, Order: ${orderId}, Template: ${templateId}`);
 
     // Debug order details
     console.log(`[SERVICE-ACTION][POST] Order productName: ${order.productName}`);
@@ -1593,12 +1616,11 @@ export async function GET(request) {
 
     await connectDB();
 
-    console.log(`[SERVICE-ACTION][GET] Loading service details for order: ${orderId}`);
+    const resolved = await resolveOrderForAction(request, orderId);
+    if (resolved.error) return resolved.error;
+    const order = resolved.order;
 
-    const order = await Order.findById(orderId);
-    if (!order) {
-      return NextResponse.json({ success: false, error: 'Order not found' }, { status: 404 });
-    }
+    console.log(`[SERVICE-ACTION][GET] Loading service details for order: ${orderId}`);
 
     // Resolve IP from common locations on the order document.
     let ipAddress = order.ipAddress

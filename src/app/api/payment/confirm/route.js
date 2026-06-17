@@ -4,12 +4,21 @@ import Order from '@/models/orderModel';
 import { Cashfree } from 'cashfree-pg';
 import crypto from 'crypto';
 import NotificationService from '@/services/notificationService';
-import { calculateExpiryDate } from '@/lib/expiryHelper';
 import { assignPanelCredentials } from '@/lib/panelCredentials';
 import { decrementIpStockForOrder } from '@/lib/ipStockAvailability';
+const { resolveOrderExpiryOnPayment } = require('@/lib/advpsOrderExpiry');
 const AutoProvisioningService = require('@/services/autoProvisioningService');
 const SlotIPPackage = require('@/models/slotIpPackageModel');
 const WhatsAppService = require('@/services/whatsappService');
+import { enforceOrderAccess } from '@/lib/apiSecurity';
+
+function resolveGatewayMethod(paymentMethod, order) {
+  const raw = String(paymentMethod || order?.paymentMethod || 'razorpay').toLowerCase();
+  if (raw.includes('razorpay')) return 'razorpay';
+  if (raw.includes('upi')) return 'upi';
+  if (raw.includes('cashfree')) return 'cashfree';
+  return 'razorpay';
+}
 
 // Initialize Cashfree
 Cashfree.XClientId = process.env.CASHFREE_APP_ID;
@@ -49,10 +58,22 @@ export async function POST(request) {
       );
     }
 
+    const accessDenied = await enforceOrderAccess(request, order);
+    if (accessDenied) return accessDenied;
+
     console.log(`[Payment Confirm] Found order: ${order._id}, Payment method: ${order.paymentMethod || paymentMethod || 'cashfree'}`);
 
-    // Determine payment method (use from body, order, or default to razorpay)
-    const method = paymentMethod || order.paymentMethod || 'razorpay';
+    // Determine payment method (wallet+razorpay → razorpay, etc.)
+    const method = resolveGatewayMethod(paymentMethod, order);
+
+    if (order.status === 'confirmed' || order.status === 'active') {
+      return NextResponse.json({
+        success: true,
+        message: 'Payment already confirmed',
+        orderId: order._id,
+        alreadyProcessed: true,
+      });
+    }
 
     // Verify payment based on method
     if (method === 'upi') {
@@ -88,8 +109,17 @@ export async function POST(request) {
     } else if (method === 'razorpay') {
       console.log(`Verifying Razorpay payment for order: ${orderIdentifier}`);
       
-      // Verify signature
+      // Verify signature — if missing (callback recovery), probe Razorpay API directly
       if (!razorpay_payment_id || !razorpay_order_id || !razorpay_signature) {
+        const recovery = await recoverPendingOrderPayment(order, { maxAttempts: 3, delayMs: 1000 });
+        if (recovery.confirmed) {
+          return NextResponse.json({
+            success: true,
+            message: 'Payment confirmed via gateway recovery',
+            orderId: order._id,
+            recovered: true,
+          });
+        }
         return NextResponse.json(
           { success: false, message: 'Missing Razorpay payment details' },
           { status: 400 }
@@ -110,27 +140,28 @@ export async function POST(request) {
         );
       }
 
-      // Calculate expiry based on the number of days in the current month
-      const expiryDate = calculateExpiryDate();
+      // ADVPS: expiry comes from upstream when service is linked; others use days-in-month
+      const expiryDate = await resolveOrderExpiryOnPayment(order);
 
       // Update order status and store payment details
       order.status = 'confirmed';
       order.transactionId = razorpay_payment_id;
       order.gatewayOrderId = razorpay_order_id;
       order.paymentMethod = order.walletDeduction?.deducted ? `wallet+razorpay` : 'razorpay';
-      order.expiryDate = expiryDate;
+      if (expiryDate) order.expiryDate = expiryDate;
       order.paymentDetails = {
-        razorpay_payment_id: razorpay_payment_id,
-        razorpay_order_id: razorpay_order_id,
-        razorpay_signature: razorpay_signature,
-        confirmedAt: new Date()
+        ...(order.paymentDetails || {}),
+        razorpay_payment_id,
+        razorpay_order_id,
+        razorpay_signature,
+        confirmedAt: new Date(),
       };
       await assignPanelCredentials(order);
       await order.save();
       await decrementIpStockForOrder(order);
 
       console.log(`Order ${order._id} confirmed with Razorpay payment ${razorpay_payment_id} (order: ${razorpay_order_id})`);
-      console.log(`Order expiry set to: ${expiryDate.toISOString()}`);
+      console.log(`Order expiry set to: ${expiryDate ? expiryDate.toISOString() : 'deferred (ADVPS upstream)'}`);
 
     } else {
       // Cashfree verification
@@ -157,15 +188,15 @@ export async function POST(request) {
           );
         }
 
-        // Calculate expiry based on the number of days in the current month
-        const expiryDate = calculateExpiryDate();
+        // ADVPS: expiry comes from upstream when service is linked; others use days-in-month
+        const expiryDate = await resolveOrderExpiryOnPayment(order);
 
         // Update order status and store payment details
         order.status = 'confirmed';
         order.transactionId = payment.cf_payment_id;
         order.gatewayOrderId = order.clientTxnId;
         order.paymentMethod = order.walletDeduction?.deducted ? `wallet+cashfree` : 'cashfree';
-        order.expiryDate = expiryDate;
+        if (expiryDate) order.expiryDate = expiryDate;
         order.paymentDetails = {
           cf_payment_id: payment.cf_payment_id,
           cf_order_id: order.clientTxnId,
@@ -182,7 +213,7 @@ export async function POST(request) {
         await decrementIpStockForOrder(order);
 
         console.log(`Order ${order._id} confirmed with Cashfree payment ${payment.cf_payment_id} (order: ${order.clientTxnId})`);
-        console.log(`Order expiry set to: ${expiryDate.toISOString()}`);
+        console.log(`Order expiry set to: ${expiryDate ? expiryDate.toISOString() : 'deferred (ADVPS upstream)'}`);
 
       } catch (cashfreeError) {
         console.error('Cashfree verification error:', cashfreeError);

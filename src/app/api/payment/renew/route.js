@@ -3,6 +3,7 @@ import connectDB from '@/lib/db';
 import { getDataFromToken } from '@/helper/getDataFromToken';
 import Order from '@/models/orderModel';
 import User from '@/models/userModel';
+import userWalletService from '@/services/userWalletService';
 import { createGatewayOrder } from '@/lib/paymentGateways';
 import { detectCompanyManagedRenewal, resolveRenewalProvider } from '@/lib/companyRenewal';
 import {
@@ -13,13 +14,32 @@ import {
 import { isSlotIpOrder, SLOT_IP_NO_RENEWAL_MESSAGE } from '@/lib/slotIpOrder';
 import { resolveOrderRenewalPrice } from '@/lib/orderRenewalPricingServer';
 
+async function refundRenewalWalletReservation(userId, amount, renewalTxnId) {
+  if (!amount || amount <= 0) return;
+  try {
+    await userWalletService.refund(userId, amount, {
+      description: `Renewal wallet refund ${renewalTxnId}`,
+      reference: renewalTxnId,
+    });
+  } catch (err) {
+    console.error('[RENEWAL-INIT] Wallet refund failed:', err.message);
+  }
+}
+
 export async function POST(request) {
   await connectDB();
   console.log("MongoDB connected");
 
+  let walletApplied = 0;
+  let walletDebit = null;
+  let renewalTxnId = null;
+  let userId = null;
+  let orderId = null;
+  let pendingSaved = false;
+
   try {
     // 1. Check which user is making this renewal request
-    const userId = await getDataFromToken(request);
+    userId = await getDataFromToken(request);
     if (!userId) {
       return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
     }
@@ -32,7 +52,8 @@ export async function POST(request) {
 
     // 3. Read request data
     const reqBody = await request.json();
-    const { orderId, paymentMethod = 'cashfree' } = reqBody;
+    const { orderId: reqOrderId, paymentMethod = 'cashfree', useWallet = false } = reqBody;
+    orderId = reqOrderId;
     
     console.log(`[RENEWAL-INIT] Payment method requested: ${paymentMethod}`);
 
@@ -97,7 +118,7 @@ export async function POST(request) {
     }
 
     // 8. Generate a unique renewal transaction ID
-    const renewalTxnId = `RENEWAL_${Date.now()}_${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+    renewalTxnId = `RENEWAL_${Date.now()}_${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
 
     // 9. Use the original order price for renewal
     const renewalPrice = await resolveOrderRenewalPrice(order);
@@ -114,55 +135,131 @@ export async function POST(request) {
       ? paymentMethod
       : 'cashfree';
 
-    let gatewayResult;
-    try {
-      gatewayResult = await createGatewayOrder({
-        preferredMethod,
-        clientTxnId: renewalTxnId,
-        amount: Math.round(renewalPrice * 100) / 100,
-        customer: {
-          id: String(userId),
-          name: user.name,
-          email: user.email,
-          phone: user.phone || '9999999999',
-        },
-        callbackPath: `/payment/callback?order_id=${order._id}`,
-        notifyPath: '/api/payment/webhook',
-        notes: {
-          order_id: String(order._id),
-          renewal_for: String(order.productName),
-          memory: String(order.memory),
-          renewal_type: 'service_renewal',
-          provider: String(provider),
-          service_identifier: String(
-            provider === 'smartvps' ? (order.smartvpsServiceId || order.ipAddress || '') : ''
-          ),
-        },
-        description: `Renewal: ${order.productName} - ${order.memory}`,
-      });
-    } catch (err) {
-      console.error('[RENEWAL-INIT] All payment gateways failed:', err.message);
-      return NextResponse.json(
-        { message: 'All payment gateways failed. Please try again later.', error: err.message },
-        { status: 500 }
-      );
+    if (useWallet) {
+      const balance = await userWalletService.getBalance(userId);
+      walletApplied = Math.min(balance, renewalPrice);
+    }
+    const gatewayCharge = Math.max(0, Math.round((renewalPrice - walletApplied) * 100) / 100);
+
+    // Only debit wallet immediately for wallet-only renewals.
+    // When gateway payment is also required, wallet is debited on renew-confirm
+    // after gateway success — so cancelling Razorpay does not steal wallet funds.
+    if (walletApplied > 0 && gatewayCharge === 0) {
+      try {
+        walletDebit = await userWalletService.debit(userId, walletApplied, {
+          description: `Renewal ${order.productName} - ${order.memory}`,
+          reference: renewalTxnId,
+          metadata: {
+            orderId: String(order._id),
+            renewalTxnId,
+            totalPrice: renewalPrice,
+            gatewayCharge,
+          },
+        });
+        console.log(`[RENEWAL-INIT] Wallet debited ₹${walletApplied}, txn=${walletDebit.walletTxnId}`);
+      } catch (err) {
+        return NextResponse.json(
+          { message: err.message || 'Insufficient wallet balance' },
+          { status: 400 }
+        );
+      }
+    } else if (walletApplied > 0) {
+      console.log(`[RENEWAL-INIT] Wallet ₹${walletApplied} reserved — debited after gateway payment confirms`);
     }
 
-    const actualPaymentMethod = gatewayResult.method;
-    console.log(`[RENEWAL-INIT] ✅ Final payment method: ${actualPaymentMethod}`);
+    let gatewayResult = null;
+    let actualPaymentMethod = gatewayCharge === 0 ? 'wallet' : preferredMethod;
+
+    if (gatewayCharge > 0) {
+      try {
+        gatewayResult = await createGatewayOrder({
+          preferredMethod,
+          clientTxnId: renewalTxnId,
+          amount: gatewayCharge,
+          customer: {
+            id: String(userId),
+            name: user.name,
+            email: user.email,
+            phone: user.phone || '9999999999',
+          },
+          callbackPath: `/payment/callback?order_id=${order._id}`,
+          notifyPath: '/api/payment/webhook',
+          notes: {
+            order_id: String(order._id),
+            renewal_for: String(order.productName),
+            memory: String(order.memory),
+            renewal_type: 'service_renewal',
+            provider: String(provider),
+            wallet_amount: String(walletApplied),
+            gateway_amount: String(gatewayCharge),
+            service_identifier: String(
+              provider === 'smartvps' ? (order.smartvpsServiceId || order.ipAddress || '') : ''
+            ),
+          },
+          description: `Renewal: ${order.productName} - ${order.memory}`,
+        });
+      } catch (err) {
+        if (walletDebit) {
+          await refundRenewalWalletReservation(userId, walletApplied, renewalTxnId);
+        }
+        console.error('[RENEWAL-INIT] All payment gateways failed:', err.message);
+        return NextResponse.json(
+          { message: 'All payment gateways failed. Please try again later.', error: err.message },
+          { status: 500 }
+        );
+      }
+
+      actualPaymentMethod = gatewayResult.method;
+      console.log(`[RENEWAL-INIT] ✅ Final payment method: ${actualPaymentMethod}`);
+    } else {
+      console.log('[RENEWAL-INIT] ✅ Wallet-only renewal — no gateway charge');
+    }
+
+    const paymentMethodLabel =
+      walletApplied > 0 && gatewayCharge > 0
+        ? `wallet+${actualPaymentMethod}`
+        : walletApplied > 0
+          ? 'wallet'
+          : actualPaymentMethod;
 
     const pendingRenewalData = {
       renewalTxnId,
       initiatedAt: new Date(),
-      paymentMethod: actualPaymentMethod,
+      paymentMethod: paymentMethodLabel,
       amount: renewalPrice,
-      gatewayOrderId: gatewayResult.gatewayOrderId,
+      gatewayAmount: gatewayCharge,
+      walletAmount: walletApplied,
+      walletDeducted: !!walletDebit,
+      walletPending: walletApplied > 0 && gatewayCharge > 0,
+      walletTxnId: walletDebit?.walletTxnId || '',
+      gatewayOrderId: gatewayResult?.gatewayOrderId || '',
     };
 
     await Order.findByIdAndUpdate(orderId, {
       pendingRenewal: pendingRenewalData,
     });
+    pendingSaved = true;
     console.log('[RENEWAL-INIT] ✅ Stored pending renewal info on order:', pendingRenewalData);
+
+    if (gatewayCharge === 0) {
+      return NextResponse.json({
+        message: 'Renewal paid from wallet',
+        orderId: order._id,
+        renewalTxnId,
+        provider,
+        paymentMethod: 'wallet',
+        walletOnly: true,
+        walletApplied,
+        gatewayCharge: 0,
+        renewalDetails: {
+          serviceName: order.productName,
+          memory: order.memory,
+          currentExpiry: order.expiryDate,
+          renewalPrice,
+          provider,
+        },
+      });
+    }
 
     return NextResponse.json({
       message: 'Renewal payment initiated',
@@ -170,6 +267,8 @@ export async function POST(request) {
       renewalTxnId,
       provider,
       paymentMethod: actualPaymentMethod,
+      walletApplied,
+      gatewayCharge,
       fallbackUsed: gatewayResult.fallbackUsed,
       originalMethod: gatewayResult.originalMethod,
       ...gatewayResult.payload,
@@ -189,6 +288,9 @@ export async function POST(request) {
 
   } catch (error) {
     console.error('Error initiating renewal payment:', error);
+    if (userId && walletDebit && walletApplied > 0 && !pendingSaved) {
+      await refundRenewalWalletReservation(userId, walletApplied, renewalTxnId || 'unknown');
+    }
     return NextResponse.json(
       { message: 'Server error', error: error.message },
       { status: 500 }

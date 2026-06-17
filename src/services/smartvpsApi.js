@@ -101,10 +101,13 @@ class SmartVpsAPI {
   // Power
   start(ip) { return httpFetch('api/oceansmart/start', { jsonBody: { ip } }); }
   stop(ip) { return httpFetch('api/oceansmart/stop', { jsonBody: { ip } }); }
-  format(ip) { return httpFetch('api/oceansmart/format', { jsonBody: { ip } }); }
+  format(ip, os) {
+    const jsonBody = os ? { ip, os: String(os) } : { ip };
+    return httpFetch('api/oceansmart/format', { jsonBody });
+  }
   status(ip) { return httpFetch('api/oceansmart/status', { jsonBody: { ip } }); }
 
-  // OS change — os ∈ {2012,2016,2019,2022,11,centos,ubuntu}
+  // OS change — prefer format+os; changeOS alone often returns "error" for Linux on SmartVPS
   changeOS(ip, os) { return httpFetch('api/oceansmart/changeos', { jsonBody: { ip, os } }); }
 
   // Buy (call ipstock first and pick a usable IP; ram string/number)

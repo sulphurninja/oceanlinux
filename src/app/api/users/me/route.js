@@ -20,8 +20,8 @@ export async function GET(request) {
             });
         }
 
-        // Find user by ID
-        const user = await User.findOne({ _id: userId }).lean();
+        // Find user by ID (never return password hash)
+        const user = await User.findOne({ _id: userId }).select('-password').lean();
         if (!user) {
             return new Response(JSON.stringify({ 
                 message: 'User not found',

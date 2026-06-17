@@ -29,7 +29,9 @@ export default function AdminSettingsPage() {
   const fetchSettings = async () => {
     try {
       setLoading(true);
-      const response = await fetch('/api/admin/settings');
+      const response = await fetch('/api/admin/settings', {
+        credentials: 'include',
+      });
       if (response.ok) {
         const data = await response.json();
         setSettings(data.settings);
@@ -60,6 +62,7 @@ export default function AdminSettingsPage() {
       setSaving(key);
       const response = await fetch('/api/admin/settings', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           key,

@@ -4,8 +4,7 @@ import Order from '@/models/orderModel';
 import IPStock from '@/models/ipStockModel';
 import { Cashfree } from 'cashfree-pg';
 import { getRazorpayClient } from '@/lib/razorpayClient';
-import { getDataFromToken } from '@/helper/getDataFromToken';
-import User from '@/models/userModel';
+import { enforceAdmin } from '@/lib/apiSecurity';
 import { resolveOrderRenewalPrice } from '@/lib/orderRenewalPricingServer';
 import { isSlotIpOrder } from '@/lib/slotIpOrder';
 
@@ -173,16 +172,8 @@ export async function GET(request) {
   await connectDB();
 
   try {
-    // Verify admin
-    const userId = await getDataFromToken(request);
-    if (!userId) {
-      return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
-    }
-
-    const user = await User.findById(userId);
-    if (!user?.isAdmin) {
-      return NextResponse.json({ message: 'Admin access required' }, { status: 403 });
-    }
+    const denied = await enforceAdmin(request);
+    if (denied) return denied;
 
     // Find orders with pending renewals
     const pendingOrders = await Order.find({
@@ -243,16 +234,8 @@ export async function POST(request) {
   await connectDB();
 
   try {
-    // Verify admin
-    const userId = await getDataFromToken(request);
-    if (!userId) {
-      return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
-    }
-
-    const user = await User.findById(userId);
-    if (!user?.isAdmin) {
-      return NextResponse.json({ message: 'Admin access required' }, { status: 403 });
-    }
+    const denied = await enforceAdmin(request);
+    if (denied) return denied;
 
     const { orderId, processAll } = await request.json();
 
@@ -360,16 +343,8 @@ export async function DELETE(request) {
   await connectDB();
 
   try {
-    // Verify admin
-    const userId = await getDataFromToken(request);
-    if (!userId) {
-      return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
-    }
-
-    const user = await User.findById(userId);
-    if (!user?.isAdmin) {
-      return NextResponse.json({ message: 'Admin access required' }, { status: 403 });
-    }
+    const denied = await enforceAdmin(request);
+    if (denied) return denied;
 
     const { olderThanMinutes = 60 } = await request.json().catch(() => ({}));
 
@@ -394,10 +369,9 @@ export async function DELETE(request) {
         continue;
       }
 
-      // Clear the stale pending renewal
-      await Order.findByIdAndUpdate(order._id, {
-        $unset: { pendingRenewal: 1 }
-      });
+      // Clear stale pending renewal and refund any wallet debit
+      const { cancelPendingRenewal } = await import('@/lib/cancelPendingOrder');
+      await cancelPendingRenewal(order, 'stale_timeout');
       clearedCount++;
     }
 

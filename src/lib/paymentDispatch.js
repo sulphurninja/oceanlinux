@@ -3,9 +3,9 @@ import WalletRecharge from '@/models/walletRechargeModel';
 import Order from '@/models/orderModel';
 import Cart from '@/models/cartModel';
 import userWalletService from '@/services/userWalletService';
-import { calculateExpiryDate } from '@/lib/expiryHelper';
 import NotificationService from '@/services/notificationService';
 import { decrementIpStockForOrder } from '@/lib/ipStockAvailability';
+const { resolveOrderExpiryOnPayment } = require('@/lib/advpsOrderExpiry');
 
 const AutoProvisioningService = require('@/services/autoProvisioningService');
 const SlotIPPackage = require('@/models/slotIpPackageModel');
@@ -114,8 +114,6 @@ export async function confirmCheckoutFromWebhook(session, { paymentMethod, trans
     return { success: false, reason: `session is ${session.status}` };
   }
 
-  const expiryDate = calculateExpiryDate();
-
   // Mark session confirmed first (atomic-ish — orders update next).
   session.status = 'confirmed';
   session.confirmedAt = new Date();
@@ -141,7 +139,8 @@ export async function confirmCheckoutFromWebhook(session, { paymentMethod, trans
     }
 
     order.status = 'confirmed';
-    order.expiryDate = expiryDate;
+    const orderExpiry = await resolveOrderExpiryOnPayment(order);
+    if (orderExpiry) order.expiryDate = orderExpiry;
     if (transactionId) order.transactionId = transactionId;
     if (paymentMethod) order.paymentMethod = paymentMethod;
     order.paymentDetails = {

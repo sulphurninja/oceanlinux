@@ -1,9 +1,15 @@
 import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
+import { enforceAdmin, isCronAuthorized } from '@/lib/apiSecurity';
 const AutoProvisioningService = require('@/services/autoProvisioningService');
 
 export async function POST(request) {
+  if (!isCronAuthorized(request)) {
+    const denied = await enforceAdmin(request);
+    if (denied) return denied;
+  }
+
   await connectDB();
 
   try {

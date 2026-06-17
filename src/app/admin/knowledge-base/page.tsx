@@ -27,6 +27,7 @@ import {
   Clock
 } from "lucide-react";
 import { toast } from 'sonner';
+import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 import Link from "next/link";
 import {
   DropdownMenu,
@@ -47,7 +48,7 @@ interface Article {
   author: {
     name: string;
     email: string;
-  };
+  } | null;
   published: boolean;
   featured: boolean;
   views: number;
@@ -76,6 +77,7 @@ const categories = [
 ];
 
 export default function AdminKnowledgeBasePage() {
+  const { confirm, ConfirmDialog } = useConfirmDialog();
   const [articles, setArticles] = useState<Article[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
@@ -196,8 +198,16 @@ export default function AdminKnowledgeBasePage() {
     }
   };
 
-  const deleteArticle = async (articleId: string) => {
-    if (!confirm('Are you sure you want to delete this article?')) return;
+  const deleteArticle = async (articleId: string, title?: string) => {
+    const ok = await confirm({
+      title: 'Delete Article',
+      description: title
+        ? <>Are you sure you want to delete <strong>{title}</strong>? This cannot be undone.</>
+        : 'Are you sure you want to delete this article? This cannot be undone.',
+      confirmLabel: 'Delete',
+      destructive: true,
+    });
+    if (!ok) return;
 
     try {
       const response = await fetch(`/api/admin/knowledge-base/${articleId}`, {
@@ -403,7 +413,7 @@ export default function AdminKnowledgeBasePage() {
                     <div className="flex items-center space-x-4 text-xs text-muted-foreground">
                       <span className="flex items-center">
                         <Users className="w-3 h-3 mr-1" />
-                        {article.author.name}
+                        {article.author?.name || "Unknown author"}
                       </span>
                       <span className="flex items-center">
                         <BookOpen className="w-3 h-3 mr-1" />
@@ -469,7 +479,7 @@ export default function AdminKnowledgeBasePage() {
                       </Link>
                       <DropdownMenuSeparator />
                       <DropdownMenuItem
-                        onClick={() => deleteArticle(article._id)}
+                        onClick={() => deleteArticle(article._id, article.title)}
                         className="text-red-600"
                       >
                         <Trash2 className="w-4 h-4 mr-2" />
@@ -654,6 +664,7 @@ export default function AdminKnowledgeBasePage() {
           </div>
         </DialogContent>
       </Dialog>
+      <ConfirmDialog />
     </div>
   );
 }

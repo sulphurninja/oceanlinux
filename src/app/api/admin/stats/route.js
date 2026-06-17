@@ -2,12 +2,15 @@ import connectDB from "@/lib/db";
 import User from "@/models/userModel";
 import SupportTicket from "@/models/supportTicketModel";
 import KnowledgeBase from "@/models/knowledgeBaseModel";
+import Order from "@/models/orderModel";
+import { enforceAdmin } from '@/lib/apiSecurity';
 
 export async function GET(request) {
     try {
-        await connectDB();
+        const denied = await enforceAdmin(request);
+        if (denied) return denied;
 
-        // TODO: Add admin authentication check here
+        await connectDB();
 
         // Get user stats
         const totalUsers = await User.countDocuments();
@@ -36,6 +39,34 @@ export async function GET(request) {
             .limit(5)
             .lean();
 
+        const [
+            totalOrders,
+            pendingOrders,
+            confirmedOrders,
+            activeOrders,
+            provisioningNow,
+            provisionFailed,
+            paidNotProvisioned,
+            advpsPending,
+        ] = await Promise.all([
+            Order.countDocuments(),
+            Order.countDocuments({ status: 'pending' }),
+            Order.countDocuments({ status: 'confirmed' }),
+            Order.countDocuments({ status: 'active' }),
+            Order.countDocuments({ provisioningStatus: { $in: ['provisioning', 'in_progress'] } }),
+            Order.countDocuments({ provisioningStatus: 'failed' }),
+            Order.countDocuments({
+                status: 'confirmed',
+                ipAddress: { $in: [null, ''] },
+                provisioningStatus: { $nin: ['completed', 'active'] },
+            }),
+            Order.countDocuments({
+                status: 'confirmed',
+                provisioningStatus: 'provisioning',
+                provisioningError: { $regex: /^ADVPS_PENDING/ },
+            }),
+        ]);
+
         const stats = {
             users: {
                 total: totalUsers,
@@ -57,7 +88,18 @@ export async function GET(request) {
             systemHealth: {
                 uptime: "99.98%",
                 responseTime: "245ms",
-                status: "operational"
+                status: provisionFailed > 5 ? "degraded" : "operational",
+                cronSecretConfigured: !!process.env.CRON_SECRET,
+            },
+            orders: {
+                total: totalOrders,
+                pending: pendingOrders,
+                confirmed: confirmedOrders,
+                active: activeOrders,
+                provisioningNow,
+                provisionFailed,
+                paidNotProvisioned,
+                advpsPending,
             }
         };
 

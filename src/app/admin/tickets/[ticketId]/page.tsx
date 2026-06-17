@@ -32,7 +32,7 @@ interface TicketDetails {
     userId: {
         name: string;
         email: string;
-    };
+    } | null;
     createdAt: string;
     updatedAt: string;
 }
@@ -211,8 +211,8 @@ export default function AdminTicketDetailsPage() {
 
                             <div>
                                 <p className="text-sm font-medium text-muted-foreground">Customer</p>
-                                <p className="text-sm font-medium">{ticket.userId.name}</p>
-                                <p className="text-xs text-muted-foreground">{ticket.userId.email}</p>
+                                <p className="text-sm font-medium">{ticket.userId?.name || 'Unknown user'}</p>
+                                <p className="text-xs text-muted-foreground">{ticket.userId?.email || '—'}</p>
                             </div>
 
                             <div>

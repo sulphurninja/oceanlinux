@@ -3,9 +3,13 @@ import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 import User from '@/models/userModel';
 import IPStock from '@/models/ipStockModel';
+import { blockUnlessDevOrCron } from '@/lib/apiSecurity';
 const AutoProvisioningService = require('@/services/autoProvisioningService');
 
 export async function POST(request) {
+  const blocked = blockUnlessDevOrCron(request);
+  if (blocked) return blocked;
+
   await connectDB();
 
   try {

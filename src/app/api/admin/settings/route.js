@@ -1,31 +1,16 @@
 import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import Settings from '@/models/settingsModel';
-import { getDataFromToken } from '@/helper/getDataFromToken';
-import User from '@/models/userModel';
+import { enforceAdmin } from '@/lib/apiSecurity';
+import { requireAdmin } from '@/lib/adminAuth';
 
 // GET - Fetch all settings (admin only)
 export async function GET(request) {
   try {
+    const denied = await enforceAdmin(request);
+    if (denied) return denied;
+
     await connectDB();
-
-    // Check authentication
-    const userId = await getDataFromToken(request);
-    if (!userId) {
-      return NextResponse.json(
-        { success: false, message: 'Authentication required' },
-        { status: 401 }
-      );
-    }
-
-    // Check if user is admin
-    const user = await User.findById(userId);
-    // if (!user?.isAdmin) {
-    //   return NextResponse.json(
-    //     { success: false, message: 'Admin access required' },
-    //     { status: 403 }
-    //   );
-    // }
 
     const settings = await Settings.find({}).sort({ key: 1 });
     
@@ -54,25 +39,12 @@ export async function GET(request) {
 // POST - Update a setting (admin only)
 export async function POST(request) {
   try {
+    const denied = await enforceAdmin(request);
+    if (denied) return denied;
+
     await connectDB();
 
-    // Check authentication
-    const userId = await getDataFromToken(request);
-    if (!userId) {
-      return NextResponse.json(
-        { success: false, message: 'Authentication required' },
-        { status: 401 }
-      );
-    }
-
-    // Check if user is admin
-    const user = await User.findById(userId);
-    // if (!user?.isAdmin) {
-    //   return NextResponse.json(
-    //     { success: false, message: 'Admin access required' },
-    //     { status: 403 }
-    //   );
-    // }
+    const adminUser = await requireAdmin(request);
 
     const { key, value, description } = await request.json();
 
@@ -83,9 +55,9 @@ export async function POST(request) {
       );
     }
 
-    const setting = await Settings.setSetting(key, value, description, userId);
+    const setting = await Settings.setSetting(key, value, description, adminUser?._id);
 
-    console.log(`[ADMIN] Setting updated: ${key} = ${value} by ${user.email}`);
+    console.log(`[ADMIN] Setting updated: ${key} = ${value} by ${adminUser?.email || 'admin'}`);
 
     return NextResponse.json({
       success: true,

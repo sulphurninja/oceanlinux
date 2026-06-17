@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import connectDB from '@/lib/db';
-import User from '@/models/userModel';
 import KnowledgeBase from '@/models/knowledgeBaseModel';
-import { getDataFromToken } from '@/helper/getDataFromToken';
+import { enforceAdmin } from '@/lib/apiSecurity';
+import { requireAdmin } from '@/lib/adminAuth';
 
 function getOpenAIClient() {
     const apiKey = process.env.OPENAI_API_KEY;
@@ -30,15 +30,12 @@ const calculateReadTime = (content) => {
 
 export async function POST(request) {
     try {
+        const denied = await enforceAdmin(request);
+        if (denied) return denied;
+
         await connectDB();
 
-        // Check authentication and admin role
-        const userId = getDataFromToken(request);
-        if (!userId) {
-            return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
-        }
-
-        const user = await User.findById(userId);
+        const adminUser = await requireAdmin(request);
 
         const { prompt, category, tone = 'professional', length = 'medium', includeCode = false } = await request.json();
 
@@ -129,7 +126,7 @@ Write about: ${prompt}`;
             excerpt,
             category,
             tags: [], // Can be enhanced with AI tag generation
-            author: userId,
+            author: adminUser._id,
             published: false, // Admin can review and publish
             seoTitle,
             seoDescription,

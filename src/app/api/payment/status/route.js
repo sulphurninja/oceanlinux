@@ -3,12 +3,11 @@ import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 import { Cashfree } from 'cashfree-pg';
 import { getRazorpayClient } from '@/lib/razorpayClient';
-import NotificationService from '@/services/notificationService';
-import { calculateExpiryDate } from '@/lib/expiryHelper';
-import { assignPanelCredentials } from '@/lib/panelCredentials';
-import { decrementIpStockForOrder } from '@/lib/ipStockAvailability';
-const AutoProvisioningService = require('@/services/autoProvisioningService');
-const WhatsAppService = require('@/services/whatsappService');
+import {
+  recoverPendingOrderPayment,
+  probeGatewayPayment,
+} from '@/lib/confirmPendingOrderPayment';
+import { enforceOrderAccess } from '@/lib/apiSecurity';
 
 // Initialize Cashfree
 Cashfree.XClientId = process.env.CASHFREE_APP_ID;
@@ -52,6 +51,9 @@ export async function POST(request) {
       });
 
       if (orderWithRenewal) {
+        const accessDenied = await enforceOrderAccess(request, orderWithRenewal);
+        if (accessDenied) return accessDenied;
+
         console.log(`[PAYMENT-STATUS] ✅ Renewal already processed for: ${txnId}`);
         return NextResponse.json({
           isRenewal: true,
@@ -66,6 +68,16 @@ export async function POST(request) {
       const orderWithPending = await Order.findOne({
         'pendingRenewal.renewalTxnId': txnId
       });
+
+      if (!orderWithPending) {
+        return NextResponse.json(
+          { message: 'Renewal order not found' },
+          { status: 404 }
+        );
+      }
+
+      const pendingAccessDenied = await enforceOrderAccess(request, orderWithPending);
+      if (pendingAccessDenied) return pendingAccessDenied;
 
       const paymentMethod = orderWithPending?.pendingRenewal?.paymentMethod || 'cashfree';
       const razorpayOrderId = orderWithPending?.pendingRenewal?.gatewayOrderId;
@@ -193,31 +205,37 @@ export async function POST(request) {
       );
     }
 
+    const accessDenied = await enforceOrderAccess(request, order);
+    if (accessDenied) return accessDenied;
+
     console.log(`Order found: ${order._id}, status: ${order.status}`);
 
     // If order is already confirmed, check if provisioning is needed
     if (order.status === 'confirmed') {
       console.log(`Order ${order._id} is already confirmed`);
-      
-      // Check if provisioning was missed (no IP assigned and not in progress)
-      const needsProvisioning = !order.ipAddress && 
-        order.provisioningStatus !== 'completed' && 
-        order.provisioningStatus !== 'in_progress';
-      
+
+      const needsProvisioning =
+        !order.ipAddress &&
+        order.provisioningStatus !== 'completed' &&
+        order.provisioningStatus !== 'in_progress' &&
+        order.provisioningStatus !== 'provisioning' &&
+        !order.slotIpPackageId;
+
       if (needsProvisioning) {
         console.log(`[PAYMENT-STATUS] Order ${order._id} confirmed but not provisioned, triggering now...`);
+        const AutoProvisioningService = require('@/services/autoProvisioningService');
         try {
           const provisioningService = new AutoProvisioningService();
           provisioningService.provisionServer(order._id.toString())
-            .then(result => console.log(`[PAYMENT-STATUS] Late provisioning result for ${order._id}:`, result))
-            .catch(error => console.error(`[PAYMENT-STATUS] Late provisioning failed for ${order._id}:`, error));
-          console.log("[PAYMENT-STATUS] Late provisioning initiated");
+            .then((result) => console.log(`[PAYMENT-STATUS] Late provisioning result for ${order._id}:`, result))
+            .catch((error) => console.error(`[PAYMENT-STATUS] Late provisioning failed for ${order._id}:`, error));
         } catch (provisionError) {
-          console.error("[PAYMENT-STATUS] Error starting late provisioning:", provisionError);
+          console.error('[PAYMENT-STATUS] Error starting late provisioning:', provisionError);
         }
       }
-      
+
       return NextResponse.json({
+        paymentStatus: 'SUCCESS',
         order: {
           id: order._id.toString(),
           status: order.status,
@@ -225,130 +243,40 @@ export async function POST(request) {
           memory: order.memory,
           price: order.price,
           clientTxnId: order.clientTxnId,
-          createdAt: order.createdAt
+          createdAt: order.createdAt,
         },
-        message: "Order already confirmed"
+        message: 'Order already confirmed',
       });
     }
 
-    // Check with Cashfree API
-    try {
-      console.log(`Checking Cashfree order status: ${order.clientTxnId}`);
-      
-      const cashfreeResponse = await Cashfree.PGOrderFetchPayments('2023-08-01', order.clientTxnId);
-      console.log(`Cashfree order response:`, cashfreeResponse.data);
+    // Recover: probe Cashfree / Razorpay / UPI and confirm when gateway says paid
+    const returnedFromPayment = !!reqBody.returnedFromPayment;
+    const recovery = await recoverPendingOrderPayment(order, {
+      maxAttempts: returnedFromPayment ? 5 : 2,
+      delayMs: returnedFromPayment ? 1500 : 0,
+    });
 
-      // If payment is successful
-      if (cashfreeResponse.data && cashfreeResponse.data.length > 0) {
-        const payment = cashfreeResponse.data[0];
-        
-        if (payment.payment_status === 'SUCCESS') {
-          console.log(`Payment confirmed for order ${order._id}`);
-          
-          // Calculate expiry based on the number of days in the current month
-          const expiryDate = calculateExpiryDate();
-
-          // Update order status and store payment details
-          order.status = 'confirmed';
-          order.transactionId = payment.cf_payment_id;
-          order.gatewayOrderId = order.clientTxnId; // Cashfree uses clientTxnId as order_id
-          order.paymentMethod = 'cashfree';
-          order.expiryDate = expiryDate;
-          order.paymentDetails = {
-            cf_payment_id: payment.cf_payment_id,
-            cf_order_id: order.clientTxnId,
-            payment_status: payment.payment_status,
-            payment_amount: payment.payment_amount,
-            payment_currency: payment.payment_currency,
-            payment_time: payment.payment_time,
-            payment_method: payment.payment_method,
-            bank_reference: payment.bank_reference,
-            confirmedAt: new Date()
-          };
-          await assignPanelCredentials(order);
-          await order.save();
-          await decrementIpStockForOrder(order);
-          
-          console.log(`Order expiry set to: ${expiryDate.toISOString()}`);
-
-          // 🚀 TRIGGER AUTO-PROVISIONING FOR CASHFREE PAYMENTS
-          // This is critical - webhook may not always be received
-          // First check if already provisioned or in progress
-          const freshOrder = await Order.findById(order._id);
-          const alreadyProvisioning = freshOrder?.provisioningStatus === 'in_progress' || 
-                                       freshOrder?.provisioningStatus === 'completed' ||
-                                       freshOrder?.ipAddress;
-          
-          if (alreadyProvisioning) {
-            console.log(`[PAYMENT-STATUS] ⚠️ Order ${order._id} already provisioning/provisioned, skipping`);
-            console.log(`[PAYMENT-STATUS]   → Status: ${freshOrder?.provisioningStatus}`);
-            console.log(`[PAYMENT-STATUS]   → IP: ${freshOrder?.ipAddress || 'none'}`);
-          } else {
-            console.log(`[PAYMENT-STATUS] 🚀 Triggering auto-provisioning for Cashfree order ${order._id}`);
-            try {
-              const provisioningService = new AutoProvisioningService();
-
-            // Send notifications
-            try {
-              await NotificationService.notifyOrderConfirmed(order.user, order);
-              await NotificationService.notifyOrderProvisioning(order.user, order);
-            } catch (notifError) {
-              console.error('[PAYMENT-STATUS] Notification error:', notifError);
-            }
-
-            // Start provisioning in background (don't await)
-            // The provisionServer method now has atomic DB locking to prevent duplicates
-            provisioningService.provisionServer(order._id.toString())
-              .then(async result => {
-                console.log(`[PAYMENT-STATUS] Auto-provisioning completed for order ${order._id}:`, result);
-                // Only send notifications if actually provisioned (not skipped due to duplicate)
-                if (result.success && !result.alreadyProvisioned && !result.alreadyProvisioning) {
-                  await NotificationService.notifyOrderCompleted(order.user, order, {
-                    ipAddress: result.ipAddress || 'Available in dashboard',
-                    username: result.username || 'root',
-                    password: result.password || 'Check dashboard'
-                  });
-                  WhatsAppService.notifyOrderViaWhatsApp(order.user, order).catch(() => {});
-                } else if (!result.success && !result.alreadyProvisioning && !result.advpsPending) {
-                  await NotificationService.notifyOrderFailed(order.user, order, result.error);
-                } else if (result.advpsPending) {
-                  console.log(`[PAYMENT-STATUS] ADVPS order pending assignment — skipping failure notification`);
-                }
-              })
-              .catch(async error => {
-                console.error(`[PAYMENT-STATUS] Auto-provisioning failed for order ${order._id}:`, error);
-                if (!String(error.message).startsWith('ADVPS_PENDING')) {
-                  await NotificationService.notifyOrderFailed(order.user, order, error.message);
-                }
-              });
-
-              console.log("[PAYMENT-STATUS] Auto-provisioning initiated for Cashfree payment");
-            } catch (provisionError) {
-              console.error("[PAYMENT-STATUS] Error starting auto-provisioning:", provisionError);
-              // Don't fail the response - provisioning can be retried
-            }
-          }
-          
-          return NextResponse.json({
-            order: {
-              id: order._id.toString(),
-              status: 'confirmed',
-              productName: order.productName,
-              memory: order.memory,
-              price: order.price,
-              clientTxnId: order.clientTxnId,
-              createdAt: order.createdAt
-            },
-            message: "Payment confirmed"
-          });
-        }
-      }
-    } catch (cashfreeError) {
-      console.error('Cashfree API error:', cashfreeError);
+    if (recovery.confirmed) {
+      const confirmedOrder = recovery.order || order;
+      return NextResponse.json({
+        paymentStatus: 'SUCCESS',
+        order: {
+          id: confirmedOrder._id.toString(),
+          status: 'confirmed',
+          productName: confirmedOrder.productName,
+          memory: confirmedOrder.memory,
+          price: confirmedOrder.price,
+          clientTxnId: confirmedOrder.clientTxnId,
+          createdAt: confirmedOrder.createdAt,
+        },
+        message: recovery.alreadyProcessed ? 'Order already confirmed' : 'Payment confirmed',
+      });
     }
 
-    // Payment not confirmed
+    const gatewayProbe = await probeGatewayPayment(order);
+
     return NextResponse.json({
+      paymentStatus: gatewayProbe.status || 'PENDING',
       order: {
         id: order._id.toString(),
         status: order.status,
@@ -356,9 +284,12 @@ export async function POST(request) {
         memory: order.memory,
         price: order.price,
         clientTxnId: order.clientTxnId,
-        createdAt: order.createdAt
+        createdAt: order.createdAt,
       },
-      message: "Payment pending or failed"
+      message:
+        gatewayProbe.status === 'PENDING' || !gatewayProbe.status
+          ? 'Payment is still processing — please wait, do not retry payment'
+          : 'Payment pending or failed',
     });
     
   } catch (error) {

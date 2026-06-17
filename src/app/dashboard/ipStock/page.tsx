@@ -49,7 +49,8 @@ import {
   Search,
   Copy,
   ShoppingCart,
-  Wallet as WalletIcon
+  Wallet as WalletIcon,
+  Sparkles,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { z } from "zod";
@@ -462,15 +463,26 @@ function IPStockContent() {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clientTxnId }),
+        body: JSON.stringify({ clientTxnId, userInitiated: true }),
       });
       const result = await res.json();
-      if (result.success && result.refunded > 0) {
-        toast.info(`Payment cancelled. ₹${result.refunded.toLocaleString('en-IN')} returned to your wallet.`);
-        fetchWalletSummary().catch(() => {});
+      const summary = await fetchWalletSummary().catch(() => null);
+      if (summary) setWalletBalance(summary.balance);
+
+      if (result.success) {
+        if (result.refunded > 0) {
+          toast.info(`Payment cancelled. ₹${result.refunded.toLocaleString('en-IN')} returned to your wallet.`);
+        } else if (result.alreadyProcessed) {
+          toast.info('Payment cancelled. Wallet balance restored.');
+        } else {
+          toast.info('Payment cancelled.');
+        }
+      } else if (result.message) {
+        toast.error(result.message);
       }
     } catch (err) {
       console.error('[Payment] Cancel/refund failed:', err);
+      toast.error('Could not restore wallet — please refresh or contact support.');
     }
   };
 
@@ -500,6 +512,7 @@ function IPStockContent() {
 
       const res = await fetch("/api/payment/create", {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(paymentBody),
       });
@@ -509,7 +522,12 @@ function IPStockContent() {
       if (!res.ok) {
         toast.error(data.message || "Failed to initiate payment");
         setPaymentInitiating(false);
+        fetchWalletSummary().then((w) => { if (w) setWalletBalance(w.balance); }).catch(() => {});
         return;
+      }
+
+      if (data.walletApplied > 0) {
+        fetchWalletSummary().then((w) => { if (w) setWalletBalance(w.balance); }).catch(() => {});
       }
 
       // Store client transaction ID
@@ -584,6 +602,7 @@ function IPStockContent() {
 
           const fallbackRes = await fetch("/api/payment/create", {
             method: "POST",
+            credentials: "include",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(fallbackBody),
           });
@@ -666,6 +685,7 @@ function IPStockContent() {
       try {
         const confirmRes = await fetch("/api/payment/confirm", {
           method: "POST",
+          credentials: "include",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             clientTxnId: data.clientTxnId,
@@ -772,6 +792,7 @@ function IPStockContent() {
           try {
             const confirmRes = await fetch("/api/payment/confirm", {
               method: "POST",
+              credentials: "include",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 clientTxnId: data.clientTxnId,
@@ -822,44 +843,57 @@ function IPStockContent() {
   };
 
   const categoryCards = [
-    { id: 'all', icon: <Grid3X3 className="h-6 w-6" />, label: 'All Plans', count: counts.all + counts.slot, desc: 'Browse every available server and proxy plan' },
-    { id: 'Linux', icon: <Server className="h-6 w-6" />, label: 'Linux Servers', count: counts.linux, desc: 'Ubuntu, CentOS, Debian & more' },
-    { id: 'VPS', icon: <Cloud className="h-6 w-6" />, label: 'Windows VPS', count: counts.vps, desc: 'Windows RDP & VPS servers' },
-    { id: 'SlotIP', icon: <Zap className="h-6 w-6" />, label: 'Premium IP Proxies', count: counts.slot, desc: 'Rotating & dedicated proxy IPs' },
+    { id: 'all', Icon: Grid3X3, label: 'All Plans', shortLabel: 'All', count: counts.all + counts.slot, activeClass: 'border-primary/40 bg-primary/5 shadow-sm shadow-primary/10' },
+    { id: 'Linux', Icon: Server, label: 'Linux Servers', shortLabel: 'Linux', count: counts.linux, activeClass: 'border-emerald-500/40 bg-emerald-500/5 shadow-sm shadow-emerald-500/10' },
+    { id: 'VPS', Icon: Cloud, label: 'Windows VPS', shortLabel: 'Windows', count: counts.vps, activeClass: 'border-sky-500/40 bg-sky-500/5 shadow-sm shadow-sky-500/10' },
+    { id: 'SlotIP', Icon: Zap, label: 'Premium IP Proxies', shortLabel: 'Proxies', count: counts.slot, activeClass: 'border-orange-500/40 bg-orange-500/5 shadow-sm shadow-orange-500/10' },
   ];
+
+  const iconActiveClass: Record<string, string> = {
+    all: 'bg-primary text-primary-foreground',
+    Linux: 'bg-emerald-500 text-white',
+    VPS: 'bg-sky-500 text-white',
+    SlotIP: 'bg-orange-500 text-white',
+  };
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Promo Banner */}
-      <div className="relative overflow-hidden border-b mt-6 md:mt-0 border-primary/10">
-        <div className="absolute inset-0 bg-gradient-to-r from-primary/[0.07] via-transparent to-primary/[0.07]" />
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-primary/10 via-transparent to-transparent" />
-        <div className="container relative mx-auto px-4 sm:px-6 lg:px-8 py-3">
-          <div className="flex items-center justify-center gap-3 sm:gap-6 flex-wrap">
-            <div className="flex items-center gap-2 text-sm">
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
-              </span>
-              <span className="text-muted-foreground">Limited offer</span>
-              <span className="font-medium">Save on every plan</span>
+      {/* Promo — compact, polished */}
+      <div className="relative overflow-hidden border-b mt-6 md:mt-0 border-primary/15">
+        <div className="absolute inset-0 bg-gradient-to-r from-primary/12 via-transparent to-primary/8" />
+        <div className="absolute bottom-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-primary/40 to-transparent" />
+        <div className="container relative mx-auto px-3 sm:px-6 lg:px-8 py-2 sm:py-2.5">
+          <div className="flex items-center justify-center gap-2.5 sm:gap-4 flex-wrap">
+            <div className="flex items-center gap-2 text-xs sm:text-sm">
+              <Badge variant="outline" className="h-5 px-1.5 gap-1 border-green-500/35 bg-green-500/10 text-green-600 dark:text-green-400 font-medium shadow-sm">
+                <span className="relative flex h-1.5 w-1.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-green-500" />
+                </span>
+                Live
+              </Badge>
+              <span className="text-muted-foreground hidden min-[380px]:inline">Limited offer</span>
+              <span className="font-semibold text-foreground">Save on every plan</span>
+              <Sparkles className="h-3.5 w-3.5 text-primary-foreground/70 dark:text-primary shrink-0 animate-pulse" />
             </div>
-            <div className="h-4 w-px bg-border hidden sm:block" />
+            <div className="h-3.5 w-px bg-gradient-to-b from-transparent via-border to-transparent hidden sm:block" />
             <button
+              type="button"
               onClick={() => {
                 navigator.clipboard.writeText('OCEAN50');
-                toast.success('Promo code copied!');
+                toast.success('Promo code OCEAN50 copied!');
               }}
-              className="group flex items-center gap-2 px-3 py-1.5 rounded-full bg-primary/10 border border-primary/20 hover:border-primary/40 hover:bg-primary/15 transition-all cursor-pointer"
+              className="group flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-full border border-primary/40 bg-gradient-to-r from-primary/20 to-primary/10 dark:from-primary/25 dark:to-primary/15 hover:from-primary/30 hover:to-primary/20 hover:border-primary/60 hover:shadow-md hover:shadow-primary/15 transition-all duration-200 active:scale-[0.98]"
             >
-              <code className="text-xs font-bold tracking-widest text-primary">OCEAN50</code>
-              <Copy className="h-3 w-3 text-primary/60 group-hover:text-primary transition-colors" />
+              <Percent className="h-3 w-3 text-primary-foreground/80 dark:text-primary-foreground group-hover:text-primary-foreground shrink-0" />
+              <code className="text-[11px] sm:text-xs font-semibold tracking-[0.12em] text-primary-foreground dark:text-primary-foreground">OCEAN50</code>
+              <Copy className="h-3 w-3 text-primary-foreground/60 dark:text-primary-foreground/70 group-hover:text-primary-foreground transition-colors shrink-0" />
             </button>
           </div>
         </div>
       </div>
 
-      <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-4">
+      <div className="container mx-auto px-3 sm:px-6 lg:px-8 py-3 sm:py-4">
         {isLoading ? (
           <div className="flex flex-col items-center justify-center py-16">
             <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
@@ -867,83 +901,103 @@ function IPStockContent() {
           </div>
         ) : (
           <div>
-            {/* Category Filter */}
-            <div className="md:flex grid-cols-2 grid items-center gap-2 mb-5 overflow-x-auto pb-1 scrollbar-hide">
-              {categoryCards.map((cat) => (
-                <button
-                  key={cat.id}
-                  onClick={() => handleTabChange(cat.id)}
-                  className={cn(
-                    "flex items-center gap-2 px-3 py-2 rounded-lg border text-sm whitespace-nowrap transition-all shrink-0",
-                    activeTab === cat.id
-                      ? "border-primary bg-primary/5 text-foreground"
-                      : "border-border bg-card text-muted-foreground hover:border-primary/30 hover:text-foreground"
-                  )}
-                >
-                  <span className={cn(
-                    "h-7 w-7 rounded-md flex items-center justify-center transition-colors [&>svg]:h-4 [&>svg]:w-4",
-                    activeTab === cat.id
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-muted text-muted-foreground"
-                  )}>
-                    {cat.icon}
-                  </span>
-                  <span className="font-medium">{cat.label}</span>
-                  <Badge variant="secondary" className="text-[10px] h-4 px-1.5 ml-0.5">{cat.count}</Badge>
-                </button>
-              ))}
+            {/* Category tabs — compact cards, responsive grid */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-1.5 sm:gap-2 mb-3 sm:mb-4">
+              {categoryCards.map((cat) => {
+                const isActive = activeTab === cat.id;
+                const CatIcon = cat.Icon;
+                return (
+                  <button
+                    key={cat.id}
+                    type="button"
+                    onClick={() => handleTabChange(cat.id)}
+                    className={cn(
+                      "flex items-center gap-2 px-2.5 sm:px-3 py-2 rounded-xl border text-left transition-all duration-200 min-w-0",
+                      isActive
+                        ? cn("text-foreground ring-1 ring-primary/15 scale-[1.01] shadow-sm", cat.activeClass)
+                        : "border-border/80 bg-card/80 text-muted-foreground hover:border-primary/25 hover:bg-muted/40 hover:text-foreground hover:shadow-sm"
+                    )}
+                  >
+                    <span className={cn(
+                      "h-7 w-7 rounded-lg flex items-center justify-center shrink-0 transition-all duration-200",
+                      isActive ? iconActiveClass[cat.id] : "bg-muted/80 text-muted-foreground"
+                    )}>
+                      <CatIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                    </span>
+                    <span className="font-medium text-xs sm:text-sm truncate flex-1 min-w-0">
+                      <span className="sm:hidden">{cat.shortLabel}</span>
+                      <span className="hidden sm:inline">{cat.label}</span>
+                    </span>
+                    <Badge
+                      variant="secondary"
+                      className={cn(
+                        "text-[10px] h-4 min-w-[1.25rem] px-1 justify-center shrink-0 tabular-nums",
+                        isActive && "bg-background/80 text-foreground font-semibold"
+                      )}
+                    >
+                      {cat.count}
+                    </Badge>
+                  </button>
+                );
+              })}
             </div>
 
-            {/* Search & Filters */}
-            <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 mb-5">
-              <div className="relative flex-1 max-w-full sm:max-w-md">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Search servers..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-9 h-9 bg-background border-border"
-                />
-              </div>
-              <div className="flex gap-2 flex-wrap sm:items-center">
-                <Select value={priceFilter} onValueChange={setPriceFilter}>
-                  <SelectTrigger className="w-[calc(50%-4px)] sm:w-32 h-9 text-xs border-border bg-background">
-                    <SelectValue placeholder="Price" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Prices</SelectItem>
-                    <SelectItem value="under-500">&lt; ₹500</SelectItem>
-                    <SelectItem value="500-1000">₹500-1K</SelectItem>
-                    <SelectItem value="1000-2000">₹1K-2K</SelectItem>
-                    <SelectItem value="above-2000">&gt; ₹2K</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Select value={sortBy} onValueChange={setSortBy}>
-                  <SelectTrigger className="w-[calc(50%-4px)] sm:w-28 h-9 text-xs border-border bg-background">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="name">Name</SelectItem>
-                    <SelectItem value="price-low">Low Price</SelectItem>
-                    <SelectItem value="price-high">High Price</SelectItem>
-                  </SelectContent>
-                </Select>
-                {(searchTerm || priceFilter !== 'all' || sortBy !== 'name') && (
+            {/* Search & filters — compact toolbar */}
+            <div className="rounded-xl border border-border/50 bg-gradient-to-b from-muted/30 to-muted/10 backdrop-blur-sm p-2 sm:p-2.5 mb-4 sm:mb-5 shadow-sm">
+              <div className="flex flex-col sm:flex-row gap-2">
+                <div className="relative flex-1 min-w-0">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+                  <Input
+                    placeholder="Search servers..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="pl-8 h-9 text-sm bg-background/90 border-border/70 focus-visible:ring-primary/25"
+                  />
+                </div>
+                <div className="flex gap-1.5 sm:gap-2 flex-wrap sm:flex-nowrap sm:items-center">
+                  <Select value={priceFilter} onValueChange={setPriceFilter}>
+                    <SelectTrigger className="flex-1 sm:flex-none sm:w-[7.5rem] h-9 text-xs bg-background/90 border-border/70">
+                      <SelectValue placeholder="Price" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Prices</SelectItem>
+                      <SelectItem value="under-500">&lt; ₹500</SelectItem>
+                      <SelectItem value="500-1000">₹500-1K</SelectItem>
+                      <SelectItem value="1000-2000">₹1K-2K</SelectItem>
+                      <SelectItem value="above-2000">&gt; ₹2K</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select value={sortBy} onValueChange={setSortBy}>
+                    <SelectTrigger className="flex-1 sm:flex-none sm:w-[6.5rem] h-9 text-xs bg-background/90 border-border/70">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="name">Name</SelectItem>
+                      <SelectItem value="price-low">Low Price</SelectItem>
+                      <SelectItem value="price-high">High Price</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {(searchTerm || priceFilter !== 'all' || sortBy !== 'name') && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => { setSearchTerm(""); setPriceFilter("all"); setSortBy("name"); }}
+                      className="h-9 px-2.5 text-xs text-muted-foreground hover:text-foreground"
+                    >
+                      Clear
+                    </Button>
+                  )}
                   <Button
-                    variant="ghost"
+                    asChild
                     size="sm"
-                    onClick={() => { setSearchTerm(""); setPriceFilter("all"); setSortBy("name"); }}
-                    className="h-9 px-3 text-xs w-full sm:w-auto"
+                    className="h-9 gap-1.5 px-3 bg-gradient-to-r from-primary to-primary/85 hover:from-primary/95 hover:to-primary/75 text-primary-foreground shadow-sm hover:shadow-md hover:shadow-primary/20 transition-all sm:ml-auto"
                   >
-                    Clear
+                    <Link href="/dashboard/cart">
+                      <ShoppingCart className="h-3.5 w-3.5" />
+                      <span className="text-xs font-medium">Cart</span>
+                    </Link>
                   </Button>
-                )}
-                <Button asChild variant="outline" size="sm" className="h-9 gap-2 hidden sm:inline-flex">
-                  <Link href="/dashboard/cart">
-                    <ShoppingCart className="h-4 w-4" />
-                    View Cart
-                  </Link>
-                </Button>
+                </div>
               </div>
             </div>
 

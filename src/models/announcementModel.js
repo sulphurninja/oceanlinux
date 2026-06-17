@@ -41,6 +41,19 @@ const announcementSchema = new mongoose.Schema({
         enum: ['all', 'customers', 'new-users', 'premium'],
         default: 'all'
     },
+    showOnOrderPage: {
+        type: Boolean,
+        default: false
+    },
+    targetProvider: {
+        type: String,
+        default: null
+    },
+    targetCompany: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Company',
+        default: null
+    },
     sentCount: {
         type: Number,
         default: 0
@@ -66,5 +79,12 @@ const announcementSchema = new mongoose.Schema({
 // Indexes
 announcementSchema.index({ status: 1, scheduledFor: 1 });
 announcementSchema.index({ createdAt: -1 });
+announcementSchema.index({ status: 1, showOnOrderPage: 1, targetProvider: 1 });
+announcementSchema.index({ status: 1, showOnOrderPage: 1, targetCompany: 1 });
+
+// Next.js hot-reload can cache an old schema — re-register when new paths were added.
+if (mongoose.models.Announcement && !mongoose.models.Announcement.schema.paths.targetCompany) {
+  delete mongoose.models.Announcement;
+}
 
 export default mongoose.models.Announcement || mongoose.model('Announcement', announcementSchema);

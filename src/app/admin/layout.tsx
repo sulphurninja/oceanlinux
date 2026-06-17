@@ -32,15 +32,12 @@ export default function Layout({ children }: Props) {
   }
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background overflow-x-hidden">
       {role === 'Admin' ? (
         <div className="flex min-h-screen">
           <AdminSidebar />
-          <main className="flex-1 lg:pl-72">
-            <div className="lg:hidden pt-16">
-              {children}
-            </div>
-            <div className="hidden lg:block">
+          <main className="flex-1 min-w-0 w-full lg:pl-72">
+            <div className="pt-16 lg:pt-0 w-full min-w-0 overflow-x-hidden">
               {children}
             </div>
           </main>

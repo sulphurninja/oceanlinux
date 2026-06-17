@@ -10,7 +10,7 @@ const {
   getAdvpsRebuildLimitMessage,
   consumeAdvpsRebuildCredit,
 } = require('@/lib/advpsRebuildLimit');
-const { syncAdvpsOrderCredentials } = require('@/lib/advpsOrderSync');
+const { syncAdvpsOrderCredentials, configureAdvpsServiceIp } = require('@/lib/advpsOrderSync');
 
 function validateInternalKey(request) {
   const key = request.headers.get('x-internal-key');
@@ -42,8 +42,17 @@ export async function POST(request) {
     switch (action) {
       case 'start': {
         const res = await api.start(serviceId);
-        await Order.findByIdAndUpdate(orderId, { provisioningStatus: 'active', lastAction: 'start', lastActionTime: new Date() });
-        return NextResponse.json({ success: true, result: res });
+        const ipConfig = await configureAdvpsServiceIp(api, serviceId, { logPrefix: '[ADVPS-INTERNAL]' });
+        const dbUpdate = {
+          provisioningStatus: 'active',
+          lastAction: 'start',
+          lastActionTime: new Date(),
+        };
+        if (ipConfig.ip && ipConfig.ip !== order.ipAddress) {
+          dbUpdate.ipAddress = ipConfig.ip;
+        }
+        await Order.findByIdAndUpdate(orderId, dbUpdate);
+        return NextResponse.json({ success: true, result: { start: res, ipConfig } });
       }
 
       case 'stop': {

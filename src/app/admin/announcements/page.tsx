@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type Dispatch, type SetStateAction } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -55,9 +55,18 @@ import {
   BellRing,
   Power,
   PowerOff,
-  ExternalLink
+  ExternalLink,
+  Server,
+  Building2,
 } from "lucide-react";
 import { toast } from 'sonner';
+
+interface Company {
+  _id: string;
+  name: string;
+  slug: string;
+  isActive?: boolean;
+}
 
 interface Announcement {
   _id: string;
@@ -69,6 +78,9 @@ interface Announcement {
   actionUrl?: string;
   actionText?: string;
   showAsLoginPopup?: boolean;
+  showOnOrderPage?: boolean;
+  targetProvider?: string | null;
+  targetCompany?: string | Company | null;
   communityLink?: string;
   scheduledFor?: string;
   sentCount: number;
@@ -78,6 +90,14 @@ interface Announcement {
   createdAt: string;
   updatedAt: string;
 }
+
+const PROVIDER_COLUMNS = [
+  { id: 'advps', label: 'ADVPS', hint: 'Orders on ADVPS provider' },
+  { id: 'smartvps', label: 'SmartVPS', hint: 'Orders on SmartVPS provider' },
+  { id: 'hostycare', label: 'Hostycare', hint: 'Orders on Hostycare provider' },
+  { id: 'netbay', label: 'Netbay', hint: 'Orders on Netbay provider' },
+  { id: 'oceanlinux', label: 'OceanLinux', hint: 'OceanLinux / slot IP orders' },
+] as const;
 
 const typeConfig = {
   promotion: { color: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300', icon: '🎉', label: 'Promotion' },
@@ -109,6 +129,9 @@ type FormData = {
   actionUrl: string;
   actionText: string;
   showAsLoginPopup: boolean;
+  showOnOrderPage: boolean;
+  targetProvider: string;
+  targetCompany: string;
   communityLink: string;
   scheduledFor: string;
 };
@@ -121,12 +144,196 @@ const emptyForm: FormData = {
   actionUrl: '',
   actionText: '',
   showAsLoginPopup: false,
+  showOnOrderPage: false,
+  targetProvider: '',
+  targetCompany: '',
   communityLink: '',
   scheduledFor: ''
 };
 
+function AnnouncementForm({
+  isEdit = false,
+  formData,
+  setFormData,
+  companies,
+  isSubmitting,
+  onCancel,
+  onSaveDraft,
+  onPublish,
+  onSave,
+  onSaveAndPublish,
+}: {
+  isEdit?: boolean;
+  formData: FormData;
+  setFormData: Dispatch<SetStateAction<FormData>>;
+  companies: Company[];
+  isSubmitting: boolean;
+  onCancel: () => void;
+  onSaveDraft: () => void;
+  onPublish: () => void;
+  onSave: () => void;
+  onSaveAndPublish: () => void;
+}) {
+  const canSubmit = !isSubmitting && !!formData.title && !!formData.content;
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label>Type</Label>
+          <Select value={formData.type} onValueChange={(v) => setFormData((prev) => ({ ...prev, type: v as FormData['type'] }))}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {Object.entries(typeConfig).map(([key, config]) => (
+                <SelectItem key={key} value={key}>
+                  <span className="flex items-center gap-2"><span>{config.icon}</span>{config.label}</span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-2">
+          <Label>Target Audience</Label>
+          <Select value={formData.targetAudience} onValueChange={(v) => setFormData((prev) => ({ ...prev, targetAudience: v as FormData['targetAudience'] }))}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {Object.entries(audienceConfig).map(([key, config]) => (
+                <SelectItem key={key} value={key}>
+                  <span className="flex items-center gap-2"><span>{config.icon}</span>{config.label}</span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <Label>Title</Label>
+        <Input
+          placeholder="Enter announcement title..."
+          value={formData.title}
+          onChange={(e) => setFormData((prev) => ({ ...prev, title: e.target.value }))}
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label>Content</Label>
+        <Textarea
+          placeholder="Enter your announcement content..."
+          value={formData.content}
+          onChange={(e) => setFormData((prev) => ({ ...prev, content: e.target.value }))}
+          rows={5}
+        />
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label>Action Button Text (Optional)</Label>
+          <Input
+            placeholder="e.g., Learn More, View Offer"
+            value={formData.actionText}
+            onChange={(e) => setFormData((prev) => ({ ...prev, actionText: e.target.value }))}
+          />
+        </div>
+        <div className="space-y-2">
+          <Label>Action Button URL (Optional)</Label>
+          <Input
+            placeholder="https://..."
+            value={formData.actionUrl}
+            onChange={(e) => setFormData((prev) => ({ ...prev, actionUrl: e.target.value }))}
+          />
+        </div>
+      </div>
+
+      <div className="rounded-lg border p-4 space-y-4">
+        {formData.showOnOrderPage && (
+          <div className="rounded-md bg-primary/5 border border-primary/20 p-3 text-sm">
+            <p className="font-medium text-primary">Manage Order News</p>
+            <p className="text-xs text-muted-foreground mt-1">
+              Shown on <code>/dashboard/order/[id]</code> for matching servers only.
+            </p>
+            <p className="text-xs mt-2">
+              Target:{' '}
+              <strong>
+                {formData.targetCompany
+                  ? companies.find((c) => c._id === formData.targetCompany)?.name ||
+                    `Company ${formData.targetCompany}`
+                  : PROVIDER_COLUMNS.find((p) => p.id === formData.targetProvider)?.label ||
+                    formData.targetProvider ||
+                    'Not set'}
+              </strong>
+            </p>
+          </div>
+        )}
+
+        <div className="flex items-center justify-between">
+          <div className="space-y-1">
+            <Label>Show as Login Popup</Label>
+            <p className="text-xs text-muted-foreground">
+              Display this as a popup after users log in (no emails sent).
+            </p>
+          </div>
+          <Switch
+            checked={formData.showAsLoginPopup}
+            disabled={formData.showOnOrderPage}
+            onCheckedChange={(checked) => setFormData((prev) => ({ ...prev, showAsLoginPopup: checked }))}
+          />
+        </div>
+
+        {formData.showAsLoginPopup && !formData.showOnOrderPage && (
+          <div className="space-y-2">
+            <Label>Community Link (WhatsApp)</Label>
+            <Input
+              placeholder="https://chat.whatsapp.com/..."
+              value={formData.communityLink}
+              onChange={(e) => setFormData((prev) => ({ ...prev, communityLink: e.target.value }))}
+            />
+            <p className="text-xs text-muted-foreground">
+              Users will see a &quot;Join Our Community&quot; WhatsApp banner in the popup.
+            </p>
+          </div>
+        )}
+      </div>
+
+      {isEdit ? (
+        <div className="flex justify-end gap-3 pt-4">
+          <Button variant="outline" onClick={onCancel}>
+            Cancel
+          </Button>
+          {formData.showOnOrderPage && (
+            <Button variant="secondary" onClick={onSaveAndPublish} disabled={!canSubmit}>
+              {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Save & Publish'}
+            </Button>
+          )}
+          <Button onClick={onSave} disabled={!canSubmit}>
+            {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Save Changes'}
+          </Button>
+        </div>
+      ) : (
+        <div className="flex justify-end gap-3 pt-4">
+          <Button variant="outline" onClick={onSaveDraft} disabled={!canSubmit}>
+            {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Save as Draft'}
+          </Button>
+          <Button onClick={onPublish} disabled={!canSubmit}>
+            {isSubmitting ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <>
+                <Send className="w-4 h-4 mr-2" />
+                {formData.showAsLoginPopup ? 'Publish Popup' : formData.showOnOrderPage ? 'Publish Order News' : 'Send Now'}
+              </>
+            )}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function AdminAnnouncementsPage() {
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showEditDialog, setShowEditDialog] = useState(false);
@@ -144,7 +351,20 @@ export default function AdminAnnouncementsPage() {
   useEffect(() => {
     fetchAnnouncements();
     fetchStats();
+    fetchCompanies();
   }, []);
+
+  const fetchCompanies = async () => {
+    try {
+      const response = await fetch('/api/admin/companies', { credentials: 'include' });
+      if (response.ok) {
+        const data = await response.json();
+        setCompanies(Array.isArray(data) ? data : []);
+      }
+    } catch (error) {
+      console.error('Error fetching companies:', error);
+    }
+  };
 
   const fetchAnnouncements = async () => {
     try {
@@ -153,7 +373,12 @@ export default function AdminAnnouncementsPage() {
       });
       if (response.ok) {
         const data = await response.json();
-        setAnnouncements(data);
+        setAnnouncements(Array.isArray(data) ? data : []);
+      } else {
+        const err = await response.json().catch(() => ({}));
+        console.error('Announcements API error:', response.status, err);
+        toast.error(err.message || 'Failed to load announcements');
+        setAnnouncements([]);
       }
     } catch (error) {
       console.error('Error fetching announcements:', error);
@@ -208,19 +433,24 @@ export default function AdminAnnouncementsPage() {
     }
   };
 
-  const handleUpdate = async () => {
+  const handleUpdate = async (publish = false) => {
     if (!editingId) return;
     setIsSubmitting(true);
     try {
+      const payload: Record<string, unknown> = { ...formData };
+      if (publish && formData.showOnOrderPage) {
+        payload.status = 'sent';
+      }
+
       const response = await fetch(`/api/admin/announcements/${editingId}`, {
         method: 'PATCH',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData)
+        body: JSON.stringify(payload)
       });
 
       if (response.ok) {
-        toast.success('Announcement updated');
+        toast.success(publish ? 'Order news published' : 'Announcement updated');
         setShowEditDialog(false);
         setEditingId(null);
         setFormData({ ...emptyForm });
@@ -238,6 +468,9 @@ export default function AdminAnnouncementsPage() {
 
   const openEditDialog = (a: Announcement) => {
     setEditingId(a._id);
+    const companyId = typeof a.targetCompany === 'object' && a.targetCompany
+      ? a.targetCompany._id
+      : (a.targetCompany as string) || '';
     setFormData({
       title: a.title,
       content: a.content,
@@ -246,10 +479,44 @@ export default function AdminAnnouncementsPage() {
       actionUrl: a.actionUrl || '',
       actionText: a.actionText || '',
       showAsLoginPopup: a.showAsLoginPopup || false,
+      showOnOrderPage: a.showOnOrderPage || false,
+      targetProvider: a.targetProvider || '',
+      targetCompany: companyId,
       communityLink: a.communityLink || '',
       scheduledFor: a.scheduledFor || ''
     });
     setShowEditDialog(true);
+  };
+
+  const openCreateForOrderNews = (target: { provider?: string; companyId?: string }) => {
+    setFormData({
+      ...emptyForm,
+      showOnOrderPage: true,
+      showAsLoginPopup: false,
+      targetProvider: target.provider || '',
+      targetCompany: target.companyId || '',
+    });
+    setShowCreateDialog(true);
+  };
+
+  const getCompanyId = (item: Announcement) => {
+    if (!item.targetCompany) return '';
+    const company = item.targetCompany;
+    return typeof company === 'object' ? String(company._id) : String(company);
+  };
+
+  const getAllForOrderTarget = (provider?: string, companyId?: string) => {
+    return orderNewsPopups
+      .filter((a) => {
+        if (companyId) return getCompanyId(a) === String(companyId);
+        if (provider) return a.targetProvider === provider && !getCompanyId(a);
+        return false;
+      })
+      .sort(
+        (a, b) =>
+          new Date(b.updatedAt || b.createdAt).getTime() -
+          new Date(a.updatedAt || a.createdAt).getTime()
+      );
   };
 
   const handleTogglePopup = async (id: string, currentValue: boolean) => {
@@ -324,141 +591,70 @@ export default function AdminAnnouncementsPage() {
   };
 
   const newsPopups = announcements.filter(a => a.showAsLoginPopup);
-  const emailAnnouncements = announcements.filter(a => !a.showAsLoginPopup);
-  const activePopup = newsPopups.find(a => a.status === 'sent');
+  const orderNewsPopups = announcements.filter(a => a.showOnOrderPage && !a.showAsLoginPopup);
+  const emailAnnouncements = announcements.filter(a => !a.showAsLoginPopup && !a.showOnOrderPage);
+  const activeLoginPopup = announcements.find(a => a.showAsLoginPopup && a.status === 'sent');
+  const liveOrderNews = orderNewsPopups.filter(a => a.status === 'sent');
 
-  const AnnouncementForm = ({ isEdit = false }: { isEdit?: boolean }) => (
-    <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label>Type</Label>
-          <Select value={formData.type} onValueChange={(v) => setFormData({ ...formData, type: v as any })}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {Object.entries(typeConfig).map(([key, config]) => (
-                <SelectItem key={key} value={key}>
-                  <span className="flex items-center gap-2"><span>{config.icon}</span>{config.label}</span>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+  const getPlacementLabel = (item: Announcement) => {
+    if (item.showOnOrderPage) {
+      const companyId = getCompanyId(item);
+      if (companyId) {
+        const company = companies.find((c) => c._id === companyId);
+        return company
+          ? `Manage Order — ${company.name} (/company/${company.slug})`
+          : 'Manage Order — Company';
+      }
+      const provider = PROVIDER_COLUMNS.find((p) => p.id === item.targetProvider);
+      return provider
+        ? `Manage Order — ${provider.label}`
+        : `Manage Order — ${item.targetProvider || 'Unknown'}`;
+    }
+    if (item.showAsLoginPopup) return 'Login Popup (after sign-in)';
+    return 'Email / Notifications';
+  };
 
-        <div className="space-y-2">
-          <Label>Target Audience</Label>
-          <Select value={formData.targetAudience} onValueChange={(v) => setFormData({ ...formData, targetAudience: v as any })}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {Object.entries(audienceConfig).map(([key, config]) => (
-                <SelectItem key={key} value={key}>
-                  <span className="flex items-center gap-2"><span>{config.icon}</span>{config.label}</span>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
+  const formatWhen = (value?: string) =>
+    value ? new Date(value).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : '—';
 
-      <div className="space-y-2">
-        <Label>Title</Label>
-        <Input
-          placeholder="Enter announcement title..."
-          value={formData.title}
-          onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-        />
-      </div>
+  const getActiveOrderNews = (provider?: string, companyId?: string) => {
+    return getAllForOrderTarget(provider, companyId).find((a) => a.status === 'sent');
+  };
 
-      <div className="space-y-2">
-        <Label>Content</Label>
-        <Textarea
-          placeholder="Enter your announcement content..."
-          value={formData.content}
-          onChange={(e) => setFormData({ ...formData, content: e.target.value })}
-          rows={5}
-        />
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label>Action Button Text (Optional)</Label>
-          <Input
-            placeholder="e.g., Learn More, View Offer"
-            value={formData.actionText}
-            onChange={(e) => setFormData({ ...formData, actionText: e.target.value })}
-          />
-        </div>
-        <div className="space-y-2">
-          <Label>Action Button URL (Optional)</Label>
-          <Input
-            placeholder="https://..."
-            value={formData.actionUrl}
-            onChange={(e) => setFormData({ ...formData, actionUrl: e.target.value })}
-          />
-        </div>
-      </div>
-
-      <div className="rounded-lg border p-4 space-y-4">
-        <div className="flex items-center justify-between">
-          <div className="space-y-1">
-            <Label>Show as Login Popup</Label>
-            <p className="text-xs text-muted-foreground">
-              Display this as a popup after users log in (no emails sent).
-            </p>
-          </div>
-          <Switch
-            checked={formData.showAsLoginPopup}
-            onCheckedChange={(checked) => setFormData({ ...formData, showAsLoginPopup: checked })}
-          />
-        </div>
-
-        {formData.showAsLoginPopup && (
-          <div className="space-y-2">
-            <Label>Community Link (WhatsApp)</Label>
-            <Input
-              placeholder="https://chat.whatsapp.com/..."
-              value={formData.communityLink}
-              onChange={(e) => setFormData({ ...formData, communityLink: e.target.value })}
-            />
-            <p className="text-xs text-muted-foreground">
-              Users will see a "Join Our Community" WhatsApp banner in the popup.
-            </p>
-          </div>
+  const renderOrderNewsItem = (item: Announcement) => (
+    <div
+      key={item._id}
+      className={`rounded-lg border p-3 space-y-2 ${item.status === 'sent' ? 'bg-green-50/50 dark:bg-green-950/20 border-green-200 dark:border-green-900' : 'bg-muted/20'}`}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <p className="font-medium text-sm line-clamp-2">{item.title}</p>
+        {item.status === 'sent' ? (
+          <Badge className="bg-green-600 text-white text-[10px] shrink-0">Live</Badge>
+        ) : (
+          <Badge variant="outline" className="text-[10px] shrink-0">Draft</Badge>
         )}
       </div>
-
-      {isEdit ? (
-        <div className="flex justify-end gap-3 pt-4">
-          <Button variant="outline" onClick={() => { setShowEditDialog(false); setEditingId(null); }}>
-            Cancel
+      <p className="text-xs text-muted-foreground line-clamp-3">{item.content}</p>
+      <div className="flex items-center justify-between gap-2 pt-1">
+        <div className="flex items-center gap-2">
+          <Switch
+            checked={item.status === 'sent'}
+            disabled={togglingId === item._id}
+            onCheckedChange={() => handleTogglePopup(item._id, item.status === 'sent')}
+          />
+          <span className="text-xs text-muted-foreground">
+            {item.status === 'sent' ? 'Enabled' : 'Disabled'}
+          </span>
+        </div>
+        <div className="flex gap-1">
+          <Button size="sm" variant="ghost" onClick={() => openEditDialog(item)}>
+            <Pencil className="w-3.5 h-3.5" />
           </Button>
-          <Button onClick={handleUpdate} disabled={isSubmitting || !formData.title || !formData.content}>
-            {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Save Changes'}
+          <Button size="sm" variant="ghost" className="text-red-600" onClick={() => handleDelete(item._id)}>
+            <Trash2 className="w-3.5 h-3.5" />
           </Button>
         </div>
-      ) : (
-        <div className="flex justify-end gap-3 pt-4">
-          <Button
-            variant="outline"
-            onClick={() => handleSubmit('draft')}
-            disabled={isSubmitting || !formData.title || !formData.content}
-          >
-            {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Save as Draft'}
-          </Button>
-          <Button
-            onClick={() => handleSubmit('send')}
-            disabled={isSubmitting || !formData.title || !formData.content}
-          >
-            {isSubmitting ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <>
-                <Send className="w-4 h-4 mr-2" />
-                {formData.showAsLoginPopup ? 'Publish Popup' : 'Send Now'}
-              </>
-            )}
-          </Button>
-        </div>
-      )}
+      </div>
     </div>
   );
 
@@ -484,7 +680,7 @@ export default function AdminAnnouncementsPage() {
             <Megaphone className="w-8 h-8 text-primary" />
             Announcements
           </h1>
-          <p className="text-muted-foreground">Manage announcements, email blasts, and login news popups</p>
+          <p className="text-muted-foreground">Manage announcements, email blasts, login popups, and per-provider order news</p>
         </div>
 
         <Dialog open={showCreateDialog} onOpenChange={(v) => { setShowCreateDialog(v); if (!v) setFormData({ ...emptyForm }); }}>
@@ -498,19 +694,133 @@ export default function AdminAnnouncementsPage() {
             <DialogHeader>
               <DialogTitle>Create Announcement</DialogTitle>
             </DialogHeader>
-            <AnnouncementForm />
+            <AnnouncementForm
+              formData={formData}
+              setFormData={setFormData}
+              companies={companies}
+              isSubmitting={isSubmitting}
+              onCancel={() => { setShowCreateDialog(false); setFormData({ ...emptyForm }); }}
+              onSaveDraft={() => handleSubmit('draft')}
+              onPublish={() => handleSubmit('send')}
+              onSave={() => handleUpdate(false)}
+              onSaveAndPublish={() => handleUpdate(true)}
+            />
           </DialogContent>
         </Dialog>
       </div>
 
+      {/* Live overview — always visible */}
+      <Card className="border-primary/20">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-lg flex items-center gap-2">
+            <CheckCircle className="h-5 w-5 text-primary" />
+            What&apos;s Live Right Now
+          </CardTitle>
+          <CardDescription>
+            {announcements.length} total announcement{announcements.length === 1 ? '' : 's'} in database
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="rounded-lg border p-3 bg-muted/20">
+              <p className="text-xs text-muted-foreground mb-1">Login popup (shows after sign-in)</p>
+              {activeLoginPopup ? (
+                <>
+                  <p className="font-medium text-sm text-green-700 dark:text-green-400">● Running</p>
+                  <p className="text-sm mt-1 line-clamp-1">{activeLoginPopup.title}</p>
+                  <p className="text-[11px] text-muted-foreground mt-1">Updated {formatWhen(activeLoginPopup.updatedAt)}</p>
+                  <p className="text-[11px] text-primary mt-1">Edit / stop → <strong>News Popups</strong> tab</p>
+                </>
+              ) : (
+                <p className="text-sm text-muted-foreground">None active</p>
+              )}
+            </div>
+            <div className="rounded-lg border p-3 bg-muted/20">
+              <p className="text-xs text-muted-foreground mb-1">Manage order news (per provider/company)</p>
+              {liveOrderNews.length > 0 ? (
+                <>
+                  <p className="font-medium text-sm text-green-700 dark:text-green-400">● {liveOrderNews.length} running</p>
+                  <div className="mt-1 space-y-1 max-h-20 overflow-y-auto">
+                    {liveOrderNews.map((item) => (
+                      <p key={item._id} className="text-xs line-clamp-1">
+                        <strong>{getPlacementLabel(item).replace('Manage Order — ', '')}:</strong> {item.title}
+                      </p>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <p className="text-sm text-muted-foreground">None active — use <strong>Manage Order News</strong> tab</p>
+              )}
+            </div>
+            <div className="rounded-lg border p-3 bg-muted/20">
+              <p className="text-xs text-muted-foreground mb-1">Email announcements</p>
+              <p className="font-medium text-sm">
+                {emailAnnouncements.filter((a) => a.status === 'sent').length} sent
+              </p>
+              <p className="text-[11px] text-muted-foreground mt-1">
+                {emailAnnouncements.length} total in Email tab
+              </p>
+            </div>
+          </div>
+
+          {announcements.length > 0 && (
+            <div className="rounded-lg border overflow-hidden">
+              <div className="bg-muted/40 px-3 py-2 text-xs font-medium text-muted-foreground">
+                All your news ({announcements.length})
+              </div>
+              <div className="max-h-56 overflow-y-auto divide-y">
+                {announcements.map((item) => (
+                  <div key={item._id} className="px-3 py-2.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-sm">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-medium truncate">{item.title}</span>
+                        {item.status === 'sent' ? (
+                          <Badge className="bg-green-600 text-white text-[10px]">Live</Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-[10px]">Draft</Badge>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-0.5">{getPlacementLabel(item)}</p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0 text-xs text-muted-foreground">
+                      <span>Updated {formatWhen(item.updatedAt)}</span>
+                      <Button size="sm" variant="ghost" className="h-7 px-2" onClick={() => openEditDialog(item)}>
+                        <Pencil className="w-3.5 h-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {announcements.length === 0 && (
+            <p className="text-sm text-muted-foreground text-center py-4">
+              No announcements in database yet. Create one using a tab below or the Create New button.
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Tabs */}
       <Tabs defaultValue="popups" className="space-y-6">
         <TabsList>
+          <TabsTrigger value="overview" className="gap-2">
+            <Eye className="w-4 h-4" />
+            Overview
+          </TabsTrigger>
           <TabsTrigger value="popups" className="gap-2">
             <BellRing className="w-4 h-4" />
             News Popups
             {newsPopups.length > 0 && (
               <Badge variant="secondary" className="ml-1 text-xs">{newsPopups.length}</Badge>
+            )}
+          </TabsTrigger>
+          <TabsTrigger value="order-news" className="gap-2">
+            <Server className="w-4 h-4" />
+            Manage Order News
+            {orderNewsPopups.length > 0 && (
+              <Badge variant="secondary" className="ml-1 text-xs">{orderNewsPopups.length}</Badge>
             )}
           </TabsTrigger>
           <TabsTrigger value="emails" className="gap-2">
@@ -522,20 +832,74 @@ export default function AdminAnnouncementsPage() {
           </TabsTrigger>
         </TabsList>
 
+        <TabsContent value="overview" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Where each type shows</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm text-muted-foreground">
+              <p><strong className="text-foreground">News Popups</strong> — After login on any dashboard page (once per session).</p>
+              <p><strong className="text-foreground">Manage Order News</strong> — On <code>/dashboard/order/[id]</code> for matching ADVPS, SmartVPS, Hostycare, company, etc.</p>
+              <p><strong className="text-foreground">Email Announcements</strong> — Sent to user emails + notifications page (not a popup).</p>
+              <p className="text-xs pt-2 border-t">
+                Your screenshot shows <strong>News Popups</strong> empty — your news may be under <strong>Manage Order News</strong> or <strong>Email</strong>. Check the green <strong>What&apos;s Live Right Now</strong> box above.
+              </p>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
         {/* ───── NEWS POPUPS TAB ───── */}
         <TabsContent value="popups" className="space-y-6">
+          <Card className="border-primary/30 bg-primary/5">
+            <CardContent className="py-4 space-y-2 text-sm">
+              <p className="font-medium text-foreground">This is your login / home dashboard popup</p>
+              <p className="text-muted-foreground">
+                Shows once after a user logs in (dashboard home and all dashboard pages). To control it:
+              </p>
+              <ul className="text-muted-foreground list-disc pl-5 space-y-1">
+                <li><strong className="text-foreground">Stop popup</strong> — turn the <strong>toggle OFF</strong> (switch left of the news card)</li>
+                <li><strong className="text-foreground">Edit text</strong> — click the <strong>pencil</strong> icon → change title/content → Save Changes</li>
+                <li><strong className="text-foreground">Delete</strong> — click the red <strong>trash</strong> icon</li>
+              </ul>
+            </CardContent>
+          </Card>
+          <Card className="border-dashed">
+            <CardContent className="py-3 text-sm text-muted-foreground">
+              For news on a specific server order page (<code>/dashboard/order/...</code>), use the{' '}
+              <strong>Manage Order News</strong> tab instead.
+            </CardContent>
+          </Card>
           {/* Active popup indicator */}
-          {activePopup ? (
+          {activeLoginPopup ? (
             <Card className="border-green-200 bg-green-50/50 dark:border-green-800 dark:bg-green-950/30">
-              <CardContent className="flex items-center gap-4 py-4">
+              <CardContent className="flex flex-col sm:flex-row sm:items-center gap-4 py-4">
                 <div className="h-10 w-10 rounded-full bg-green-100 dark:bg-green-900 flex items-center justify-center flex-shrink-0">
                   <CheckCircle className="h-5 w-5 text-green-600 dark:text-green-400" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-green-800 dark:text-green-300">Active login popup</p>
-                  <p className="text-sm text-green-600 dark:text-green-400 truncate">{activePopup.title}</p>
+                  <p className="text-sm font-medium text-green-800 dark:text-green-300">● RUNNING — users see this after login</p>
+                  <p className="text-sm text-green-600 dark:text-green-400 truncate">{activeLoginPopup.title}</p>
+                  <p className="text-xs text-muted-foreground mt-1">Updated {formatWhen(activeLoginPopup.updatedAt)}</p>
                 </div>
-                <Badge className="bg-green-600 text-white">Live</Badge>
+                <div className="flex flex-wrap gap-2 shrink-0">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => openEditDialog(activeLoginPopup)}
+                  >
+                    <Pencil className="w-3.5 h-3.5 mr-1" />
+                    Edit
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    disabled={togglingId === activeLoginPopup._id}
+                    onClick={() => handleTogglePopup(activeLoginPopup._id, true)}
+                  >
+                    <PowerOff className="w-3.5 h-3.5 mr-1" />
+                    Stop Popup
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           ) : (
@@ -665,6 +1029,118 @@ export default function AdminAnnouncementsPage() {
               ))}
             </div>
           )}
+        </TabsContent>
+
+        {/* ───── MANAGE ORDER NEWS TAB ───── */}
+        <TabsContent value="order-news" className="space-y-6">
+          <Card className="border-primary/20 bg-primary/5">
+            <CardContent className="py-4">
+              <p className="text-sm text-muted-foreground">
+                Each column is a separate news slot. Customers only see news for their server&apos;s provider or linked company when they open{' '}
+                <code className="text-xs bg-muted px-1.5 py-0.5 rounded">/dashboard/order/[id]</code>.
+                Company news overrides provider news for that company&apos;s orders.
+                Enabling a new item automatically disables the previous live one in the same column (it moves to Draft — not deleted).
+              </p>
+            </CardContent>
+          </Card>
+
+          <div>
+            <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
+              <Server className="h-5 w-5 text-primary" />
+              Provider News
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5 gap-4">
+              {PROVIDER_COLUMNS.map((column) => {
+                const items = getAllForOrderTarget(column.id);
+                const active = getActiveOrderNews(column.id);
+                return (
+                  <Card key={column.id} className={active ? 'border-green-300 dark:border-green-800' : 'border-dashed'}>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-base flex items-center justify-between gap-2">
+                        <span>{column.label}</span>
+                        {active && <Badge className="bg-green-600 text-white text-[10px]">Live</Badge>}
+                      </CardTitle>
+                      <CardDescription className="text-xs">{column.hint}</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      {items.length > 0 ? (
+                        <div className="space-y-2 max-h-72 overflow-y-auto">
+                          {items.map((item) => renderOrderNewsItem(item))}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-muted-foreground py-2">No news yet for {column.label} orders.</p>
+                      )}
+
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="w-full"
+                        onClick={() => openCreateForOrderNews({ provider: column.id })}
+                      >
+                        <Plus className="w-3.5 h-3.5 mr-1" />
+                        Add News
+                      </Button>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          </div>
+
+          <div>
+            <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
+              <Building2 className="h-5 w-5 text-primary" />
+              Company News
+            </h2>
+            {companies.length === 0 ? (
+              <Card className="border-dashed">
+                <CardContent className="py-8 text-center text-sm text-muted-foreground">
+                  No companies found. Link IP stock to a company to target company-specific order news.
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                {companies.map((company) => {
+                  const items = getAllForOrderTarget(undefined, company._id);
+                  const active = getActiveOrderNews(undefined, company._id);
+                  return (
+                    <Card key={company._id} className={active ? 'border-green-300 dark:border-green-800' : 'border-dashed'}>
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-base flex items-center justify-between gap-2">
+                          <span className="truncate">{company.name}</span>
+                          {active && <Badge className="bg-green-600 text-white text-[10px]">Live</Badge>}
+                        </CardTitle>
+                        <CardDescription className="text-xs font-mono">
+                          /company/{company.slug}
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent className="space-y-3">
+                        {items.length > 0 ? (
+                          <div className="space-y-2 max-h-72 overflow-y-auto">
+                            {items.map((item) => renderOrderNewsItem(item))}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-muted-foreground py-2">
+                            No news yet for {company.name} orders.
+                          </p>
+                        )}
+
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="w-full"
+                          onClick={() => openCreateForOrderNews({ companyId: company._id })}
+                        >
+                          <Plus className="w-3.5 h-3.5 mr-1" />
+                          Add News
+                        </Button>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </TabsContent>
 
         {/* ───── EMAIL ANNOUNCEMENTS TAB ───── */}
@@ -835,7 +1311,18 @@ export default function AdminAnnouncementsPage() {
           <DialogHeader>
             <DialogTitle>Edit Announcement</DialogTitle>
           </DialogHeader>
-          <AnnouncementForm isEdit />
+          <AnnouncementForm
+            isEdit
+            formData={formData}
+            setFormData={setFormData}
+            companies={companies}
+            isSubmitting={isSubmitting}
+            onCancel={() => { setShowEditDialog(false); setEditingId(null); setFormData({ ...emptyForm }); }}
+            onSaveDraft={() => handleSubmit('draft')}
+            onPublish={() => handleSubmit('send')}
+            onSave={() => handleUpdate(false)}
+            onSaveAndPublish={() => handleUpdate(true)}
+          />
         </DialogContent>
       </Dialog>
     </div>

@@ -1,8 +1,7 @@
 import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
-import User from '@/models/userModel';
-import { getDataFromToken } from '@/helper/getDataFromToken';
+import { enforceAdmin } from '@/lib/apiSecurity';
 import fs from 'fs';
 import path from 'path';
 
@@ -49,15 +48,10 @@ const EXPIRE_SOON_DAYS = 7;
  */
 export async function POST(request) {
   try {
+    const denied = await enforceAdmin(request);
+    if (denied) return denied;
+
     await connectDB();
-
-    const userId = await getDataFromToken(request);
-    if (!userId) {
-      return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
-    }
-
-    const user = await User.findById(userId);
-    const isAdmin = user?.isAdmin === true || user?.userType === 'admin';
 
     let body = {};
     try {

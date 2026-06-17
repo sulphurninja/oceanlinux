@@ -30,7 +30,7 @@ interface AdminTicket {
   userId: {
     name: string;
     email: string;
-  };
+  } | null;
   messages: any[];
   createdAt: string;
   updatedAt: string;
@@ -239,9 +239,9 @@ export default function AdminTicketsPage() {
                     <div>
                       <h3 className="font-medium">{ticket.subject}</h3>
                       <div className="flex items-center space-x-2 text-sm text-muted-foreground">
-                        <span>{ticket.userId.name}</span>
+                        <span>{ticket.userId?.name || 'Unknown user'}</span>
                         <span>•</span>
-                        <span>{ticket.userId.email}</span>
+                        <span>{ticket.userId?.email || '—'}</span>
                         <span>•</span>
                         <span className="flex items-center">
                           <Calendar className="w-3 h-3 mr-1" />

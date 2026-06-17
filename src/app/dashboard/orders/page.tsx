@@ -73,7 +73,8 @@ import { Label } from '@/components/ui/label';
 import {
     getOrdersPageStatus,
     hasDeliveredCredentials,
-    isServerListOrder,
+    hasOrderBeenDelivered,
+    isOrderPaid,
 } from '@/lib/orderDeliveryStatus';
 
 interface Order {
@@ -899,7 +900,7 @@ const OrderHistory = () => {
                             </Card>
 
                             {/* Server Access Details */}
-                            {(selectedOrder.username || selectedOrder.password || selectedOrder.ipAddress) && (
+                            {(selectedOrder.username || selectedOrder.password || selectedOrder.ipAddress || (hasOrderBeenDelivered(selectedOrder) && isOrderPaid(selectedOrder))) && (
                                 <Card>
                                     <CardHeader>
                                         <CardTitle className="flex items-center gap-2">
@@ -909,7 +910,9 @@ const OrderHistory = () => {
                                         <CardDescription>
                                             {hasDeliveredCredentials(selectedOrder)
                                                 ? "Your server credentials are ready to use"
-                                                : "Server credentials will be available once setup is complete"
+                                                : hasOrderBeenDelivered(selectedOrder) && isOrderPaid(selectedOrder)
+                                                    ? "Your server is delivered. Credentials may still be syncing — open Manage Server or use Sync."
+                                                    : "Server credentials will be available once setup is complete"
                                             }
                                         </CardDescription>
                                     </CardHeader>
@@ -995,6 +998,47 @@ const OrderHistory = () => {
                                                             </p>
                                                         </div>
                                                     </div>
+                                                </div>
+                                            </div>
+                                        ) : hasOrderBeenDelivered(selectedOrder) && isOrderPaid(selectedOrder) ? (
+                                            <div className="space-y-4">
+                                                {selectedOrder.ipAddress && (
+                                                    <div>
+                                                        <Label className="text-sm font-medium">Server IP Address</Label>
+                                                        <div className="flex items-center gap-2 mt-1">
+                                                            <Input
+                                                                readOnly
+                                                                value={selectedOrder.ipAddress}
+                                                                className="font-mono text-sm"
+                                                            />
+                                                            <Button
+                                                                variant="outline"
+                                                                size="sm"
+                                                                onClick={() => copyToClipboard(selectedOrder.ipAddress!)}
+                                                                className="gap-2"
+                                                            >
+                                                                <Copy className="h-4 w-4" />
+                                                                Copy
+                                                            </Button>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                <div className="text-center py-6">
+                                                    <div className="w-16 h-16 mx-auto mb-4 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center">
+                                                        <Loader2 className="h-8 w-8 text-blue-600 animate-spin" />
+                                                    </div>
+                                                    <h3 className="font-semibold mb-2">Server Delivered — Syncing Credentials</h3>
+                                                    <p className="text-sm text-muted-foreground mb-4">
+                                                        Your service is active. Login details are still being fetched from the provider.
+                                                        Open Manage Server and tap Sync, or wait a few minutes.
+                                                    </p>
+                                                    <Button
+                                                        onClick={() => router.push(`/dashboard/order/${selectedOrder._id}`)}
+                                                        className="gap-2"
+                                                    >
+                                                        <Settings className="h-4 w-4" />
+                                                        Manage Server
+                                                    </Button>
                                                 </div>
                                             </div>
                                         ) : (

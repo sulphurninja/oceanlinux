@@ -2,8 +2,12 @@ import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import Reseller from '@/models/resellerModel';
 import Order from '@/models/orderModel';
+import { enforceAdmin } from '@/lib/apiSecurity';
 
 export async function GET(request, { params }) {
+    const denied = await enforceAdmin(request);
+    if (denied) return denied;
+
     await connectDB();
     const { id } = params;
 
@@ -32,6 +36,9 @@ export async function GET(request, { params }) {
 }
 
 export async function PUT(request, { params }) {
+    const denied = await enforceAdmin(request);
+    if (denied) return denied;
+
     await connectDB();
     const { id } = params;
     const body = await request.json();

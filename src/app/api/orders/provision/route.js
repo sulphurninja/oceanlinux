@@ -1,9 +1,15 @@
 import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
+import { enforceAdmin, enforceOrderAccess, isCronAuthorized } from '@/lib/apiSecurity';
 const AutoProvisioningService = require('@/services/autoProvisioningService');
 
 export async function POST(request) {
+  if (!isCronAuthorized(request)) {
+    const denied = await enforceAdmin(request);
+    if (denied) return denied;
+  }
+
   await connectDB();
   
   console.log('\n' + '='.repeat(80));
@@ -131,13 +137,18 @@ export async function GET(request) {
       );
     }
     const order = await Order.findById(orderId).select(
-      'provisioningStatus provisioningError hostycareServiceId autoProvisioned'
+      'user provisioningStatus provisioningError hostycareServiceId autoProvisioned'
     );
     if (!order) {
       return NextResponse.json(
         { message: 'Order not found' },
         { status: 404 }
       );
+    }
+
+    if (!isCronAuthorized(request)) {
+      const denied = await enforceOrderAccess(request, order);
+      if (denied) return denied;
     }
 
     return NextResponse.json({

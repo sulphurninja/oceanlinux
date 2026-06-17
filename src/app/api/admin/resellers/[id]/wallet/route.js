@@ -1,8 +1,12 @@
 import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import ResellerWalletService from '@/services/resellerWalletService';
+import { enforceAdmin } from '@/lib/apiSecurity';
 
 export async function POST(request, { params }) {
+    const denied = await enforceAdmin(request);
+    if (denied) return denied;
+
     await connectDB();
     const { id } = params;
     const body = await request.json();

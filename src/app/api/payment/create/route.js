@@ -10,6 +10,7 @@ const WhatsAppService = require('@/services/whatsappService');
 import { assertIpStockPurchasable, decrementIpStockForOrder } from '@/lib/ipStockAvailability';
 import { calculateExpiryDate } from '@/lib/expiryHelper';
 import { assignPanelCredentials } from '@/lib/panelCredentials';
+const { resolveOrderExpiryOnPayment } = require('@/lib/advpsOrderExpiry');
 import userWalletService from '@/services/userWalletService';
 import NotificationService from '@/services/notificationService';
 import { Cashfree } from 'cashfree-pg';
@@ -46,9 +47,15 @@ export async function POST(request) {
   await connectDB();
   console.log("MongoDB connected");
 
+  let walletApplied = 0;
+  let walletDebit = null;
+  let orderCreated = false;
+  let clientTxnId = null;
+  let userId = null;
+
   try {
     // 1. Check which user is making this purchase
-    const userId = await getDataFromToken(request);
+    userId = await getDataFromToken(request);
     if (!userId) {
       return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
     }
@@ -159,10 +166,10 @@ export async function POST(request) {
 
     console.log(`[Payment] Server-validated price: originalPrice=${originalPrice}, discount=${promoDiscount}, finalPrice=${price}`);
 
-    const clientTxnId = `ORDER_${Date.now()}_${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+    clientTxnId = `ORDER_${Date.now()}_${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
 
-    let walletApplied = 0;
-    let walletDebit = null;
+    walletApplied = 0;
+    walletDebit = null;
     if (useWallet) {
       const balance = await userWalletService.getBalance(userId);
       walletApplied = Math.min(balance, price);
@@ -368,6 +375,12 @@ export async function POST(request) {
     // 9. Create a pending order in our database
     const appliedPromoCode = promoDiscount > 0 ? promoCode : null;
 
+    let confirmedExpiryDate = gatewayCharge === 0 ? calculateExpiryDate() : null;
+    if (gatewayCharge === 0 && !isSlotIpPurchase) {
+      const resolvedExpiry = await resolveOrderExpiryOnPayment({ ipStockId, productName });
+      confirmedExpiryDate = resolvedExpiry;
+    }
+
     const orderData = {
       user: userId,
       productName,
@@ -382,7 +395,7 @@ export async function POST(request) {
       status: gatewayCharge === 0 ? 'confirmed' : 'pending',
       customerName: user.name,
       customerEmail: user.email,
-      expiryDate: gatewayCharge === 0 ? calculateExpiryDate() : expiryDate,
+      expiryDate: gatewayCharge === 0 ? (confirmedExpiryDate || undefined) : expiryDate,
       paymentDetails: {
         gatewayAmount: gatewayCharge,
         walletAmount: walletApplied,
@@ -415,6 +428,7 @@ export async function POST(request) {
     }
     
     const newOrder = await Order.create(orderData);
+    orderCreated = true;
 
     if (gatewayCharge === 0) {
       await assignPanelCredentials(newOrder);
@@ -512,6 +526,9 @@ export async function POST(request) {
 
   } catch (error) {
     console.error('Error initiating payment:', error);
+    if (userId && walletDebit && walletApplied > 0 && !orderCreated) {
+      await refundWalletReservation(userId, walletApplied, clientTxnId || 'unknown');
+    }
     return NextResponse.json(
       { message: 'Server error', error: error.message },
       { status: 500 }

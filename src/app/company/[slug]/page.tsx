@@ -24,15 +24,24 @@ import { cn } from '@/lib/utils';
 import { COMPANY_FILTER_VERSION, isCompanyVisibleOrder } from '@/lib/companyOrders';
 
 function orderStatusBadgeProps(status: string): {
-  variant: 'default' | 'secondary' | 'outline';
+  variant: 'default' | 'secondary' | 'outline' | 'destructive';
   className?: string;
+  label?: string;
 } {
-  if (status === 'active') return { variant: 'default', className: 'text-[10px] h-4 capitalize' };
+  if (status === 'active') {
+    return {
+      variant: 'outline',
+      label: 'active',
+      className:
+        'text-[10px] h-4 capitalize text-emerald-700 border-emerald-200 bg-emerald-50 dark:bg-emerald-950/30 dark:text-emerald-400 dark:border-emerald-800',
+    };
+  }
   if (status === 'confirmed' || status === 'paid') {
     return {
       variant: 'outline',
+      label: 'needs delivery',
       className:
-        'text-[10px] h-4 capitalize text-emerald-700 border-emerald-200 bg-emerald-50 dark:bg-emerald-950/30 dark:text-emerald-400 dark:border-emerald-800',
+        'text-[10px] h-4 capitalize text-red-700 border-red-200 bg-red-50 dark:bg-red-950/30 dark:text-red-400 dark:border-red-800',
     };
   }
   if (status === 'completed') return { variant: 'secondary', className: 'text-[10px] h-4 capitalize' };
@@ -606,7 +615,14 @@ export default function CompanyDashboard() {
               </Card>
             )}
             <p className="text-xs text-muted-foreground">
-              Paid orders (confirmed &amp; active) are shown. Pending and unpaid orders are hidden.
+              <span className="inline-flex items-center gap-1.5 mr-3">
+                <span className="inline-block h-2 w-2 rounded-full bg-red-500" />
+                Red = paid, needs delivery (confirmed)
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
+                Green = delivered (active)
+              </span>
             </p>
             {/* Filters */}
             <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
@@ -651,7 +667,9 @@ export default function CompanyDashboard() {
             <div className="space-y-2">
               {filteredOrders.length === 0 ? (
                 <Card><CardContent className="py-12 text-center"><Package className="h-10 w-10 mx-auto text-muted-foreground mb-3" /><p className="text-sm text-muted-foreground">{visibleOrders.length === 0 ? 'No orders yet.' : 'No orders match your filters.'}</p></CardContent></Card>
-              ) : filteredOrders.filter(isCompanyVisibleOrder).map((order) => (
+              ) : filteredOrders.filter(isCompanyVisibleOrder).map((order) => {
+                const { label, ...statusBadge } = orderStatusBadgeProps(order.status);
+                return (
                 <Card key={order._id}>
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between gap-4">
@@ -660,7 +678,7 @@ export default function CompanyDashboard() {
                           <h3 className="font-medium text-sm">{order.productName}</h3>
                           <Badge variant="outline" className="text-[10px] h-4">{order.memory}</Badge>
                           <Badge variant="secondary" className="text-[10px] h-4">{order.stockName}</Badge>
-                          <Badge {...orderStatusBadgeProps(order.status)}>{order.status}</Badge>
+                          <Badge {...statusBadge}>{label || order.status}</Badge>
                         </div>
                         <div className="flex items-center gap-4 mt-1.5 text-xs text-muted-foreground flex-wrap">
                           {order.customerName && <span>{order.customerName}</span>}
@@ -689,7 +707,8 @@ export default function CompanyDashboard() {
                     </div>
                   </CardContent>
                 </Card>
-              ))}
+              );
+              })}
             </div>
           </div>
         )}

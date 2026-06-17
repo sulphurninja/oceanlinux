@@ -1,8 +1,8 @@
 import connectDB from '@/lib/db';
 import KnowledgeBase from '@/models/knowledgeBaseModel';
-import User from '@/models/userModel';
-import { getDataFromToken } from '@/helper/getDataFromToken';
 import { NextResponse } from 'next/server';
+import { enforceAdmin } from '@/lib/apiSecurity';
+import { requireAdmin } from '@/lib/adminAuth';
 
 // Helper function to generate slug
 const generateSlug = (title) => {
@@ -16,6 +16,9 @@ const generateSlug = (title) => {
 
 export async function GET(request) {
     try {
+        const denied = await enforceAdmin(request);
+        if (denied) return denied;
+
         await connectDB();
 
         const { searchParams } = new URL(request.url);
@@ -81,18 +84,12 @@ export async function GET(request) {
 
 export async function POST(request) {
     try {
+        const denied = await enforceAdmin(request);
+        if (denied) return denied;
+
         await connectDB();
 
-        // Check authentication and admin role
-        const userId = getDataFromToken(request);
-        if (!userId) {
-            return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
-        }
-
-        const user = await User.findById(userId);
-        // if (!user || user.role !== 'Admin') {
-        //     return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
-        // }
+        const adminUser = await requireAdmin(request);
 
         const {
             title,
@@ -135,7 +132,7 @@ export async function POST(request) {
             excerpt,
             category,
             tags,
-            author: userId,
+            author: adminUser._id,
             published,
             featured,
             readTime,

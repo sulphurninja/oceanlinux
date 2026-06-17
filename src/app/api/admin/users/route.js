@@ -1,17 +1,16 @@
 import connectDB from "@/lib/db";
 import User from "@/models/userModel";
 import Order from "@/models/orderModel";
-import { getDataFromToken } from "@/helper/getDataFromToken";
+import { requireAdmin } from "@/lib/adminAuth";
 
 export async function GET(request) {
     try {
         await connectDB();
 
-        // Check if user is admin
-        const userId = getDataFromToken(request);
-        if (!userId) {
-            return new Response(JSON.stringify({ message: 'Authentication required' }), {
-                status: 401,
+        const admin = await requireAdmin(request);
+        if (!admin) {
+            return new Response(JSON.stringify({ message: 'Admin access required' }), {
+                status: 403,
                 headers: { 'Content-Type': 'application/json' }
             });
         }
@@ -127,11 +126,10 @@ export async function PATCH(request) {
     try {
         await connectDB();
 
-        // Check if user is admin
-        const userId = getDataFromToken(request);
-        if (!userId) {
-            return new Response(JSON.stringify({ message: 'Authentication required' }), {
-                status: 401,
+        const admin = await requireAdmin(request);
+        if (!admin) {
+            return new Response(JSON.stringify({ message: 'Admin access required' }), {
+                status: 403,
                 headers: { 'Content-Type': 'application/json' }
             });
         }

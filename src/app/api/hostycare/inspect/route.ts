@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 const HostycareAPI = require("@/services/hostycareApi");
+import { enforceAdmin } from "@/lib/apiSecurity";
 
 function inferVpsId(details: any, info: any): string | null {
   const candidates = [
@@ -15,7 +16,7 @@ function inferVpsId(details: any, info: any): string | null {
   return candidates.length ? String(candidates[0]) : null;
 }
 
-function requireAdmin(req: NextRequest) {
+function requireInspectToken(req: NextRequest) {
   const sent = req.headers.get("x-admin-token") || "";
   const need = process.env.HOSTYCARE_INSPECT_TOKEN || "";
   return !!need && sent === need;
@@ -23,8 +24,12 @@ function requireAdmin(req: NextRequest) {
 
 export async function GET(req: NextRequest) {
   try {
-    // if (!requireAdmin(req))
-    //   return NextResponse.json({ message: "Forbidden" }, { status: 403 });
+    const denied = await enforceAdmin(req);
+    if (denied) return denied;
+
+    if (process.env.HOSTYCARE_INSPECT_TOKEN && !requireInspectToken(req)) {
+      return NextResponse.json({ message: "Forbidden" }, { status: 403 });
+    }
 
     const { searchParams } = new URL(req.url);
     const serviceId = searchParams.get("serviceId");
@@ -71,7 +76,10 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    if (!requireAdmin(req))
+    const denied = await enforceAdmin(req);
+    if (denied) return denied;
+
+    if (process.env.HOSTYCARE_INSPECT_TOKEN && !requireInspectToken(req))
       return NextResponse.json({ message: "Forbidden" }, { status: 403 });
 
     const body = await req.json().catch(() => ({}));

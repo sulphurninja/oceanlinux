@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
+import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -147,6 +148,7 @@ interface CompanyStock {
 }
 
 export default function CompaniesPage() {
+  const { confirm, ConfirmDialog } = useConfirmDialog();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
@@ -229,7 +231,13 @@ export default function CompaniesPage() {
   };
 
   const handleDelete = async (id: string, companyName: string) => {
-    if (!confirm(`Delete "${companyName}"? This cannot be undone.`)) return;
+    const ok = await confirm({
+      title: 'Delete Company',
+      description: <>Delete <strong>{companyName}</strong>? This cannot be undone.</>,
+      confirmLabel: 'Delete',
+      destructive: true,
+    });
+    if (!ok) return;
     try {
       const res = await fetch(`/api/admin/companies/${id}`, { method: 'DELETE' });
       if (res.ok) {
@@ -536,7 +544,13 @@ export default function CompaniesPage() {
 
   const handleClearResellerApi = async () => {
     if (!resellerCompany) return;
-    if (!confirm(`Clear reseller API config for "${resellerCompany.name}"?`)) return;
+    const ok = await confirm({
+      title: 'Clear Reseller API',
+      description: <>Clear reseller API config for <strong>{resellerCompany.name}</strong>?</>,
+      confirmLabel: 'Clear',
+      destructive: true,
+    });
+    if (!ok) return;
     setResellerSaving(true);
     try {
       const res = await fetch(`/api/admin/companies/${resellerCompany._id}`, {
@@ -626,10 +640,14 @@ export default function CompaniesPage() {
     // admin so they don't accidentally save an unusable empty config.
     if (
       netbayForm.enabled &&
-      (!netbayForm.apiKey.trim() || !netbayForm.apiSecret.trim()) &&
-      !confirm('API Key / Secret are blank. The server will fall back to NETBAY_API_KEY / NETBAY_API_SECRET env vars. Continue?')
+      (!netbayForm.apiKey.trim() || !netbayForm.apiSecret.trim())
     ) {
-      return;
+      const ok = await confirm({
+        title: 'Blank API Credentials',
+        description: 'API Key / Secret are blank. The server will fall back to NETBAY_API_KEY / NETBAY_API_SECRET env vars. Continue?',
+        confirmLabel: 'Continue',
+      });
+      if (!ok) return;
     }
     setNetbaySaving(true);
     try {
@@ -658,7 +676,13 @@ export default function CompaniesPage() {
 
   const handleClearNetbayApi = async () => {
     if (!netbayCompany) return;
-    if (!confirm(`Clear Netbay API config for "${netbayCompany.name}"?`)) return;
+    const ok = await confirm({
+      title: 'Clear Netbay API',
+      description: <>Clear Netbay API config for <strong>{netbayCompany.name}</strong>?</>,
+      confirmLabel: 'Clear',
+      destructive: true,
+    });
+    if (!ok) return;
     setNetbaySaving(true);
     try {
       const res = await fetch(`/api/admin/companies/${netbayCompany._id}`, {
@@ -1604,6 +1628,7 @@ export default function CompaniesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <ConfirmDialog />
     </div>
   );
 }

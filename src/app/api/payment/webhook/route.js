@@ -5,12 +5,15 @@ import IPStock from '@/models/ipStockModel';
 import RenewalRequest from '@/models/renewalRequestModel';
 import User from '@/models/userModel';
 import crypto from 'crypto';
-import { calculateExpiryDate, calculateRenewalExpiryDate } from '@/lib/expiryHelper';
+import { calculateRenewalExpiryDate } from '@/lib/expiryHelper';
 import { assignPanelCredentials } from '@/lib/panelCredentials';
 import { decrementIpStockForOrder } from '@/lib/ipStockAvailability';
+const { resolveOrderExpiryOnPayment, pickAdvpsExpiryDate } = require('@/lib/advpsOrderExpiry');
+const { extractAdvpsStatusCredentials } = require('@/lib/advpsStatusNormalize');
 import { detectCompanyManagedRenewal, resolveRenewalProvider } from '@/lib/companyRenewal';
 import { isSlotIpOrder, SLOT_IP_NO_RENEWAL_MESSAGE } from '@/lib/slotIpOrder';
 import { resolveOrderRenewalPrice } from '@/lib/orderRenewalPricingServer';
+import { debitPendingRenewalWallet } from '@/lib/renewalWallet';
 import {
   findDispatchTarget,
   confirmRechargeFromWebhook,
@@ -147,14 +150,13 @@ export async function POST(request) {
       const orderUpdateStart = Date.now();
       console.log(`[WEBHOOK] 📝 UPDATING ORDER STATUS...`);
 
-      // Calculate expiry based on the number of days in the current month
-      const expiryDate = calculateExpiryDate();
+      const expiryDate = await resolveOrderExpiryOnPayment(order);
 
       order.status = 'confirmed';
       order.transactionId = payment.payment.cf_payment_id;
       order.gatewayOrderId = payment.order.order_id; // Store Cashfree order ID
       order.paymentMethod = 'cashfree';
-      order.expiryDate = expiryDate;
+      if (expiryDate) order.expiryDate = expiryDate;
 
       // Store additional payment info
       order.webhookAmount = payment.payment.payment_amount.toString();
@@ -180,7 +182,7 @@ export async function POST(request) {
       await decrementIpStockForOrder(order);
       const orderUpdateTime = Date.now() - orderUpdateStart;
       console.log(`[WEBHOOK] ✅ ORDER UPDATED to 'confirmed' in ${orderUpdateTime}ms`);
-      console.log(`[WEBHOOK] 📅 Order expiry set to: ${expiryDate.toISOString()}`);
+      console.log(`[WEBHOOK] 📅 Order expiry set to: ${expiryDate ? expiryDate.toISOString() : 'deferred (ADVPS upstream)'}`);
 
       // Allocate slot IP if this is a slot IP purchase
       if (order.slotIpPackageId && !order.slotIpId) {
@@ -279,17 +281,37 @@ export async function POST(request) {
         console.error(`[WEBHOOK] ❌ ERROR initiating auto-provisioning:`, provisioningError);
       }
 
-    } else if (data.event === 'payment.failed') {
-      const payment = data.payload.payment.entity;
-      const orderId = payment.order_id;
+    } else if (data.type === 'PAYMENT_FAILED_WEBHOOK' || data.event === 'payment.failed') {
+      const orderId =
+        data.data?.order?.order_id ||
+        data.payload?.payment?.entity?.order_id;
 
-      console.log(`[WEBHOOK] ❌ Payment failed for order: ${orderId}`);
+      if (!orderId) {
+        console.log('[WEBHOOK] Payment failed event without order id — ignored');
+      } else {
+        console.log(`[WEBHOOK] ❌ Payment failed event for order: ${orderId}`);
 
-      const order = await Order.findOne({ gatewayOrderId: orderId });
-      if (order) {
-        const { cancelPendingBuyNowOrder } = await import('@/lib/cancelPendingOrder');
-        await cancelPendingBuyNowOrder(order, 'failed');
-        console.log(`[WEBHOOK] ✅ Order ${order._id} marked as failed`);
+        const order = await Order.findOne({
+          $or: [{ clientTxnId: orderId }, { gatewayOrderId: orderId }],
+        });
+
+        if (!order) {
+          console.log(`[WEBHOOK] No order found for failed payment: ${orderId}`);
+        } else if (order.status === 'confirmed' || order.status === 'active') {
+          console.log(`[WEBHOOK] Order ${order._id} already confirmed — ignoring failed webhook`);
+        } else {
+          const { probeGatewayPayment } = await import('@/lib/confirmPendingOrderPayment');
+          const probe = await probeGatewayPayment(order);
+          if (probe.success) {
+            const { confirmPendingOrderPayment } = await import('@/lib/confirmPendingOrderPayment');
+            await confirmPendingOrderPayment(order, probe);
+            console.log(`[WEBHOOK] Order ${order._id} was actually paid — confirmed instead of failing`);
+          } else {
+            const { cancelPendingBuyNowOrder } = await import('@/lib/cancelPendingOrder');
+            await cancelPendingBuyNowOrder(order, 'failed');
+            console.log(`[WEBHOOK] Order ${order._id} payment release recorded`);
+          }
+        }
       }
     }
 
@@ -378,8 +400,19 @@ async function handleRenewalWebhook(renewalTxnId, payment, webhookStartTime) {
     logger.logInfo('Provider determined', { provider });
     logger.setPaymentInfo('cashfree', payment.payment.cf_payment_id, renewalPrice);
 
+    try {
+      await debitPendingRenewalWallet(order, renewalTxnId);
+    } catch (walletErr) {
+      console.error('[WEBHOOK-RENEWAL] Wallet debit failed:', walletErr);
+      await logger.finalize(false, null, walletErr.message);
+      return NextResponse.json(
+        { success: false, message: walletErr.message || 'Insufficient wallet balance for renewal' },
+        { status: 400 }
+      );
+    }
+
     // Calculate new expiry based on the number of days in the base month
-    const newExpiryDate = calculateRenewalExpiryDate(order.expiryDate);
+    let newExpiryDate = calculateRenewalExpiryDate(order.expiryDate);
 
     console.log(`[WEBHOOK-RENEWAL] New expiry date: ${newExpiryDate}`);
 
@@ -497,30 +530,49 @@ async function handleRenewalWebhook(renewalTxnId, payment, webhookStartTime) {
         advpsServiceId: order.advpsServiceId,
       });
 
-      const apiStart = Date.now();
-      const advpsApi = new AdvpsAPI();
-      const advpsRenew = await executeAdvpsUpstreamRenewal(advpsApi, order, { Order });
-      const apiDuration = Date.now() - apiStart;
+      try {
+        const apiStart = Date.now();
+        const advpsApi = new AdvpsAPI();
+        const advpsRenew = await executeAdvpsUpstreamRenewal(advpsApi, order, { Order });
+        const apiDuration = Date.now() - apiStart;
 
-      if (advpsRenew.correctedServiceId) {
-        await Order.findByIdAndUpdate(order._id, {
-          advpsServiceId: advpsRenew.correctedServiceId,
-          ...(order.advpsOrderId ? {} : { advpsOrderId: advpsRenew.advpsOrderId }),
-        });
-      }
+        if (advpsRenew.correctedServiceId) {
+          await Order.findByIdAndUpdate(order._id, {
+            advpsServiceId: advpsRenew.correctedServiceId,
+            ...(order.advpsOrderId ? {} : { advpsOrderId: advpsRenew.advpsOrderId }),
+          });
+        }
 
-      providerRenewalResult = advpsRenew.result || {
-        error: advpsRenew.error,
-        testMode: advpsRenew.testMode,
-      };
-      providerRenewalSuccess = advpsRenew.success;
+        providerRenewalResult = advpsRenew.result || {
+          error: advpsRenew.error,
+          testMode: advpsRenew.testMode,
+        };
+        providerRenewalSuccess = advpsRenew.success;
 
-      if (advpsRenew.success) {
-        console.log(`[WEBHOOK-RENEWAL] ✅ ADVPS renewal API success`);
-        logger.setProviderApiResult('advps', true, advpsRenew.result, null, apiDuration);
-      } else {
-        console.error(`[WEBHOOK-RENEWAL] ADVPS renewal API failed:`, advpsRenew.error);
-        logger.setProviderApiResult('advps', false, advpsRenew.result, { message: advpsRenew.error }, apiDuration);
+        if (advpsRenew.success) {
+          console.log(`[WEBHOOK-RENEWAL] ✅ ADVPS renewal API success`);
+          logger.setProviderApiResult('advps', true, advpsRenew.result, null, apiDuration);
+
+          try {
+            const statusRes = await advpsApi.status(order.advpsServiceId);
+            const statusCreds = extractAdvpsStatusCredentials(statusRes, order);
+            const advpsExpiry = pickAdvpsExpiryDate(statusCreds.expiryDate);
+            if (advpsExpiry) {
+              newExpiryDate = advpsExpiry;
+              console.log(`[WEBHOOK-RENEWAL] ADVPS expiry after renew: ${newExpiryDate.toISOString()}`);
+            }
+          } catch (statusErr) {
+            console.warn('[WEBHOOK-RENEWAL] Could not fetch ADVPS expiry after renew:', statusErr.message);
+          }
+        } else {
+          console.error(`[WEBHOOK-RENEWAL] ADVPS renewal API failed:`, advpsRenew.error);
+          logger.setProviderApiResult('advps', false, advpsRenew.result, { message: advpsRenew.error }, apiDuration);
+        }
+      } catch (advpsErr) {
+        console.error(`[WEBHOOK-RENEWAL] ADVPS renewal threw:`, advpsErr.message);
+        logger.setProviderApiResult('advps', false, null, advpsErr);
+        providerRenewalResult = { error: advpsErr.message };
+        providerRenewalSuccess = false;
       }
     } else {
       console.log(`[WEBHOOK-RENEWAL] ${provider} renewal - no API call needed`);

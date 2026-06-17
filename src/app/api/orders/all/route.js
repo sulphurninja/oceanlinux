@@ -1,16 +1,18 @@
 import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
-// If you have an auth check for admin, do it here
-// import { requireAdmin } from '@/helper/requireAdmin';
+import { requireAdmin } from '@/lib/adminAuth';
 
-export async function GET() {
+export async function GET(request) {
   await connectDB();
 
-  try {
-    // requireAdmin(); // If you have an admin check, do it here
+  const admin = await requireAdmin(request);
+  if (!admin) {
+    return NextResponse.json({ message: 'Admin access required' }, { status: 403 });
+  }
 
-    const orders = await Order.find().populate('user', 'email').sort({createdAt: -1});
+  try {
+    const orders = await Order.find().populate('user', 'email name').sort({ createdAt: -1 });
     return NextResponse.json(orders, { status: 200 });
   } catch (error) {
     console.error('Error fetching orders:', error);

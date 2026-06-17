@@ -9,7 +9,7 @@ import { fetchWalletSummary } from "@/lib/walletClient";
 
 // Create a client component that uses useSearchParams
 function PaymentCallbackContent() {
-  const [status, setStatus] = useState<"loading" | "success" | "failed">("loading");
+  const [status, setStatus] = useState<"loading" | "success" | "failed" | "processing">("loading");
   const [message, setMessage] = useState("Processing your payment...");
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -38,10 +38,28 @@ function PaymentCallbackContent() {
         });
         console.log(`URL parameters:`, paramsObject);
 
-        // Handle specific failure statuses
+        // Handle specific failure statuses — still try gateway recovery first
         if (statusParam === "processing_failed" || statusParam === "confirmation_failed") {
-          setStatus("failed");
-          setMessage("Payment was successful but order processing failed. Don't worry - your payment is safe! Please contact support with your transaction ID for assistance.");
+          if (clientTxnId) {
+            setStatus("processing");
+            setMessage("Payment received — confirming your order, please wait…");
+            const pollRes = await fetch("/api/payment/status", {
+              method: "POST",
+              credentials: "include",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ clientTxnId, returnedFromPayment: true }),
+            });
+            const pollData = pollRes.ok ? await pollRes.json() : null;
+            if (pollData?.paymentStatus === "SUCCESS" || pollData?.order?.status === "confirmed") {
+              setStatus("success");
+              setMessage("Payment successful! Your server is being provisioned and will be ready shortly.");
+              toast.success("Payment confirmed!");
+              setTimeout(() => router.push("/dashboard/viewLinux"), 3000);
+              return;
+            }
+          }
+          setStatus("processing");
+          setMessage("Payment was successful but order processing is still catching up. Check My Orders in a few minutes — your payment is safe. Contact support with your transaction ID if needed.");
           return;
         }
 
@@ -150,6 +168,7 @@ function PaymentCallbackContent() {
           // First, verify payment status
           const statusResponse = await fetch("/api/payment/status", {
             method: "POST",
+            credentials: "include",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               renewalTxnId: clientTxnId
@@ -173,6 +192,7 @@ function PaymentCallbackContent() {
             // Confirm the renewal
             const confirmResponse = await fetch("/api/payment/renew-confirm", {
               method: "POST",
+              credentials: "include",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 renewalTxnId: clientTxnId,
@@ -214,6 +234,23 @@ function PaymentCallbackContent() {
             }
           } else {
             console.log(`[RENEWAL-CALLBACK] Payment not successful: ${statusData.paymentStatus}`);
+            try {
+              const cancelRes = await fetch('/api/payment/cancel', {
+                method: 'POST',
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ clientTxnId, userInitiated: true }),
+              });
+              const cancelData = await cancelRes.json();
+              if (cancelData.success && cancelData.refunded > 0) {
+                fetchWalletSummary().catch(() => { });
+                setStatus('failed');
+                setMessage(`Renewal payment was not completed. ₹${cancelData.refunded.toLocaleString('en-IN')} has been returned to your wallet.`);
+                return;
+              }
+            } catch (cancelErr) {
+              console.error('[RENEWAL-CALLBACK] Cancel/refund failed:', cancelErr);
+            }
             setStatus("failed");
             setMessage("Renewal payment verification failed. Please check your orders or contact support.");
           }
@@ -221,62 +258,93 @@ function PaymentCallbackContent() {
           return;
         }
 
-        // HANDLE NEW ORDER TRANSACTIONS (existing logic)
+        // HANDLE NEW ORDER TRANSACTIONS
         console.log(`Calling payment status API with transaction ID: ${clientTxnId}`);
 
-        const response = await fetch("/api/payment/status", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            clientTxnId: clientTxnId,
-            razorpayPaymentId: paymentId,
-            returnedFromPayment: true,
-            allParams: paramsObject
-          })
-        });
+        const pollOrderPayment = async (attempt = 0): Promise<void> => {
+          const maxAttempts = 8;
+          const response = await fetch("/api/payment/status", {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              clientTxnId,
+              razorpayPaymentId: paymentId,
+              returnedFromPayment: true,
+              allParams: paramsObject,
+            }),
+          });
 
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error(`API returned error ${response.status}: ${errorText}`);
-          throw new Error(`API error: ${response.status} - ${errorText}`);
-        }
-
-        const data = await response.json();
-        console.log(`Payment status API response:`, data);
-
-        // Check payment status
-        if (data.order && data.order.status === "confirmed") {
-          console.log(`Payment confirmed for transaction ${clientTxnId}`);
-          setStatus("success");
-          setMessage("Payment successful! Your server is being provisioned and will be ready shortly.");
-
-          toast.success("Payment confirmed! Check your orders for server details.");
-
-          setTimeout(() => {
-            router.push("/dashboard/viewLinux");
-          }, 3000);
-        } else {
-          console.log(`Payment not confirmed for transaction ${clientTxnId}`, data);
-          try {
-            const cancelRes = await fetch('/api/payment/cancel', {
-              method: 'POST',
-              credentials: 'include',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ clientTxnId }),
-            });
-            const cancelData = await cancelRes.json();
-            if (cancelData.success && cancelData.refunded > 0) {
-              fetchWalletSummary().catch(() => { });
-              setStatus("failed");
-              setMessage(`Payment was not completed. ₹${cancelData.refunded.toLocaleString('en-IN')} has been returned to your wallet.`);
-              return;
+          if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`API returned error ${response.status}: ${errorText}`);
+            if (attempt < maxAttempts - 1) {
+              setStatus("processing");
+              setMessage("Payment received — confirming your order, please wait…");
+              await new Promise((r) => setTimeout(r, 2000 + attempt * 1000));
+              return pollOrderPayment(attempt + 1);
             }
-          } catch (cancelErr) {
-            console.error('[CALLBACK] Cancel/refund failed:', cancelErr);
+            throw new Error(`API error: ${response.status} - ${errorText}`);
           }
-          setStatus("failed");
-          setMessage(data.message || "Payment verification failed. Please check your orders page or contact support.");
-        }
+
+          const data = await response.json();
+          console.log(`Payment status API response (attempt ${attempt + 1}):`, data);
+
+          const isConfirmed =
+            data.paymentStatus === "SUCCESS" ||
+            data.order?.status === "confirmed";
+
+          if (isConfirmed) {
+            setStatus("success");
+            setMessage("Payment successful! Your server is being provisioned and will be ready shortly.");
+            toast.success("Payment confirmed! Check your orders for server details.");
+            setTimeout(() => router.push("/dashboard/viewLinux"), 3000);
+            return;
+          }
+
+          const stillPending =
+            !data.paymentStatus ||
+            data.paymentStatus === "PENDING" ||
+            data.paymentStatus === "CREATED" ||
+            data.paymentStatus === "ATTEMPTED";
+
+          if (stillPending && attempt < maxAttempts - 1) {
+            setStatus("processing");
+            setMessage("Payment received — confirming your order, please wait…");
+            await new Promise((r) => setTimeout(r, 2000 + attempt * 1000));
+            return pollOrderPayment(attempt + 1);
+          }
+
+          if (data.paymentStatus === "FAILED" || data.paymentStatus === "FAILURE") {
+            try {
+              const cancelRes = await fetch('/api/payment/cancel', {
+                method: 'POST',
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ clientTxnId, userInitiated: true }),
+              });
+              const cancelData = await cancelRes.json();
+              if (cancelData.success && cancelData.refunded > 0) {
+                fetchWalletSummary().catch(() => { });
+                setStatus('failed');
+                setMessage(`Payment was not completed. ₹${cancelData.refunded.toLocaleString('en-IN')} has been returned to your wallet.`);
+                return;
+              }
+            } catch (cancelErr) {
+              console.error('[CALLBACK] Cancel/refund failed:', cancelErr);
+            }
+            setStatus("failed");
+            setMessage(data.message || "Payment was not completed. You can try again from IP Stock.");
+            return;
+          }
+
+          setStatus("processing");
+          setMessage(
+            "Your payment may have gone through. We're still confirming with the bank — check My Orders in a few minutes. If the order doesn't appear, contact support with your transaction ID."
+          );
+        };
+
+        await pollOrderPayment();
       } catch (error: any) {
         console.error("Error verifying payment:", error);
         setStatus("failed");
@@ -298,7 +366,7 @@ function PaymentCallbackContent() {
 
   // Determine icon and colors based on message content
   const isSessionError = message.toLowerCase().includes('session') || message.toLowerCase().includes('expired');
-  const isPaymentSafe = message.toLowerCase().includes('payment is safe') || message.toLowerCase().includes('automatically processed');
+  const isPaymentSafe = message.toLowerCase().includes('payment is safe') || message.toLowerCase().includes('automatically processed') || message.toLowerCase().includes('may have gone through');
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
@@ -308,12 +376,16 @@ function PaymentCallbackContent() {
           <div className={`
             p-4 rounded-full 
             ${status === "loading" ? "bg-blue-500/10" : ""}
+            ${status === "processing" ? "bg-amber-500/10" : ""}
             ${status === "success" ? "bg-green-500/10" : ""}
             ${status === "failed" && isSessionError ? "bg-amber-500/10" : ""}
             ${status === "failed" && !isSessionError ? "bg-red-500/10" : ""}
           `}>
             {status === "loading" && (
               <Loader2 className="h-12 w-12 text-blue-500 animate-spin" />
+            )}
+            {status === "processing" && (
+              <Loader2 className="h-12 w-12 text-amber-500 animate-spin" />
             )}
             {status === "success" && (
               <CheckCircle2 className="h-12 w-12 text-green-500" />
@@ -330,6 +402,7 @@ function PaymentCallbackContent() {
           <div className="space-y-2">
             <h1 className="text-2xl font-bold text-foreground">
               {status === "loading" && "Verifying Payment"}
+              {status === "processing" && "Confirming Order"}
               {status === "success" && "Payment Successful"}
               {status === "failed" && isSessionError && "Session Expired"}
               {status === "failed" && !isSessionError && "Payment Issue"}
@@ -338,7 +411,12 @@ function PaymentCallbackContent() {
             {/* Subtitle for context */}
             {status === "failed" && isPaymentSafe && (
               <p className="text-sm text-green-600 dark:text-green-400 font-medium">
-                ✓ Your payment is safe
+                ✓ Your payment is likely safe
+              </p>
+            )}
+            {status === "processing" && (
+              <p className="text-sm text-amber-600 dark:text-amber-400 font-medium">
+                Do not pay again for the same order
               </p>
             )}
           </div>
@@ -347,7 +425,7 @@ function PaymentCallbackContent() {
           <p className="text-muted-foreground leading-relaxed">{message}</p>
 
           {/* Transaction ID if available */}
-          {searchParams.get("client_txn_id") && status === "failed" && (
+          {searchParams.get("client_txn_id") && (status === "failed" || status === "processing") && (
             <div className="w-full p-3 bg-muted rounded-lg">
               <p className="text-xs text-muted-foreground mb-1">Transaction Reference</p>
               <p className="font-mono text-sm text-foreground break-all">
@@ -366,6 +444,17 @@ function PaymentCallbackContent() {
               >
                 View My Orders
               </Button>
+
+              {status === "processing" && (
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  size="lg"
+                  onClick={() => router.push("/support/tickets")}
+                >
+                  Contact Support
+                </Button>
+              )}
 
               {status === "failed" && isSessionError && (
                 <Button

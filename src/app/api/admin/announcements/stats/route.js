@@ -1,20 +1,13 @@
 import connectDB from '@/lib/db';
 import Announcement from '@/models/announcementModel';
-import { getDataFromToken } from '@/helper/getDataFromToken';
+import { enforceAdmin } from '@/lib/apiSecurity';
 
 export async function GET(request) {
   try {
+    const denied = await enforceAdmin(request);
+    if (denied) return denied;
+
     await connectDB();
-
-    const userId = await getDataFromToken(request);
-    if (!userId) {
-      return new Response(JSON.stringify({ message: 'Unauthorized' }), {
-        status: 401,
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
-
-    // Get aggregate stats
     const stats = await Announcement.aggregate([
       {
         $match: {

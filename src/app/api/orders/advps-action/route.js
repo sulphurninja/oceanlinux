@@ -21,6 +21,7 @@ const {
   syncAdvpsOrderCredentials,
   resolveAdvpsServiceIdForPower,
   formatAdvpsActionError,
+  configureAdvpsServiceIp,
 } = require('@/lib/advpsOrderSync');
 const { extractPasswordFromGenerateError } = require('@/lib/advpsPasswordFetch');
 
@@ -166,12 +167,18 @@ export async function POST(request) {
 
     switch (action) {
       case 'start': {
-        result = await api.start(serviceId);
-        await Order.findByIdAndUpdate(orderId, {
+        const startRes = await api.start(serviceId);
+        const ipConfig = await configureAdvpsServiceIp(api, serviceId, { logPrefix: '[ADVPS-ACTION]' });
+        const dbUpdate = {
           provisioningStatus: 'active',
           lastAction: 'start',
           lastActionTime: new Date(),
-        });
+        };
+        if (ipConfig.ip && ipConfig.ip !== order.ipAddress) {
+          dbUpdate.ipAddress = ipConfig.ip;
+        }
+        await Order.findByIdAndUpdate(orderId, dbUpdate);
+        result = { start: startRes, ipConfig };
         break;
       }
 

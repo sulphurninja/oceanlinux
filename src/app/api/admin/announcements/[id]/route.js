@@ -1,18 +1,17 @@
 import connectDB from '@/lib/db';
 import Announcement from '@/models/announcementModel';
-import { getDataFromToken } from '@/helper/getDataFromToken';
+import { enforceAdmin } from '@/lib/apiSecurity';
+import {
+  deactivateSiblingOrderPopups,
+  normalizeOrderPopupFields,
+} from '@/lib/announcementOrderPopup';
 
 export async function DELETE(request, { params }) {
   try {
-    await connectDB();
+    const denied = await enforceAdmin(request);
+    if (denied) return denied;
 
-    const userId = await getDataFromToken(request);
-    if (!userId) {
-      return new Response(JSON.stringify({ message: 'Unauthorized' }), {
-        status: 401,
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
+    await connectDB();
 
     const announcement = await Announcement.findById(params.id);
     if (!announcement) {
@@ -42,15 +41,10 @@ export async function DELETE(request, { params }) {
 
 export async function PATCH(request, { params }) {
   try {
-    await connectDB();
+    const denied = await enforceAdmin(request);
+    if (denied) return denied;
 
-    const userId = await getDataFromToken(request);
-    if (!userId) {
-      return new Response(JSON.stringify({ message: 'Unauthorized' }), {
-        status: 401,
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
+    await connectDB();
 
     const announcement = await Announcement.findById(params.id);
     if (!announcement) {
@@ -65,20 +59,58 @@ export async function PATCH(request, { params }) {
     const allowedFields = [
       'title', 'content', 'type', 'targetAudience',
       'actionUrl', 'actionText', 'showAsLoginPopup',
-      'communityLink', 'status'
+      'communityLink', 'status', 'showOnOrderPage',
+      'targetProvider', 'targetCompany',
     ];
+
+    if (
+      body.showOnOrderPage !== undefined ||
+      body.targetProvider !== undefined ||
+      body.targetCompany !== undefined
+    ) {
+      const orderPopupFields = normalizeOrderPopupFields({
+        showOnOrderPage: body.showOnOrderPage ?? announcement.showOnOrderPage,
+        targetProvider: body.targetProvider ?? announcement.targetProvider,
+        targetCompany: body.targetCompany ?? announcement.targetCompany,
+      });
+      if (orderPopupFields.error) {
+        return new Response(JSON.stringify({ message: orderPopupFields.error }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+      Object.assign(announcement, orderPopupFields);
+    }
 
     for (const field of allowedFields) {
       if (body[field] !== undefined) {
-        if (field === 'showAsLoginPopup') {
+        if (field === 'showAsLoginPopup' || field === 'showOnOrderPage') {
           announcement[field] = Boolean(body[field]);
+        } else if (field === 'targetProvider' || field === 'targetCompany') {
+          // handled above when any order-popup field changes
         } else {
           announcement[field] = body[field];
         }
       }
     }
 
-    if (body.status === 'sent' && announcement.showAsLoginPopup && !announcement.sentAt) {
+    if (body.status === 'sent' && (announcement.showAsLoginPopup || announcement.showOnOrderPage) && !announcement.sentAt) {
+      announcement.sentAt = new Date();
+    }
+
+    if (body.status === 'sent' && announcement.showOnOrderPage) {
+      await deactivateSiblingOrderPopups(announcement);
+    }
+
+    const contentChanged =
+      (body.title !== undefined && body.title !== announcement.title) ||
+      (body.content !== undefined && body.content !== announcement.content);
+
+    if (
+      contentChanged &&
+      announcement.showOnOrderPage &&
+      announcement.status === 'sent'
+    ) {
       announcement.sentAt = new Date();
     }
 

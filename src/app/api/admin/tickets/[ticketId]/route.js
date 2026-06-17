@@ -3,20 +3,14 @@ import SupportTicket from "@/models/supportTicketModel";
 import User from "@/models/userModel";
 import EmailService from "@/lib/sendgrid";
 import NotificationService from "@/services/notificationService"; // Add this import
-import { getDataFromToken } from "@/helper/getDataFromToken";
+import { enforceAdmin } from '@/lib/apiSecurity';
 
 export async function GET(request, { params }) {
     try {
-        await connectDB();
+        const denied = await enforceAdmin(request);
+        if (denied) return denied;
 
-        // Check if user is admin
-        const userId = getDataFromToken(request);
-        if (!userId) {
-            return new Response(JSON.stringify({ message: 'Authentication required' }), {
-                status: 401,
-                headers: { 'Content-Type': 'application/json' }
-            });
-        }
+        await connectDB();
 
         const ticket = await SupportTicket.findOne({
             ticketId: params.ticketId
@@ -45,16 +39,10 @@ export async function GET(request, { params }) {
 
 export async function PATCH(request, { params }) {
     try {
-        await connectDB();
+        const denied = await enforceAdmin(request);
+        if (denied) return denied;
 
-        // Check if user is admin
-        const adminUserId = getDataFromToken(request);
-        if (!adminUserId) {
-            return new Response(JSON.stringify({ message: 'Authentication required' }), {
-                status: 401,
-                headers: { 'Content-Type': 'application/json' }
-            });
-        }
+        await connectDB();
 
         const { status, assignedTo, tags, adminReply } = await request.json();
 

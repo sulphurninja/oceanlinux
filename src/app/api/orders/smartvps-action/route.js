@@ -4,6 +4,218 @@ import Order from '@/models/orderModel';
 import { getDataFromToken } from '@/helper/getDataFromToken';
 const SmartVPSAPI = require('@/services/smartvpsApi');
 
+const SMARTVPS_OS_TEMPLATES = {
+  ubuntu: 'Ubuntu 22',
+  centos: 'CentOS 7',
+  '2012': 'Windows Server 2012',
+  '2016': 'Windows Server 2016',
+  '2019': 'Windows Server 2019',
+  '2022': 'Windows Server 2022',
+  '11': 'Windows 11',
+  '2025': 'Windows 2025',
+};
+
+function normalizeSmartVpsOsType(templateId) {
+  if (!templateId) return null;
+  const key = String(templateId).toLowerCase().trim();
+  const aliases = {
+    'ubuntu 22': 'ubuntu',
+    ubuntu22: 'ubuntu',
+    'ubuntu-22.04': 'ubuntu',
+    'ubuntu 20': 'ubuntu',
+    ubuntu20: 'ubuntu',
+    'centos 7': 'centos',
+    centos7: 'centos',
+    'windows server 2012': '2012',
+    'windows server 2016': '2016',
+    'windows server 2019': '2019',
+    'windows server 2022': '2022',
+    'windows 11': '11',
+    'windows 2025': '2025',
+  };
+  if (aliases[key]) return aliases[key];
+  return SMARTVPS_OS_TEMPLATES[key] ? key : templateId;
+}
+
+function orderOsToSmartVpsOs(orderOs) {
+  const os = String(orderOs || '').toLowerCase();
+  if (os.includes('ubuntu')) return 'ubuntu';
+  if (os.includes('centos')) return 'centos';
+  if (os.includes('2012')) return '2012';
+  if (os.includes('2016')) return '2016';
+  if (os.includes('2019')) return '2019';
+  if (os.includes('2022')) return '2022';
+  if (os.includes('windows 11') || /\bwin\s*11\b/.test(os)) return '11';
+  if (os.includes('2025')) return '2025';
+  return null;
+}
+
+function smartVpsOsFieldMatchesType(osField, osType) {
+  const os = String(osField || '').toLowerCase();
+  if (!os || !osType) return false;
+  switch (osType) {
+    case 'ubuntu':
+      return os.includes('ubuntu');
+    case 'centos':
+      return os.includes('centos');
+    case '2012':
+      return os.includes('2012');
+    case '2016':
+      return os.includes('2016');
+    case '2019':
+      return os.includes('2019');
+    case '2022':
+      return os.includes('2022');
+    case '11':
+      return os.includes('windows 11') || /\bwin\s*11\b/.test(os) || os === '11';
+    case '2025':
+      return os.includes('2025');
+    default:
+      return os.includes(String(osType).toLowerCase());
+  }
+}
+
+function resolveSmartVpsStatus(parsedResponse) {
+  const actionStatus = String(parsedResponse?.ActionStatus || '').toLowerCase();
+  if (actionStatus === 'processing' || actionStatus === 'pending') {
+    return 'provisioning';
+  }
+  return parsedResponse?.MachineStatus ||
+    parsedResponse?.PowerStatus ||
+    parsedResponse?.ActionStatus ||
+    parsedResponse?.status;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isPlainObject(value) {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isSmartVpsErrorResponse(response) {
+  if (response == null) return true;
+  if (typeof response === 'string') {
+    const lower = response.toLowerCase().trim();
+    if (['success', 'pending', 'completed', 'ok'].includes(lower)) return false;
+    return lower === 'error' || lower === 'false' || lower.includes('fail');
+  }
+  if (typeof response === 'object') {
+    if (response.success === false) return true;
+    if (typeof response.error === 'string' && response.error.toLowerCase() !== '') return true;
+  }
+  return false;
+}
+
+function getSmartVpsOsCandidates(osType) {
+  const aliases = {
+    ubuntu: ['ubuntu'],
+    centos: ['centos'],
+    '2012': ['2012'],
+    '2016': ['2016'],
+    '2019': ['2019'],
+    '2022': ['2022'],
+    '11': ['11'],
+    '2025': ['2025'],
+  };
+  return aliases[osType] ? [...aliases[osType]] : [osType];
+}
+
+async function ensureSmartVpsNotBusy(api, serviceIdentifier) {
+  const statusData = await api.status(serviceIdentifier);
+  const parsed = parseSmartVPSResponse(statusData, 'status');
+  if (!isPlainObject(parsed)) return;
+
+  const actionStatus = String(parsed.ActionStatus || '').toLowerCase();
+  if (actionStatus === 'processing' || actionStatus === 'pending') {
+    throw new Error('Server is still processing a previous action. Please wait 5 minutes and try again.');
+  }
+}
+
+async function executeSmartVpsCrossOsChange(api, serviceIdentifier, osType) {
+  await ensureSmartVpsNotBusy(api, serviceIdentifier);
+
+  const candidates = getSmartVpsOsCandidates(osType);
+
+  // SmartVPS cross-OS uses format+os (changeOS returns "error" for Linux on this provider).
+  for (const candidate of candidates) {
+    console.log('[SMARTVPS-CROSS-OS] Trying format+os:', candidate);
+    const res = await api.format(serviceIdentifier, candidate);
+    if (!isSmartVpsErrorResponse(res)) {
+      return { method: 'format+os', os: candidate, result: res, needsFollowUpFormat: false };
+    }
+    console.log('[SMARTVPS-CROSS-OS] format+os rejected for', candidate, ':', res);
+  }
+
+  const label = SMARTVPS_OS_TEMPLATES[osType] || osType;
+  throw new Error(
+    `SmartVPS rejected switching to ${label}. Wait 5 minutes if a previous format is still running. If it keeps failing, this server slot may not support ${label} — contact support.`
+  );
+}
+
+function assertSmartVpsActionOk(response, actionLabel) {
+  if (isSmartVpsErrorResponse(response)) {
+    const detail = typeof response === 'string' ? response : (response?.message || response?.error || 'unknown error');
+    throw new Error(`SmartVPS ${actionLabel} failed: ${detail}`);
+  }
+}
+
+async function waitForSmartVpsActionComplete(api, serviceIdentifier, { maxWaitMs = 300000, pollMs = 10000 } = {}) {
+  const started = Date.now();
+
+  while (Date.now() - started < maxWaitMs) {
+    const statusData = await api.status(serviceIdentifier);
+    const parsed = parseSmartVPSResponse(statusData, 'status');
+
+    if (!isPlainObject(parsed)) {
+      console.log('[SMARTVPS-WAIT] Unexpected status payload, retrying...');
+      await sleep(pollMs);
+      continue;
+    }
+
+    const actionStatus = String(parsed.ActionStatus || '').toLowerCase();
+    console.log('[SMARTVPS-WAIT] ActionStatus:', actionStatus || '(empty)', 'OS:', parsed.OS || '(unknown)');
+
+    if (!actionStatus || actionStatus === 'completed') {
+      return parsed;
+    }
+    if (['failed', 'error', 'cancelled'].includes(actionStatus)) {
+      throw new Error(`SmartVPS action failed (ActionStatus: ${actionStatus})`);
+    }
+
+    await sleep(pollMs);
+  }
+
+  throw new Error('Timed out waiting for SmartVPS to finish the OS change');
+}
+
+function buildSyncDetailsFromStatus(parsedStatusData, extractedCredentials, serviceIdentifier, pendingTarget) {
+  const details = {
+    id: serviceIdentifier,
+    ip: extractedCredentials.ip || serviceIdentifier,
+    status: ['active', 'online', 'completed'].includes(String(extractedCredentials.status || '').toLowerCase())
+      ? 'active'
+      : 'provisioning',
+    username: extractedCredentials.username,
+    password: extractedCredentials.password,
+    os: extractedCredentials.os,
+    ...(isPlainObject(parsedStatusData) ? parsedStatusData : {}),
+  };
+
+  if (pendingTarget?.osType && smartVpsOsFieldMatchesType(extractedCredentials.os, pendingTarget.osType)) {
+    details.os = pendingTarget.osLabel || extractedCredentials.os;
+    if (pendingTarget.osType === 'ubuntu' || pendingTarget.osType === 'centos') {
+      details.username = 'root';
+    }
+    details.status = String(parsedStatusData?.ActionStatus || '').toLowerCase() === 'completed'
+      ? 'active'
+      : 'provisioning';
+  }
+
+  return details;
+}
+
 
 export async function GET(request) {
   console.log('[SMARTVPS-ACTION][GET] === REQUEST START ===');
@@ -82,24 +294,28 @@ export async function GET(request) {
       const transformedDetails = {
         id: serviceIdentifier,
         ip: extractedCredentials.ip || serviceIdentifier,
-
-        // Use extracted status and map to our format
-        status: extractedCredentials.status === 'active' ? 'active' :
-          extractedCredentials.status === 'Online' ? 'active' :
-            extractedCredentials.status === 'completed' ? 'active' : 'unknown',
-
-        // Use the credentials from SmartVPS, fallback to order if not found
+        status: extractedCredentials.status || 'unknown',
         username: extractedCredentials.username || 'Administrator',
-        password: extractedCredentials.password, // This should now get the NEW password
+        password: extractedCredentials.password,
         os: extractedCredentials.os,
-
-        // Additional fields
         ram: extractedCredentials.ram,
         expiryDate: extractedCredentials.expiryDate,
-
-        // Include original parsed response for debugging
         ...parsedResponse
       };
+
+      const pendingTarget = order.serverDetails?.pendingFormatTarget;
+      if (
+        pendingTarget?.osType &&
+        smartVpsOsFieldMatchesType(extractedCredentials.os, pendingTarget.osType)
+      ) {
+        transformedDetails.os = pendingTarget.osLabel || extractedCredentials.os;
+        if (pendingTarget.osType === 'ubuntu' || pendingTarget.osType === 'centos') {
+          transformedDetails.username = 'root';
+        }
+        transformedDetails.status = String(parsedResponse?.ActionStatus || '').toLowerCase() === 'completed'
+          ? 'active'
+          : 'provisioning';
+      }
 
       console.log('[SMARTVPS-ACTION][GET] Transformed details with credentials:', {
         id: transformedDetails.id,
@@ -287,62 +503,124 @@ export async function POST(request) {
 
           // If templateId is provided, change OS first then format
           if (payload?.templateId) {
-            console.log('[SMARTVPS-ACTION][POST] Changing OS to template:', payload.templateId);
-            await api.changeOS(serviceIdentifier, payload.templateId);
-            console.log('[SMARTVPS-ACTION][POST] OS change completed, now formatting...');
+            const osType = normalizeSmartVpsOsType(payload.templateId);
+            const currentOsType = orderOsToSmartVpsOs(order.os);
+            const needsOsChange = currentOsType !== osType;
+            const targetOsLabel = SMARTVPS_OS_TEMPLATES[osType] || osType;
 
-            // Format - SmartVPS format doesn't take OS parameter, just format the service
-            formatResult = await api.format(serviceIdentifier);
+            if (needsOsChange) {
+              console.log('[SMARTVPS-ACTION][POST] Cross-OS change requested:', {
+                from: currentOsType,
+                to: osType,
+                targetLabel: targetOsLabel,
+              });
+
+              const crossOsResult = await executeSmartVpsCrossOsChange(api, serviceIdentifier, osType);
+              console.log('[SMARTVPS-ACTION][POST] Cross-OS initiated via', crossOsResult.method, 'os:', crossOsResult.os);
+
+              result = {
+                ...crossOsResult,
+                targetOsType: osType,
+                targetOsLabel,
+                message: crossOsResult.method === 'format+os'
+                  ? `Format to ${targetOsLabel} started.`
+                  : 'OS template change started. Server will format automatically when ready.',
+              };
+
+              if (crossOsResult.needsFollowUpFormat) {
+                void (async () => {
+                  try {
+                    console.log('[SMARTVPS-ACTION][POST] [bg] Waiting before follow-up format...');
+                    try {
+                      await waitForSmartVpsActionComplete(api, serviceIdentifier, { maxWaitMs: 180000 });
+                    } catch (waitErr) {
+                      console.warn('[SMARTVPS-ACTION][POST] [bg] Wait timed out, running format anyway:', waitErr.message);
+                      await sleep(30000);
+                    }
+                    console.log('[SMARTVPS-ACTION][POST] [bg] Running follow-up format...');
+                    const bgFormatResult = await api.format(serviceIdentifier);
+                    assertSmartVpsActionOk(bgFormatResult, 'format');
+                    console.log('[SMARTVPS-ACTION][POST] [bg] Follow-up format complete:', bgFormatResult);
+                  } catch (bgErr) {
+                    console.error('[SMARTVPS-ACTION][POST] [bg] Cross-OS follow-up format failed:', bgErr);
+                    await Order.findByIdAndUpdate(orderId, {
+                      provisioningStatus: 'failed',
+                      provisioningError: bgErr.message,
+                      lastActionTime: new Date(),
+                    });
+                  }
+                })();
+              }
+            } else {
+              console.log('[SMARTVPS-ACTION][POST] Same OS refresh via format only:', osType);
+              formatResult = await api.format(serviceIdentifier);
+              assertSmartVpsActionOk(formatResult, 'format');
+              result = { format: formatResult, method: 'format', targetOsType: osType, targetOsLabel };
+            }
           } else {
-            // Just format without OS change
             formatResult = await api.format(serviceIdentifier);
+            assertSmartVpsActionOk(formatResult, 'format');
+            result = formatResult;
           }
 
-          console.log('[SMARTVPS-ACTION][POST] Format API Success:', formatResult);
-          result = formatResult;
+          console.log('[SMARTVPS-ACTION][POST] Format flow success:', result);
 
           console.log('[SMARTVPS-ACTION][POST] Updating order provisioning status to provisioning');
+          const pendingTarget = payload?.templateId
+            ? {
+                osType: normalizeSmartVpsOsType(payload.templateId),
+                osLabel: SMARTVPS_OS_TEMPLATES[normalizeSmartVpsOsType(payload.templateId)] ||
+                  normalizeSmartVpsOsType(payload.templateId),
+                startedAt: new Date(),
+              }
+            : null;
+
           await Order.findByIdAndUpdate(orderId, {
             provisioningStatus: 'provisioning',
             lastAction: 'format',
-            lastActionTime: new Date()
+            lastActionTime: new Date(),
+            ...(pendingTarget
+              ? {
+                  serverDetails: {
+                    ...(order.serverDetails || {}),
+                    pendingFormatTarget: pendingTarget,
+                  },
+                }
+              : {}),
           });
           console.log('[SMARTVPS-ACTION][POST] Order updated successfully');
 
-          // Immediately schedule multiple sync attempts after format to capture new credentials
-          console.log('[SMARTVPS-ACTION][POST] Scheduling post-format sync attempts for credential updates');
-          const syncAttempts = [5000, 15000, 30000, 60000, 120000]; // 5s, 15s, 30s, 1m, 2m
+          const pendingTargetForSync = pendingTarget;
+          const isCrossOsChange = payload?.templateId &&
+            orderOsToSmartVpsOs(order.os) !== normalizeSmartVpsOsType(payload.templateId);
+          const syncAttempts = isCrossOsChange
+            ? [60000, 120000, 180000, 240000, 300000, 420000, 600000, 720000]
+            : [5000, 15000, 30000, 60000, 120000];
 
           syncAttempts.forEach((delay, index) => {
             setTimeout(async () => {
               console.log(`[SMARTVPS-ACTION][POST] Post-format sync attempt ${index + 1}/${syncAttempts.length} after ${delay}ms`);
               try {
-                const statusData = await api.status(serviceIdentifier);
+                const freshOrder = await Order.findById(orderId);
+                if (!freshOrder) return;
 
-                // Parse the response specifically for status action
+                const statusData = await api.status(serviceIdentifier);
                 const parsedStatusData = parseSmartVPSResponse(statusData, 'status');
 
-                // 🔍 ENHANCED DEBUGGING for post-format sync
                 console.log(`[SMARTVPS-ACTION][POST] === POST-FORMAT SYNC ${index + 1} PARSED RESPONSE ===`);
                 console.log(`[SMARTVPS-ACTION][POST] Parsed response:`, JSON.stringify(parsedStatusData, null, 2));
                 console.log(`[SMARTVPS-ACTION][POST] === END POST-FORMAT SYNC ${index + 1} RESPONSE ===`);
 
-                // Extract credentials from the parsed response
-                const extractedCredentials = extractSmartVPSCredentials(parsedStatusData, order);
+                const pendingTargetNow =
+                  freshOrder.serverDetails?.pendingFormatTarget || pendingTargetForSync;
 
-                const details = {
-                  id: serviceIdentifier,
-                  ip: extractedCredentials.ip || serviceIdentifier,
-                  status: extractedCredentials.status === 'active' || extractedCredentials.status === 'Online' ? 'active' : 'provisioning',
-
-                  // Use the credentials from SmartVPS
-                  username: extractedCredentials.username,
-                  password: extractedCredentials.password, // This should now get the NEW password
-                  os: extractedCredentials.os,
-
-                  // Include all original response data
-                  ...parsedStatusData
-                };
+                const extractedCredentials = extractSmartVPSCredentials(parsedStatusData, freshOrder);
+                const details = buildSyncDetailsFromStatus(
+                  parsedStatusData,
+                  extractedCredentials,
+                  serviceIdentifier,
+                  pendingTargetNow,
+                );
 
                 console.log(`[SMARTVPS-ACTION][POST] Post-format sync ${index + 1} - Final details for sync:`, {
                   id: details.id,
@@ -390,17 +668,8 @@ export async function POST(request) {
       case 'templates':
         console.log('[SMARTVPS-ACTION][POST] Fetching templates for service:', serviceIdentifier);
         try {
-          // Return available OS templates based on SmartVPS documentation
-          result = {
-            '2012': 'Windows Server 2012',
-            '2016': 'Windows Server 2016',
-            '2019': 'Windows Server 2019',
-            '2022': 'Windows Server 2022',
-            '11': 'Windows 11',
-            'centos': 'CentOS 7',
-            'ubuntu': 'Ubuntu 22',
-            '2025': 'Windows 2025', // New addition
-          };
+          // Linux first — common format target; avoids dropdown click issues in UI
+          result = { ...SMARTVPS_OS_TEMPLATES };
           console.log('[SMARTVPS-ACTION][POST] Templates returned:', result);
         } catch (error) {
           console.error('[SMARTVPS-ACTION][POST] Templates fetch error:', error.message);
@@ -468,7 +737,7 @@ export async function POST(request) {
             powerState = 'running';
           } else if (powerStatusLower === 'offline') {
             powerState = 'stopped';
-          } else if (ActionStatus?.toLowerCase() === 'pending') {
+          } else if (['pending', 'processing'].includes(String(ActionStatus || '').toLowerCase())) {
             powerState = 'busy';
           }
 
@@ -476,10 +745,11 @@ export async function POST(request) {
 
           // Sync to database (don't await to speed up response)
           const extractedCreds = extractSmartVPSCredentials(parsedStatusData, order);
+          const actionBusy = ['pending', 'processing'].includes(String(ActionStatus || '').toLowerCase());
           const details = {
             id: serviceIdentifier,
             ip: extractedCreds.ip || serviceIdentifier,
-            status: powerState === 'running' ? 'active' : powerState === 'stopped' ? 'suspended' : MachineStatus,
+            status: actionBusy ? 'provisioning' : (powerState === 'running' ? 'active' : powerState === 'stopped' ? 'suspended' : MachineStatus),
             username: extractedCreds.username,
             password: extractedCreds.password,
             os: extractedCreds.os,
@@ -684,6 +954,20 @@ function extractSmartVPSCredentials(parsedResponse, order) {
   console.log(`[SMARTVPS-EXTRACT] === CREDENTIAL EXTRACTION START ===`);
   console.log(`[SMARTVPS-EXTRACT] Parsing response for credential extraction`);
   console.log(`[SMARTVPS-EXTRACT] Parsed response type:`, typeof parsedResponse);
+
+  if (!isPlainObject(parsedResponse)) {
+    console.warn('[SMARTVPS-EXTRACT] Non-object status response — using order fallbacks');
+    return {
+      ip: order.ipAddress,
+      rawUsername: order.username,
+      username: order.username,
+      password: order.password,
+      os: order.os,
+      status: 'provisioning',
+      usernameSource: 'Order Document',
+    };
+  }
+
   console.log(`[SMARTVPS-EXTRACT] Parsed response keys:`, Object.keys(parsedResponse || {}));
 
   // 🔍 LOG THE ENTIRE PARSED RESPONSE FOR DEBUGGING
@@ -775,7 +1059,7 @@ function extractSmartVPSCredentials(parsedResponse, order) {
         parsedResponse?.operating_system_name ||
         order.os,
 
-    status: parsedResponse?.MachineStatus || parsedResponse?.PowerStatus || parsedResponse?.ActionStatus || parsedResponse?.status,
+    status: resolveSmartVpsStatus(parsedResponse),
     ram: parsedResponse?.RAM || parsedResponse?.ram,
     expiryDate: parsedResponse?.ExpiryDate || parsedResponse?.expiryDate
   };
@@ -906,9 +1190,13 @@ async function syncServerState(orderId, details, info) {
         ip: details.ip
       });
 
-      // Status mapping (unchanged)
+      // Status mapping — respect in-progress SmartVPS actions
+      const rawActionStatus = String(details.ActionStatus || info?.ActionStatus || '').toLowerCase();
       let smartvpsStatus;
-      if (typeof details.status === 'string') {
+      if (rawActionStatus === 'processing' || rawActionStatus === 'pending') {
+        smartvpsStatus = 'provisioning';
+        console.log('[SMARTVPS-SYNC] ActionStatus in progress -> provisioning');
+      } else if (typeof details.status === 'string') {
         smartvpsStatus = details.status.toLowerCase();
         console.log('[SMARTVPS-SYNC] String status converted:', smartvpsStatus);
       } else if (typeof details.status === 'number') {
@@ -932,7 +1220,14 @@ async function syncServerState(orderId, details, info) {
       console.log('[SMARTVPS-SYNC] Final smartvpsStatus:', smartvpsStatus);
       console.log('[SMARTVPS-SYNC] Mapping status to provisioning status');
 
-      switch (smartvpsStatus) {
+      const pendingTarget = currentOrder.serverDetails?.pendingFormatTarget;
+      if (
+        pendingTarget?.osType &&
+        !smartVpsOsFieldMatchesType(details.os || currentOrder.os, pendingTarget.osType)
+      ) {
+        updateData.provisioningStatus = 'provisioning';
+        console.log('[SMARTVPS-SYNC] Pending OS change still in progress -> provisioning');
+      } else switch (smartvpsStatus) {
         case 'online':
         case 'running':
         case 'active':
@@ -1085,6 +1380,18 @@ async function syncServerState(orderId, details, info) {
 
         updateData.os = mappedOS;
         console.log('[SMARTVPS-SYNC] Mapped OS:', details.os, '->', mappedOS);
+
+        // Clear pending format target once OS has switched
+        if (
+          currentOrder.serverDetails?.pendingFormatTarget?.osType &&
+          smartVpsOsFieldMatchesType(mappedOS, currentOrder.serverDetails.pendingFormatTarget.osType)
+        ) {
+          updateData.serverDetails = {
+            ...(updateData.serverDetails || currentOrder.serverDetails || {}),
+            pendingFormatTarget: null,
+            lastFormatCompletedAt: new Date(),
+          };
+        }
       } else if (details.os === currentOrder.os) {
         console.log('[SMARTVPS-SYNC] OS unchanged:', details.os);
 

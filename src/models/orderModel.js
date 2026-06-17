@@ -103,6 +103,11 @@ const orderSchema = new mongoose.Schema({
         paymentMethod: { type: String },
         amount: { type: Number },
         gatewayOrderId: { type: String }, // Razorpay order ID if applicable
+        gatewayAmount: { type: Number },
+        walletAmount: { type: Number },
+        walletDeducted: { type: Boolean, default: false },
+        walletPending: { type: Boolean, default: false },
+        walletTxnId: { type: String },
         // Set when the renewal payment has been confirmed but the linked
         // company has to approve it before the expiry is extended.
         awaitingCompanyApproval: { type: Boolean, default: false },

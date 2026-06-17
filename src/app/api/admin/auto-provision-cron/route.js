@@ -3,6 +3,7 @@ import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 const AutoProvisioningService = require('@/services/autoProvisioningService');
 const WhatsAppService = require('@/services/whatsappService');
+import { enforceCronSecret } from '@/lib/apiSecurity';
 
 // Configuration
 const CONFIG = {
@@ -390,6 +391,9 @@ async function releaseDatabaseLock(orderId, finalStatus, error = '') {
 
 // Main auto-provisioning cron endpoint - ENHANCED WITH PROPER VALIDATION
 export async function POST(request) {
+    const cronDenied = enforceCronSecret(request);
+    if (cronDenied) return cronDenied;
+
     const startTime = Date.now();
     const cronId = Math.random().toString(36).substring(2, 8);
     
@@ -586,6 +590,9 @@ export async function POST(request) {
 
 // GET — same as POST (lock + provision one order). ADVPS pending poll: /api/admin/advps-pending-cron
 export async function GET(request) {
+    const cronDenied = enforceCronSecret(request);
+    if (cronDenied) return cronDenied;
+
     const { searchParams } = new URL(request.url);
     const statsOnly = searchParams.get('stats') === '1';
 

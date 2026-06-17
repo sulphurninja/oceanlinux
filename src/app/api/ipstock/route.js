@@ -1,8 +1,12 @@
 // pages/api/ipstock.js
 import connectDB from '@/lib/db';
 import IPStock from '@/models/ipStockModel';
+import { enforceAdmin } from '@/lib/apiSecurity';
 
 export async function POST(request) {
+    const denied = await enforceAdmin(request);
+    if (denied) return denied;
+
     await connectDB();
 
     try {

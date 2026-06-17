@@ -204,7 +204,7 @@ export default function DashboardLayout({
             },
             '/dashboard/ipStock': {
                 title: 'IP Stock',
-                description: 'Browse server plans and deploy instantly',
+                description: 'Browse Linux, Windows & proxy plans',
                 icon: Store,
             },
             '/dashboard/viewLinux': {
@@ -315,61 +315,76 @@ export default function DashboardLayout({
                     {/* Main Content Area */}
                     <div className="lg:pl-64">
                         {/* Top Navigation Bar */}
-                        <div className="sticky top-0 z-40 bg-background/80 backdrop-blur-lg border-b border-border/60 lg:top-0">
-                            <div className="flex h-14 items-center justify-between px-4 lg:px-6">
+                        <div className="sticky top-0 z-40 bg-background/85 backdrop-blur-xl border-b border-border/50 shadow-[0_1px_12px_-4px_hsl(var(--primary)/0.15)]">
+                            <div className="flex h-12 sm:h-14 items-center justify-between gap-2 px-3 sm:px-4 lg:px-6">
                                 {/* Page Info */}
-                                <div className="flex items-center gap-2.5 min-w-0">
-                                    <currentPage.icon className="h-4 w-4 text-muted-foreground shrink-0" />
-
-                                    {/* Breadcrumb */}
-                                    {currentPage.breadcrumb && currentPage.breadcrumb.length > 0 ? (
-                                        <div className="flex items-center gap-1 text-sm">
-                                            {currentPage.breadcrumb.map((crumb) => (
-                                                <div key={crumb.href} className="flex items-center gap-1">
-                                                    <Link href={crumb.href} className="text-muted-foreground hover:text-foreground transition-colors">
-                                                        {crumb.name}
-                                                    </Link>
-                                                    <ChevronRight className="h-3 w-3 text-muted-foreground/50" />
-                                                </div>
-                                            ))}
-                                            <span className="font-medium truncate">{currentPage.title}</span>
-                                        </div>
-                                    ) : (
-                                        <h1 className="text-sm font-medium truncate">{currentPage.title}</h1>
-                                    )}
+                                <div className="flex items-center gap-2 sm:gap-2.5 min-w-0 flex-1">
+                                    <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-primary/25 to-primary/10 border border-primary/30 shadow-sm shadow-primary/10 flex items-center justify-center shrink-0">
+                                        <currentPage.icon className="h-4 w-4 text-primary-foreground dark:text-primary" />
+                                    </div>
+                                    <div className="min-w-0">
+                                        {currentPage.breadcrumb && currentPage.breadcrumb.length > 0 ? (
+                                            <div className="flex items-center gap-1 text-sm">
+                                                {currentPage.breadcrumb.map((crumb) => (
+                                                    <div key={crumb.href} className="flex items-center gap-1">
+                                                        <Link href={crumb.href} className="text-muted-foreground hover:text-foreground transition-colors">
+                                                            {crumb.name}
+                                                        </Link>
+                                                        <ChevronRight className="h-3 w-3 text-muted-foreground/50" />
+                                                    </div>
+                                                ))}
+                                                <span className="font-semibold truncate">{currentPage.title}</span>
+                                            </div>
+                                        ) : (
+                                            <>
+                                                <h1 className="text-sm sm:text-base font-semibold truncate leading-tight tracking-tight">
+                                                    {currentPage.title}
+                                                </h1>
+                                                {currentPage.description && (
+                                                    <p className="text-[10px] sm:text-xs text-muted-foreground truncate hidden min-[420px]:block">
+                                                        {currentPage.description}
+                                                    </p>
+                                                )}
+                                            </>
+                                        )}
+                                    </div>
                                 </div>
 
                                 {/* Right Side Actions */}
-                                <div className="flex items-center gap-1.5 sm:gap-2">
-                                    {/* Wallet pill — hidden for resellers (they have a dedicated reseller wallet). */}
-                                    <WalletBadge
-                                        hidden={user?.userType === 'reseller'}
-                                        className="hidden sm:flex"
-                                    />
-                                    {/* Cart icon with live badge — hidden for resellers. */}
+                                <div className="flex items-center gap-1 sm:gap-1.5 shrink-0 p-1 rounded-xl bg-gradient-to-b from-muted/50 to-muted/20 border border-border/40 shadow-sm backdrop-blur-sm">
+                                    <WalletBadge hidden={user?.userType === 'reseller'} />
                                     <CartIcon hidden={user?.userType === 'reseller'} />
                                     <NotificationBell />
 
+                                    <div className="w-px h-5 bg-border/60 hidden sm:block" />
+
                                     <DropdownMenu>
                                         <DropdownMenuTrigger asChild>
-                                            <Button variant="ghost" className="relative h-8 w-8 rounded-full">
-                                                <Avatar className="h-8 w-8">
-                                                    <AvatarImage src={user?.avatar} alt={user?.name || 'User'} />
-                                                    <AvatarFallback className="bg-primary/10 text-primary text-xs font-medium">
+                                            <Button
+                                                variant="ghost"
+                                                className="relative h-9 w-9 rounded-full p-0 hover:opacity-90 ring-2 ring-primary/15 ring-offset-2 ring-offset-background hover:ring-primary/35 transition-all duration-200"
+                                            >
+                                                <Avatar className="h-8 w-8 shadow-md shadow-primary/25">
+                                                    <AvatarImage src={user?.avatar} alt={user?.name || 'User'} className="object-cover" />
+                                                    <AvatarFallback className="bg-gradient-to-br from-emerald-700 via-emerald-600 to-primary text-white text-xs font-bold tracking-wide">
                                                         {user?.name ? getUserInitials(user.name) : 'U'}
                                                     </AvatarFallback>
                                                 </Avatar>
+                                                <span className="absolute bottom-0.5 right-0.5 h-2.5 w-2.5 rounded-full bg-green-500 border-2 border-background shadow-sm" title="Online" />
                                             </Button>
                                         </DropdownMenuTrigger>
                                         <DropdownMenuContent className="w-72" align="end" forceMount>
                                             <DropdownMenuLabel className="p-3">
                                                 <div className="flex items-center gap-3">
-                                                    <Avatar className="h-10 w-10">
-                                                        <AvatarImage src={user?.avatar} alt={user?.name || 'User'} />
-                                                        <AvatarFallback className="bg-primary/10 text-primary font-medium">
-                                                            {user?.name ? getUserInitials(user.name) : 'U'}
-                                                        </AvatarFallback>
-                                                    </Avatar>
+                                                    <div className="relative shrink-0">
+                                                        <Avatar className="h-11 w-11 shadow-md shadow-primary/20 ring-2 ring-primary/20">
+                                                            <AvatarImage src={user?.avatar} alt={user?.name || 'User'} className="object-cover" />
+                                                            <AvatarFallback className="bg-gradient-to-br from-emerald-700 via-emerald-600 to-primary text-white font-bold">
+                                                                {user?.name ? getUserInitials(user.name) : 'U'}
+                                                            </AvatarFallback>
+                                                        </Avatar>
+                                                        <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full bg-green-500 border-2 border-background" />
+                                                    </div>
                                                     <div className="flex-1 min-w-0">
                                                         <div className="flex items-center gap-1.5">
                                                             <p className="text-sm font-medium truncate">

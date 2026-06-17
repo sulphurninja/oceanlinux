@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { NodeSSH } from 'node-ssh';
+import { enforceProxyServerAccess } from '@/lib/apiSecurity';
 
 const SSH_PORTS = [22, 3052];
 
@@ -47,6 +48,9 @@ export async function POST(request) {
         { status: 400 }
       );
     }
+
+    const accessDenied = await enforceProxyServerAccess(request, ip);
+    if (accessDenied) return accessDenied;
 
     console.log(`[PROXY-SETUP] Connecting to ${ip} as ${username}`);
 

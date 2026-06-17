@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
+import { requireAdmin } from '@/lib/adminAuth';
+import { sanitizeSlotPackage } from '@/lib/apiSecurity';
 const SlotIPPackage = require('@/models/slotIpPackageModel');
 
 function parseProxyLine(line) {
@@ -21,6 +23,11 @@ function parseProxyLine(line) {
 
 export async function POST(request) {
   await connectDB();
+
+  const admin = await requireAdmin(request);
+  if (!admin) {
+    return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
+  }
 
   try {
     const { name, description, price, available, bulkIps, promoCodes } = await request.json();
@@ -83,40 +90,12 @@ export async function GET(request) {
   await connectDB();
 
   try {
-    const { searchParams } = new URL(request.url);
-    const customerView = searchParams.get('view') === 'customer';
-
+    const admin = await requireAdmin(request);
     const packages = await SlotIPPackage.find({}).lean();
 
-    const result = packages.map(pkg => {
-      const ips = pkg.ips || [];
-      const totalCount = ips.length;
-      const allocatedCount = ips.filter(ip => ip.allocated).length;
-      const availableCount = totalCount - allocatedCount;
-
-      if (customerView) {
-        // Strip sensitive IP details for customer-facing requests
-        return {
-          _id: pkg._id,
-          name: pkg.name,
-          description: pkg.description,
-          price: pkg.price,
-          available: pkg.available,
-          promoCodes: pkg.promoCodes,
-          totalCount,
-          availableCount,
-          allocatedCount,
-          createdAt: pkg.createdAt,
-        };
-      }
-
-      return {
-        ...pkg,
-        totalCount,
-        availableCount,
-        allocatedCount,
-      };
-    });
+    const result = packages.map((pkg) =>
+      sanitizeSlotPackage(pkg, { includeIps: !!admin })
+    );
 
     return NextResponse.json(result);
   } catch (error) {

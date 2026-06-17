@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 import { assignPanelCredentials } from '@/lib/panelCredentials';
+import { requireAdmin } from '@/lib/adminAuth';
 const AdvpsAPI = require('@/services/advpsApi');
 const WhatsAppService = require('@/services/whatsappService');
 const { syncAdvpsOrderCredentials } = require('@/lib/advpsOrderSync');
@@ -17,6 +18,11 @@ function normalizeAdminOrderStatus(status) {
 
 export async function POST(request) {
   await connectDB();
+
+  const admin = await requireAdmin(request);
+  if (!admin) {
+    return NextResponse.json({ message: 'Admin access required' }, { status: 403 });
+  }
 
   try {
     const { orderId, ipAddress, username, password, status, os, provider, provisioningStatus, advpsServiceId, advpsOrderId } = await request.json();
@@ -71,6 +77,9 @@ export async function POST(request) {
             advpsNotes.push(`ADVPS purchase order linked: ${sync.dbUpdates.advpsOrderId}`);
           } else if (sync.advpsOrderIdMissing) {
             advpsNotes.push('Credentials synced from service status (purchase order ID not found yet)');
+          }
+          if (sync.dbUpdates.expiryDate) {
+            advpsNotes.push(`Expiry synced from ADVPS: ${new Date(sync.dbUpdates.expiryDate).toISOString()}`);
           }
 
           updateFields.provider = 'advps';

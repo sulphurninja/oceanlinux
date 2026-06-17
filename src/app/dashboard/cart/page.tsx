@@ -34,6 +34,7 @@ import {
   type CartLine,
 } from '@/lib/cartClient';
 import { broadcastWallet, fetchWalletSummary } from '@/lib/walletClient';
+import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 
 declare global {
   interface Window {
@@ -46,6 +47,7 @@ const OS_OPTIONS = ['Ubuntu 22', 'CentOS 7', 'Windows 2022 64'];
 
 export default function CartPage() {
   const router = useRouter();
+  const { confirm, ConfirmDialog } = useConfirmDialog();
   const [cart, setCart] = useState<CartSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [walletBalance, setWalletBalance] = useState<number>(0);
@@ -149,7 +151,13 @@ export default function CartPage() {
 
   const onClear = async () => {
     if (!cart || cart.items.length === 0) return;
-    if (!confirm('Empty the cart? This cannot be undone.')) return;
+    const ok = await confirm({
+      title: 'Empty Cart',
+      description: 'Remove all items from your cart? This cannot be undone.',
+      confirmLabel: 'Empty Cart',
+      destructive: true,
+    });
+    if (!ok) return;
     try {
       const updated = await clearCart();
       setCart(updated);
@@ -583,6 +591,7 @@ export default function CartPage() {
           </div>
         </div>
       )}
+      <ConfirmDialog />
     </div>
   );
 }

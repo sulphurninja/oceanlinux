@@ -60,13 +60,6 @@ import {
     getServerDeliveryStatus,
 } from '@/lib/orderDeliveryStatus';
 import { isWithinRenewalWindow } from '@/lib/expiryHelper';
-import {
-    canShowLivePowerState,
-    fetchPowerStatesForOrders,
-    orderNeedsIpStockForPowerState,
-    type IPStockLike,
-    type PowerState,
-} from '@/lib/orderPowerState';
 
 interface Order {
     _id: string;
@@ -102,12 +95,6 @@ interface Order {
         newExpiry: Date;
         renewalTxnId: string;
     }>;
-}
-
-interface IPStock {
-    _id: string;
-    name: string;
-    tags: string[];
 }
 
 // OS Icon Component
@@ -159,8 +146,6 @@ const ViewLinux = () => {
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [actionBusy, setActionBusy] = useState<string | null>(null);
-    const [ipStockMap, setIpStockMap] = useState<Record<string, IPStockLike>>({});
-    const [powerStates, setPowerStates] = useState<Record<string, PowerState | 'loading'>>({});
 
     // Filter states
     const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -171,58 +156,6 @@ const ViewLinux = () => {
     useEffect(() => {
         fetchOrders();
     }, []);
-
-    const loadIpStocks = async (orderList: Order[]) => {
-        const ids = [
-            ...new Set(
-                orderList
-                    .filter(orderNeedsIpStockForPowerState)
-                    .map((order) => order.ipStockId)
-                    .filter((id): id is string => !!id)
-            ),
-        ];
-
-        if (ids.length === 0) {
-            return {};
-        }
-
-        const entries = await Promise.all(
-            ids.map(async (id) => {
-                try {
-                    const res = await fetch(`/api/ipstock/${id}`);
-                    if (!res.ok) return [id, null] as const;
-                    return [id, (await res.json()) as IPStockLike] as const;
-                } catch {
-                    return [id, null] as const;
-                }
-            })
-        );
-
-        const map = Object.fromEntries(
-            entries.filter((entry): entry is [string, IPStockLike] => !!entry[1])
-        );
-        setIpStockMap((prev) => ({ ...prev, ...map }));
-        return map;
-    };
-
-    const loadServerPowerData = async (serverOrders: Order[]) => {
-        const stocks = await loadIpStocks(serverOrders);
-
-        await fetchPowerStatesForOrders(
-            serverOrders,
-            stocks,
-            (orderId, state) => {
-                setPowerStates((prev) => ({ ...prev, [orderId]: state }));
-            },
-            (orderIds) => {
-                setPowerStates((prev) => {
-                    const next = { ...prev };
-                    for (const id of orderIds) next[id] = 'loading';
-                    return next;
-                });
-            }
-        );
-    };
 
     const fetchOrders = async (isRefresh = false) => {
         if (isRefresh) {
@@ -236,10 +169,6 @@ const ViewLinux = () => {
             if (!response.ok) throw new Error('Failed to fetch orders');
             const data = await response.json();
             setOrders(data);
-
-            const serverOrders = (data as Order[]).filter(isServerListOrder);
-            // Show the list immediately; power status loads in the background.
-            void loadServerPowerData(serverOrders);
         } catch (error) {
             console.error('Failed to fetch orders:', error);
             router.push('/login');
@@ -396,58 +325,7 @@ const ViewLinux = () => {
         return getDaysUntilExpiry(order.expiryDate) < 0;
     };
 
-    const getPowerStateBadge = (powerState: PowerState | 'loading' | undefined) => {
-        if (powerState === 'loading' || powerState === undefined) {
-            return (
-                <Badge className="bg-muted text-muted-foreground border-border">
-                    <Loader2 className="w-3 h-3 mr-1 animate-spin" />
-                    Checking...
-                </Badge>
-            );
-        }
-
-        switch (powerState) {
-            case 'running':
-                return (
-                    <Badge className="bg-green-50 text-green-700 border border-green-200 dark:bg-green-950 dark:text-green-300 dark:border-green-800">
-                        <div className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></div>
-                        Active
-                    </Badge>
-                );
-            case 'stopped':
-            case 'suspended':
-            case 'unknown':
-                return (
-                    <Badge className="bg-red-50 text-red-700 border border-red-200 dark:bg-red-950 dark:text-red-300 dark:border-red-800">
-                        <div className="w-2 h-2 bg-red-500 rounded-full mr-2"></div>
-                        Offline
-                    </Badge>
-                );
-            case 'busy':
-                return (
-                    <Badge className="bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-800">
-                        <Loader2 className="w-3 h-3 mr-1 animate-spin" />
-                        Processing
-                    </Badge>
-                );
-            default:
-                return (
-                    <Badge className="bg-red-50 text-red-700 border border-red-200 dark:bg-red-950 dark:text-red-300 dark:border-red-800">
-                        <div className="w-2 h-2 bg-red-500 rounded-full mr-2"></div>
-                        Offline
-                    </Badge>
-                );
-        }
-    };
-
     const getStatusBadge = (status: string, provisioningStatus?: string, lastAction?: string, order?: Order) => {
-        if (order) {
-            const stock = order.ipStockId ? ipStockMap[order.ipStockId] : null;
-            if (canShowLivePowerState(order, stock)) {
-                return getPowerStateBadge(powerStates[order._id]);
-            }
-        }
-
         if (status.toLowerCase() === 'completed') {
         return (
             <Badge className="bg-green-50 text-green-700 border border-green-200 dark:bg-green-950 dark:text-green-300 dark:border-green-800">
@@ -758,7 +636,7 @@ const ViewLinux = () => {
                         </div>
                         <h3 className="text-lg sm:text-xl font-semibold mb-2">No active servers yet</h3>
                         <p className="text-muted-foreground mb-4 sm:mb-6 max-w-md mx-auto text-sm sm:text-base">
-                            Delivered servers appear here. Orders still being set up are on the Orders page.
+                            Delivered servers appear here as soon as your service is assigned — even while credentials are still syncing. Orders still awaiting delivery are on the Orders page.
                         </p>
                         <div className="flex flex-col sm:flex-row gap-2 justify-center">
                         <Button onClick={() => router.push('/dashboard/ipStock')} className="gap-2 mx-auto" size="sm">

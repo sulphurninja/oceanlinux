@@ -1,19 +1,13 @@
 import connectDB from "@/lib/db";
 import SupportTicket from "@/models/supportTicketModel";
-import { getDataFromToken } from "@/helper/getDataFromToken";
+import { enforceAdmin } from '@/lib/apiSecurity';
 
 export async function GET(request) {
     try {
-        await connectDB();
+        const denied = await enforceAdmin(request);
+        if (denied) return denied;
 
-        // Check if user is admin
-        const userId = getDataFromToken(request);
-        if (!userId) {
-            return new Response(JSON.stringify({ message: 'Authentication required' }), {
-                status: 401,
-                headers: { 'Content-Type': 'application/json' }
-            });
-        }
+        await connectDB();
 
         const { searchParams } = new URL(request.url);
         const status = searchParams.get('status');

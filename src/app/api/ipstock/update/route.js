@@ -2,6 +2,7 @@
 import { NextResponse } from 'next/server';
 import connectDB from '../../../../lib/db';
 import IPStock from '../../../../models/ipStockModel';
+import { enforceAdmin } from '@/lib/apiSecurity';
 
 const {
   toPlainConfigurations,
@@ -9,6 +10,9 @@ const {
 } = require('@/lib/advpsLiveStock');
 
 export async function PUT(req, res) {
+  const denied = await enforceAdmin(req);
+  if (denied) return denied;
+
   const reqBody = await req.json();
   const { _id, name, available, serverType, tags, memoryOptions, promoCodes, defaultConfigurations, company, stockCount } = reqBody;
 
@@ -70,6 +74,9 @@ export async function PUT(req, res) {
 }
 
 export async function DELETE(req, res) {
+  const denied = await enforceAdmin(req);
+  if (denied) return denied;
+
   const reqBody = await req.json();
   const { _id } = reqBody;
 
