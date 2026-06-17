@@ -1,8 +1,10 @@
 import querystring from "querystring";
 import https from "https";
 
-/** Fast fail for listvs / find / template listing — dead panels must not block the request. */
-const TIMEOUT_LIST_MS = 20000;
+/** listvs / find / template listing — large panels (200+ VMs) can take 20–40s from prod. */
+const TIMEOUT_LIST_MS = 60000;
+/** Second pass for panels that timed out on the first scan. */
+const TIMEOUT_LIST_RETRY_MS = 90000;
 /** Reinstall can take longer on the Virtualizor side. */
 const TIMEOUT_REINSTALL_MS = 90000;
 /** Default for power actions and misc calls. */
@@ -354,24 +356,24 @@ export class VirtualizorAPI {
    * Panels are queried in parallel so dead/unreachable Hostycare Virtualizor nodes do not
    * block the request for minutes before the working panel is tried.
    */
-  async findVpsId(by = {}) {
-    const ipRaw  = by.ip?.trim();
-    const ipIn   = ipRaw ? ipRaw.split(':')[0] : null;
-    const hostIn = by.hostname?.trim()?.toLowerCase();
+  async _scanPanelsForVps(indices, ipIn, hostIn, timeoutMs) {
+    const listOpts = { timeoutMs, retries: 0 };
+    const timedOutIndices = [];
 
-    console.log(`[VirtualizorAPI][findVpsId] Searching for VPS with IP: ${ipIn}${ipRaw !== ipIn ? ` (stripped from ${ipRaw})` : ''}, hostname: ${hostIn}`);
-
-    const listOpts = { timeoutMs: TIMEOUT_LIST_MS, retries: 0 };
     const settled = await Promise.allSettled(
-      this.accounts.map((acct, i) =>
-        this._listMyVms(i, listOpts).then(vms => ({ i, acct, vms }))
+      indices.map((i) =>
+        this._listMyVms(i, listOpts).then((vms) => ({ i, acct: this.accounts[i], vms }))
       )
     );
 
-    for (const entry of settled) {
+    for (let j = 0; j < settled.length; j++) {
+      const panelIndex = indices[j];
+      const entry = settled[j];
+
       if (entry.status !== 'fulfilled') {
         const reason = entry.reason?.message || String(entry.reason);
-        console.warn(`[VirtualizorAPI][findVpsId] Panel lookup failed: ${reason}`);
+        console.warn(`[VirtualizorAPI][findVpsId] Panel ${panelIndex} (${this.accounts[panelIndex]?.host}) failed: ${reason}`);
+        if (/timeout/i.test(reason)) timedOutIndices.push(panelIndex);
         continue;
       }
 
@@ -384,6 +386,27 @@ export class VirtualizorAPI {
         this._vpsAccountCache.set(matched.vpsid, i);
         return { vpsid: matched.vpsid, virt: matched.virt || null };
       }
+    }
+
+    return { timedOutIndices };
+  }
+
+  async findVpsId(by = {}) {
+    const ipRaw  = by.ip?.trim();
+    const ipIn   = ipRaw ? ipRaw.split(':')[0] : null;
+    const hostIn = by.hostname?.trim()?.toLowerCase();
+
+    console.log(`[VirtualizorAPI][findVpsId] Searching for VPS with IP: ${ipIn}${ipRaw !== ipIn ? ` (stripped from ${ipRaw})` : ''}, hostname: ${hostIn}`);
+
+    const allIndices = this.accounts.map((_, i) => i);
+    const firstPass = await this._scanPanelsForVps(allIndices, ipIn, hostIn, TIMEOUT_LIST_MS);
+    if (firstPass?.vpsid) return firstPass;
+
+    const retryIndices = firstPass?.timedOutIndices || [];
+    if (retryIndices.length) {
+      console.log(`[VirtualizorAPI][findVpsId] Retrying ${retryIndices.length} timed-out panel(s) with ${TIMEOUT_LIST_RETRY_MS}ms`);
+      const secondPass = await this._scanPanelsForVps(retryIndices, ipIn, hostIn, TIMEOUT_LIST_RETRY_MS);
+      if (secondPass?.vpsid) return secondPass;
     }
 
     console.log(`[VirtualizorAPI][findVpsId] No VPS found across ${this.accounts.length} accounts`);

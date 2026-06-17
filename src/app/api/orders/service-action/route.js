@@ -318,6 +318,45 @@ function guessHostnameFromOrder(order) {
   );
 }
 
+/**
+ * Merge env Virtualizor panels with any per-company panels on the order's IP stock.
+ * Hostycare reinstall/templates need every panel — some VPS (e.g. 103.215.x.x) only
+ * appear on a slow or company-specific node.
+ */
+async function buildMergedVirtualizorApi(order) {
+  let envAccounts = [];
+  try {
+    const envApi = new VirtualizorAPI();
+    envAccounts = envApi.accounts;
+  } catch (err) {
+    console.warn('[SERVICE-ACTION] Env Virtualizor not configured:', err.message);
+  }
+
+  const { accounts: companyAccounts } = await resolveCompanyVirtualizorAccounts(order);
+  const companyApiAccounts = companyAccounts.length
+    ? toVirtualizorApiAccounts(companyAccounts)
+    : [];
+
+  const seen = new Set();
+  const merged = [];
+  for (const acct of [...envAccounts, ...companyApiAccounts]) {
+    const key = `${acct.host}:${acct.port || 4083}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      merged.push(acct);
+    }
+  }
+
+  if (!merged.length) {
+    throw new Error('VirtualizorAPI: no panels configured (check VIRTUALIZOR_HOST_* env or company Virtualizor settings)');
+  }
+
+  console.log(
+    `[SERVICE-ACTION] Virtualizor panels: ${envAccounts.length} env + ${companyApiAccounts.length} company → ${merged.length} unique`
+  );
+  return new VirtualizorAPI({ accounts: merged });
+}
+
 
 
 export async function POST(request) {
@@ -1004,7 +1043,7 @@ export async function POST(request) {
 
       // Virtualizor is only for reinstall/templates on Hostycare orders — power uses Hostycare API
       if (action === 'reinstall' || action === 'templates') {
-        virtualizorApi = new VirtualizorAPI();
+        virtualizorApi = await buildMergedVirtualizorApi(order);
       }
     }
 
