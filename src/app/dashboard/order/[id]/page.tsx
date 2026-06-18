@@ -49,6 +49,7 @@ import { Progress } from '@/components/ui/progress';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Switch } from '@/components/ui/switch';
 import { fetchWalletSummary } from '@/lib/walletClient';
+import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { ADVPS_REBUILD_LIMIT, getAdvpsRebuildUsage } from '@/lib/advpsRebuildLimit';
 import { isWithinRenewalWindow } from '@/lib/expiryHelper';
@@ -298,6 +299,8 @@ const OrderDetails = () => {
   const [serviceLoading, setServiceLoading] = useState(false);
   const [actionBusy, setActionBusy] = useState<string | null>(null);
   const [serverPowerState, setServerPowerState] = useState<'running' | 'stopped' | 'suspended' | 'busy' | 'unknown'>('unknown');
+  const POWER_ACTIONS = new Set(['start', 'stop', 'restart', 'resetmac']);
+  const isPowerActionBusy = (busy: string | null) => !!busy && POWER_ACTIONS.has(busy);
   const [powerStateLoading, setPowerStateLoading] = useState(false);
 
   // Payment method for renewals
@@ -369,7 +372,7 @@ const OrderDetails = () => {
         (provider === 'oceanlinux' || !hasNativeServiceId);
 
       if (hasNativeServiceId || isCompanyAutomated) {
-        fetchServerPowerState();
+        fetchServerPowerState({ force: true });
       }
       // Manual request fallback only applies to oceanlinux orders that
       // don't have any automation configured at the company level.
@@ -816,6 +819,31 @@ const OrderDetails = () => {
     return false;
   };
 
+  const resolvePowerStateFromStatusResponse = (data: {
+    powerState?: string;
+    powerStatus?: string;
+    rawStatus?: string;
+    details?: { PowerStatus?: string; ActionStatus?: string };
+  }): typeof serverPowerState | null => {
+    const powerStatus = String(
+      data.powerStatus || data.details?.PowerStatus || ''
+    ).toLowerCase().trim();
+    if (powerStatus === 'online' || powerStatus === 'on') return 'running';
+    if (powerStatus === 'offline' || powerStatus === 'off') return 'stopped';
+
+    const raw = String(data.rawStatus || '').toLowerCase().trim();
+    if (['online', 'running', 'active', 'started', 'on'].includes(raw)) return 'running';
+    if (['offline', 'stopped', 'inactive', 'off', 'shutdown', 'down'].includes(raw)) return 'stopped';
+    if (['suspended', 'paused'].includes(raw)) return 'suspended';
+
+    const ps = data.powerState;
+    // Never persist API "busy" — it can stick while ActionStatus=processing
+    if (ps === 'busy') return null;
+    if (ps === 'running' || ps === 'stopped' || ps === 'suspended') return ps;
+    if (ps === 'unknown') return 'unknown';
+    return ps ? (ps as typeof serverPowerState) : null;
+  };
+
   const fetchServerPowerState = async (opts?: { force?: boolean }): Promise<typeof serverPowerState | null> => {
     if (!order) return null;
 
@@ -847,13 +875,12 @@ const OrderDetails = () => {
       });
       const data = await res.json();
 
-      const nextState = data.powerState || 'unknown';
-      if (data.powerState) {
-        console.log('[ORDER-DETAILS] Server power state:', data.powerState);
-        setServerPowerState(data.powerState);
+      const nextState = resolvePowerStateFromStatusResponse(data);
+      if (nextState) {
+        console.log('[ORDER-DETAILS] Server power state:', nextState);
+        setServerPowerState(nextState);
       } else {
-        console.log('[ORDER-DETAILS] Could not determine power state:', data);
-        setServerPowerState('unknown');
+        console.log('[ORDER-DETAILS] Power state unchanged (transient/busy):', data);
       }
 
       if (provider === 'advps' && data.credentialsUpdated) {
@@ -870,20 +897,24 @@ const OrderDetails = () => {
     }
   };
 
-  /** Poll until start/stop/restart is reflected, or give up after ~30s. */
+  /** Poll until start/stop/restart is reflected (providers can lag 1–3 min). */
   const pollPowerStateAfterAction = async (action: 'start' | 'stop' | 'restart') => {
     const target = action === 'stop' ? 'stopped' : 'running';
-    const maxAttempts = 10;
+    const maxAttempts = 60; // ~3 min at 3s intervals
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      await new Promise((resolve) => setTimeout(resolve, attempt === 0 ? 2000 : 3000));
+      if (attempt > 0) {
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+      }
       const state = await fetchServerPowerState({ force: true });
       if (state === target) return state;
       if (action === 'stop' && (state === 'stopped' || state === 'suspended')) return state;
       if (action !== 'stop' && state === 'running') return state;
     }
 
-    return fetchServerPowerState({ force: true });
+    const fallback = action === 'stop' ? 'stopped' : 'running';
+    setServerPowerState(fallback);
+    return fallback;
   };
 
   const getManageEndpoint = (provider: ReturnType<typeof getProviderFromOrder>) =>
@@ -901,7 +932,7 @@ const OrderDetails = () => {
     }
   };
 
-  const loadServiceDetails = async () => {
+  const loadServiceDetails = async (opts?: { skipPowerRefresh?: boolean }) => {
     if (!order) return;
 
     const provider = getProviderFromOrder(order, ipStock);
@@ -924,10 +955,19 @@ const OrderDetails = () => {
           setServiceDetails(data);
         }
 
-        // Refresh order data to get latest synced information
+        // SmartVPS GET sync includes PowerStatus on details — update badge immediately
+        const syncedPower = resolvePowerStateFromStatusResponse({
+          powerState: data.powerState,
+          powerStatus: data.powerStatus,
+          details: data.details,
+        });
+        if (syncedPower) {
+          setServerPowerState(syncedPower);
+        }
+
         await fetchOrder();
 
-        if (data.success && (provider === 'hostycare' || provider === 'smartvps' || provider === 'advps')) {
+        if (!opts?.skipPowerRefresh && data.success && (provider === 'hostycare' || provider === 'smartvps' || provider === 'advps')) {
           await fetchServerPowerState({ force: true });
         }
 
@@ -975,10 +1015,7 @@ const OrderDetails = () => {
 
     setActionBusy(action);
 
-    // Set power state to busy during actions that change VM power
-    if (['start', 'stop', 'restart', 'resetmac'].includes(action)) {
-      setServerPowerState('busy');
-    }
+    const isPowerAction = POWER_ACTIONS.has(action);
 
     try {
       const provider = getProviderFromOrder(order, ipStock);
@@ -999,8 +1036,8 @@ const OrderDetails = () => {
             action === 'start' && provider === 'advps' && data.result?.ipConfig?.ok && data.result?.ipConfig?.ip
               ? ` IP configured after start (${data.result.ipConfig.ip}).`
               : '';
-          toast.success(`${actionLabel} server...${ipNote} Updating status…`, {
-            duration: 3000,
+          toast.success(`${actionLabel} server...${ipNote} Status may take 1–3 minutes to update.`, {
+            duration: 5000,
           });
 
           await pollPowerStateAfterAction(action as 'start' | 'stop' | 'restart');
@@ -1042,8 +1079,10 @@ const OrderDetails = () => {
         }
 
         await Promise.all([
-          loadServiceDetails(),
-          fetchOrder()
+          loadServiceDetails({
+            skipPowerRefresh: ['start', 'stop', 'restart', 'resetmac'].includes(action),
+          }),
+          fetchOrder(),
         ]);
 
         if (action === 'changepassword' || action === 'reinstall' || action === 'format') {
@@ -1067,10 +1106,13 @@ const OrderDetails = () => {
       }
     } catch (e: any) {
       toast.error(e.message || `Failed to execute "${action}"`);
-      if (['start', 'stop', 'restart', 'resetmac'].includes(action)) {
+      if (POWER_ACTIONS.has(action)) {
         await fetchServerPowerState({ force: true });
       }
     } finally {
+      if (isPowerAction) {
+        await fetchServerPowerState({ force: true });
+      }
       setActionBusy(null);
     }
   };
@@ -1753,6 +1795,15 @@ const OrderDetails = () => {
 
   // Helper to get power state badge for active servers
   const getPowerStateBadge = () => {
+    if (isPowerActionBusy(actionBusy)) {
+      return (
+        <Badge className="bg-blue-500/10 text-blue-600 border-blue-500/20">
+          <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+          Processing
+        </Badge>
+      );
+    }
+
     if (powerStateLoading) {
       return (
         <Badge className="bg-muted text-muted-foreground border-border">
@@ -1782,13 +1833,6 @@ const OrderDetails = () => {
           <Badge className="bg-red-500/10 text-red-600 border-red-500/20">
             <div className="w-2 h-2 bg-red-500 rounded-full mr-2"></div>
             Offline
-          </Badge>
-        );
-      case 'busy':
-        return (
-          <Badge className="bg-blue-500/10 text-blue-600 border-blue-500/20">
-            <Loader2 className="w-3 h-3 mr-1 animate-spin" />
-            Processing
           </Badge>
         );
       default:
@@ -2067,7 +2111,7 @@ const OrderDetails = () => {
                   if (order && getProviderFromOrder(order, ipStock) === 'advps' && order.advpsServiceId) {
                     loadServiceDetails();
                   } else if (order && usesLivePowerUi) {
-                    void fetchServerPowerState();
+                    void fetchServerPowerState({ force: true });
                     void fetchOrder();
                   } else {
                     fetchOrder();
@@ -2435,22 +2479,22 @@ const OrderDetails = () => {
                         "p-3 rounded-lg border shadow-sm",
                         usesLivePowerUi && serverPowerState === 'running' && "bg-green-500/10 border-green-500/30",
                         usesLivePowerUi && serverPowerState === 'stopped' && "bg-red-500/10 border-red-500/30",
-                        usesLivePowerUi && serverPowerState === 'busy' && "bg-blue-500/10 border-blue-500/30",
-                        !(usesLivePowerUi && ['running', 'stopped', 'busy'].includes(serverPowerState)) && "bg-primary/10 border-primary/30"
+                        usesLivePowerUi && isPowerActionBusy(actionBusy) && "bg-blue-500/10 border-blue-500/30",
+                        !(usesLivePowerUi && (['running', 'stopped'].includes(serverPowerState) || isPowerActionBusy(actionBusy))) && "bg-primary/10 border-primary/30"
                       )}>
                         <div className="flex items-center gap-3">
                           <div className={cn(
                             "h-10 w-10 rounded-lg flex items-center justify-center flex-shrink-0 shadow-sm",
                             usesLivePowerUi && serverPowerState === 'running' && "bg-green-500/20",
                             usesLivePowerUi && serverPowerState === 'stopped' && "bg-red-500/20",
-                            usesLivePowerUi && serverPowerState === 'busy' && "bg-blue-500/20",
-                            !(usesLivePowerUi && ['running', 'stopped', 'busy'].includes(serverPowerState)) && "bg-primary/20"
+                            usesLivePowerUi && isPowerActionBusy(actionBusy) && "bg-blue-500/20",
+                            !(usesLivePowerUi && (['running', 'stopped'].includes(serverPowerState) || isPowerActionBusy(actionBusy))) && "bg-primary/20"
                           )}>
                             <Activity className={cn(
                               "h-5 w-5",
                               usesLivePowerUi && serverPowerState === 'running' && "text-green-600",
                               usesLivePowerUi && serverPowerState === 'stopped' && "text-red-600",
-                              usesLivePowerUi && serverPowerState === 'busy' && "text-blue-600"
+                              usesLivePowerUi && isPowerActionBusy(actionBusy) && "text-blue-600"
                             )} />
                           </div>
                           <div className="min-w-0 flex-1">
@@ -3131,19 +3175,24 @@ const OrderDetails = () => {
                       {usesLivePowerUi && (
                         <div className={cn(
                           "flex items-center gap-3 p-3 rounded-lg border transition-colors",
-                          powerStateLoading && "bg-muted/50 border-border",
-                          !powerStateLoading && serverPowerState === 'running' && "bg-green-50 border-green-200 dark:bg-green-950/30 dark:border-green-800",
-                          !powerStateLoading && serverPowerState === 'stopped' && "bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-800",
-                          !powerStateLoading && serverPowerState === 'suspended' && "bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-800",
-                          !powerStateLoading && serverPowerState === 'busy' && "bg-blue-50 border-blue-200 dark:bg-blue-950/30 dark:border-blue-800",
-                          !powerStateLoading && serverPowerState === 'unknown' && "bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-800"
+                          (powerStateLoading || isPowerActionBusy(actionBusy)) && "bg-blue-50 border-blue-200 dark:bg-blue-950/30 dark:border-blue-800",
+                          !powerStateLoading && !isPowerActionBusy(actionBusy) && serverPowerState === 'running' && "bg-green-50 border-green-200 dark:bg-green-950/30 dark:border-green-800",
+                          !powerStateLoading && !isPowerActionBusy(actionBusy) && serverPowerState === 'stopped' && "bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-800",
+                          !powerStateLoading && !isPowerActionBusy(actionBusy) && serverPowerState === 'suspended' && "bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-800",
+                          !powerStateLoading && !isPowerActionBusy(actionBusy) && serverPowerState === 'unknown' && "bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-800"
                         )}>
-                          {powerStateLoading ? (
+                          {powerStateLoading || isPowerActionBusy(actionBusy) ? (
                             <>
-                              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                              <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
                               <div className="flex-1">
-                                <p className="text-sm font-medium text-muted-foreground">Checking Status...</p>
-                                <p className="text-xs text-muted-foreground">Fetching server power state</p>
+                                <p className="text-sm font-medium text-blue-700 dark:text-blue-300">
+                                  {isPowerActionBusy(actionBusy) ? 'Processing...' : 'Checking Status...'}
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                  {isPowerActionBusy(actionBusy)
+                                    ? 'Please wait — this can take 1–3 minutes on some providers'
+                                    : 'Fetching server power state'}
+                                </p>
                               </div>
                             </>
                           ) : (
@@ -3153,7 +3202,6 @@ const OrderDetails = () => {
                                 serverPowerState === 'running' && "bg-green-500 animate-pulse",
                                 serverPowerState === 'stopped' && "bg-red-500",
                                 serverPowerState === 'suspended' && "bg-red-500",
-                                serverPowerState === 'busy' && "bg-blue-500 animate-pulse",
                                 serverPowerState === 'unknown' && "bg-red-500"
                               )} />
                               <div className="flex-1">
@@ -3162,40 +3210,33 @@ const OrderDetails = () => {
                                   serverPowerState === 'running' && "text-green-700 dark:text-green-300",
                                   serverPowerState === 'stopped' && "text-red-700 dark:text-red-300",
                                   serverPowerState === 'suspended' && "text-red-700 dark:text-red-300",
-                                  serverPowerState === 'busy' && "text-blue-700 dark:text-blue-300",
                                   serverPowerState === 'unknown' && "text-red-700 dark:text-red-300"
                                 )}>
                                   {serverPowerState === 'running' && 'Server is Online'}
                                   {serverPowerState === 'stopped' && 'Server is Offline'}
                                   {serverPowerState === 'suspended' && 'Server is Offline'}
-                                  {serverPowerState === 'busy' && 'Processing...'}
                                   {serverPowerState === 'unknown' && 'Server is Offline'}
                                 </p>
                                 <p className="text-xs text-muted-foreground">
                                   {serverPowerState === 'running' && 'Your server is online and responding'}
                                   {serverPowerState === 'stopped' && 'Your server is powered off'}
                                   {serverPowerState === 'suspended' && 'Your server is powered off'}
-                                  {serverPowerState === 'busy' && 'Please wait while the action completes'}
                                   {serverPowerState === 'unknown' && 'Your server is powered off'}
                                 </p>
                               </div>
-                              {serverPowerState === 'busy' ? (
-                                <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
-                              ) : (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => fetchServerPowerState()}
-                                  disabled={powerStateLoading}
-                                  className="h-8 w-8 p-0 hover:bg-muted"
-                                  title="Refresh status"
-                                >
-                                  <RefreshCw className={cn(
-                                    "h-4 w-4 text-muted-foreground",
-                                    powerStateLoading && "animate-spin"
-                                  )} />
-                                </Button>
-                              )}
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => fetchServerPowerState({ force: true })}
+                                disabled={powerStateLoading}
+                                className="h-8 w-8 p-0 hover:bg-muted"
+                                title="Refresh status"
+                              >
+                                <RefreshCw className={cn(
+                                  "h-4 w-4 text-muted-foreground",
+                                  powerStateLoading && "animate-spin"
+                                )} />
+                              </Button>
                             </>
                           )}
                         </div>
@@ -3206,7 +3247,7 @@ const OrderDetails = () => {
                         <Button
                           variant="default"
                           onClick={() => runServiceAction('start')}
-                          disabled={!!actionBusy || serverPowerState === 'running' || serverPowerState === 'busy'}
+                          disabled={!!actionBusy || serverPowerState === 'running'}
                           className={cn(
                             "h-10 gap-2 text-sm",
                             serverPowerState === 'running'
@@ -3225,7 +3266,7 @@ const OrderDetails = () => {
                         <Button
                           variant="outline"
                           onClick={() => runServiceAction('stop')}
-                          disabled={!!actionBusy || serverPowerState === 'stopped' || serverPowerState === 'busy'}
+                          disabled={!!actionBusy || serverPowerState === 'stopped'}
                           className={cn(
                             "h-10 gap-2 text-sm",
                             serverPowerState === 'stopped' && "opacity-50 cursor-not-allowed"
@@ -3242,7 +3283,7 @@ const OrderDetails = () => {
                         <Button
                           variant="secondary"
                           onClick={() => runServiceAction('restart')}
-                          disabled={!!actionBusy || serverPowerState === 'stopped' || serverPowerState === 'busy'}
+                          disabled={!!actionBusy || serverPowerState === 'stopped'}
                           className={cn(
                             "h-10 gap-2 text-sm",
                             serverPowerState === 'stopped' && "opacity-50 cursor-not-allowed"

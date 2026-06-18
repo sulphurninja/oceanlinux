@@ -360,6 +360,8 @@ export async function GET(request) {
       serviceId: serviceIdentifier,
       details,
       info,
+      powerState: computeSmartVpsPowerState(details),
+      powerStatus: details?.PowerStatus || null,
       syncResult: {
         credentialsUpdated: !!(syncResult.username || syncResult.password || syncResult.os),
         lastSyncTime: syncResult.lastSyncTime
@@ -729,19 +731,10 @@ export async function POST(request) {
           
           console.log('[SMARTVPS-ACTION][POST] SmartVPS Status:', { PowerStatus, MachineStatus, ActionStatus });
 
-          // PowerStatus is the REAL power indicator
-          let powerState = 'unknown';
-          const powerStatusLower = (PowerStatus || '').toLowerCase();
-          
-          if (powerStatusLower === 'online') {
-            powerState = 'running';
-          } else if (powerStatusLower === 'offline') {
-            powerState = 'stopped';
-          } else if (['pending', 'processing'].includes(String(ActionStatus || '').toLowerCase())) {
-            powerState = 'busy';
-          }
+          // PowerStatus is the REAL power indicator — never return "busy" (ActionStatus lags)
+          const powerState = computeSmartVpsPowerState(parsedStatusData);
 
-          console.log('[SMARTVPS-ACTION][POST] Power state:', powerState, '(from PowerStatus:', PowerStatus, ')');
+          console.log('[SMARTVPS-ACTION][POST] Power state:', powerState, '(from PowerStatus:', PowerStatus, ', ActionStatus:', ActionStatus, ')');
 
           // Sync to database (don't await to speed up response)
           const extractedCreds = extractSmartVPSCredentials(parsedStatusData, order);
@@ -900,52 +893,66 @@ function parseSmartVPSResponse(response, actionType = 'unknown') {
   console.log(`[SMARTVPS-PARSE] Parsing response for action: ${actionType}`);
   console.log(`[SMARTVPS-PARSE] Raw response type:`, typeof response);
 
+  let current = response;
+  for (let depth = 0; depth < 3 && typeof current === 'string'; depth++) {
+    try {
+      current = JSON.parse(current);
+    } catch {
+      break;
+    }
+  }
+
   // For status action, expect JSON data
   if (actionType === 'status') {
-    // If it's already a proper object with meaningful keys, return as-is
-    if (response && typeof response === 'object' && !Array.isArray(response)) {
-      const keys = Object.keys(response);
+    if (current && typeof current === 'object' && !Array.isArray(current)) {
+      const keys = Object.keys(current);
       const hasNonNumericKeys = keys.some(key => isNaN(key));
 
       if (hasNonNumericKeys) {
-        console.log(`[SMARTVPS-PARSE] Response is already parsed object:`, response);
-        return response;
+        console.log(`[SMARTVPS-PARSE] Response is already parsed object`);
+        return current;
       }
 
-      // If it's an object with only numeric keys (character array), reconstruct the string
       if (keys.every(key => !isNaN(key))) {
         try {
           const jsonString = keys
             .sort((a, b) => parseInt(a) - parseInt(b))
-            .map(key => response[key])
+            .map(key => current[key])
             .join('');
-          console.log(`[SMARTVPS-PARSE] Reconstructed JSON string:`, jsonString);
           const parsed = JSON.parse(jsonString);
-          console.log(`[SMARTVPS-PARSE] Successfully parsed reconstructed JSON:`, parsed);
+          console.log(`[SMARTVPS-PARSE] Successfully parsed reconstructed JSON`);
           return parsed;
         } catch (parseError) {
           console.error(`[SMARTVPS-PARSE] Failed to parse reconstructed string:`, parseError);
-          return response;
+          return current;
         }
       }
     }
 
-    // If it's a string, try to parse as JSON
-    if (typeof response === 'string') {
+    if (typeof current === 'string') {
       try {
-        const parsed = JSON.parse(response);
-        console.log(`[SMARTVPS-PARSE] Successfully parsed JSON string:`, parsed);
+        const parsed = JSON.parse(current);
+        console.log(`[SMARTVPS-PARSE] Successfully parsed JSON string`);
         return parsed;
       } catch (parseError) {
         console.error(`[SMARTVPS-PARSE] Failed to parse JSON string:`, parseError);
-        return response;
+        return current;
       }
     }
+
+    return current;
   }
 
-  // For other actions (start, stop, reboot, format, etc.), return as-is
   console.log(`[SMARTVPS-PARSE] Non-status action, returning response as-is`);
-  return response;
+  return current;
+}
+
+function computeSmartVpsPowerState(parsed) {
+  if (!parsed || typeof parsed !== 'object') return 'unknown';
+  const powerStatusLower = String(parsed.PowerStatus || '').toLowerCase().trim();
+  if (['online', 'on', 'running', 'active'].includes(powerStatusLower)) return 'running';
+  if (['offline', 'off', 'stopped', 'down'].includes(powerStatusLower)) return 'stopped';
+  return 'unknown';
 }
 
 // Helper function to extract credentials from parsed SmartVPS response
