@@ -621,6 +621,7 @@ const OrderDetails = () => {
       return;
     }
     const provider = getProviderFromOrder(order!, ipStock);
+    setActionBusy(osMode === 'format' ? 'format' : 'reinstall');
     setOsLoading(true);
     setOsProgress(osMode === 'format' ? 'Initiating server format...' : 'Submitting reinstall...');
 
@@ -653,6 +654,7 @@ const OrderDetails = () => {
       });
 
     } catch (err: any) {
+      setActionBusy(null);
       setOsProgress(`Error: ${err.message || 'unknown error'}`);
       setTimeout(() => {
         setOsDialogOpen(false);
@@ -814,33 +816,28 @@ const OrderDetails = () => {
     return false;
   };
 
-  const fetchServerPowerState = async () => {
-    if (!order) return;
+  const fetchServerPowerState = async (opts?: { force?: boolean }): Promise<typeof serverPowerState | null> => {
+    if (!order) return null;
 
     const provider = getProviderFromOrder(order, ipStock);
 
     const isHostycare = provider === 'hostycare' && order.hostycareServiceId;
     const isSmartVPS = provider === 'smartvps' && (order.smartvpsServiceId || order.ipAddress);
     const isAdvps = provider === 'advps' && order.advpsServiceId;
-    // Company automation (Virtualizor or reseller API) covers oceanlinux
-    // orders AND any order whose declared provider lacks a real service ID
-    // but is linked to a company with automation enabled.
     const isCompanyAuto = hasCompanyAnyAutomation(ipStock) &&
       (provider === 'oceanlinux' || (!isHostycare && !isSmartVPS && !isAdvps));
 
     if (!isHostycare && !isSmartVPS && !isAdvps && !isCompanyAuto) {
-      return;
+      return null;
     }
 
-    // Don't refetch if already loading
-    if (powerStateLoading) return;
+    if (!opts?.force && powerStateLoading) return null;
 
     setPowerStateLoading(true);
 
     try {
       console.log('[ORDER-DETAILS] Fetching server power state for provider:', provider);
 
-      // Use the appropriate endpoint based on provider
       const endpoint = provider === 'smartvps' ? 'smartvps-action' : provider === 'advps' ? 'advps-action' : 'service-action';
 
       const res = await fetch(`/api/orders/${endpoint}`, {
@@ -850,6 +847,7 @@ const OrderDetails = () => {
       });
       const data = await res.json();
 
+      const nextState = data.powerState || 'unknown';
       if (data.powerState) {
         console.log('[ORDER-DETAILS] Server power state:', data.powerState);
         setServerPowerState(data.powerState);
@@ -858,15 +856,48 @@ const OrderDetails = () => {
         setServerPowerState('unknown');
       }
 
-      // ADVPS status poll also syncs credentials — refresh order if IP/password changed
       if (provider === 'advps' && data.credentialsUpdated) {
         await fetchOrder();
       }
+
+      return nextState;
     } catch (error) {
       console.error('[ORDER-DETAILS] Failed to fetch power state:', error);
       setServerPowerState('unknown');
+      return 'unknown';
     } finally {
       setPowerStateLoading(false);
+    }
+  };
+
+  /** Poll until start/stop/restart is reflected, or give up after ~30s. */
+  const pollPowerStateAfterAction = async (action: 'start' | 'stop' | 'restart') => {
+    const target = action === 'stop' ? 'stopped' : 'running';
+    const maxAttempts = 10;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, attempt === 0 ? 2000 : 3000));
+      const state = await fetchServerPowerState({ force: true });
+      if (state === target) return state;
+      if (action === 'stop' && (state === 'stopped' || state === 'suspended')) return state;
+      if (action !== 'stop' && state === 'running') return state;
+    }
+
+    return fetchServerPowerState({ force: true });
+  };
+
+  const getManageEndpoint = (provider: ReturnType<typeof getProviderFromOrder>) =>
+    provider === 'smartvps' ? 'smartvps-action' : provider === 'advps' ? 'advps-action' : 'service-action';
+
+  /** Pull latest VM state from the provider before re-reading the order document. */
+  const syncManageOrderFromProvider = async () => {
+    if (!order) return;
+    const provider = getProviderFromOrder(order, ipStock);
+    const endpoint = getManageEndpoint(provider);
+    try {
+      await fetch(`/api/orders/${endpoint}?orderId=${order._id}`, { cache: 'no-store' });
+    } catch (err) {
+      console.warn('[ORDER-DETAILS] Provider sync failed:', err);
     }
   };
 
@@ -897,7 +928,7 @@ const OrderDetails = () => {
         await fetchOrder();
 
         if (data.success && (provider === 'hostycare' || provider === 'smartvps' || provider === 'advps')) {
-          await fetchServerPowerState();
+          await fetchServerPowerState({ force: true });
         }
 
         // Show sync result — never pretend success when ADVPS API failed
@@ -944,8 +975,8 @@ const OrderDetails = () => {
 
     setActionBusy(action);
 
-    // Set power state to busy during action
-    if (['start', 'stop', 'restart'].includes(action)) {
+    // Set power state to busy during actions that change VM power
+    if (['start', 'stop', 'restart', 'resetmac'].includes(action)) {
       setServerPowerState('busy');
     }
 
@@ -968,18 +999,11 @@ const OrderDetails = () => {
             action === 'start' && provider === 'advps' && data.result?.ipConfig?.ok && data.result?.ipConfig?.ip
               ? ` IP configured after start (${data.result.ipConfig.ip}).`
               : '';
-          toast.success(`${actionLabel} server...${ipNote} This may take a few moments.`, {
-            duration: 4000,
+          toast.success(`${actionLabel} server...${ipNote} Updating status…`, {
+            duration: 3000,
           });
 
-          // Give the server a moment to change state
-          await new Promise(resolve => setTimeout(resolve, 3000));
-          await fetchServerPowerState();
-
-          // Show follow-up message to refresh if status doesn't update
-          toast.info('If status doesn\'t update, please refresh the page.', {
-            duration: 5000,
-          });
+          await pollPowerStateAfterAction(action as 'start' | 'stop' | 'restart');
         } else if (action === 'resetmac') {
           const r = data.result;
           const oldM = r?.oldMacAddress;
@@ -991,6 +1015,19 @@ const OrderDetails = () => {
           } else {
             toast.success('MAC address reset successfully');
           }
+          toast.info('Waiting for server to come back online…', { duration: 3000 });
+          await pollPowerStateAfterAction('restart');
+        } else if (action === 'reinstall' || action === 'format') {
+          toast.success(
+            action === 'format'
+              ? 'Format started. Waiting for server to finish…'
+              : 'Reinstall started. Waiting for server to finish…',
+            { duration: 4000 }
+          );
+          await pollForServerUpdates({
+            expectedTemplateId: payload?.templateId,
+            useOsDialog: false,
+          });
         } else if (action === 'generatepassword') {
           const newPass = data.result?.password;
           if (newPass) {
@@ -1024,16 +1061,14 @@ const OrderDetails = () => {
           toast.error(data.error || data.message || `Failed to execute "${action}"`);
         }
         // Refresh power state on error too
-        if (['start', 'stop', 'restart'].includes(action) && (provider === 'hostycare' || provider === 'smartvps' || provider === 'advps')) {
-          await fetchServerPowerState();
+        if (['start', 'stop', 'restart', 'resetmac'].includes(action)) {
+          await fetchServerPowerState({ force: true });
         }
       }
     } catch (e: any) {
       toast.error(e.message || `Failed to execute "${action}"`);
-      // Refresh power state on error
-      const provider = getProviderFromOrder(order, ipStock);
-      if (['start', 'stop', 'restart'].includes(action) && (provider === 'hostycare' || provider === 'smartvps' || provider === 'advps')) {
-        await fetchServerPowerState();
+      if (['start', 'stop', 'restart', 'resetmac'].includes(action)) {
+        await fetchServerPowerState({ force: true });
       }
     } finally {
       setActionBusy(null);
@@ -1092,7 +1127,6 @@ const OrderDetails = () => {
       return;
     }
     setLegacyActionOpen(false);
-    setActionBusy(legacyAction);
     await runServiceAction(legacyAction, {
       password: legacyPassword,
       templateId: legacySelectedTemplate || undefined,
@@ -1227,6 +1261,7 @@ const OrderDetails = () => {
     }
 
     console.log('[FORMAT-DIALOG] Starting format with template:', selectedTemplate);
+    setActionBusy('format');
     setFormatLoading(true);
     setFormatProgress('Initiating server format...');
 
@@ -1249,13 +1284,13 @@ const OrderDetails = () => {
         console.log('[FORMAT-DIALOG] Format initiated successfully');
         setFormatProgress('Format initiated. Waiting for server to update...');
 
-        // Start polling for updates
-        await pollForServerUpdates();
+        await pollForServerUpdates({ expectedTemplateId: selectedTemplate });
       } else {
         throw new Error(formatData.error || 'Format failed');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('[FORMAT-DIALOG] Format error:', error);
+      setActionBusy(null);
       setFormatProgress(`Error: ${error.message}`);
       setTimeout(() => {
         setFormatDialogOpen(false);
@@ -1265,7 +1300,7 @@ const OrderDetails = () => {
     }
   };
 
-  // Function to poll for server updates after format / OS change
+  // Poll after format / reinstall until credentials or OS update (all providers).
   const pollForServerUpdates = async (options?: {
     expectedTemplateId?: string;
     useOsDialog?: boolean;
@@ -1273,7 +1308,9 @@ const OrderDetails = () => {
     const expectedTemplateId = options?.expectedTemplateId;
     const useOsDialog = options?.useOsDialog ?? false;
     const setProgress = useOsDialog ? setOsProgress : setFormatProgress;
+
     const closeDialog = () => {
+      setActionBusy(null);
       if (useOsDialog) {
         setOsDialogOpen(false);
         setOsLoading(false);
@@ -1286,30 +1323,24 @@ const OrderDetails = () => {
       }
     };
 
-    console.log('[FORMAT-DIALOG] Starting enhanced polling for server updates', {
-      expectedTemplateId,
-      useOsDialog,
-    });
     const maxAttempts = expectedTemplateId ? 54 : 24;
-    let attempts = 0;
+    const intervalMs = 10000;
+    const initialDelayMs = expectedTemplateId ? 15000 : 8000;
     const originalOrder = { ...order! };
 
-    const poll = async () => {
-      attempts++;
-      console.log(`[FORMAT-DIALOG] Polling attempt ${attempts}/${maxAttempts}`);
+    console.log('[ORDER-DETAILS] Polling for format/reinstall completion', {
+      expectedTemplateId,
+      useOsDialog,
+      maxAttempts,
+    });
 
-      setProgress(`Checking server status... (${attempts}/${maxAttempts})`);
+    await new Promise((resolve) => setTimeout(resolve, initialDelayMs));
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      setProgress(`Checking server status... (${attempt}/${maxAttempts})`);
 
       try {
-        console.log('[FORMAT-DIALOG] Triggering service sync...');
-        const syncRes = await fetch(`/api/orders/smartvps-action?orderId=${order!._id}`);
-        if (syncRes.ok) {
-          const syncData = await syncRes.json();
-          console.log('[FORMAT-DIALOG] Sync response:', {
-            success: syncData.success,
-            credentialsUpdated: syncData.syncResult?.credentialsUpdated,
-          });
-        }
+        await syncManageOrderFromProvider();
 
         const orderRes = await fetch(`/api/orders/${order!._id}`, { cache: 'no-store' });
         if (!orderRes.ok) throw new Error('Failed to fetch order');
@@ -1318,66 +1349,61 @@ const OrderDetails = () => {
         const targetOsReached = expectedTemplateId
           ? orderOsMatchesTemplate(latestOrder.os, expectedTemplateId)
           : false;
-
-        const credentialsUpdated = (
+        const credentialsUpdated =
           latestOrder.username !== originalOrder.username ||
           latestOrder.password !== originalOrder.password ||
-          latestOrder.os !== originalOrder.os
-        );
-
-        const statusImproved = (
+          latestOrder.os !== originalOrder.os;
+        const statusImproved =
           latestOrder.provisioningStatus === 'active' &&
-          originalOrder.provisioningStatus !== 'active'
-        );
+          originalOrder.provisioningStatus !== 'active';
+        const stillProvisioning = latestOrder.provisioningStatus === 'provisioning';
 
         const formatComplete = expectedTemplateId
-          ? targetOsReached && latestOrder.provisioningStatus === 'active'
-          : (credentialsUpdated || statusImproved);
+          ? (targetOsReached || credentialsUpdated) && !stillProvisioning
+          : credentialsUpdated || statusImproved;
 
-        if (formatComplete || (!expectedTemplateId && (credentialsUpdated || statusImproved))) {
-          console.log('[FORMAT-DIALOG] Server format/OS change completed');
-          setProgress(targetOsReached
-            ? `Installed ${getOsTemplateLabel(osTemplates[expectedTemplateId!] || expectedTemplateId, expectedTemplateId!)} successfully!`
-            : 'Server format completed successfully!');
-
+        if (formatComplete) {
           setOrder(latestOrder);
+          setProgress(
+            targetOsReached
+              ? `Installed ${getOsTemplateLabel(osTemplates[expectedTemplateId!] || expectedTemplateId, expectedTemplateId!)} successfully!`
+              : 'Server update completed successfully!'
+          );
 
           if (targetOsReached || credentialsUpdated) {
-            toast.success(targetOsReached
-              ? `Server is now running ${latestOrder.os}. New credentials are ready.`
-              : 'Server format completed! New credentials have been generated.');
+            toast.success(
+              targetOsReached
+                ? `Server is now running ${latestOrder.os}. New credentials are ready.`
+                : 'Server update completed! New credentials are ready.'
+            );
           } else {
-            toast.success('Server format completed! Server is now active.');
+            toast.success('Server update completed! Server is now active.');
           }
 
-          setTimeout(closeDialog, 2000);
+          await fetchServerPowerState({ force: true });
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+          closeDialog();
           return;
         }
-
-        if (attempts < maxAttempts) {
-          setTimeout(poll, 10000);
-        } else {
-          console.log('[FORMAT-DIALOG] Polling timeout reached');
-          setProgress(expectedTemplateId
-            ? 'OS change is taking longer than expected. Use Sync in a few minutes to refresh credentials.'
-            : 'Format is taking longer than expected. Please check back in a few minutes or use the sync button.');
-          setTimeout(() => {
-            closeDialog();
-            fetchOrder();
-          }, 5000);
-        }
       } catch (error) {
-        console.error('[FORMAT-DIALOG] Polling error:', error);
-        if (attempts < maxAttempts) {
-          setTimeout(poll, 10000);
-        } else {
-          setProgress('Unable to verify completion. Please refresh the page or use the sync button.');
-          setTimeout(closeDialog, 5000);
-        }
+        console.error('[ORDER-DETAILS] Poll error:', error);
       }
-    };
 
-    setTimeout(poll, expectedTemplateId ? 15000 : 8000);
+      if (attempt < maxAttempts) {
+        await new Promise((resolve) => setTimeout(resolve, intervalMs));
+      }
+    }
+
+    console.log('[ORDER-DETAILS] Format/reinstall poll timed out');
+    setProgress(
+      expectedTemplateId
+        ? 'OS change is taking longer than expected. Use Sync to refresh credentials.'
+        : 'Update is taking longer than expected. Use Sync or check back shortly.'
+    );
+    await fetchOrder();
+    await fetchServerPowerState({ force: true });
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    closeDialog();
   };
 
 
