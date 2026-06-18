@@ -11,6 +11,8 @@ export async function GET(request) {
 
         await connectDB();
 
+        const { searchParams } = new URL(request.url);
+
         // Build query filters
         const filters = {};
 
