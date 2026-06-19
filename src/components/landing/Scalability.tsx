@@ -1,173 +1,110 @@
+"use client";
+
 import { ArrowUpCircle, ArrowDownCircle, Minimize2, Zap, TrendingUp, Settings } from "lucide-react"
+import PremiumSection from "@/components/landing/PremiumSection"
+import PremiumSectionHeader from "@/components/landing/PremiumSectionHeader"
+import PremiumFeatureCard from "@/components/landing/PremiumFeatureCard"
+import Tilt3DCard from "@/components/landing/Tilt3DCard"
 
 const scalingOptions = [
   {
-    icon: <ArrowUpCircle className="w-8 h-8 text-green-500" />,
-    title: "Instant Vertical Scaling",
-    description: "Upgrade your CPU, RAM, and storage instantly without downtime. Pay only for what you need, when you need it.",
-    features: ["Zero Downtime Upgrades", "Instant Resource Addition", "Flexible Billing", "Same Low Prices"]
+    icon: <ArrowUpCircle />,
+    title: "Vertical Scaling",
+    description: "Upgrade CPU, RAM, and storage instantly without downtime. Pay only for what you need.",
+    features: ["Zero Downtime Upgrades", "Instant Resource Addition", "Flexible Billing", "Same Low Prices"],
   },
   {
-    icon: <ArrowDownCircle className="w-8 h-8 text-blue-500" />,
-    title: "Easy Horizontal Scaling",
-    description: "Add more VPS instances to handle increased traffic. Our most affordable pricing scales with your growth.",
-    features: ["Load Balancing", "Multiple Server Management", "Unified Dashboard", "Cost-Effective Scaling"]
+    icon: <ArrowDownCircle />,
+    title: "Horizontal Scaling",
+    description: "Add VPS instances to handle traffic growth. Affordable pricing that scales with your business.",
+    features: ["Load Balancing", "Multi-Server Management", "Unified Dashboard", "Cost-Effective"],
   },
   {
-    icon: <Minimize2 className="w-8 h-8 text-purple-500" />,
+    icon: <Minimize2 />,
     title: "Smart Auto-Scaling",
-    description: "Set up automatic scaling rules to handle traffic spikes efficiently while keeping costs low.",
-    features: ["Traffic-Based Scaling", "Cost Optimization", "Performance Monitoring", "Budget Controls"]
-  }
+    description: "Automatic scaling rules for traffic spikes — with budget controls to keep costs predictable.",
+    features: ["Traffic-Based Scaling", "Cost Optimization", "Performance Monitoring", "Budget Controls"],
+  },
 ]
 
 export default function Scalability() {
   return (
-    <section id="scalability" className="section-padding bg-background">
-      <div className="container mx-auto container-padding">
-        {/* Header */}
-        <div className="text-center mb-16 animate-fade-in">
-          <h2 className="text-4xl lg:text-5xl font-bold mb-6">
-            Scale Without Breaking
-            <span className="text-primary"> Your Budget</span>
-          </h2>
-          <p className="text-xl text-muted-foreground max-w-3xl mx-auto">
-            Grow your business without worrying about hosting costs.
-            Our affordable VPS plans scale with you, keeping prices low as you expand.
-          </p>
-        </div>
+    <PremiumSection id="scalability">
+      <PremiumSectionHeader
+        eyebrow="Scalability"
+        title="Scale Without Breaking"
+        titleAccent="Your Budget"
+        description="Start small and grow on demand. Transparent pricing at every tier — no surprise bills."
+      />
 
-        {/* Scaling Options */}
-        <div className="grid lg:grid-cols-3 gap-8 mb-16">
-          {scalingOptions.map((option, index) => (
-            <div
-              key={index}
-              className="feature-card animate-slide-up hover-lift"
-              style={{ animationDelay: `${index * 0.1}s` }}
-            >
-              <div className="text-center mb-6">
-                <div className="inline-flex p-4 rounded-xl bg-muted mb-4">
-                  {option.icon}
+      <div className="grid lg:grid-cols-3 gap-5 lg:gap-6 mb-16">
+        {scalingOptions.map((option, index) => (
+          <PremiumFeatureCard
+            key={index}
+            icon={option.icon}
+            title={option.title}
+            description={option.description}
+          >
+            <div className="space-y-2">
+              {option.features.map((feature, i) => (
+                <div key={i} className="premium-spec-row">
+                  <div className="premium-spec-dot" />
+                  <span>{feature}</span>
                 </div>
-                <h3 className="text-xl font-semibold mb-3">{option.title}</h3>
-                <p className="text-muted-foreground leading-relaxed">{option.description}</p>
-              </div>
-
-              <div className="space-y-2">
-                {option.features.map((feature, i) => (
-                  <div key={i} className="flex items-center text-sm">
-                    <div className="w-2 h-2 bg-primary rounded-full mr-3 flex-shrink-0"></div>
-                    <span className="text-muted-foreground">{feature}</span>
-                  </div>
-                ))}
-              </div>
+              ))}
             </div>
-          ))}
-        </div>
+          </PremiumFeatureCard>
+        ))}
+      </div>
 
-        {/* Scaling Benefits */}
-        <div className="glass rounded-2xl p-8 lg:p-12 animate-fade-in">
-          <div className="grid lg:grid-cols-2 gap-12 items-center">
-            <div>
-              <h3 className="text-3xl font-bold mb-6">Why Our Scalability is Different</h3>
-              <div className="space-y-6">
-                <div className="flex items-start space-x-4">
-                  <div className="p-2 rounded-lg bg-green-500/10">
-                    <TrendingUp className="w-5 h-5 text-green-500" />
-                  </div>
+      <div className="premium-panel">
+        <div className="grid lg:grid-cols-2 gap-10 lg:gap-14 items-center">
+          <div>
+            <h3 className="text-2xl font-semibold text-white mb-6 tracking-tight">Why Our Scaling Works</h3>
+            <div className="space-y-5">
+              {[
+                { icon: <TrendingUp />, title: "Cost-Effective Growth", desc: "Scale based on actual usage. No long-term contracts or hidden fees." },
+                { icon: <Zap />, title: "Instant Deployment", desc: "New resources available in seconds, not hours." },
+                { icon: <Settings />, title: "Simple Management", desc: "One dashboard to manage all your VPS instances." },
+              ].map((item) => (
+                <div key={item.title} className="flex gap-4">
+                  <div className="premium-icon-box shrink-0 w-10 h-10">{item.icon}</div>
                   <div>
-                    <h4 className="font-semibold mb-2">Cost-Effective Growth</h4>
-                    <p className="text-sm text-muted-foreground">
-                      Scale up or down based on actual usage. No long-term contracts or hidden fees.
-                    </p>
+                    <h4 className="font-medium text-white mb-1">{item.title}</h4>
+                    <p className="text-sm text-white/45">{item.desc}</p>
                   </div>
                 </div>
-
-                <div className="flex items-start space-x-4">
-                  <div className="p-2 rounded-lg bg-blue-500/10">
-                    <Zap className="w-5 h-5 text-blue-500" />
-                  </div>
-                  <div>
-                    <h4 className="font-semibold mb-2">Instant Deployment</h4>
-                    <p className="text-sm text-muted-foreground">
-                      New resources are available in seconds, not hours. Keep your business running smoothly.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-start space-x-4">
-                  <div className="p-2 rounded-lg bg-purple-500/10">
-                    <Settings className="w-5 h-5 text-purple-500" />
-                  </div>
-                  <div>
-                    <h4 className="font-semibold mb-2">Simple Management</h4>
-                    <p className="text-sm text-muted-foreground">
-                      Easy-to-use dashboard makes scaling as simple as moving a slider.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="text-center">
-              <div className="bg-gradient-to-br from-card to-muted rounded-xl p-8 border dark:border-none border dark:border-none-border dark:border-none">
-                <h4 className="text-lg font-semibold mb-6">Scaling Dashboard Preview</h4>
-                <div className="space-y-4">
-                  <div className="flex justify-between items-center p-3 bg-background/50 rounded-lg">
-                    <span className="text-sm">CPU Cores</span>
-                    <div className="flex items-center space-x-2">
-                      <span className="text-muted-foreground">2</span>
-                      <div className="w-16 h-2 bg-muted rounded-full">
-                        <div className="w-1/3 h-full bg-primary rounded-full"></div>
-                      </div>
-                      <span className="text-primary">8</span>
-                    </div>
-                  </div>
-
-                  <div className="flex justify-between items-center p-3 bg-background/50 rounded-lg">
-                    <span className="text-sm">RAM (GB)</span>
-                    <div className="flex items-center space-x-2">
-                      <span className="text-muted-foreground">4</span>
-                      <div className="w-16 h-2 bg-muted rounded-full">
-                        <div className="w-1/2 h-full bg-blue-500 rounded-full"></div>
-                      </div>
-                      <span className="text-blue-500">16</span>
-                    </div>
-                  </div>
-
-                  <div className="flex justify-between items-center p-3 bg-background/50 rounded-lg">
-                    <span className="text-sm">Storage (GB)</span>
-                    <div className="flex items-center space-x-2">
-                      <span className="text-muted-foreground">50</span>
-                      <div className="w-16 h-2 bg-muted rounded-full">
-                        <div className="w-3/4 h-full bg-green-500 rounded-full"></div>
-                      </div>
-                      <span className="text-green-500">200</span>
-                    </div>
-                  </div>
-                </div>
-                <div className="mt-6 text-center">
-                  <div className="text-2xl font-bold text-primary mb-1">₹899/month</div>
-                  <div className="text-xs text-muted-foreground">Current estimated cost</div>
-                </div>
-              </div>
+              ))}
             </div>
           </div>
-        </div>
 
-        {/* Bottom CTA */}
-        <div className="text-center mt-16 animate-fade-in">
-          <div className="inline-flex items-center px-6 py-3 bg-primary/10 rounded-full mb-4">
-            <span className="text-sm text-primary font-medium">
-              🚀 Start small, scale fast, pay less
-            </span>
-          </div>
-          <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-            Begin with our most affordable plan and scale as your business grows.
-            No surprises, no hidden costs, just transparent pricing that works for you.
-          </p>
+          <Tilt3DCard maxTilt={5} scale={1.01} innerClassName="premium-glass-card p-7">
+            <p className="text-[10px] font-medium uppercase tracking-widest text-white/35 mb-5 text-center">
+              Resource Scaling
+            </p>
+            {[
+              { label: "CPU Cores", from: "2", to: "8", pct: "w-1/3" },
+              { label: "RAM (GB)", from: "4", to: "16", pct: "w-1/2" },
+              { label: "Storage (GB)", from: "50", to: "200", pct: "w-3/4" },
+            ].map((row) => (
+              <div key={row.label} className="flex justify-between items-center py-3 border-b border-white/[0.05] last:border-0">
+                <span className="text-sm text-white/50">{row.label}</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-white/30 tabular-nums">{row.from}</span>
+                  <div className="w-20 h-1 bg-white/10 rounded-full overflow-hidden">
+                    <div className={`${row.pct} h-full bg-emerald-400/80 rounded-full`} />
+                  </div>
+                  <span className="text-xs text-emerald-400 tabular-nums">{row.to}</span>
+                </div>
+              </div>
+            ))}
+            <div className="mt-6 pt-5 border-t border-white/[0.06] text-center">
+              <div className="premium-stat-value text-2xl">₹899</div>
+              <div className="text-xs text-white/35 mt-1">estimated / month</div>
+            </div>
+          </Tilt3DCard>
         </div>
       </div>
-    </section>
+    </PremiumSection>
   )
 }

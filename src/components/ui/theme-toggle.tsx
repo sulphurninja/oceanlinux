@@ -17,7 +17,7 @@ export function ThemeToggle({
   size = 'sm',
   className
 }: ThemeToggleProps) {
-  const { theme, setTheme } = useTheme()
+  const { theme, setTheme, resolvedTheme } = useTheme()
   const [mounted, setMounted] = React.useState(false)
 
   React.useEffect(() => {
@@ -41,7 +41,7 @@ export function ThemeToggle({
     <Button
       variant={variant}
       size={size}
-      onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
+      onClick={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}
       className={cn(
         'relative overflow-hidden transition-all duration-300 hover:scale-105 active:scale-95',
         className
@@ -51,7 +51,7 @@ export function ThemeToggle({
         <Sun
           className={cn(
             'h-4 w-4 transition-all duration-500 ease-in-out',
-            theme === 'dark'
+            resolvedTheme === 'dark'
               ? 'rotate-90 scale-0 opacity-0'
               : 'rotate-0 scale-100 opacity-100'
           )}
@@ -59,7 +59,7 @@ export function ThemeToggle({
         <Moon
           className={cn(
             'absolute h-4 w-4 transition-all duration-500 ease-in-out',
-            theme === 'dark'
+            resolvedTheme === 'dark'
               ? 'rotate-0 scale-100 opacity-100'
               : '-rotate-90 scale-0 opacity-0'
           )}

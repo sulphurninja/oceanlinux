@@ -4,6 +4,8 @@ import Order from '@/models/orderModel';
 import IPStock from '@/models/ipStockModel';
 import { getDataFromToken } from '@/helper/getDataFromToken';
 import { assertIpStockPurchasable } from '@/lib/ipStockAvailability';
+import { refreshAndVerifyPurchase } from '@/lib/syncIpStockBeforePurchase';
+import { customerStockUnavailableMessage } from '@/lib/customerStockMessages';
 
 export async function POST(request) {
   await connectDB();
@@ -28,6 +30,14 @@ export async function POST(request) {
     }
 
     // 4. SERVER-SIDE PRICE VALIDATION - Fetch actual price from database
+    const liveStock = await refreshAndVerifyPurchase({ ipStockId, memory });
+    if (!liveStock.ok) {
+      return NextResponse.json(
+        { message: customerStockUnavailableMessage(liveStock.message) },
+        { status: 409 }
+      );
+    }
+
     const stockCheck = await assertIpStockPurchasable(ipStockId, 1);
     if (!stockCheck.ok) {
       return NextResponse.json({ message: stockCheck.message }, { status: 400 });

@@ -7,6 +7,20 @@ const IPStockSchema = new mongoose.Schema({
   /** Units remaining for company-managed stock. Only enforced when `company` is set. */
   stockCount: { type: Number, default: 0, min: 0 },
   company: { type: mongoose.Schema.Types.ObjectId, ref: 'Company', default: null },
+  /** Pre-configured servers — auto-assigned on payment (like slot IPs). */
+  inventoryItems: [{
+    ipAddress: { type: String, required: true },
+    username: { type: String, required: true },
+    password: { type: String, required: true },
+    os: {
+      type: String,
+      enum: ['CentOS 7', 'Ubuntu 22', 'Windows 2022 64'],
+      default: 'Windows 2022 64',
+    },
+    allocated: { type: Boolean, default: false },
+    orderId: { type: mongoose.Schema.Types.ObjectId, ref: 'Order', default: null },
+    allocatedAt: { type: Date, default: null },
+  }],
   serverType: {
     type: String,
     enum: ['VPS', 'Linux'],

@@ -40,6 +40,7 @@ interface IPStock {
     description?: string;
     memoryOptions: Record<string, MemoryOptionDetails>;
     available: boolean;
+    availabilityManual?: boolean;
     stockCount?: number;
     serverType: string;
     tags: string[];
@@ -266,7 +267,11 @@ const ManageIpStock = () => {
 
     const handleAvailableChange = (value: string) => {
         if (currentStock) {
-            setCurrentStock({ ...currentStock, available: value === "true" });
+            setCurrentStock({
+                ...currentStock,
+                available: value === "true",
+                availabilityManual: true,
+            });
         }
     };
 
@@ -375,7 +380,14 @@ const ManageIpStock = () => {
                                 <TableCell>
                                     {stock.company
                                         ? `${stock.stockCount ?? 0} units`
-                                        : (stock.available ? 'Yes' : 'No')}
+                                        : (
+                                            <span className="inline-flex items-center gap-1">
+                                              {stock.available ? 'Yes' : 'No'}
+                                              {stock.availabilityManual && (
+                                                <Badge variant="outline" className="text-[10px] h-5">Manual</Badge>
+                                              )}
+                                            </span>
+                                          )}
                                 </TableCell>
                                 {Object.entries(stock.memoryOptions).map(([memory, details]) => (
                                     <TableCell key={memory}>
@@ -471,6 +483,24 @@ const ManageIpStock = () => {
                                                     <option value="true">Yes</option>
                                                     <option value="false">No</option>
                                                 </select>
+                                                {(/^⚡|^🌊/.test(currentStock.name)) && (
+                                                  <label className="flex items-center gap-2 mt-2 text-sm text-muted-foreground cursor-pointer">
+                                                    <input
+                                                      type="checkbox"
+                                                      checked={!currentStock.availabilityManual}
+                                                      onChange={(e) => setCurrentStock({
+                                                        ...currentStock,
+                                                        availabilityManual: !e.target.checked,
+                                                      })}
+                                                    />
+                                                    Auto-sync availability from provider API (ADVPS/SmartVPS)
+                                                  </label>
+                                                )}
+                                                {currentStock.availabilityManual && (
+                                                  <p className="text-xs text-amber-600 mt-1">
+                                                    Manual lock on — user page refresh will not change Available.
+                                                  </p>
+                                                )}
                                             </>
                                         )}
                                     </div>

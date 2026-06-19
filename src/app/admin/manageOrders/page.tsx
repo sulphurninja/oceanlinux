@@ -545,6 +545,7 @@ const ManageOrders = () => {
             const response = await fetch('/api/admin/orders/transfer', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
                 body: JSON.stringify({
                     orderId: transferOrder._id,
                     targetUserEmail: email,
@@ -557,13 +558,7 @@ const ManageOrders = () => {
                 return;
             }
 
-            setOrders((prev) =>
-                prev.map((order) =>
-                    order._id === transferOrder._id
-                        ? { ...order, user: data.order?.user || order.user }
-                        : order
-                )
-            );
+            await fetchOrders();
 
             toast.success(data.message || 'Service transferred successfully');
             setTransferOrder(null);
@@ -1982,6 +1977,9 @@ const ManageOrders = () => {
                                 />
                                 <p className="text-xs text-muted-foreground">
                                     The target user must already have an OceanLinux account.
+                                    {!transferOrder.ipAddress?.trim() ? (
+                                        <> Servers without an IP yet appear under <strong>Dashboard → Orders</strong> on the new account (not My Servers).</>
+                                    ) : null}
                                 </p>
                             </div>
                         </div>

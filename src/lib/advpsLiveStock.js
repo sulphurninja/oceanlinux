@@ -188,6 +188,12 @@ async function buildListStockMap(api, verbose) {
   return stockMap;
 }
 
+/** Force next fetchAdvpsStockMap to hit ADVPS API (e.g. before checkout). */
+function invalidateAdvpsStockMapCache() {
+  _stockMapCache = null;
+  _stockMapCacheExpires = 0;
+}
+
 async function enrichMissingProductIds(api, stockMap, productIds, verbose) {
   const unique = [...new Set((productIds || []).map(normalizeProductId).filter(Boolean))].filter((id) => !stockMap[id]);
   if (verbose && unique.length > 0) {
@@ -352,4 +358,5 @@ module.exports = {
   fetchAdvpsStockMap,
   applyStockMapToAdvpsBlock,
   rowLooksInStock,
+  invalidateAdvpsStockMapCache,
 };

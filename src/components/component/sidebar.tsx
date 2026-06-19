@@ -75,6 +75,7 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
     const newCollapsed = !collapsed;
     setCollapsed(newCollapsed);
     localStorage.setItem('sidebar-collapsed', JSON.stringify(newCollapsed));
+    window.dispatchEvent(new CustomEvent('sidebar-collapse', { detail: { collapsed: newCollapsed } }));
   };
 
   const handleLogout = async () => {
@@ -217,12 +218,12 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
 
   const SidebarContent = ({ isMobile = false, isCollapsed = false }: { isMobile?: boolean; isCollapsed?: boolean }) => (
     <div className={cn(
-      "flex flex-col h-full bg- border-r border-border transition-all duration-300",
+      "flex flex-col h-full premium-dashboard-sidebar border-r transition-all duration-300",
       isCollapsed && !isMobile ? "w-16" : "w-64"
     )}>
       {/* Header */}
       <div className={cn(
-        "border-b border-border",
+        "border-b border-white/[0.06]",
         isCollapsed && !isMobile ? "p-4" : "p-5"
       )}>
         <div className={cn(
@@ -238,7 +239,7 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
             alt="OceanLinux"
           />
           {(!isCollapsed || isMobile) && (
-            <h1 className="text-2xl font-bold bg-gradient-to-l from-primary to-foreground bg-clip-text text-transparent whitespace-nowrap">
+            <h1 className="text-2xl font-bold premium-sidebar-brand tracking-tight whitespace-nowrap">
               OceanLinux
             </h1>
           )}
@@ -247,11 +248,11 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
         {/* Backtick Labs Attribution */}
         {(!isCollapsed || isMobile) && (
           <div className='flex flex-col items-center gap-1.5 mt-3'>
-            <div className="h-px w-12 bg-gradient-to-r from-transparent via-border to-transparent"></div>
-            <div className='flex items-center gap-2 opacity-70 hover:opacity-100 transition-all duration-200 group'>
-              <span className="text-[9px]  text-white-foreground font-medium uppercase tracking-wider">A Product of</span>
-              <img src='/backtick.png' className='h-3.5 dark:invert-[0] invert-[100] w-auto transition-transform group-hover:scale-110' alt="Backtick" />
-              <span className="text-[10px] font-semibold ">Backtick Labs</span>
+            <div className="h-px w-12 bg-gradient-to-r from-transparent via-emerald-500/20 to-transparent premium-sidebar-divider" />
+            <div className='flex items-center gap-2 opacity-90 hover:opacity-100 transition-all duration-200 group'>
+              <span className="text-[9px] premium-sidebar-muted font-medium uppercase tracking-wider">A Product of</span>
+              <img src='/backtick.png' className='h-3.5 w-auto opacity-90 transition-transform group-hover:scale-110' alt="Backtick" />
+              <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">Backtick Labs</span>
             </div>
           </div>
         )}
@@ -268,10 +269,9 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
               onClick={() => isMobile && setOpen(false)}
               className={cn(
                 "group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-all duration-200",
-                "hover:bg-muted/50",
                 isActive(item.href)
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:text-foreground",
+                  ? "premium-dashboard-nav-active"
+                  : "premium-dashboard-nav-item",
                 isCollapsed && !isMobile ? "justify-center px-2" : ""
               )}
               title={isCollapsed && !isMobile ? item.label : undefined}
@@ -286,10 +286,10 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
                   {item.badge && (
                     <Badge
                       className={cn(
-                        "text-[10px] px-2 py-0 h-5 font-semibold",
+                        "text-[10px] px-2 py-0 h-5 font-semibold border-0",
                         isActive(item.href)
-                          ? "bg-primary-foreground/20 text-primary-foreground border-primary-foreground/30"
-                          : "bg-primary text-primary-foreground border-primary shadow-sm"
+                          ? "bg-emerald-400/20 text-emerald-200"
+                          : "bg-emerald-500/15 text-emerald-300"
                       )}
                     >
                       {item.badge}
@@ -300,7 +300,7 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
             </Link>
           ))}
 
-          <Separator className="my-3" />
+          <Separator className="my-3 premium-sidebar-divider" />
 
           {/* Account Items */}
           {accountItems.map((item) => (
@@ -310,10 +310,9 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
               onClick={() => isMobile && setOpen(false)}
               className={cn(
                 "group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-all duration-200",
-                "hover:bg-muted/50",
                 isActive(item.href)
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:text-foreground",
+                  ? "premium-dashboard-nav-active"
+                  : "premium-dashboard-nav-item",
                 isCollapsed && !isMobile ? "justify-center px-2" : ""
               )}
               title={isCollapsed && !isMobile ? item.label : undefined}
@@ -332,7 +331,7 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
 
       {/* Footer */}
       <div className={cn(
-        "border-t border-border",
+        "border-t premium-sidebar-divider",
         isCollapsed && !isMobile ? "p-3" : "p-3"
       )}>
         {/* Theme Toggle */}
@@ -341,7 +340,7 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
           isCollapsed && !isMobile ? "justify-center" : "justify-between"
         )}>
           {(!isCollapsed || isMobile) && (
-            <span className="text-xs text-muted-foreground">Theme</span>
+            <span className="text-xs premium-sidebar-muted">Theme</span>
           )}
           <ThemeToggle />
         </div>
@@ -354,7 +353,7 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
               isMobile && setOpen(false);
             }}
             variant="ghost"
-            className="w-full justify-start text-muted-foreground hover:text-foreground hover:bg-muted/50 h-8 text-sm"
+            className="w-full justify-start premium-sidebar-footer-btn h-8 text-sm"
           >
             <HelpCircle className="h-4 w-4 mr-2" />
             Help & Support
@@ -392,35 +391,35 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
   return (
     <>
       {/* Mobile Header with Menu Button */}
-      <div className="lg:hidden fixed top-0 left-0 right-0 z-50 bg- /95 backdrop-blur supports-[backdrop-filter]:bg-card/90 border-b border-border">
+      <div className="lg:hidden fixed top-0 left-0 right-0 z-50 premium-dashboard-mobile-header">
         <div className="flex items-center justify-between p-4">
           <Sheet open={open} onOpenChange={setOpen}>
             <SheetTrigger asChild>
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-9 w-9 hover:bg-muted"
+                className="h-9 w-9 premium-dashboard-icon-btn"
               >
                 <Menu className="h-5 w-5" />
                 <span className="sr-only">Open sidebar</span>
               </Button>
             </SheetTrigger>
-            <SheetContent side="left" className="w-64 p-0 border-r border-border">
+            <SheetContent side="left" className="w-64 p-0 border-r border-white/[0.06] bg-transparent">
               <SidebarContent isMobile />
             </SheetContent>
           </Sheet>
 
           <div className="flex justify-center items-center space-x-2">
-            <img src='/ol.png' className='h-12 w-auto object-' alt="OceanLinux" />
+            <img src='/ol.png' className='h-10 sm:h-12 w-auto object-contain' alt="OceanLinux" />
           </div>
 
           <div className="flex items-center gap-1">
             {(!user || user?.userType !== 'reseller') && (
               <Link href="/dashboard/cart" className="relative">
-                <Button variant="ghost" size="icon" className="h-9 w-9 hover:bg-muted relative">
+                <Button variant="ghost" size="icon" className="h-9 w-9 text-white/70 hover:text-white hover:bg-white/[0.05] relative">
                   <ShoppingCart className="h-4 w-4" />
                   {cartCount > 0 && (
-                    <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-[16px] flex items-center justify-center rounded-full bg-primary text-primary-foreground text-[9px] font-bold px-1 border-2 border-background">
+                    <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-[16px] flex items-center justify-center rounded-full bg-emerald-500 text-emerald-950 text-[9px] font-bold px-1 border-2 border-[hsl(158_40%_8%)]">
                       {cartCount > 99 ? '99+' : cartCount}
                     </span>
                   )}
@@ -431,7 +430,7 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
               onClick={() => router.push('/support/tickets')}
               variant="ghost"
               size="icon"
-              className="h-9 w-9 hover:bg-muted"
+              className="h-9 w-9 text-white/70 hover:text-white hover:bg-white/[0.05]"
             >
               <HelpCircle className="h-4 w-4" />
             </Button>

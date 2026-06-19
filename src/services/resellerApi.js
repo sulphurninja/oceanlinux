@@ -25,7 +25,9 @@
 
 const TOKEN_CACHE = new Map(); // key: `${baseUrl}|${email}` → { token, expiresAt }
 const LOGIN_INFLIGHT = new Map(); // key → Promise<token>; de-dupes concurrent re-logins
+const VM_IP_CACHE = new Map(); // key: `${baseUrl}|${email}|${ip}` → { found, at }
 const TOKEN_TTL_MS = 23 * 60 * 60 * 1000; // refresh after 23h to stay clear of typical 24h JWT exp
+const VM_IP_CACHE_TTL_MS = 10 * 60 * 1000;
 
 function trimSlash(s) {
   return (s || '').replace(/\/+$/, '');
@@ -299,10 +301,20 @@ class ResellerApi {
   /**
    * Walk paginated overview pages searching for a VM whose IP equals `ip`
    * (port stripped). Returns { vmId, ip, raw } or null.
+   * Results are cached per panel account so status/stop polling does not
+   * re-scan every order page on each request (~14s without cache).
    */
-  async findVmByIp(ip, { maxPages = 20, pageSize = 50 } = {}) {
+  async findVmByIp(ip, { maxPages = 20, pageSize = 50, skipCache = false } = {}) {
     const cleanIp = String(ip || '').split(':')[0].trim();
     if (!cleanIp) return null;
+
+    const cacheKey = `${this._cacheKey}|${cleanIp}`;
+    if (!skipCache) {
+      const hit = VM_IP_CACHE.get(cacheKey);
+      if (hit && hit.found && Date.now() - hit.at < VM_IP_CACHE_TTL_MS) {
+        return hit.found;
+      }
+    }
 
     let page = 0;
     let totalPages = 1;
@@ -325,18 +337,27 @@ class ResellerApi {
         if (candidates.includes(cleanIp)) {
           const vmId = o?.virtualMachineId || o?.vmId || o?.id || o?.vmid;
           if (vmId == null) continue;
-          return {
+          const found = {
             vmId: String(vmId),
             ip: cleanIp,
             serverName: o?.serverName || o?.vmName || o?.hostname || '',
             raw: o,
           };
+          VM_IP_CACHE.set(cacheKey, { found, at: Date.now() });
+          return found;
         }
       }
       page++;
       if (totalPages <= page) break;
     }
     return null;
+  }
+
+  /** Drop cached IP→VM mapping after power actions or when lookup may be stale. */
+  invalidateVmIpCache(ip) {
+    const cleanIp = String(ip || '').split(':')[0].trim();
+    if (!cleanIp) return;
+    VM_IP_CACHE.delete(`${this._cacheKey}|${cleanIp}`);
   }
 
   async getVmDetails(vmId) {
@@ -411,6 +432,9 @@ class ResellerApi {
       record.current?.status,
       record.current?.state,
       record.current?.power,
+      record.current?.data?.status,
+      record.current?.data?.qmpstatus,
+      record.current?.data?.state,
     ];
 
     for (const value of vmFields) {
@@ -451,11 +475,12 @@ class ResellerApi {
   }
 
   /**
-   * Resolve live VM power from Hostheaven — details first, then overview, then metrics.
-   * Never uses ping; IP reachability is not a reliable power signal on shared hosts.
+   * Resolve live VM power — Proxmox metrics first (fast + accurate), then
+   * overview liveState, then order details. Overview can lag 30–60s after stop.
    */
   async resolveVmPowerState(vmId, { overviewRaw = null } = {}) {
     const attempt = (record, source) => {
+      if (!record) return null;
       const candidate = ResellerApi.extractVmPowerCandidate(record);
       if (candidate == null) return null;
       const powerState = ResellerApi.normalizeVmPowerState(candidate);
@@ -463,7 +488,17 @@ class ResellerApi {
       return { powerState, rawStatus: candidate, source };
     };
 
-    // Hostheaven overview rows carry `liveState` (running/stopped) — check first.
+    try {
+      const metrics = await this.getVmMetrics(vmId);
+      const fromMetrics =
+        attempt(metrics?.current?.data, 'metrics.data') ||
+        attempt(metrics?.current, 'metrics.current') ||
+        attempt(metrics, 'metrics');
+      if (fromMetrics) return fromMetrics;
+    } catch (err) {
+      console.warn('[ResellerApi] getVmMetrics for power state failed:', err.message);
+    }
+
     const fromOverview = attempt(overviewRaw, 'overview');
     if (fromOverview) return fromOverview;
 
@@ -473,16 +508,6 @@ class ResellerApi {
       if (fromDetails) return fromDetails;
     } catch (err) {
       console.warn('[ResellerApi] getVmDetails for power state failed:', err.message);
-    }
-
-    try {
-      const metrics = await this.getVmMetrics(vmId);
-      const fromMetrics =
-        attempt(metrics, 'metrics') ||
-        attempt(metrics?.current, 'metrics.current');
-      if (fromMetrics) return fromMetrics;
-    } catch (err) {
-      console.warn('[ResellerApi] getVmMetrics for power state failed:', err.message);
     }
 
     return { powerState: 'unknown', rawStatus: null, source: 'none' };
@@ -498,10 +523,24 @@ class ResellerApi {
       throw new Error(`ResellerApi.control: unsupported action '${action}'`);
     }
     const userId = 0; // path is ignored by upstream — JWT-derived
-    return this._request(
+    const parsed = await this._request(
       `/api/users/${userId}/vms/${encodeURIComponent(vmId)}/control?action=${encodeURIComponent(action)}`,
       { method: 'POST' }
     );
+    const msg = typeof parsed?.message === 'string' ? parsed.message.toLowerCase() : '';
+    if (parsed && parsed.success === false) {
+      throw new ResellerApiError(parsed.message || `Reseller control '${action}' rejected`, {
+        status: 502,
+        body: parsed,
+      });
+    }
+    if (msg.includes('fail') || msg.includes('error') || msg.includes('denied') || msg.includes('locked')) {
+      throw new ResellerApiError(parsed?.message || `Reseller control '${action}' failed`, {
+        status: 502,
+        body: parsed,
+      });
+    }
+    return parsed;
   }
 
   async start(vmId) { return this.control(vmId, 'start'); }

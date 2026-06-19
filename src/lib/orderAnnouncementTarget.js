@@ -2,6 +2,8 @@ import { isSlotIpOrder } from '@/lib/slotIpOrder';
 
 /**
  * Resolve upstream provider for an order (mirrors dashboard order page logic).
+ * Service IDs win over the stored `provider` field — many ADVPS orders still
+ * carry the schema default provider value `hostycare` until explicitly updated.
  */
 export function resolveProviderFromOrder(order, ipStock = null) {
   if (!order) return 'oceanlinux';
@@ -10,12 +12,13 @@ export function resolveProviderFromOrder(order, ipStock = null) {
   if (order.provider === 'netbay') return 'netbay';
   if (order.provider === 'advps') return 'advps';
   if (order.provider === 'smartvps') return 'smartvps';
-  if (order.provider === 'hostycare') return 'hostycare';
 
   if (order.netbayServiceId) return 'netbay';
   if (order.advpsServiceId) return 'advps';
   if (order.hostycareServiceId) return 'hostycare';
   if (order.smartvpsServiceId) return 'smartvps';
+
+  if (order.provider === 'hostycare') return 'hostycare';
 
   const tags = (ipStock?.tags || []).map((t) => String(t).toLowerCase());
   if (tags.includes('netbay')) return 'netbay';

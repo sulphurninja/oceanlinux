@@ -7,7 +7,6 @@ import User from '@/models/userModel';
 import crypto from 'crypto';
 import { calculateRenewalExpiryDate } from '@/lib/expiryHelper';
 import { assignPanelCredentials } from '@/lib/panelCredentials';
-import { decrementIpStockForOrder } from '@/lib/ipStockAvailability';
 const { resolveOrderExpiryOnPayment, pickAdvpsExpiryDate } = require('@/lib/advpsOrderExpiry');
 const { extractAdvpsStatusCredentials } = require('@/lib/advpsStatusNormalize');
 import { detectCompanyManagedRenewal, resolveRenewalProvider } from '@/lib/companyRenewal';
@@ -134,6 +133,25 @@ export async function POST(request) {
 
       if (!order) {
         console.error(`[WEBHOOK] ❌ Order not found for Cashfree order ID: ${orderId}`);
+        const PaymentOrderLogger = require('@/services/paymentOrderLogger');
+        const logger = PaymentOrderLogger.forTxn(orderId, 'webhook');
+        logger.error('Webhook PAYMENT_SUCCESS but no matching order in database', {
+          cfOrderId: orderId,
+          cfPaymentId: payment.payment?.cf_payment_id,
+          amount: payment.payment?.payment_amount,
+        });
+        logger.setPaymentInfo({
+          method: 'cashfree',
+          gatewayStatus: 'SUCCESS',
+          transactionId: payment.payment?.cf_payment_id,
+          gatewayOrderId: orderId,
+          amount: payment.payment?.payment_amount,
+        });
+        await logger.save({
+          success: false,
+          anomaly: true,
+          errorMessage: 'webhook_order_not_found',
+        });
         return NextResponse.json(
           { success: false, message: 'Order not found' },
           { status: 404 }
@@ -179,66 +197,45 @@ export async function POST(request) {
 
       await assignPanelCredentials(order);
       await order.save();
-      await decrementIpStockForOrder(order);
+      const { fulfillOrderInventory } = require('@/lib/fulfillOrderInventory');
+      await fulfillOrderInventory(order);
+
+      const PaymentOrderLogger = require('@/services/paymentOrderLogger');
+      const webhookLogger = PaymentOrderLogger.forOrder(order, 'webhook');
+      webhookLogger.success('Cashfree webhook confirmed order', {
+        cfPaymentId: payment.payment.cf_payment_id,
+        amount: payment.payment.payment_amount,
+      });
+      webhookLogger.setPaymentInfo({
+        method: 'cashfree',
+        gatewayStatus: 'SUCCESS',
+        transactionId: payment.payment.cf_payment_id,
+        gatewayOrderId: payment.order.order_id,
+        amount: payment.payment.payment_amount,
+      });
+      await webhookLogger.save({ success: true });
+
       const orderUpdateTime = Date.now() - orderUpdateStart;
       console.log(`[WEBHOOK] ✅ ORDER UPDATED to 'confirmed' in ${orderUpdateTime}ms`);
       console.log(`[WEBHOOK] 📅 Order expiry set to: ${expiryDate ? expiryDate.toISOString() : 'deferred (ADVPS upstream)'}`);
-
-      // Allocate slot IP if this is a slot IP purchase
-      if (order.slotIpPackageId && !order.slotIpId) {
-        try {
-          console.log(`[WEBHOOK] Allocating slot IP for order ${order._id}`);
-          const allocated = await SlotIPPackage.findOneAndUpdate(
-            { _id: order.slotIpPackageId, 'ips.allocated': false },
-            { $set: { 'ips.$.allocated': true, 'ips.$.orderId': order._id, 'ips.$.allocatedAt': new Date() } },
-            { new: true }
-          );
-          if (allocated) {
-            const slotIp = allocated.ips.find(ip => ip.orderId && ip.orderId.toString() === order._id.toString());
-            if (slotIp) {
-              order.slotIpId = slotIp._id.toString();
-              order.ipAddress = `${slotIp.ip}:${slotIp.port}`;
-              order.username = slotIp.username;
-              order.password = slotIp.password;
-              order.provisioningStatus = 'active';
-              order.autoProvisioned = true;
-              order.provider = 'slotip';
-              await order.save();
-              console.log(`[WEBHOOK] Slot IP allocated: ${slotIp.proxy}`);
-            }
-          } else {
-            order.provisioningStatus = 'failed';
-            order.provisioningError = 'No available slot IPs';
-            await order.save();
-          }
-        } catch (slotErr) {
-          console.error(`[WEBHOOK] Slot IP allocation error:`, slotErr);
-        }
-      }
 
       console.log("\n" + "-".repeat(60));
       console.log(`[WEBHOOK] CHECKING AUTO-PROVISIONING for order ${order._id}`);
       console.log("-".repeat(60));
 
       try {
-        if (order.slotIpPackageId) {
-          console.log(`[WEBHOOK] Slot IP order - skipping auto-provisioning`);
-        } else {
         const freshOrder = await Order.findById(order._id);
-        const alreadyProvisioning = freshOrder?.provisioningStatus === 'provisioning' ||
-          freshOrder?.provisioningStatus === 'active' ||
-          freshOrder?.ipAddress;
-
-        if (alreadyProvisioning) {
-          console.log(`[WEBHOOK] ⚠️ Order ${order._id} already provisioning/provisioned, skipping`);
-          console.log(`[WEBHOOK]   → Status: ${freshOrder?.provisioningStatus}`);
-          console.log(`[WEBHOOK]   → IP: ${freshOrder?.ipAddress || 'none'}`);
-          console.log(`[WEBHOOK]   → Lock ID: ${freshOrder?.provisioningLockId || 'none'}`);
+        if (freshOrder?.slotIpPackageId || freshOrder?.inventoryItemId || freshOrder?.ipAddress) {
+          console.log(`[WEBHOOK] Pre-assigned inventory — skipping auto-provisioning`);
+        } else if (
+          freshOrder?.provisioningStatus === 'provisioning' ||
+          freshOrder?.provisioningStatus === 'active'
+        ) {
+          console.log(`[WEBHOOK] Order ${order._id} already provisioning/provisioned, skipping`);
         } else {
           console.log(`[WEBHOOK] 🚀 Starting auto-provisioning for order ${order._id}`);
 
           const provisioningService = new AutoProvisioningService();
-          console.log(`[WEBHOOK] 🔄 Creating AutoProvisioningService instance...`);
 
           // Start auto-provisioning in background
           // The provisionServer method now has atomic DB locking to prevent duplicates
@@ -275,8 +272,6 @@ export async function POST(request) {
 
           console.log(`[WEBHOOK] ✅ Auto-provisioning initiated successfully`);
         }
-        } // end slot IP skip block
-
       } catch (provisioningError) {
         console.error(`[WEBHOOK] ❌ ERROR initiating auto-provisioning:`, provisioningError);
       }

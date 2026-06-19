@@ -42,6 +42,18 @@ export function hasDeliveredCredentials(order: OrderLike): boolean {
 }
 
 /**
+ * Customer paid but admin/company has not delivered the server yet.
+ * Show "Processing" — not "Failed" — until IP or service ID is assigned.
+ */
+export function isOrderAwaitingDelivery(order: OrderLike): boolean {
+  if (!isOrderPaid(order)) return false;
+  if (hasOrderBeenDelivered(order)) return false;
+  const currentStatus = (order.provisioningStatus || order.status || '').toLowerCase();
+  if (['terminated', 'cancelled', 'canceled'].includes(currentStatus)) return false;
+  return true;
+}
+
+/**
  * Admin/upstream has handed the service to the customer — IP, service ID, or active status.
  * Does not require password (ADVPS often delivers before password sync).
  */
@@ -89,6 +101,10 @@ export function getServerDeliveryStatus(order: OrderLike): ServerStatus {
     return 'expired';
   }
 
+  if (isOrderAwaitingDelivery(order)) {
+    return 'pending';
+  }
+
   if (currentStatus === 'failed' && !hasOrderBeenDelivered(order)) {
     return 'failed';
   }
@@ -130,6 +146,11 @@ export function getOrdersPageStatus(order: OrderLike): OrdersPageStatus {
 
   if (isOrderPaid(order) && hasOrderBeenDelivered(order)) {
     return 'delivered';
+  }
+
+  // Paid but not yet delivered (manual / slow company) → processing, not failed
+  if (isOrderAwaitingDelivery(order)) {
+    return 'pending';
   }
 
   if (currentStatus === 'failed' || currentStatus === 'terminated') {

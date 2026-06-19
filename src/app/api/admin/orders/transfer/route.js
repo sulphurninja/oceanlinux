@@ -2,17 +2,9 @@ import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 import User from '@/models/userModel';
-import { getDataFromToken } from '@/helper/getDataFromToken';
-
-function isAdminUser(user) {
-  if (!user) return false;
-  return (
-    user.userType === 'admin' ||
-    user.isAdmin === true ||
-    user.role === 'Admin' ||
-    user.role === 'admin'
-  );
-}
+import { requireAdmin } from '@/lib/adminAuth';
+import { findUserByEmail } from '@/lib/userEmail';
+import NotificationService from '@/services/notificationService';
 
 /**
  * POST /api/admin/orders/transfer
@@ -22,19 +14,15 @@ export async function POST(request) {
   try {
     await connectDB();
 
-    const adminId = getDataFromToken(request);
-    if (!adminId) {
-      return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
-    }
-
-    const admin = await User.findById(adminId).select('userType isAdmin role name email');
-    if (!isAdminUser(admin)) {
+    const admin = await requireAdmin(request);
+    if (!admin) {
       return NextResponse.json({ success: false, message: 'Admin access required' }, { status: 403 });
     }
 
     const body = await request.json();
     const orderId = body?.orderId;
-    const targetUserEmail = typeof body?.targetUserEmail === 'string' ? body.targetUserEmail.trim().toLowerCase() : '';
+    const targetUserEmail =
+      typeof body?.targetUserEmail === 'string' ? body.targetUserEmail.trim() : '';
     const targetUserId = body?.targetUserId;
 
     if (!orderId) {
@@ -48,22 +36,32 @@ export async function POST(request) {
       );
     }
 
-    const order = await Order.findById(orderId).populate('user', 'name email');
+    const order = await Order.findById(orderId).populate('user', 'name email').lean();
     if (!order) {
       return NextResponse.json({ success: false, message: 'Order not found' }, { status: 404 });
     }
 
-    const fromUserId = order.user?._id?.toString() || order.user?.toString();
-    let targetUser = null;
+    const fromUserId =
+      order.user?._id?.toString?.() || order.user?.toString?.() || String(order.user || '');
 
+    let targetUser = null;
     if (targetUserId) {
-      targetUser = await User.findById(targetUserId).select('name email');
+      targetUser = await User.findById(targetUserId).select('name email').lean();
     } else {
-      targetUser = await User.findOne({ email: targetUserEmail }).select('name email');
+      targetUser = await findUserByEmail(User, targetUserEmail);
+      if (targetUser) {
+        targetUser = await User.findById(targetUser._id).select('name email').lean();
+      }
     }
 
     if (!targetUser) {
-      return NextResponse.json({ success: false, message: 'Target user not found' }, { status: 404 });
+      return NextResponse.json(
+        {
+          success: false,
+          message: 'Target user not found. They must register on OceanLinux first.',
+        },
+        { status: 404 }
+      );
     }
 
     const toUserId = targetUser._id.toString();
@@ -76,32 +74,74 @@ export async function POST(request) {
 
     const previousOwner = {
       userId: fromUserId,
-      name: order.user?.name || null,
-      email: order.user?.email || null,
+      name: order.user?.name || order.customerName || null,
+      email: order.user?.email || order.customerEmail || null,
     };
-
-    order.user = targetUser._id;
-    order.customerEmail = targetUser.email;
-    order.customerName = targetUser.name;
 
     const existingMeta =
-      order.apiMetadata && typeof order.apiMetadata === 'object' ? order.apiMetadata : {};
-    order.apiMetadata = {
-      ...existingMeta,
-      lastTransfer: {
-        fromUserId: previousOwner.userId,
-        fromEmail: previousOwner.email,
-        toUserId,
-        toEmail: targetUser.email,
-        transferredAt: new Date(),
-        transferredBy: adminId,
+      order.apiMetadata && typeof order.apiMetadata === 'object' && !Array.isArray(order.apiMetadata)
+        ? order.apiMetadata
+        : {};
+
+    const updated = await Order.findByIdAndUpdate(
+      orderId,
+      {
+        $set: {
+          user: targetUser._id,
+          customerEmail: targetUser.email,
+          customerName: targetUser.name,
+          apiMetadata: {
+            ...existingMeta,
+            lastTransfer: {
+              fromUserId: previousOwner.userId,
+              fromEmail: previousOwner.email,
+              toUserId,
+              toEmail: targetUser.email,
+              transferredAt: new Date(),
+              transferredBy: admin._id.toString(),
+            },
+          },
+        },
       },
-    };
+      { new: true, runValidators: true }
+    )
+      .populate('user', 'name email')
+      .lean();
 
-    order.markModified('apiMetadata');
-    await order.save();
+    if (!updated) {
+      return NextResponse.json({ success: false, message: 'Failed to update order owner' }, { status: 500 });
+    }
 
-    const updated = await Order.findById(orderId).populate('user', 'name email').lean();
+    const verifiedUserId =
+      updated.user?._id?.toString?.() || updated.user?.toString?.() || String(updated.user || '');
+    if (verifiedUserId !== toUserId) {
+      console.error('[ADMIN/ORDERS/TRANSFER] Owner mismatch after update', {
+        orderId,
+        expected: toUserId,
+        actual: verifiedUserId,
+      });
+      return NextResponse.json(
+        { success: false, message: 'Transfer did not persist — please try again' },
+        { status: 500 }
+      );
+    }
+
+    try {
+      await NotificationService.create(
+        targetUser._id,
+        'order',
+        'Service transferred to your account',
+        `${updated.productName} has been moved to your account.`,
+        { orderId: updated._id.toString() },
+        { actionUrl: '/dashboard/orders', priority: 'high' }
+      );
+    } catch (notifErr) {
+      console.warn('[ADMIN/ORDERS/TRANSFER] Notification failed (non-fatal):', notifErr.message);
+    }
+
+    console.log(
+      `[ADMIN/ORDERS/TRANSFER] Order ${orderId} transferred ${previousOwner.email} → ${targetUser.email}`
+    );
 
     return NextResponse.json({
       success: true,

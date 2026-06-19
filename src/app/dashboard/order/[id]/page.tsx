@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useRouter, useParams } from 'next/navigation';
+import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import {
   ArrowLeft,
   Copy,
@@ -51,12 +51,12 @@ import { Switch } from '@/components/ui/switch';
 import { fetchWalletSummary } from '@/lib/walletClient';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { premiumBtnOutline, premiumBadge } from '@/lib/premium-badges';
 import { ADVPS_REBUILD_LIMIT, getAdvpsRebuildUsage } from '@/lib/advpsRebuildLimit';
 import { isWithinRenewalWindow } from '@/lib/expiryHelper';
 import { getOrderRenewalPrice, getOrderRenewalPriceNote, getCurrentListPriceFromStock } from '@/lib/orderRenewalPricing';
 import { useSessionAlert } from '@/components/session-alert';
 import { useConfirmDialog } from '@/hooks/useConfirmDialog';
-import OrderNewsPopup from '@/components/order-news-popup';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
   AlertDialog,
@@ -109,6 +109,7 @@ type SlotIpConnection = {
 };
 
 import { isSlotIpOrder } from '@/lib/slotIpOrder';
+import { isOrderAwaitingDelivery, isOrderPaid, hasOrderBeenDelivered } from '@/lib/orderDeliveryStatus';
 
 function parseSlotIpConnection(order: Order): SlotIpConnection | null {
   const raw = (order.ipAddress || '').trim();
@@ -184,6 +185,8 @@ interface Order {
   lastActionTime?: Date;
   lastSyncTime?: Date;
   ipStockId?: string;
+  customerEmail?: string;
+  customerName?: string;
   renewalPayments?: Array<{
     paymentId: string;
     amount: number;
@@ -284,7 +287,14 @@ function orderOsMatchesTemplate(orderOs: string | undefined, templateId: string)
 const OrderDetails = () => {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const orderId = params.id as string;
+  const returnTo = (() => {
+    const rt = searchParams.get('returnTo');
+    return rt && rt.startsWith('/') ? rt : '/dashboard/viewLinux';
+  })();
+  const isAdminView = returnTo.startsWith('/admin');
+  const goBack = () => router.push(returnTo);
   const { showAlert } = useSessionAlert();
   const { confirm, ConfirmDialog } = useConfirmDialog();
 
@@ -302,6 +312,7 @@ const OrderDetails = () => {
   const POWER_ACTIONS = new Set(['start', 'stop', 'restart', 'resetmac']);
   const isPowerActionBusy = (busy: string | null) => !!busy && POWER_ACTIONS.has(busy);
   const [powerStateLoading, setPowerStateLoading] = useState(false);
+  const powerFetchInFlight = useRef(false);
 
   // Payment method for renewals
   const [renewalPaymentMethod, setRenewalPaymentMethod] = useState<'cashfree' | 'razorpay' | 'upi'>('cashfree');
@@ -407,7 +418,11 @@ const OrderDetails = () => {
                 ? `Server is ready on ${updated.os || targetOs}!`
                 : 'Server is ready! Credentials are now available.');
             } else if (updated.provisioningStatus === 'failed') {
-              toast.error(updated.provisioningError || 'Provisioning failed. Check the order details.');
+              const paidUndelivered =
+                isOrderPaid(updated) && !hasOrderBeenDelivered(updated);
+              if (!paidUndelivered) {
+                toast.error(updated.provisioningError || 'Provisioning failed. Check the order details.');
+              }
             }
           }
         }
@@ -461,7 +476,7 @@ const OrderDetails = () => {
     } catch (error) {
       console.error('Failed to fetch order:', error);
       toast.error('Failed to load order details');
-      router.push('/dashboard/viewLinux');
+      router.push(returnTo);
     } finally {
       setLoading(false);
     }
@@ -477,7 +492,7 @@ const OrderDetails = () => {
     } catch (error) {
       console.error('Failed to fetch order:', error);
       toast.error('Failed to load order details');
-      router.push('/dashboard/viewLinux');
+      router.push(returnTo);
     } finally {
       setLoading(false);
     }
@@ -860,7 +875,9 @@ const OrderDetails = () => {
     }
 
     if (!opts?.force && powerStateLoading) return null;
+    if (powerFetchInFlight.current) return null;
 
+    powerFetchInFlight.current = true;
     setPowerStateLoading(true);
 
     try {
@@ -893,28 +910,36 @@ const OrderDetails = () => {
       setServerPowerState('unknown');
       return 'unknown';
     } finally {
+      powerFetchInFlight.current = false;
       setPowerStateLoading(false);
     }
   };
 
-  /** Poll until start/stop/restart is reflected (providers can lag 1–3 min). */
+  /** Poll until start/stop/restart is reflected (providers can lag 30–90s on Windows). */
   const pollPowerStateAfterAction = async (action: 'start' | 'stop' | 'restart') => {
     const target = action === 'stop' ? 'stopped' : 'running';
-    const maxAttempts = 60; // ~3 min at 3s intervals
+    const resellerPoll = hasCompanyResellerApiAutomation(ipStock);
+    const pollIntervalMs = resellerPoll ? 8000 : 3000;
+    const maxAttempts = resellerPoll ? 20 : 60;
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       if (attempt > 0) {
-        await new Promise((resolve) => setTimeout(resolve, 3000));
+        await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
       }
+      if (powerFetchInFlight.current) continue;
       const state = await fetchServerPowerState({ force: true });
       if (state === target) return state;
       if (action === 'stop' && (state === 'stopped' || state === 'suspended')) return state;
       if (action !== 'stop' && state === 'running') return state;
     }
 
-    const fallback = action === 'stop' ? 'stopped' : 'running';
-    setServerPowerState(fallback);
-    return fallback;
+    toast.info(
+      action === 'stop'
+        ? 'Stop was sent to the panel. Windows can take 1–2 minutes to shut down — use Refresh if status looks stale.'
+        : 'Power action was sent. Status may still be updating — use Refresh.',
+      { duration: 6000 }
+    );
+    return null;
   };
 
   const getManageEndpoint = (provider: ReturnType<typeof getProviderFromOrder>) =>
@@ -1032,12 +1057,13 @@ const OrderDetails = () => {
         // For power actions, show a more informative message
         if (['start', 'stop', 'restart'].includes(action)) {
           const actionLabel = action === 'start' ? 'Starting' : action === 'stop' ? 'Stopping' : 'Restarting';
+          const panelMsg = data.result?.message ? ` ${data.result.message}` : '';
           const ipNote =
             action === 'start' && provider === 'advps' && data.result?.ipConfig?.ok && data.result?.ipConfig?.ip
               ? ` IP configured after start (${data.result.ipConfig.ip}).`
               : '';
-          toast.success(`${actionLabel} server...${ipNote} Status may take 1–3 minutes to update.`, {
-            duration: 5000,
+          toast.success(`${actionLabel} server…${panelMsg}${ipNote} Status may take 1–2 minutes to update.`, {
+            duration: 6000,
           });
 
           await pollPowerStateAfterAction(action as 'start' | 'stop' | 'restart');
@@ -1873,6 +1899,17 @@ const OrderDetails = () => {
     const currentStatus = provisioningStatus || status;
     const companyAutomated = isOrderCompanyAutomated(order, ipStock);
     const hasAssignedIp = !!(order?.ipAddress?.trim());
+
+    // Paid but admin/company has not delivered yet — always show Processing
+    if (order && isOrderAwaitingDelivery(order)) {
+      return (
+        <Badge className="bg-blue-500/10 text-blue-600 border-blue-500/20">
+          <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+          Processing
+        </Badge>
+      );
+    }
+
     const isActiveStatus =
       status.toLowerCase() === 'completed' ||
       currentStatus.toLowerCase() === 'active' ||
@@ -2043,9 +2080,9 @@ const OrderDetails = () => {
             </div>
             <h3 className="text-xl font-semibold mb-2">Server not found</h3>
             <p className="text-muted-foreground mb-6">The requested server could not be found.</p>
-            <Button onClick={() => router.push('/dashboard/viewLinux')} className="gap-2">
+            <Button onClick={goBack} className="gap-2">
               <ArrowLeft className="h-4 w-4" />
-              Back to Servers
+              {isAdminView ? 'Back to admin' : 'Back to Servers'}
             </Button>
           </div>
         </div>
@@ -2070,24 +2107,27 @@ const OrderDetails = () => {
   const renewalPriceNote = getOrderRenewalPriceNote(order, currentListPrice);
 
   return (
-    <div className='min-h-screen bg-background'>
-      {/* Add proper mobile top spacing */}
-      <div className="pt-16 lg:pt-0">
-        {/* Modern Header */}
-        <div className='sticky top-16 lg:top-0 z-40 bg-card/95 backdrop-blur-md border-b border-border'>
-          <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-4 lg:p-5 max-w-7xl mx-auto'>
-            <div className='flex items-start sm:items-center gap-3 min-w-0 flex-1'>
+    <div className='premium-dashboard-page premium-order-detail-page min-h-0'>
+      {isAdminView && (
+        <div className="bg-amber-500/10 border-b border-amber-500/30 px-4 py-2 text-center text-sm text-amber-900 dark:text-amber-200">
+          Admin mode — managing customer order{order.customerEmail ? ` (${order.customerEmail})` : ''}. Start / stop / format work without seller login.
+        </div>
+      )}
+      {/* Order sub-header — matches dashboard topbar in light & dark */}
+      <div className='premium-order-detail-header sticky top-0 z-30 lg:top-0'>
+          <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 p-3 sm:p-4 lg:px-6 lg:py-4 max-w-7xl mx-auto'>
+            <div className='flex items-start sm:items-center gap-2.5 sm:gap-3 min-w-0 flex-1'>
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={() => router.push('/dashboard/viewLinux')}
-                className="hover:bg-muted rounded-lg flex-shrink-0 h-10 w-10"
+                onClick={goBack}
+                className="premium-dashboard-icon-btn rounded-lg flex-shrink-0 h-10 w-10"
               >
                 <ArrowLeft className="h-5 w-5" />
               </Button>
               <OSIcon os={order.os} className="h-10 w-10 sm:h-12 sm:w-12 flex-shrink-0" />
               <div className="min-w-0 flex-1">
-                <h1 className='text-base sm:text-lg font-semibold break-words mb-1.5'>
+                <h1 className='text-base sm:text-lg font-semibold break-words mb-1.5 premium-dashboard-title'>
                   {styleText(order.productName)}
                 </h1>
                 <div className="flex flex-wrap items-center gap-2">
@@ -2095,7 +2135,7 @@ const OrderDetails = () => {
                     {getProviderDisplayName(provider)}
                   </Badge>
                   {isOrderCompanyAutomated(order, ipStock) && (
-                    <Badge variant="outline" className="text-xs h-5 gap-1 text-emerald-600 border-emerald-200">
+                    <Badge variant="outline" className={cn(premiumBadge.success, "text-xs h-5 gap-1")}>
                       Auto-managed
                     </Badge>
                   )}
@@ -2118,7 +2158,7 @@ const OrderDetails = () => {
                   }
                 }}
                 disabled={loading || serviceLoading}
-                className="h-9 gap-2"
+                className={cn("h-9 gap-2", premiumBtnOutline)}
               >
                 <RefreshCw className={`h-4 w-4 ${(loading || serviceLoading) ? 'animate-spin' : ''}`} />
                 <span className="hidden sm:inline">Sync</span>
@@ -2127,7 +2167,7 @@ const OrderDetails = () => {
           </div>
         </div>
 
-        <div className='max-w-7xl mx-auto p-4 lg:p-6'>
+        <div className='premium-dashboard-page-inner max-w-7xl'>
           {/* Check if order is unpaid */}
           {isUnpaid(order) ? (
             /* Unpaid Order UI */
@@ -2142,14 +2182,14 @@ const OrderDetails = () => {
                     Order Purchase Didn't Go Through
                   </h2>
 
-                  <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-xl p-4 sm:p-6 mb-6">
+                  <div className="bg-red-500/10 border border-red-400/25 rounded-xl p-4 sm:p-6 mb-6">
                     <div className="flex items-start gap-3">
-                      <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
+                      <AlertTriangle className="h-5 w-5 text-red-400 flex-shrink-0 mt-0.5" />
                       <div className="text-left">
-                        <h3 className="font-semibold text-red-800 dark:text-red-200 mb-2">
+                        <h3 className="font-semibold text-red-200 mb-2">
                           Payment Not Completed
                         </h3>
-                        <p className="text-sm text-red-700 dark:text-red-300">
+                        <p className="text-sm text-red-300/90">
                           This order was created but the payment was not completed.
                           The server has not been provisioned.
                         </p>
@@ -2200,7 +2240,7 @@ const OrderDetails = () => {
                     </Button>
                     <Button
                       variant="outline"
-                      onClick={() => router.push('/dashboard/viewLinux')}
+                      onClick={goBack}
                       className="flex-1 gap-2 h-11 sm:h-12"
                     >
                       <ArrowLeft className="h-4 w-4" />
@@ -2292,7 +2332,7 @@ const OrderDetails = () => {
                       </Button>
                       <Button
                         variant="outline"
-                        onClick={() => router.push('/dashboard/viewLinux')}
+                        onClick={goBack}
                         className="flex-1 gap-2 h-11 sm:h-12 text-base"
                       >
                         <ArrowLeft className="h-4 w-4 sm:h-5 sm:w-5" />
@@ -2986,7 +3026,7 @@ const OrderDetails = () => {
                       )}
 
                       {/* Action Buttons */}
-                      <div className="grid grid-cols-2 gap-2">
+                      <div className="grid grid-cols-2 gap-2 premium-order-action-grid">
                         <Button
                           variant="outline"
                           size="sm"
@@ -3056,10 +3096,10 @@ const OrderDetails = () => {
                 }}
               >
                 <DialogContent
-                  className="sm:max-w-[480px]"
+                  className="premium-dashboard-dialog premium-dialog-mobile-sheet sm:max-w-[480px] w-[calc(100vw-1.25rem)] overflow-hidden"
                   onOpenAutoFocus={(e) => e.preventDefault()}
                 >
-                  <DialogHeader>
+                  <DialogHeader className="premium-dashboard-dialog-header">
                     <DialogTitle className="flex items-center gap-2">
                       <HardDriveIcon className="h-5 w-5 text-primary" />
                       {osMode === 'format' ? 'Format Server' : 'Reinstall OS'}
@@ -3069,7 +3109,7 @@ const OrderDetails = () => {
                     </DialogDescription>
                   </DialogHeader>
 
-                  <div className="space-y-6 py-4">
+                  <div className="premium-dashboard-dialog-body space-y-6 py-0">
                     {osLoading && osProgress ? (
                       <div className="flex flex-col items-center gap-4 py-6">
                         <div className="relative">
@@ -3099,8 +3139,8 @@ const OrderDetails = () => {
                                   className={cn(
                                     'flex items-center gap-3 rounded-lg border p-3 text-left transition-colors',
                                     isSelected
-                                      ? 'border-primary bg-primary/10 ring-2 ring-primary'
-                                      : 'border-border hover:bg-muted/50'
+                                      ? 'border-emerald-400/40 bg-emerald-500/15 ring-1 ring-emerald-400/30'
+                                      : 'border-white/12 bg-white/[0.03] hover:bg-white/[0.06] hover:border-emerald-400/20'
                                   )}
                                 >
                                   <OSIcon os={label} className="h-8 w-8 shrink-0" />
@@ -3128,11 +3168,11 @@ const OrderDetails = () => {
                           );
                         })()}
 
-                        <div className="flex gap-3 pt-4">
+                        <div className="flex flex-col-reverse sm:flex-row gap-3 pt-2">
                           <Button
                             variant="outline"
                             onClick={() => setOsDialogOpen(false)}
-                            className="flex-1"
+                            className="flex-1 premium-btn-outline"
                             disabled={osLoading}
                           >
                             Cancel
@@ -3140,7 +3180,7 @@ const OrderDetails = () => {
                           <Button
                             onClick={executeOsAction}
                             disabled={!selectedOs || osLoading}
-                            className="flex-1 bg-destructive hover:bg-destructive/90"
+                            className="flex-1 bg-red-600 hover:bg-red-500 text-white border-0"
                           >
                             {osMode === 'format'
                               ? `Format to ${getOsTemplateLabel(osTemplates[selectedOs] || selectedOs, selectedOs)}`
@@ -3175,17 +3215,17 @@ const OrderDetails = () => {
                       {usesLivePowerUi && (
                         <div className={cn(
                           "flex items-center gap-3 p-3 rounded-lg border transition-colors",
-                          (powerStateLoading || isPowerActionBusy(actionBusy)) && "bg-blue-50 border-blue-200 dark:bg-blue-950/30 dark:border-blue-800",
-                          !powerStateLoading && !isPowerActionBusy(actionBusy) && serverPowerState === 'running' && "bg-green-50 border-green-200 dark:bg-green-950/30 dark:border-green-800",
-                          !powerStateLoading && !isPowerActionBusy(actionBusy) && serverPowerState === 'stopped' && "bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-800",
-                          !powerStateLoading && !isPowerActionBusy(actionBusy) && serverPowerState === 'suspended' && "bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-800",
-                          !powerStateLoading && !isPowerActionBusy(actionBusy) && serverPowerState === 'unknown' && "bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-800"
+                          (powerStateLoading || isPowerActionBusy(actionBusy)) && "bg-sky-500/10 border-sky-400/25",
+                          !powerStateLoading && !isPowerActionBusy(actionBusy) && serverPowerState === 'running' && "bg-emerald-500/10 border-emerald-400/25",
+                          !powerStateLoading && !isPowerActionBusy(actionBusy) && serverPowerState === 'stopped' && "bg-red-500/10 border-red-400/25",
+                          !powerStateLoading && !isPowerActionBusy(actionBusy) && serverPowerState === 'suspended' && "bg-red-500/10 border-red-400/25",
+                          !powerStateLoading && !isPowerActionBusy(actionBusy) && serverPowerState === 'unknown' && "bg-red-500/10 border-red-400/25"
                         )}>
                           {powerStateLoading || isPowerActionBusy(actionBusy) ? (
                             <>
                               <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
                               <div className="flex-1">
-                                <p className="text-sm font-medium text-blue-700 dark:text-blue-300">
+                                <p className="text-sm font-medium text-sky-300">
                                   {isPowerActionBusy(actionBusy) ? 'Processing...' : 'Checking Status...'}
                                 </p>
                                 <p className="text-xs text-muted-foreground">
@@ -3207,10 +3247,10 @@ const OrderDetails = () => {
                               <div className="flex-1">
                                 <p className={cn(
                                   "text-sm font-medium",
-                                  serverPowerState === 'running' && "text-green-700 dark:text-green-300",
-                                  serverPowerState === 'stopped' && "text-red-700 dark:text-red-300",
-                                  serverPowerState === 'suspended' && "text-red-700 dark:text-red-300",
-                                  serverPowerState === 'unknown' && "text-red-700 dark:text-red-300"
+                                  serverPowerState === 'running' && "text-emerald-300",
+                                  serverPowerState === 'stopped' && "text-red-300",
+                                  serverPowerState === 'suspended' && "text-red-300",
+                                  serverPowerState === 'unknown' && "text-red-300"
                                 )}>
                                   {serverPowerState === 'running' && 'Server is Online'}
                                   {serverPowerState === 'stopped' && 'Server is Offline'}
@@ -3856,7 +3896,6 @@ const OrderDetails = () => {
             </div>
           )}
         </div>
-      </div>
 
       <AlertDialog
         open={reinstallConfirmOpen}
@@ -3865,8 +3904,8 @@ const OrderDetails = () => {
           if (!open) setPendingReinstallAction(null);
         }}
       >
-        <AlertDialogContent className="sm:max-w-md">
-          <AlertDialogHeader>
+        <AlertDialogContent className="premium-dashboard-alert sm:max-w-md w-[calc(100vw-1.5rem)]">
+          <AlertDialogHeader className="premium-dashboard-dialog-header !border-0">
             <AlertDialogTitle className="flex items-center gap-2">
               <AlertTriangle className="h-5 w-5 text-destructive" />
               {pendingReinstallAction === 'format'
@@ -3890,7 +3929,7 @@ const OrderDetails = () => {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              className="bg-red-600 hover:bg-red-500 text-white"
               onClick={() => {
                 const action = pendingReinstallAction;
                 setReinstallConfirmOpen(false);
@@ -3905,8 +3944,8 @@ const OrderDetails = () => {
       </AlertDialog>
 
       <Dialog open={renewConfirmOpen} onOpenChange={setRenewConfirmOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
+        <DialogContent className="premium-dashboard-dialog premium-dialog-mobile-sheet sm:max-w-md w-[calc(100vw-1.25rem)] overflow-hidden">
+          <DialogHeader className="premium-dashboard-dialog-header">
             <DialogTitle className="flex items-center gap-2">
               <RefreshCw className="h-5 w-5 text-primary" />
               Renew Service
@@ -4017,8 +4056,8 @@ const OrderDetails = () => {
           }
         }}
       >
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
+        <DialogContent className="premium-dashboard-dialog premium-dialog-mobile-sheet sm:max-w-md w-[calc(100vw-1.25rem)] overflow-hidden">
+          <DialogHeader className="premium-dashboard-dialog-header">
             <DialogTitle className="flex items-center gap-2">
               <HardDriveIcon className="h-5 w-5 text-primary" />
               {legacyActionLabel}
@@ -4090,7 +4129,6 @@ const OrderDetails = () => {
       </Dialog>
 
       <ConfirmDialog />
-      {orderId && <OrderNewsPopup orderId={orderId} />}
     </div>
   );
 };

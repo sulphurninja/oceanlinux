@@ -7,7 +7,9 @@ import IPStock from '@/models/ipStockModel';
 const SlotIPPackage = require('@/models/slotIpPackageModel');
 const AutoProvisioningService = require('@/services/autoProvisioningService');
 const WhatsAppService = require('@/services/whatsappService');
-import { assertIpStockPurchasable, decrementIpStockForOrder } from '@/lib/ipStockAvailability';
+import { assertIpStockPurchasable } from '@/lib/ipStockAvailability';
+import { refreshAndVerifyPurchase } from '@/lib/syncIpStockBeforePurchase';
+import { customerStockUnavailableMessage } from '@/lib/customerStockMessages';
 import { calculateExpiryDate } from '@/lib/expiryHelper';
 import { assignPanelCredentials } from '@/lib/panelCredentials';
 const { resolveOrderExpiryOnPayment } = require('@/lib/advpsOrderExpiry');
@@ -102,6 +104,16 @@ export async function POST(request) {
         return NextResponse.json({ message: 'No slot IPs available in this package' }, { status: 400 });
       }
 
+      const slotLive = await refreshAndVerifyPurchase({ slotIpPackageId });
+      if (!slotLive.ok) {
+        return NextResponse.json(
+          {
+            message: customerStockUnavailableMessage(slotLive.message, { kind: 'slot' }),
+          },
+          { status: 409 }
+        );
+      }
+
       originalPrice = slotPkg.price;
       price = originalPrice;
 
@@ -126,6 +138,16 @@ export async function POST(request) {
         return NextResponse.json(
           { message: 'Missing required fields (productName, memory, ipStockId)' },
           { status: 400 }
+        );
+      }
+
+      const liveStock = await refreshAndVerifyPurchase({ ipStockId, memory });
+      if (!liveStock.ok) {
+        return NextResponse.json(
+          {
+            message: customerStockUnavailableMessage(liveStock.message),
+          },
+          { status: 409 }
         );
       }
 
@@ -433,41 +455,8 @@ export async function POST(request) {
     if (gatewayCharge === 0) {
       await assignPanelCredentials(newOrder);
       await newOrder.save();
-      if (!isSlotIpPurchase) {
-        await decrementIpStockForOrder(newOrder);
-      }
-
-      if (isSlotIpPurchase && newOrder.slotIpPackageId) {
-        try {
-          const allocated = await SlotIPPackage.findOneAndUpdate(
-            { _id: newOrder.slotIpPackageId, 'ips.allocated': false },
-            {
-              $set: {
-                'ips.$.allocated': true,
-                'ips.$.orderId': newOrder._id,
-                'ips.$.allocatedAt': new Date(),
-              },
-            },
-            { new: true }
-          );
-          if (allocated) {
-            const slotIp = allocated.ips.find(
-              (ip) => ip.orderId && ip.orderId.toString() === newOrder._id.toString()
-            );
-            if (slotIp) {
-              newOrder.slotIpId = slotIp._id.toString();
-              newOrder.ipAddress = `${slotIp.ip}:${slotIp.port}`;
-              newOrder.username = slotIp.username;
-              newOrder.password = slotIp.password;
-              newOrder.provisioningStatus = 'active';
-              newOrder.autoProvisioned = true;
-              await newOrder.save();
-            }
-          }
-        } catch (slotErr) {
-          console.error('[Payment] Slot IP allocation failed:', slotErr.message);
-        }
-      }
+      const { fulfillOrderInventory } = require('@/lib/fulfillOrderInventory');
+      await fulfillOrderInventory(newOrder);
 
       try {
         await NotificationService.notifyOrderConfirmed(newOrder.user, newOrder);

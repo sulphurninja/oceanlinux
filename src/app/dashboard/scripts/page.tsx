@@ -276,32 +276,28 @@ const ProxySetupTerminal = () => {
     };
 
     return (
-        <div className='min-h-screen bg-background'>
-            {/* Mobile Header Spacer */}
-            <div className="lg:hidden h-16" />
-
-            {/* Header */}
-            <div className='container mx-auto px-4 sm:px-6 lg:px-8 py-6 -mt-16 md:mt-0'>
-                <div className='flex flex-col gap-6'>
-                    <div className='flex items-start justify-between gap-4'>
-                        <div className='flex-1'>
+        <div className='premium-dashboard-page'>
+            <div className='premium-dashboard-page-inner space-y-6'>
+                    <div className='flex items-start justify-between gap-4 premium-scripts-header'>
+                        <div className='flex-1 min-w-0'>
                             <div className='flex items-center gap-3 mb-3'>
-                                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center border border-primary/20">
-                                    <Terminal className="h-6 w-6 text-primary" />
+                                <div className="w-12 h-12 rounded-xl bg-emerald-500/15 flex items-center justify-center border border-emerald-400/25">
+                                    <Terminal className="h-6 w-6 text-emerald-300" />
                                 </div>
                                 <div>
-                                    <h1 className='text-2xl sm:text-3xl font-bold'>Proxy Setup Terminal</h1>
-                                    <p className="text-sm text-muted-foreground mt-1">
+                                    <p className="text-sm text-white/45 mt-1">
                                         One-click proxy server installation on port 3128
                                     </p>
                                 </div>
                             </div>
                         </div>
                         {step !== 'credentials' && (
-                            <Button variant="outline" size="sm" onClick={handleReset} className="gap-2">
-                                <RefreshCw className="h-4 w-4" />
-                                Start Over
-                            </Button>
+                            <div className="premium-scripts-header-actions shrink-0">
+                                <Button variant="outline" size="sm" onClick={handleReset} className="gap-2 premium-btn-outline w-full sm:w-auto">
+                                    <RefreshCw className="h-4 w-4" />
+                                    Start Over
+                                </Button>
+                            </div>
                         )}
                     </div>
 
@@ -324,22 +320,18 @@ const ProxySetupTerminal = () => {
                             4. Complete
                         </Badge>
                     </div>
-                </div>
-            </div>
 
-            {/* Main Content */}
-            <div className='container mx-auto px-4 sm:px-6 lg:px-8 py-6'>
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                     {/* Left Column - Credentials & Controls */}
                     <div className="space-y-6">
                         {/* Credentials Card */}
-                        <Card className="border-border">
+                        <Card className="premium-dashboard-card border-0">
                             <CardHeader className="pb-4">
-                                <CardTitle className="text-lg flex items-center gap-2">
-                                    <Server className="h-5 w-5 text-primary" />
+                                <CardTitle className="text-lg flex items-center gap-2 text-white">
+                                    <Server className="h-5 w-5 text-emerald-300" />
                                     Server Credentials
                                 </CardTitle>
-                                <CardDescription>
+                                <CardDescription className="text-white/45">
                                     Enter your Linux server details or paste IP:Username:Password
                                 </CardDescription>
                             </CardHeader>
@@ -561,7 +553,7 @@ const ProxySetupTerminal = () => {
                                 {/* Terminal Body */}
                                 <div
                                     ref={terminalRef}
-                                    className="h-[400px] overflow-y-auto p-4 font-mono text-sm"
+                                    className="premium-scripts-terminal h-[400px] overflow-y-auto overflow-x-hidden p-3 sm:p-4 font-mono text-xs sm:text-sm"
                                 >
                                     {logs.length === 0 ? (
                                         <div className="text-slate-500 flex flex-col items-center justify-center h-full gap-3">
@@ -633,7 +625,6 @@ const ProxySetupTerminal = () => {
                         </Card>
                     </div>
                 </div>
-            </div>
 
             {/* Proxy Credentials Dialog */}
             <Dialog open={showProxyDialog} onOpenChange={setShowProxyDialog}>
@@ -748,6 +739,7 @@ const ProxySetupTerminal = () => {
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+            </div>
         </div>
     );
 };

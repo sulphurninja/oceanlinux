@@ -61,23 +61,30 @@ export function useConfirmDialog() {
         if (!next) finish(false);
       }}
     >
-      <AlertDialogContent className="sm:max-w-md">
-        <AlertDialogHeader>
-          <AlertDialogTitle className="flex items-center gap-2">
-            {options.destructive && <AlertTriangle className="h-5 w-5 text-destructive shrink-0" />}
+      <AlertDialogContent className="premium-dashboard-alert sm:max-w-md rounded-2xl p-0 gap-0 overflow-hidden">
+        <div className="h-0.5 w-full shrink-0 bg-gradient-to-r from-emerald-600/80 via-emerald-400 to-emerald-500/60" />
+        <AlertDialogHeader className="premium-dashboard-dialog-header text-left">
+          <AlertDialogTitle className="flex items-center gap-2 text-white text-lg">
+            {options.destructive && <AlertTriangle className="h-5 w-5 text-red-400 shrink-0" />}
             {options.title}
           </AlertDialogTitle>
           <AlertDialogDescription asChild>
-            <div className="text-sm text-muted-foreground">{options.description}</div>
+            <div className="text-sm text-white/55 leading-relaxed">{options.description}</div>
           </AlertDialogDescription>
         </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel onClick={() => finish(false)}>
+        <AlertDialogFooter className="premium-dashboard-dialog-footer flex-col-reverse sm:flex-row gap-2.5 sm:gap-3">
+          <AlertDialogCancel
+            onClick={() => finish(false)}
+            className="premium-btn-outline h-10 sm:h-9 w-full sm:w-auto mt-0 border-white/12 bg-white/[0.04] text-white/70 hover:text-white"
+          >
             {options.cancelLabel}
           </AlertDialogCancel>
           <AlertDialogAction
             className={cn(
-              options.destructive && 'bg-destructive text-destructive-foreground hover:bg-destructive/90'
+              'h-10 sm:h-9 w-full sm:w-auto rounded-xl border-0 font-semibold',
+              options.destructive
+                ? 'bg-red-500/90 text-white hover:bg-red-500'
+                : 'premium-btn-primary border-0 shadow-none'
             )}
             onClick={() => finish(true)}
           >

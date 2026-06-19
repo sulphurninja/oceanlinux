@@ -26,7 +26,8 @@ import {
   BarChart3,
   Megaphone,
   ClipboardList,
-  Building2
+  Building2,
+  RefreshCw
 } from 'lucide-react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../ui/collapsible';
 import { useRouter, usePathname } from 'next/navigation';
@@ -122,6 +123,11 @@ const AdminSidebar = () => {
       href: '/admin/manageOrders',
       label: 'Orders',
       icon: BarChart3,
+    },
+    {
+      href: '/admin/renewal-logs',
+      label: 'Renewal Logs',
+      icon: RefreshCw,
     },
     {
       href: '/admin/server-action-requests',

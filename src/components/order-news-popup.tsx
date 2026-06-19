@@ -1,8 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
-  ArrowRight,
   ExternalLink,
   Gift,
   RefreshCw,
@@ -16,6 +15,11 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import {
+  JUST_LOGGED_IN_KEY,
+  LOGIN_POPUP_COMPLETE_EVENT,
+  LOGIN_POPUP_SHOWN_KEY,
+} from "@/lib/post-login";
 
 type AnnouncementType = "promotion" | "update" | "maintenance" | "feature" | "security";
 
@@ -33,37 +37,62 @@ type OrderPopupAnnouncement = {
 
 const typeMeta: Record<
   AnnouncementType,
-  { label: string; icon: typeof Gift; tone: string }
+  { label: string; icon: typeof Gift; tone: string; badge: string }
 > = {
   promotion: {
     label: "Offer",
     icon: Gift,
-    tone: "from-amber-500/15 to-amber-500/5 border-amber-500/20 text-amber-700 dark:text-amber-400",
+    tone: "from-amber-500/20 to-amber-500/5 border-amber-400/30 text-amber-300",
+    badge: "border-amber-400/35 text-amber-200 bg-amber-500/15",
   },
   update: {
     label: "Update",
     icon: RefreshCw,
-    tone: "from-primary/20 to-primary/5 border-primary/20 text-emerald-700 dark:text-emerald-400",
+    tone: "from-emerald-500/20 to-emerald-500/5 border-emerald-400/30 text-emerald-300",
+    badge: "border-emerald-400/35 text-emerald-200 bg-emerald-500/15",
   },
   maintenance: {
     label: "Maintenance",
     icon: Wrench,
-    tone: "from-orange-500/15 to-orange-500/5 border-orange-500/20 text-orange-700 dark:text-orange-400",
+    tone: "from-orange-500/20 to-orange-500/5 border-orange-400/30 text-orange-300",
+    badge: "border-orange-400/35 text-orange-200 bg-orange-500/15",
   },
   feature: {
     label: "New",
     icon: Sparkles,
-    tone: "from-violet-500/15 to-violet-500/5 border-violet-500/20 text-violet-700 dark:text-violet-400",
+    tone: "from-violet-500/20 to-violet-500/5 border-violet-400/30 text-violet-300",
+    badge: "border-violet-400/35 text-violet-200 bg-violet-500/15",
   },
   security: {
     label: "Security",
     icon: Shield,
-    tone: "from-blue-500/15 to-blue-500/5 border-blue-500/20 text-blue-700 dark:text-blue-400",
+    tone: "from-sky-500/20 to-sky-500/5 border-sky-400/30 text-sky-300",
+    badge: "border-sky-400/35 text-sky-200 bg-sky-500/15",
   },
 };
 
-function orderPopupSessionKey(orderId: string, announcementId: string, updatedAt?: string) {
-  return `orderNewsShown_${orderId}_${announcementId}_${updatedAt || 'v1'}`;
+function waitForLoginPopupComplete(): Promise<void> {
+  if (typeof window === "undefined") return Promise.resolve();
+
+  if (sessionStorage.getItem(LOGIN_POPUP_SHOWN_KEY) === "1") {
+    return Promise.resolve();
+  }
+
+  const justLoggedIn = sessionStorage.getItem(JUST_LOGGED_IN_KEY) === "1";
+  if (!justLoggedIn) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve) => {
+    const finish = () => {
+      window.removeEventListener(LOGIN_POPUP_COMPLETE_EVENT, finish);
+      clearTimeout(timer);
+      resolve();
+    };
+
+    window.addEventListener(LOGIN_POPUP_COMPLETE_EVENT, finish, { once: true });
+    const timer = window.setTimeout(finish, 8000);
+  });
 }
 
 function NewsContent({ text }: { text: string }) {
@@ -83,8 +112,8 @@ function NewsContent({ text }: { text: string }) {
         if (isBullet) {
           return (
             <div key={index} className="flex gap-3 pl-0.5">
-              <span className="mt-2.5 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-600/70 dark:bg-emerald-400/80" />
-              <p className="text-sm leading-relaxed text-muted-foreground sm:text-[15px]">{cleanLine}</p>
+              <span className="mt-2.5 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400/80" />
+              <p className="text-sm leading-relaxed text-white/60 sm:text-[15px]">{cleanLine}</p>
             </div>
           );
         }
@@ -95,8 +124,8 @@ function NewsContent({ text }: { text: string }) {
             className={cn(
               "whitespace-pre-wrap leading-relaxed",
               index === 0
-                ? "text-sm font-medium text-foreground sm:text-base"
-                : "text-sm text-muted-foreground sm:text-[15px]"
+                ? "text-sm font-medium text-white/90 sm:text-base"
+                : "text-sm text-white/60 sm:text-[15px]"
             )}
           >
             {cleanLine}
@@ -111,33 +140,39 @@ export default function OrderNewsPopup({ orderId }: { orderId: string }) {
   const [popup, setPopup] = useState<OrderPopupAnnouncement | null>(null);
   const [open, setOpen] = useState(false);
 
-  const markAsShown = (announcement: OrderPopupAnnouncement) => {
-    if (typeof window === "undefined") return;
-    sessionStorage.setItem(
-      orderPopupSessionKey(orderId, announcement._id, announcement.updatedAt)
-    );
-  };
+  const dismissPopup = useCallback(() => {
+    setOpen(false);
+  }, []);
 
   useEffect(() => {
     if (!orderId) return;
 
+    let cancelled = false;
+
     const loadPopup = async () => {
       try {
-        const response = await fetch(`/api/announcements/order-popup?orderId=${orderId}`, {
+        await waitForLoginPopupComplete();
+        if (cancelled) return;
+
+        const response = await fetch(`/api/announcements/order-popup?orderId=${encodeURIComponent(orderId)}`, {
           credentials: "include",
+          cache: "no-store",
         });
 
-        if (!response.ok) return;
+        if (!response.ok) {
+          if (!cancelled) {
+            console.warn("[OrderNewsPopup] API error:", response.status, orderId);
+          }
+          return;
+        }
 
         const data = await response.json();
-        if (!data?.popup) return;
-
-        const seenKey = orderPopupSessionKey(
-          orderId,
-          data.popup._id,
-          data.popup.updatedAt
-        );
-        if (sessionStorage.getItem(seenKey) === "1") return;
+        if (!data?.popup || cancelled) {
+          if (!cancelled && data?.hint) {
+            console.info("[OrderNewsPopup]", data.hint, { provider: data.provider, orderId });
+          }
+          return;
+        }
 
         setPopup(data.popup);
         setOpen(true);
@@ -146,17 +181,17 @@ export default function OrderNewsPopup({ orderId }: { orderId: string }) {
       }
     };
 
+    setPopup(null);
+    setOpen(false);
     loadPopup();
+
+    return () => {
+      cancelled = true;
+    };
   }, [orderId]);
 
   const handleOpenChange = (value: boolean) => {
     setOpen(value);
-    if (!value && popup) {
-      sessionStorage.setItem(
-        orderPopupSessionKey(orderId, popup._id, popup.updatedAt),
-        "1"
-      );
-    }
   };
 
   if (!popup) return null;
@@ -168,82 +203,109 @@ export default function OrderNewsPopup({ orderId }: { orderId: string }) {
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
         className={cn(
-          "p-0 gap-0 overflow-hidden",
-          "border border-border/50 bg-card/95 backdrop-blur-md text-card-foreground",
-          "shadow-[0_12px_48px_-14px_hsl(var(--foreground)/0.15)]",
-          "w-[calc(100vw-1rem)] max-w-none",
-          "fixed left-1/2 bottom-2 top-auto translate-x-[-50%] translate-y-0",
-          "max-h-[min(92dvh,720px)] rounded-2xl",
-          "data-[state=open]:slide-in-from-bottom-8 data-[state=closed]:slide-out-to-bottom-8",
-          "sm:bottom-auto sm:top-1/2 sm:translate-y-[-50%] sm:max-w-xl md:max-w-2xl",
+          "premium-login-news-dialog premium-order-news-dialog premium-dialog-mobile-sheet",
+          "!flex !flex-col p-0 gap-0 !overflow-hidden",
+          "border-0 shadow-2xl",
+          "w-[calc(100vw-1.25rem)] max-w-none sm:max-w-xl md:max-w-2xl",
+          "!max-h-[min(92dvh,calc(100dvh-1.5rem-env(safe-area-inset-top)-env(safe-area-inset-bottom)))]",
+          "rounded-2xl z-[101]",
+          "max-sm:fixed max-sm:left-1/2 max-sm:-translate-x-1/2",
+          "max-sm:bottom-[max(0.5rem,env(safe-area-inset-bottom))] max-sm:top-auto max-sm:translate-y-0",
+          "max-sm:data-[state=open]:slide-in-from-bottom-8 max-sm:data-[state=closed]:slide-out-to-bottom-8",
+          "sm:top-1/2 sm:left-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 sm:bottom-auto",
           "sm:data-[state=open]:slide-in-from-bottom-0 sm:data-[state=open]:zoom-in-95",
           "[&>button[class*='absolute']]:hidden"
         )}
       >
-        <div className="h-0.5 w-full bg-gradient-to-r from-emerald-600/80 via-primary to-emerald-500/60" />
+        <div className="h-0.5 w-full shrink-0 bg-gradient-to-r from-emerald-600/80 via-emerald-400 to-emerald-500/60" />
 
-        <div className="flex max-h-[min(92dvh,720px)] flex-col">
-          <div className="relative shrink-0 border-b border-border/40 px-4 pb-5 pt-5 sm:px-6 sm:pb-6 sm:pt-6">
-            <button
-              onClick={() => handleOpenChange(false)}
-              aria-label="Close announcement"
-              className="absolute right-3 top-4 z-20 flex h-8 w-8 items-center justify-center rounded-full border border-border/50 bg-background/80 text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground sm:right-5 sm:top-5"
-            >
-              <X className="h-4 w-4" />
-            </button>
+        <div
+          className="absolute left-1/2 top-2.5 z-30 h-1 w-10 -translate-x-1/2 rounded-full bg-white/20 sm:hidden"
+          aria-hidden="true"
+        />
 
-            <div className="relative z-10 pr-10">
-              <div className="mb-4 flex flex-wrap items-center gap-2">
-                <div
-                  className={cn(
-                    "flex h-10 w-10 items-center justify-center rounded-xl border bg-gradient-to-br shadow-sm",
-                    meta.tone
-                  )}
-                >
-                  <TypeIcon className="h-5 w-5" />
-                </div>
-                <span className={cn("inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-medium", meta.tone)}>
-                  {meta.label}
-                </span>
-                {popup.targetLabel && (
-                  <Badge variant="outline" className="gap-1 text-[11px]">
-                    <Server className="h-3 w-3" />
-                    {popup.targetLabel}
-                  </Badge>
+        <div
+          className="relative shrink-0 border-b px-4 pb-4 pt-5 sm:px-6 sm:pb-5 sm:pt-6"
+          style={{ borderColor: "var(--pd-border)" }}
+        >
+          <button
+            type="button"
+            onClick={dismissPopup}
+            aria-label="Close announcement"
+            className="absolute right-3 top-4 z-20 flex h-8 w-8 items-center justify-center rounded-full border border-white/12 bg-white/5 text-white/55 transition-colors hover:bg-white/10 hover:text-white sm:right-5 sm:top-5"
+          >
+            <X className="h-4 w-4" />
+          </button>
+
+          <div className="relative z-10 pr-10">
+            <div className="mb-3 flex flex-wrap items-center gap-2.5 sm:mb-4 sm:gap-3">
+              <div
+                className={cn(
+                  "flex h-10 w-10 items-center justify-center rounded-xl border bg-gradient-to-br shadow-sm sm:h-11 sm:w-11",
+                  meta.tone
                 )}
-              </div>
-
-              <DialogTitle className="text-2xl font-bold leading-snug tracking-tight text-foreground sm:text-3xl">
-                {popup.title}
-              </DialogTitle>
-            </div>
-          </div>
-
-          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-card px-4 py-4 sm:px-6 sm:py-5">
-            <div className="rounded-xl border border-border/40 bg-muted/20 px-4 py-4 sm:px-5 sm:py-5">
-              <NewsContent text={popup.content} />
-            </div>
-          </div>
-
-          <div className="shrink-0 border-t border-border/40 bg-muted/15 px-4 py-3 sm:px-6 sm:py-4 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end sm:gap-3">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => handleOpenChange(false)}
-                className="h-9 w-full text-sm text-muted-foreground sm:w-auto"
               >
-                Dismiss
-              </Button>
-              {popup.actionUrl && (
-                <Button asChild size="sm" className="h-9 w-full gap-2 text-sm shadow-sm sm:w-auto">
-                  <a href={popup.actionUrl} target="_blank" rel="noopener noreferrer">
-                    {popup.actionText || "Learn more"}
-                    <ExternalLink className="h-4 w-4" />
-                  </a>
-                </Button>
+                <TypeIcon className="h-5 w-5" />
+              </div>
+              <span
+                className={cn(
+                  "inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-semibold",
+                  meta.badge
+                )}
+              >
+                {meta.label}
+              </span>
+              {popup.targetLabel && (
+                <Badge variant="outline" className="gap-1 text-[11px] border-white/15 text-white/70">
+                  <Server className="h-3 w-3" />
+                  {popup.targetLabel}
+                </Badge>
               )}
             </div>
+
+            <DialogTitle
+              className="premium-order-news-title text-xl font-bold leading-snug tracking-tight sm:text-2xl md:text-3xl"
+              style={{ color: "var(--pd-title)" }}
+            >
+              {popup.title}
+            </DialogTitle>
+          </div>
+        </div>
+
+        <div className="premium-login-news-body min-h-0 shrink px-4 py-4 sm:px-6 sm:py-5">
+          <div
+            className="premium-login-news-content rounded-2xl border px-5 py-5 sm:px-6 sm:py-6 flex-1 min-h-0 overflow-y-auto sm:max-h-[min(52vh,520px)]"
+            style={{ borderColor: "var(--pd-border)", background: "var(--pd-surface-soft)" }}
+          >
+            <NewsContent text={popup.content} />
+          </div>
+        </div>
+
+        <div
+          className="shrink-0 border-t px-4 py-3 sm:px-6 sm:py-4 pb-[max(0.875rem,env(safe-area-inset-bottom))]"
+          style={{ borderColor: "var(--pd-border)", background: "var(--pd-dialog-bg)" }}
+        >
+          <div className="flex flex-col-reverse gap-2.5 sm:flex-row sm:items-center sm:justify-end sm:gap-3">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={dismissPopup}
+              className="premium-btn-outline h-10 w-full sm:h-9 sm:w-auto sm:min-w-[7rem]"
+            >
+              Dismiss
+            </Button>
+            {popup.actionUrl && (
+              <Button
+                asChild
+                size="sm"
+                className="h-10 w-full gap-2 rounded-xl border-0 text-sm font-semibold shadow-none sm:h-9 sm:w-auto sm:min-w-[10rem] bg-gradient-to-r from-emerald-400 to-emerald-500 text-[hsl(160_40%_8%)] hover:brightness-110"
+              >
+                <a href={popup.actionUrl} target="_blank" rel="noopener noreferrer">
+                  {popup.actionText || "Learn more"}
+                  <ExternalLink className="h-4 w-4 shrink-0" />
+                </a>
+              </Button>
+            )}
           </div>
         </div>
       </DialogContent>

@@ -39,7 +39,7 @@ import {
     XIcon,
     Download
 } from 'lucide-react';
-import { Input } from '@/components/ui/input';
+import DashboardSearchInput from '@/components/dashboard/DashboardSearchInput';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -52,12 +52,14 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import { toast } from 'sonner';
+import { premiumBadge, premiumBtnCredentials, premiumBtnOutline, premiumSelectContent } from '@/lib/premium-badges';
 import { cn } from '@/lib/utils';
 import {
     hasDeliveredCredentials,
     getDaysUntilExpiry,
     isServerListOrder,
     getServerDeliveryStatus,
+    isOrderAwaitingDelivery,
 } from '@/lib/orderDeliveryStatus';
 import { isWithinRenewalWindow } from '@/lib/expiryHelper';
 
@@ -328,7 +330,7 @@ const ViewLinux = () => {
     const getStatusBadge = (status: string, provisioningStatus?: string, lastAction?: string, order?: Order) => {
         if (status.toLowerCase() === 'completed') {
         return (
-            <Badge className="bg-green-50 text-green-700 border border-green-200 dark:bg-green-950 dark:text-green-300 dark:border-green-800">
+            <Badge variant="outline" className={premiumBadge.success}>
                 <div className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></div>
                 Active
             </Badge>
@@ -336,6 +338,16 @@ const ViewLinux = () => {
     }
 
     const currentStatus = provisioningStatus || status;
+
+    // Paid, waiting for admin/company delivery — never show Failed
+    if (order && isOrderAwaitingDelivery(order)) {
+        return (
+            <Badge variant="outline" className={premiumBadge.info}>
+                <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                Processing
+            </Badge>
+        );
+    }
 
     // 🆕 NEW: Check if order is fresh (created within last 10 minutes)
     // Fresh orders should show a friendly "Setting Up" message
@@ -346,7 +358,7 @@ const ViewLinux = () => {
         // For very fresh orders (< 2 mins), show "Processing Payment"
         if (orderAge < 2 * 60 * 1000) {
             return (
-                <Badge className="bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-800">
+                <Badge variant="outline" className={premiumBadge.info}>
                     <Loader2 className="w-3 h-3 mr-1 animate-spin" />
                     Processing
                 </Badge>
@@ -354,7 +366,7 @@ const ViewLinux = () => {
         }
         // For orders 2-10 mins old, show "Setting Up"
         return (
-            <Badge className="bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800">
+            <Badge variant="outline" className={premiumBadge.warning}>
                 <Loader2 className="w-3 h-3 mr-1 animate-spin" />
                 Setting Up
             </Badge>
@@ -378,7 +390,7 @@ const ViewLinux = () => {
         lowerCurrent === 'canceled';
     if (order && hasDeliveredCredentials(order) && !isExplicitlyBadForBadge) {
         return (
-            <Badge className="bg-green-50 text-green-700 border border-green-200 dark:bg-green-950 dark:text-green-300 dark:border-green-800">
+            <Badge variant="outline" className={premiumBadge.success}>
                 <div className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></div>
                 Active
             </Badge>
@@ -389,17 +401,17 @@ const ViewLinux = () => {
     if (!isAutoProvisionedProvider) {
         if (currentStatus.toLowerCase() === 'terminated') {
             return (
-                <Badge className="bg-red-50 text-red-700 border border-red-200 dark:bg-red-950 dark:text-red-300 dark:border-red-800">
+                <Badge variant="outline" className={premiumBadge.error}>
                     <XCircle className="w-3 h-3 mr-1" />
                     Terminated
                 </Badge>
             );
         }
-        // All other states for non-auto-provisioned should show as awaiting manual setup
+        // All other states for non-auto-provisioned should show as processing
         return (
-            <Badge className="bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800">
-                <User className="w-3 h-3 mr-1" />
-                Awaiting Manual Setup
+            <Badge variant="outline" className={premiumBadge.info}>
+                <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                Processing
             </Badge>
         );
     }
@@ -415,7 +427,7 @@ const ViewLinux = () => {
             order.provisioningError.includes('IPStock') ||
             order.provisioningError.includes('timeout'))) {
         return (
-            <Badge className="bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800">
+            <Badge variant="outline" className={premiumBadge.warning}>
                 <Clock className="w-3 h-3 mr-1" />
                 In Queue
             </Badge>
@@ -425,7 +437,7 @@ const ViewLinux = () => {
     switch (currentStatus.toLowerCase()) {
         case 'active':
             return (
-                <Badge className="bg-green-50 text-green-700 border border-green-200 dark:bg-green-950 dark:text-green-300 dark:border-green-800">
+                <Badge variant="outline" className={premiumBadge.success}>
                     <div className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></div>
                     Active
                 </Badge>
@@ -433,26 +445,34 @@ const ViewLinux = () => {
         case 'pending':
         case 'confirmed':
             return (
-                <Badge className="bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800">
+                <Badge variant="outline" className={premiumBadge.warning}>
                     <Clock className="w-3 h-3 mr-1" />
                     Pending Setup
                 </Badge>
             );
         case 'provisioning':
             return (
-                <Badge className="bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-800">
+                <Badge variant="outline" className={premiumBadge.info}>
                     <Loader2 className="w-3 h-3 mr-1 animate-spin" />
                     Provisioning
                 </Badge>
             );
         case 'suspended':
             return (
-                <Badge className="bg-red-50 text-red-700 border border-red-200 dark:bg-red-950 dark:text-red-300 dark:border-red-800">
+                <Badge variant="outline" className={premiumBadge.error}>
                     <div className="w-2 h-2 bg-red-500 rounded-full mr-2"></div>
                     Offline
                 </Badge>
             );
         case 'failed':
+            if (order && isOrderAwaitingDelivery(order)) {
+                return (
+                    <Badge variant="outline" className={premiumBadge.info}>
+                        <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                        Processing
+                    </Badge>
+                );
+            }
             // Double-check for config/temporary errors even in failed status
             if (order?.provisioningError && 
                 (order.provisioningError.includes('CONFIG:') ||
@@ -460,21 +480,21 @@ const ViewLinux = () => {
                  order.provisioningError.includes('Lock') ||
                  order.provisioningError.includes('timeout'))) {
                 return (
-                    <Badge className="bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800">
+                    <Badge variant="outline" className={premiumBadge.warning}>
                         <Clock className="w-3 h-3 mr-1" />
                         In Queue
                     </Badge>
                 );
             }
             return (
-                <Badge className="bg-red-50 text-red-700 border border-red-200 dark:bg-red-950 dark:text-red-300 dark:border-red-800">
+                <Badge variant="outline" className={premiumBadge.error}>
                     <XCircle className="w-3 h-3 mr-1" />
                     Needs Attention
                 </Badge>
             );
         case 'terminated':
             return (
-                <Badge className="bg-red-50 text-red-700 border border-red-200 dark:bg-red-950 dark:text-red-300 dark:border-red-800">
+                <Badge variant="outline" className={premiumBadge.error}>
                     <XCircle className="w-3 h-3 mr-1" />
                     Terminated
                 </Badge>
@@ -484,7 +504,7 @@ const ViewLinux = () => {
             const isManualOrder = !lastAction || lastAction.includes('manual');
             if (isManualOrder || currentStatus.toLowerCase() === 'confirmed') {
                 return (
-                    <Badge className="bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800">
+                    <Badge variant="outline" className={premiumBadge.warning}>
                         <Clock className="w-3 h-3 mr-1" />
                         Awaiting Setup
                     </Badge>
@@ -511,83 +531,39 @@ const ViewLinux = () => {
     };
 
     return (
-        <div className='min-h-screen bg-background'>
-            {/* Mobile Header */}
-            <div className="lg:hidden h-16" />
-
-            {/* Responsive Header with proper mobile spacing */}
-            <div className='sticky md:hidden  lg:top-0 z-40 bg-background/95 backdrop-blur-sm shadow-sm border-b border-border'>
-                <div className='container mx-auto -mt-14 md:mt-0 px-3 sm:px-4 md:px-6 lg:px-8'>
-                    <div className='flex h-14 sm:h-16 items-center justify-between gap-2 sm:gap-4'>
-                        <div className='flex items-center gap-2 sm:gap-3 min-w-0 flex-1'>
-                            <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => router.back()}
-                                className="hover:bg-muted rounded-full flex-shrink-0 h-8 w-8 sm:h-10 sm:w-10"
-                            >
-                                <ArrowLeft className="h-4 w-4 sm:h-5 sm:w-5" />
-                            </Button>
-                            <div className='flex items-center gap-2 sm:gap-3 min-w-0 flex-1'>
-                                <div className="w-7 h-7 sm:w-8 sm:h-8 bg-primary rounded-lg flex items-center justify-center flex-shrink-0">
-                                    <Server className="h-3 w-3 sm:h-4 sm:w-4 text-white" />
-                                </div>
-                                <div className="min-w-0 flex-1">
-                                    <h1 className='text-base sm:text-lg lg:text-xl font-bold'>Server Management</h1>
-                                    <p className="text-xs sm:text-sm text-muted-foreground hidden xs:block">Manage your servers</p>
-                                </div>
-                            </div>
-                        </div>
-
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            className="gap-1 sm:gap-2 h-8 sm:h-9 px-2 sm:px-3 flex-shrink-0"
-                            onClick={() => fetchOrders(true)}
-                            disabled={loading || refreshing}
-                        >
-                            <RefreshCw className={`h-3 w-3 sm:h-4 sm:w-4 ${loading || refreshing ? 'animate-spin' : ''}`} />
-                            <span className="hidden sm:inline text-xs sm:text-sm">Refresh</span>
-                        </Button>
-                    </div>
-                </div>
-            </div>
-
-            {/* Main Content with responsive container */}
-            <div className='container mx-auto  px-3 sm:px-4 md:px-6 lg:px-8 py-4 sm:py-6'>
+        <div className='premium-dashboard-page'>
+            <div className='premium-dashboard-page-inner'>
                 {/* Search and Filters Section - Enhanced */}
                 {!loading && orders.filter(isServerListOrder).length > 0 && (
-                    <div className="mb-4 sm:mb-6 space-y-3 sm:space-y-4">
+                    <div className="premium-dashboard-toolbar mb-4 sm:mb-6 space-y-3 sm:space-y-4">
                         <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 items-stretch sm:items-center">
-                            {/* Search Bar */}
-                            <div className="relative flex-1 max-w-full ">
-                                <Search className="absolute left-2.5 sm:left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                                <Input
-                                    placeholder="Search servers..."
-                                    value={searchQuery}
-                                    onChange={(e) => setSearchQuery(e.target.value)}
-                                    className="pl-8 sm:pl-10 w-full pr-8 sm:pr-10 h-9 sm:h-10 text-sm"
-                                />
-                                {searchQuery && (
-                                    <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={clearSearch}
-                                        className="absolute right-1 top-1/2 transform -translate-y-1/2 h-6 w-6 p-0 hover:bg-muted/80"
-                                    >
-                                        <XIcon className="h-3 w-3" />
-                                    </Button>
-                                )}
-                            </div>
+                            <DashboardSearchInput
+                                value={searchQuery}
+                                onChange={setSearchQuery}
+                                onClear={clearSearch}
+                                placeholder="Search servers..."
+                            />
+
+                            <div className="flex gap-2 shrink-0">
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="gap-1 sm:gap-2 h-9 sm:h-10 px-2 sm:px-3 premium-btn-outline"
+                                    onClick={() => fetchOrders(true)}
+                                    disabled={loading || refreshing}
+                                >
+                                    <RefreshCw className={`h-3 w-3 sm:h-4 sm:w-4 ${loading || refreshing ? 'animate-spin' : ''}`} />
+                                    <span className="hidden sm:inline text-xs sm:text-sm">Refresh</span>
+                                </Button>
 
                             {/* Status Filter */}
                             <div className="flex gap-2">
                                 <Select value={statusFilter} onValueChange={setStatusFilter}>
-                                    <SelectTrigger className="w-32 sm:w-36 h-9 sm:h-10 text-xs sm:text-sm">
+                                    <SelectTrigger className="premium-dashboard-select w-32 sm:w-36">
                                         <Filter className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
                                         <SelectValue placeholder="Status" />
                                     </SelectTrigger>
-                                    <SelectContent>
+                                    <SelectContent className={premiumSelectContent}>
                                         <SelectItem value="all">All Status</SelectItem>
                                         <SelectItem value="active">Active</SelectItem>
                                         <SelectItem value="expired">Expired</SelectItem>
@@ -600,17 +576,18 @@ const ViewLinux = () => {
                                         variant="outline"
                                         size="sm"
                                         onClick={clearFilters}
-                                        className="h-9 sm:h-10 px-2 sm:px-3 text-xs sm:text-sm flex-shrink-0"
+                                        className="h-9 sm:h-10 px-2 sm:px-3 text-xs sm:text-sm flex-shrink-0 premium-btn-outline"
                                     >
                                         Clear
                                     </Button>
                                 )}
                             </div>
+                            </div>
                         </div>
 
                         {/* Show filter summary */}
                         {(searchQuery || statusFilter !== 'all') && (
-                            <p className="text-xs sm:text-sm text-muted-foreground">
+                            <p className="text-xs sm:text-sm text-white/45">
                                 {filteredOrders.length} of {orders.filter(isServerListOrder).length} servers
                                 {searchQuery && ` matching "${searchQuery}"`}
                                 {statusFilter !== 'all' && ` with status "${statusFilter}"`}
@@ -639,12 +616,12 @@ const ViewLinux = () => {
                             Delivered servers appear here as soon as your service is assigned — even while credentials are still syncing. Orders still awaiting delivery are on the Orders page.
                         </p>
                         <div className="flex flex-col sm:flex-row gap-2 justify-center">
-                        <Button onClick={() => router.push('/dashboard/ipStock')} className="gap-2 mx-auto" size="sm">
+                        <Button onClick={() => router.push('/dashboard/ipStock')} className="gap-2 mx-auto premium-btn-primary border-0" size="sm">
                             <Server className="h-4 w-4" />
                             Browse Plans
                         </Button>
                         {orders.length > 0 && (
-                            <Button variant="outline" onClick={() => router.push('/dashboard/orders')} className="gap-2 mx-auto" size="sm">
+                            <Button variant="outline" onClick={() => router.push('/dashboard/orders')} className="gap-2 mx-auto premium-btn-outline" size="sm">
                                 <Clock className="h-4 w-4" />
                                 View Pending Orders
                             </Button>
@@ -652,11 +629,11 @@ const ViewLinux = () => {
                         </div>
                     </div>
                 ) : (
-                    <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4 sm:space-y-6">
+                    <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4 sm:space-y-6 premium-dashboard-tabs">
                         {/* Enhanced Tab Navigation with Counts */}
                         <div className="flex justify-center overflow-x-auto scrollbar-hide">
                             <TabsList className="grid grid-cols-3 h-fit w-fit min-w-0">
-                                <TabsTrigger value="all" className="flex items-center h- gap-1 px-2 sm:px-3 py-2 text-xs sm:text-sm whitespace-nowrap">
+                                <TabsTrigger value="all" className="flex items-center gap-1 px-2 sm:px-3 py-2 text-xs sm:text-sm whitespace-nowrap">
                                     <Server className="h-3 w-3 sm:h-4 sm:w-4" />
                                     <span>All</span>
                                     <Badge variant="secondary" className="ml-0.5 text-xs h-4 px-1">
@@ -729,7 +706,7 @@ const ViewLinux = () => {
                                     {filteredOrders.map((order) => (
                                         <Card
                                             key={order._id}
-                                            className="hover:shadow-md transition-shadow cursor-pointer border-0 shadow-lg scale-90 bg-card"
+                                            className="premium-dashboard-order-card"
                                             onClick={() => router.push(`/dashboard/order/${order._id}`)}
                                         >
                                             <CardContent className="p-3 sm:p-4 lg:p-6">
@@ -739,7 +716,7 @@ const ViewLinux = () => {
                                                         <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
                                                             <OSIcon os={order.os} className="h-8 w-8 sm:h-10 sm:w-10 flex-shrink-0" />
                                                             <div className="flex-1 min-w-0">
-                                                                <h3 className="font-semibold text-sm sm:text-base leading-tight break-words">
+                                                                <h3 className="font-semibold text-sm sm:text-base leading-snug break-words premium-dashboard-title">
                                                                     {styleText(order.productName)}
                                                                 </h3>
                                                                 <div className="flex items-center gap-1 sm:gap-2 mt-1 flex-wrap">
@@ -798,7 +775,7 @@ const ViewLinux = () => {
                                                     )}
 
                                                     <div className="border-t border-border pt-2">
-                                                        <div className="flex gap-2">
+                                                        <div className="premium-mobile-order-actions">
                                                             <Button
                                                                 variant="outline"
                                                                 size="sm"
@@ -806,20 +783,20 @@ const ViewLinux = () => {
                                                                     e.stopPropagation();
                                                                     router.push(`/dashboard/order/${order._id}`);
                                                                 }}
-                                                                className="flex-1 gap-1 sm:gap-2 h-8 sm:h-9"
+                                                                className={cn("gap-1 sm:gap-2", premiumBtnOutline)}
                                                             >
-                                                                <Settings className="h-3 w-3" />
-                                                                <span className="text-xs">Manage</span>
+                                                                <Settings className="h-3 w-3 shrink-0" />
+                                                                <span className="text-xs truncate">Manage</span>
                                                             </Button>
 
                                                             <Button
                                                                 variant="outline"
                                                                 size="sm"
                                                                 onClick={(e) => downloadInvoice(e, order._id)}
-                                                                className="gap-1 sm:gap-2 h-8 sm:h-9 px-2 sm:px-3"
+                                                                className={cn("gap-1 sm:gap-2", premiumBtnOutline)}
                                                             >
-                                                                <Download className="h-3 w-3" />
-                                                                <span className="text-xs">Invoice</span>
+                                                                <Download className="h-3 w-3 shrink-0" />
+                                                                <span className="text-xs truncate">Invoice</span>
                                                             </Button>
 
                                                             {order.panelUsername && (
@@ -827,10 +804,11 @@ const ViewLinux = () => {
                                                                     variant="outline"
                                                                     size="sm"
                                                                     onClick={(e) => copyHosthellCreds(e, order)}
-                                                                    className="gap-1 sm:gap-2 h-8 sm:h-9 px-2 sm:px-3 border-red-500/30 text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30"
+                                                                    className={cn("premium-mobile-order-action--wide gap-1 sm:gap-2", premiumBtnCredentials)}
                                                                 >
-                                                                    <Copy className="h-3 w-3" />
-                                                                    <span className="text-xs">Copy Panel Credentials</span>
+                                                                    <Copy className="h-3 w-3 shrink-0" />
+                                                                    <span className="text-xs truncate sm:hidden">Copy Panel Creds</span>
+                                                                    <span className="text-xs truncate hidden sm:inline">Copy Panel Credentials</span>
                                                                 </Button>
                                                             )}
 
@@ -842,10 +820,10 @@ const ViewLinux = () => {
                                                                         e.stopPropagation();
                                                                         router.push('/support/tickets');
                                                                     }}
-                                                                    className="gap-1 sm:gap-2 h-8 sm:h-9 px-2 sm:px-3"
+                                                                    className={cn("premium-mobile-order-action--wide gap-1 sm:gap-2", premiumBtnOutline)}
                                                                 >
-                                                                    <LifeBuoy className="h-3 w-3" />
-                                                                    <span className="text-xs">Support</span>
+                                                                    <LifeBuoy className="h-3 w-3 shrink-0" />
+                                                                    <span className="text-xs truncate">Support</span>
                                                                 </Button>
                                                             )}
                                                         </div>
@@ -917,7 +895,7 @@ const ViewLinux = () => {
                                                                     variant="outline"
                                                                     size="sm"
                                                                     onClick={(e) => copyHosthellCreds(e, order)}
-                                                                    className="gap-2 h-9 xl:h-10 px-3 xl:px-4 border-red-500/30 text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30"
+                                                                    className={cn("gap-2 h-9 xl:h-10 px-3 xl:px-4", premiumBtnCredentials)}
                                                                 >
                                                                     <Copy className="h-4 w-4" />
                                                                     Copy Panel Credentials
@@ -927,7 +905,7 @@ const ViewLinux = () => {
                                                                 variant="outline"
                                                                 size="sm"
                                                                 onClick={(e) => downloadInvoice(e, order._id)}
-                                                                className="gap-2 h-9 xl:h-10 px-3 xl:px-4"
+                                                                className={cn("gap-2 h-9 xl:h-10 px-3 xl:px-4", premiumBtnOutline)}
                                                             >
                                                                 <Download className="h-4 w-4" />
                                                                 Invoice
@@ -939,7 +917,7 @@ const ViewLinux = () => {
                                                                     e.stopPropagation();
                                                                     router.push(`/dashboard/order/${order._id}`);
                                                                 }}
-                                                                className="gap-2 h-9 xl:h-10 px-3 xl:px-4"
+                                                                className={cn("gap-2 h-9 xl:h-10 px-3 xl:px-4", premiumBtnOutline)}
                                                             >
                                                                 <Settings className="h-4 w-4" />
                                                                 Manage

@@ -519,7 +519,7 @@ export default function AdminAnnouncementsPage() {
       );
   };
 
-  const handleTogglePopup = async (id: string, currentValue: boolean) => {
+  const handleTogglePopup = async (id: string, currentValue: boolean, item?: Announcement) => {
     setTogglingId(id);
     try {
       const newValue = !currentValue;
@@ -527,6 +527,10 @@ export default function AdminAnnouncementsPage() {
 
       if (newValue) {
         payload.status = 'sent';
+        if (item?.showOnOrderPage) {
+          payload.showOnOrderPage = true;
+          payload.showAsLoginPopup = false;
+        }
       } else {
         payload.status = 'draft';
       }
@@ -640,7 +644,7 @@ export default function AdminAnnouncementsPage() {
           <Switch
             checked={item.status === 'sent'}
             disabled={togglingId === item._id}
-            onCheckedChange={() => handleTogglePopup(item._id, item.status === 'sent')}
+            onCheckedChange={() => handleTogglePopup(item._id, item.status === 'sent', item)}
           />
           <span className="text-xs text-muted-foreground">
             {item.status === 'sent' ? 'Enabled' : 'Disabled'}

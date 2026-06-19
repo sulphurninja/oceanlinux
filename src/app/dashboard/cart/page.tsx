@@ -10,6 +10,13 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
   ShoppingCart,
   Trash2,
   Plus,
@@ -24,6 +31,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { premiumSelectContent } from '@/lib/premium-badges';
 import { cn } from '@/lib/utils';
 import {
   fetchCart,
@@ -317,8 +325,10 @@ export default function CartPage() {
 
   if (loading) {
     return (
-      <div className="flex h-[60vh] items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      <div className="premium-dashboard-page">
+        <div className="flex h-[60vh] items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-emerald-400" />
+        </div>
       </div>
     );
   }
@@ -326,24 +336,15 @@ export default function CartPage() {
   const isEmpty = !cart || cart.items.length === 0;
 
   return (
-    <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-6 mt-16 lg:mt-0 space-y-6">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <ShoppingCart className="h-6 w-6" /> Your Cart
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            {isEmpty
-              ? 'Browse the catalog to add servers to your cart.'
-              : `${cart!.itemCount} item${cart!.itemCount === 1 ? '' : 's'} ready for checkout.`}
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={refresh} disabled={refreshing}>
+    <div className="premium-dashboard-page">
+      <div className="premium-dashboard-page-inner space-y-6">
+      <div className="premium-dashboard-page-header">
+        <div className="flex gap-2 ml-auto w-full sm:w-auto justify-end">
+          <Button variant="outline" size="sm" onClick={refresh} disabled={refreshing} className="premium-btn-outline">
             <RefreshCw className={cn('h-4 w-4 mr-2', refreshing && 'animate-spin')} /> Refresh
           </Button>
           {!isEmpty && (
-            <Button variant="outline" size="sm" onClick={onClear}>
+            <Button variant="outline" size="sm" onClick={onClear} className="premium-btn-outline">
               <Trash2 className="h-4 w-4 mr-2" /> Empty Cart
             </Button>
           )}
@@ -351,14 +352,14 @@ export default function CartPage() {
       </div>
 
       {isEmpty && (
-        <Card>
+        <Card className="premium-dashboard-card border-0">
           <CardContent className="py-16 flex flex-col items-center text-center gap-4">
-            <ShoppingCart className="h-12 w-12 text-muted-foreground" />
+            <ShoppingCart className="h-12 w-12 text-white/30" />
             <div>
-              <h2 className="font-semibold">Your cart is empty</h2>
-              <p className="text-sm text-muted-foreground">Pick servers from the catalog and they&apos;ll show up here.</p>
+              <h2 className="font-semibold text-white">Your cart is empty</h2>
+              <p className="text-sm text-white/45">Pick servers from the catalog and they&apos;ll show up here.</p>
             </div>
-            <Button onClick={() => router.push('/dashboard/ipStock')}>
+            <Button onClick={() => router.push('/dashboard/ipStock')} className="premium-btn-primary border-0">
               Browse plans <ArrowRight className="h-4 w-4 ml-2" />
             </Button>
           </CardContent>
@@ -371,12 +372,12 @@ export default function CartPage() {
             {cart!.items.map((line) => {
               const invalid = !line.pricing.valid;
               return (
-                <Card key={line._id} className={cn(invalid && 'border-destructive/50')}>
+                <Card key={line._id} className={cn("premium-dashboard-card border-0", invalid && 'border-red-400/35')}>
                   <CardContent className="p-4">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <h3 className="font-semibold truncate">
+                          <h3 className="font-semibold truncate text-white">
                             {line.pricing.productName || (line.kind === 'slotip' ? 'Slot IP Package' : 'IP Stock')}
                           </h3>
                           <Badge variant="outline" className="capitalize">{line.kind === 'slotip' ? 'Slot IP' : 'VPS'}</Badge>
@@ -411,10 +412,10 @@ export default function CartPage() {
 
                     <Separator className="my-3" />
 
-                    <div className="flex flex-wrap gap-3 items-end">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[auto_minmax(160px,1fr)_minmax(180px,1.5fr)_auto] gap-4 items-end premium-cart-line-grid">
                       <div>
-                        <label className="text-[11px] text-muted-foreground">Quantity</label>
-                        <div className="flex items-center mt-1 border rounded-md">
+                        <label className="premium-field-label">Quantity</label>
+                        <div className="flex items-center border border-white/12 rounded-lg bg-white/[0.04] w-fit">
                           <Button
                             size="icon"
                             variant="ghost"
@@ -438,21 +439,29 @@ export default function CartPage() {
                       </div>
 
                       {line.kind === 'ipstock' && (
-                        <div>
-                          <label className="text-[11px] text-muted-foreground">Operating System</label>
-                          <select
-                            className="mt-1 h-8 px-2 rounded-md border border-input bg-background text-sm"
+                        <div className="min-w-0">
+                          <label className="premium-field-label">Operating System</label>
+                          <Select
                             value={line.os || 'Ubuntu 22'}
-                            onChange={(e) => onOs(line, e.target.value)}
+                            onValueChange={(value) => onOs(line, value)}
                             disabled={busyItem === line._id}
                           >
-                            {OS_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
-                          </select>
+                            <SelectTrigger className="premium-dashboard-input h-9 w-full min-w-[160px] text-sm">
+                              <SelectValue placeholder="Select OS" />
+                            </SelectTrigger>
+                            <SelectContent className={premiumSelectContent}>
+                              {OS_OPTIONS.map((o) => (
+                                <SelectItem key={o} value={o}>
+                                  {o}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                         </div>
                       )}
 
-                      <div className="flex-1 min-w-[180px]">
-                        <label className="text-[11px] text-muted-foreground flex items-center gap-1">
+                      <div className="min-w-0 sm:col-span-2 lg:col-span-1">
+                        <label className="premium-field-label flex items-center gap-1">
                           <Tag className="h-3 w-3" /> Promo Code
                         </label>
                         <PromoEditor
@@ -461,12 +470,12 @@ export default function CartPage() {
                           onApply={(code) => onPromo(line, code)}
                         />
                         {line.pricing.promoApplied && (
-                          <span className="text-[11px] text-green-600">Applied: {line.pricing.promoApplied}</span>
+                          <span className="text-[11px] premium-promo-text">Applied: {line.pricing.promoApplied}</span>
                         )}
                       </div>
 
                       {!invalid && (
-                        <div className="ml-auto text-right">
+                        <div className="ml-auto text-right premium-cart-line-total sm:ml-auto">
                           <p className="text-[11px] text-muted-foreground">Line total</p>
                           <p className="text-lg font-bold">{formatINR(line.pricing.lineTotal!)}</p>
                         </div>
@@ -479,10 +488,10 @@ export default function CartPage() {
           </div>
 
           <div>
-            <Card className="sticky top-4">
+            <Card className="lg:sticky lg:top-4 premium-cart-summary-card premium-dashboard-card border-0">
               <CardHeader>
-                <CardTitle className="text-lg">Order Summary</CardTitle>
-                <CardDescription>Server-side validated. Promos recomputed at checkout.</CardDescription>
+                <CardTitle className="text-lg premium-dashboard-title">Order Summary</CardTitle>
+                <CardDescription className="premium-dashboard-subtitle">Server-side validated. Promos recomputed at checkout.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
                 <div className="flex justify-between text-sm">
@@ -522,17 +531,15 @@ export default function CartPage() {
                 {totals.gatewayCharge > 0 && (
                   <div>
                     <label className="text-[11px] text-muted-foreground mb-1 block">Pay remaining via</label>
-                    <div className="grid grid-cols-3 gap-1.5">
+                    <div className="grid grid-cols-3 gap-1.5 premium-payment-grid">
                       {(['razorpay', 'cashfree', 'upi'] as const).map((g) => (
                         <button
                           key={g}
                           type="button"
                           onClick={() => setGateway(g)}
                           className={cn(
-                            'p-2 rounded-md border text-xs font-medium uppercase transition',
-                            gateway === g
-                              ? 'bg-primary text-primary-foreground border-primary'
-                              : 'border-border hover:border-primary/40 text-muted-foreground'
+                            'premium-payment-pill uppercase',
+                            gateway === g ? 'premium-payment-pill--active' : 'premium-payment-pill--inactive'
                           )}
                           disabled={checkingOut}
                         >
@@ -569,7 +576,7 @@ export default function CartPage() {
                 )}
 
                 <Button
-                  className="w-full"
+                  className="w-full premium-btn-pay border-0"
                   size="lg"
                   onClick={onCheckout}
                   disabled={checkingOut || cart!.hasInvalidItems || cart!.items.length === 0}
@@ -582,7 +589,7 @@ export default function CartPage() {
                 </Button>
 
                 {walletBalance < totals.total && (
-                  <Link href="/dashboard/wallet" className="text-xs text-center text-primary hover:underline block">
+                  <Link href="/dashboard/wallet" className="text-xs text-center block premium-dashboard-subtitle hover:text-emerald-600 dark:hover:text-emerald-300 transition-colors">
                     Top up wallet to skip the gateway →
                   </Link>
                 )}
@@ -592,6 +599,7 @@ export default function CartPage() {
         </div>
       )}
       <ConfirmDialog />
+      </div>
     </div>
   );
 }
@@ -608,20 +616,20 @@ function PromoEditor({
   const [value, setValue] = useState(initial);
   useEffect(() => { setValue(initial); }, [initial]);
   return (
-    <div className="flex items-center gap-1 mt-1">
+    <div className="flex items-center gap-2 mt-1">
       <Input
         value={value}
         onChange={(e) => setValue(e.target.value)}
         placeholder="Promo code"
-        className="h-8 text-sm flex-1"
+        className="h-9 text-sm flex-1 premium-dashboard-input"
         disabled={disabled}
       />
       <Button
         size="sm"
-        variant="outline"
-        className="h-8"
+        variant="ghost"
+        className="premium-btn-apply h-9 min-w-[4.5rem] px-4"
         onClick={() => onApply(value)}
-        disabled={disabled || value === initial}
+        disabled={disabled || !value.trim() || value === initial}
       >
         Apply
       </Button>

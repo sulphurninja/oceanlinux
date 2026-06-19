@@ -1,8 +1,6 @@
 import CTA from "@/components/landing/CTA";
 import EcoFriendly from "@/components/landing/EcoFriendly";
 import Features from "@/components/landing/Features";
-import Footer from "@/components/landing/Footer";
-import Header from "@/components/landing/Header";
 import Hero from "@/components/landing/Hero";
 import NetworkInfrastructure from "@/components/landing/NetworkInfrastructure";
 import Performance from "@/components/landing/Performance";
@@ -10,7 +8,7 @@ import PricingSection from "@/components/landing/pricing";
 import Scalability from "@/components/landing/Scalability";
 import Security from "@/components/landing/Security";
 import SupportAndReliability from "@/components/landing/SupportAndReliability";
-import FloatingSupport from "@/components/component/floating-support";
+import PublicPageLayout from "@/components/landing/PublicPageLayout";
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
@@ -182,7 +180,7 @@ export default function LandingPage() {
   };
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <PublicPageLayout>
       {/* Structured data for better SEO */}
       <script
         type="application/ld+json"
@@ -191,23 +189,16 @@ export default function LandingPage() {
         }}
       />
 
-      <Header />
-      <main>
-        <Hero />
-        <PricingSection />
-        <Features />
-        <Performance />
-        <Security />
-        <Scalability />
-        <NetworkInfrastructure />
-        <SupportAndReliability />
-        <EcoFriendly />
-        <CTA />
-      </main>
-      <Footer />
-      
-      {/* Floating Support & WhatsApp Widget */}
-      <FloatingSupport />
-    </div>
+      <Hero />
+      <PricingSection />
+      <Features />
+      <Performance />
+      <Security />
+      <Scalability />
+      <NetworkInfrastructure />
+      <SupportAndReliability />
+      <EcoFriendly />
+      <CTA />
+    </PublicPageLayout>
   )
 }

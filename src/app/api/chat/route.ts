@@ -39,7 +39,7 @@ PAYMENT:
 
 FEATURES:
 - Premium quality at budget-friendly prices
-- Global network infrastructure
+- VPS sourced from trusted upstream providers, managed and supported by OceanLinux (we do not operate our own data centers)
 - Bank-grade encryption and security
 - Professional management tools
 - Scalable solutions

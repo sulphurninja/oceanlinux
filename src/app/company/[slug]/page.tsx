@@ -48,15 +48,31 @@ function orderStatusBadgeProps(status: string): {
   return { variant: 'outline', className: 'text-[10px] h-4 capitalize' };
 }
 
+interface InventoryItem {
+  _id: string;
+  ipAddress: string;
+  username: string;
+  password: string;
+  os: string;
+  allocated: boolean;
+  orderId?: string | null;
+}
+
 interface Stock {
   _id: string;
   name: string;
   available: boolean;
   stockCount: number;
   usesStockCount?: boolean;
+  usesPreconfiguredInventory?: boolean;
+  inventoryTotal?: number;
+  inventoryAvailable?: number;
+  inventoryItems?: InventoryItem[];
   serverType: string;
   tags: string[];
 }
+
+const OS_OPTIONS = ['Windows 2022 64', 'Ubuntu 22', 'CentOS 7'] as const;
 
 interface Order {
   _id: string;
@@ -149,6 +165,11 @@ export default function CompanyDashboard() {
   const [tab, setTab] = useState<'stocks' | 'orders' | 'requests' | 'renewals'>('stocks');
   const [savingStockId, setSavingStockId] = useState<string | null>(null);
   const [stockCountDrafts, setStockCountDrafts] = useState<Record<string, string>>({});
+  const [inventoryBulkDrafts, setInventoryBulkDrafts] = useState<Record<string, string>>({});
+  const [inventoryFormDrafts, setInventoryFormDrafts] = useState<
+    Record<string, { ipAddress: string; username: string; password: string; os: string }>
+  >({});
+  const [expandedStockId, setExpandedStockId] = useState<string | null>(null);
 
   // Order filters
   const [searchTerm, setSearchTerm] = useState('');
@@ -278,7 +299,7 @@ export default function CompanyDashboard() {
       const res = await fetch('/api/company/stocks', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ stockId, stockCount }),
+        body: JSON.stringify({ stockId, stockCount, action: 'setStockCount' }),
       });
       const data = await res.json();
       if (res.ok) {
@@ -294,6 +315,83 @@ export default function CompanyDashboard() {
       setSavingStockId(null);
     }
   };
+
+  const addInventory = async (stockId: string, mode: 'bulk' | 'single') => {
+    setSavingStockId(stockId);
+    try {
+      const payload: Record<string, unknown> = { stockId, action: 'addInventory' };
+      if (mode === 'bulk') {
+        payload.bulkLines = inventoryBulkDrafts[stockId] || '';
+      } else {
+        const form = inventoryFormDrafts[stockId] || {
+          ipAddress: '',
+          username: 'Administrator',
+          password: '',
+          os: 'Windows 2022 64',
+        };
+        if (!form.ipAddress || !form.password) {
+          toast.error('IP address and password are required');
+          return;
+        }
+        payload.items = [form];
+      }
+      const res = await fetch('/api/company/stocks', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (res.ok && data.stock) {
+        setStocks(prev => prev.map(s => s._id === stockId ? data.stock : s));
+        setStockCountDrafts(prev => ({ ...prev, [stockId]: String(data.stock.stockCount) }));
+        if (mode === 'bulk') setInventoryBulkDrafts(prev => ({ ...prev, [stockId]: '' }));
+        else {
+          setInventoryFormDrafts(prev => ({
+            ...prev,
+            [stockId]: { ipAddress: '', username: 'Administrator', password: '', os: 'Windows 2022 64' },
+          }));
+        }
+        toast.success(`Added ${data.added} server(s) — auto-deliver on payment`);
+      } else {
+        toast.error(data.error || 'Failed to add inventory');
+      }
+    } catch {
+      toast.error('Failed to add inventory');
+    } finally {
+      setSavingStockId(null);
+    }
+  };
+
+  const removeInventoryItem = async (stockId: string, removeItemId: string) => {
+    setSavingStockId(stockId);
+    try {
+      const res = await fetch('/api/company/stocks', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stockId, action: 'removeInventory', removeItemId }),
+      });
+      const data = await res.json();
+      if (res.ok && data.stock) {
+        setStocks(prev => prev.map(s => s._id === stockId ? data.stock : s));
+        setStockCountDrafts(prev => ({ ...prev, [stockId]: String(data.stock.stockCount) }));
+        toast.success('Removed unused server from stock');
+      } else {
+        toast.error(data.error || 'Cannot remove (may be already sold)');
+      }
+    } catch {
+      toast.error('Failed to remove item');
+    } finally {
+      setSavingStockId(null);
+    }
+  };
+
+  const getInventoryForm = (stockId: string) =>
+    inventoryFormDrafts[stockId] || {
+      ipAddress: '',
+      username: 'Administrator',
+      password: '',
+      os: 'Windows 2022 64',
+    };
 
   const openEditOrder = (order: Order) => {
     setEditOrder(order);
@@ -553,9 +651,12 @@ export default function CompanyDashboard() {
             ) : stocks.map((stock) => {
               const count = stock.stockCount ?? 0;
               const inStock = count > 0;
+              const hasPreconfig = stock.usesPreconfiguredInventory;
+              const form = getInventoryForm(stock._id);
+              const expanded = expandedStockId === stock._id;
               return (
               <Card key={stock._id}>
-                <CardContent className="p-4">
+                <CardContent className="p-4 space-y-4">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div className="flex items-center gap-3">
                       <div className={cn('h-9 w-9 rounded-lg flex items-center justify-center', inStock ? 'bg-green-500/10' : 'bg-red-500/10')}>
@@ -566,7 +667,11 @@ export default function CompanyDashboard() {
                         <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                           <Badge variant="outline" className="text-[10px] h-4">{stock.serverType}</Badge>
                           {stock.tags?.map(t => <Badge key={t} variant="secondary" className="text-[10px] h-4">{t}</Badge>)}
-                          {inStock ? (
+                          {hasPreconfig ? (
+                            <Badge className="text-[10px] h-4 bg-blue-500/10 text-blue-700">
+                              {stock.inventoryAvailable}/{stock.inventoryTotal} ready
+                            </Badge>
+                          ) : inStock ? (
                             <Badge className="text-[10px] h-4 bg-emerald-500/10 text-emerald-700">{count} in stock</Badge>
                           ) : (
                             <Badge className="text-[10px] h-4 bg-red-500/10 text-red-600">Out of stock</Badge>
@@ -575,25 +680,155 @@ export default function CompanyDashboard() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      <Label htmlFor={`stock-${stock._id}`} className="text-xs text-muted-foreground whitespace-nowrap">Units</Label>
-                      <Input
-                        id={`stock-${stock._id}`}
-                        type="number"
-                        min={0}
-                        step={1}
-                        value={stockCountDrafts[stock._id] ?? String(count)}
-                        onChange={(e) => setStockCountDrafts(prev => ({ ...prev, [stock._id]: e.target.value }))}
-                        className="w-24 h-9"
-                      />
                       <Button
+                        variant="outline"
                         size="sm"
-                        onClick={() => updateStockCount(stock._id)}
-                        disabled={savingStockId === stock._id}
+                        onClick={() => setExpandedStockId(expanded ? null : stock._id)}
                       >
-                        {savingStockId === stock._id ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save'}
+                        {expanded ? 'Hide' : 'Manage servers'}
                       </Button>
+                      {!hasPreconfig && (
+                        <>
+                          <Label htmlFor={`stock-${stock._id}`} className="text-xs text-muted-foreground whitespace-nowrap">Units</Label>
+                          <Input
+                            id={`stock-${stock._id}`}
+                            type="number"
+                            min={0}
+                            step={1}
+                            value={stockCountDrafts[stock._id] ?? String(count)}
+                            onChange={(e) => setStockCountDrafts(prev => ({ ...prev, [stock._id]: e.target.value }))}
+                            className="w-24 h-9"
+                          />
+                          <Button
+                            size="sm"
+                            onClick={() => updateStockCount(stock._id)}
+                            disabled={savingStockId === stock._id}
+                          >
+                            {savingStockId === stock._id ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save'}
+                          </Button>
+                        </>
+                      )}
                     </div>
                   </div>
+
+                  {expanded && (
+                    <div className="border-t pt-4 space-y-4">
+                      <div>
+                        <p className="text-sm font-medium mb-1">Pre-configured servers</p>
+                        <p className="text-xs text-muted-foreground mb-3">
+                          Add IP + credentials in advance. When a customer pays, the next available server is assigned instantly (like Slot IP).
+                        </p>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 mb-3">
+                          <Input
+                            placeholder="IP Address"
+                            value={form.ipAddress}
+                            onChange={(e) => setInventoryFormDrafts(prev => ({
+                              ...prev,
+                              [stock._id]: { ...form, ipAddress: e.target.value },
+                            }))}
+                          />
+                          <Input
+                            placeholder="Username"
+                            value={form.username}
+                            onChange={(e) => setInventoryFormDrafts(prev => ({
+                              ...prev,
+                              [stock._id]: { ...form, username: e.target.value },
+                            }))}
+                          />
+                          <Input
+                            placeholder="Password"
+                            type="password"
+                            value={form.password}
+                            onChange={(e) => setInventoryFormDrafts(prev => ({
+                              ...prev,
+                              [stock._id]: { ...form, password: e.target.value },
+                            }))}
+                          />
+                          <Select
+                            value={form.os}
+                            onValueChange={(v) => setInventoryFormDrafts(prev => ({
+                              ...prev,
+                              [stock._id]: { ...form, os: v },
+                            }))}
+                          >
+                            <SelectTrigger><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              {OS_OPTIONS.map((os) => (
+                                <SelectItem key={os} value={os}>{os}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <Button
+                          size="sm"
+                          className="mb-3"
+                          onClick={() => addInventory(stock._id, 'single')}
+                          disabled={savingStockId === stock._id}
+                        >
+                          Add 1 server
+                        </Button>
+                        <Textarea
+                          placeholder={'Bulk add (one per line):\n103.151.44.189,Administrator,password123,Windows 2022 64\n103.151.44.190,Administrator,pass456,Ubuntu 22'}
+                          value={inventoryBulkDrafts[stock._id] || ''}
+                          onChange={(e) => setInventoryBulkDrafts(prev => ({ ...prev, [stock._id]: e.target.value }))}
+                          rows={4}
+                          className="text-xs font-mono mb-2"
+                        />
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => addInventory(stock._id, 'bulk')}
+                          disabled={savingStockId === stock._id}
+                        >
+                          Add from bulk paste
+                        </Button>
+                      </div>
+
+                      {(stock.inventoryItems?.length ?? 0) > 0 && (
+                        <div className="rounded-lg border overflow-hidden">
+                          <table className="w-full text-xs">
+                            <thead className="bg-muted/50">
+                              <tr>
+                                <th className="text-left p-2">IP</th>
+                                <th className="text-left p-2">User</th>
+                                <th className="text-left p-2">OS</th>
+                                <th className="text-left p-2">Status</th>
+                                <th className="p-2"></th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {stock.inventoryItems!.map((item) => (
+                                <tr key={item._id} className="border-t">
+                                  <td className="p-2 font-mono">{item.ipAddress}</td>
+                                  <td className="p-2">{item.username}</td>
+                                  <td className="p-2">{item.os}</td>
+                                  <td className="p-2">
+                                    {item.allocated ? (
+                                      <Badge className="text-[10px] bg-muted">Sold</Badge>
+                                    ) : (
+                                      <Badge className="text-[10px] bg-emerald-500/10 text-emerald-700">Available</Badge>
+                                    )}
+                                  </td>
+                                  <td className="p-2 text-right">
+                                    {!item.allocated && (
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-7 text-destructive"
+                                        onClick={() => removeInventoryItem(stock._id, item._id)}
+                                      >
+                                        Remove
+                                      </Button>
+                                    )}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             );})}

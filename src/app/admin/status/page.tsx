@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Activity,
   Server,
@@ -15,7 +16,12 @@ import {
   Package,
   Zap,
   Shield,
+  Terminal,
+  Download,
+  Search,
+  Copy,
 } from "lucide-react";
+import { toast } from "sonner";
 
 interface AdminStats {
   systemHealth: {
@@ -36,6 +42,46 @@ interface AdminStats {
   };
   users: { total: number };
   tickets: { total: number; open: number };
+}
+
+interface PaymentLogEntry {
+  timestamp: string;
+  level: string;
+  message: string;
+  data?: unknown;
+}
+
+interface PaymentOrderLog {
+  _id: string;
+  orderId?: string;
+  clientTxnId?: string;
+  source: string;
+  success: boolean;
+  anomaly: boolean;
+  flowType?: string;
+  orderContext?: {
+    productName?: string;
+    memory?: string;
+    price?: number;
+    status?: string;
+  };
+  paymentInfo?: {
+    method?: string;
+    gatewayStatus?: string;
+    transactionId?: string;
+    amount?: number;
+  };
+  errorMessage?: string;
+  duration?: number;
+  logs: PaymentLogEntry[];
+  createdAt: string;
+}
+
+interface PaymentLogSummary {
+  total: number;
+  successCount: number;
+  anomalyCount: number;
+  failedCount: number;
 }
 
 const statusBadge = (status: string) => {
@@ -68,6 +114,15 @@ export default function AdminStatusPage() {
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
+  const [paymentLogs, setPaymentLogs] = useState<PaymentOrderLog[]>([]);
+  const [logSummary, setLogSummary] = useState<PaymentLogSummary | null>(null);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [scanLoading, setScanLoading] = useState(false);
+  const [logFilter, setLogFilter] = useState<"all" | "anomaly" | "success" | "failed">("all");
+  const [txnFilter, setTxnFilter] = useState("");
+  const [selectedLog, setSelectedLog] = useState<PaymentOrderLog | null>(null);
+  const terminalRef = useRef<HTMLDivElement>(null);
+
   const fetchStats = useCallback(async () => {
     try {
       setLoading(true);
@@ -86,9 +141,118 @@ export default function AdminStatusPage() {
     }
   }, []);
 
+  const fetchPaymentLogs = useCallback(async () => {
+    try {
+      setLogsLoading(true);
+      const params = new URLSearchParams({ limit: "80" });
+      if (logFilter === "anomaly") params.set("anomaly", "true");
+      if (logFilter === "success") params.set("success", "true");
+      if (logFilter === "failed") params.set("success", "false");
+      if (txnFilter.trim()) params.set("clientTxnId", txnFilter.trim());
+
+      const res = await fetch(`/api/admin/payment-order-logs?${params}`, {
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (data.success) {
+        setPaymentLogs(data.logs);
+        setLogSummary(data.summary);
+      }
+    } catch (err) {
+      console.error("Failed to fetch payment logs:", err);
+    } finally {
+      setLogsLoading(false);
+    }
+  }, [logFilter, txnFilter]);
+
+  const scanPendingOrders = async () => {
+    try {
+      setScanLoading(true);
+      const res = await fetch("/api/admin/payment-order-logs", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hours: 72 }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        const recovered = data.recoveredCount ?? 0;
+        const anomalies = data.anomalyCount ?? 0;
+        if (recovered > 0) {
+          toast.success(
+            `Recovered ${recovered} order(s) automatically${anomalies > 0 ? ` — ${anomalies} still need manual check` : ''}`
+          );
+        } else if (anomalies > 0) {
+          toast.warning(`Found ${anomalies} paid-but-pending order(s) — recovery failed, check logs`);
+        } else {
+          toast.success(`Scanned ${data.scanned} pending orders — no mismatches found`);
+        }
+        await fetchPaymentLogs();
+      } else {
+        toast.error(data.message || "Scan failed");
+      }
+    } catch {
+      toast.error("Scan failed");
+    } finally {
+      setScanLoading(false);
+    }
+  };
+
+  const downloadLogs = () => {
+    const blob = new Blob([JSON.stringify(paymentLogs, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `payment-order-logs-${new Date().toISOString().slice(0, 10)}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const copyLogForSupport = (log: PaymentOrderLog) => {
+    const text = JSON.stringify(log, null, 2);
+    navigator.clipboard.writeText(text);
+    toast.success("Log copied — paste this when reporting the issue");
+  };
+
+  const formatTs = (d: string) =>
+    new Date(d).toLocaleString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+
+  const levelColor = (level: string) => {
+    switch (level) {
+      case "success":
+        return "text-green-400";
+      case "error":
+        return "text-red-400";
+      case "warning":
+        return "text-yellow-400";
+      case "debug":
+        return "text-gray-500";
+      default:
+        return "text-blue-300";
+    }
+  };
+
   useEffect(() => {
     fetchStats();
   }, [fetchStats]);
+
+  useEffect(() => {
+    fetchPaymentLogs();
+  }, [fetchPaymentLogs]);
+
+  useEffect(() => {
+    if (selectedLog && terminalRef.current) {
+      terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
+    }
+  }, [selectedLog]);
 
   if (loading && !stats) {
     return (
@@ -283,6 +447,224 @@ export default function AdminStatusPage() {
               {statusBadge(svc.status)}
             </div>
           ))}
+        </CardContent>
+      </Card>
+
+      {/* Payment / order debug terminal */}
+      <Card className="border-gray-800 overflow-hidden">
+        <CardHeader className="bg-gray-950 text-gray-100 border-b border-gray-800">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <CardTitle className="flex items-center gap-2 text-gray-100">
+              <Terminal className="w-5 h-5 text-green-400" />
+              Payment &amp; Order Logs
+            </CardTitle>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={scanPendingOrders}
+                disabled={scanLoading}
+                className="border-yellow-600 text-yellow-400 hover:bg-yellow-950"
+              >
+                {scanLoading ? (
+                  <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                ) : (
+                  <Search className="w-4 h-4 mr-1" />
+                )}
+                Scan paid-but-pending
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={fetchPaymentLogs}
+                disabled={logsLoading}
+                className="border-gray-600 text-gray-300"
+              >
+                <RefreshCw className={`w-4 h-4 mr-1 ${logsLoading ? "animate-spin" : ""}`} />
+                Refresh logs
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={downloadLogs}
+                disabled={!paymentLogs.length}
+                className="border-gray-600 text-gray-300"
+              >
+                <Download className="w-4 h-4 mr-1" />
+                Export JSON
+              </Button>
+            </div>
+          </div>
+          <p className="text-sm text-gray-400 mt-1">
+            Tracks when customer paid successfully but order stayed pending. Scan now{" "}
+            <strong className="text-green-400">auto-recovers</strong> paid orders. Use{" "}
+            <strong className="text-green-400">Copy log</strong> to share for debugging.
+          </p>
+        </CardHeader>
+        <CardContent className="p-0 bg-gray-950">
+          {logSummary && (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-gray-800 border-b border-gray-800">
+              {[
+                { label: "Total events", value: logSummary.total, cls: "text-gray-200" },
+                { label: "Confirmed OK", value: logSummary.successCount, cls: "text-green-400" },
+                { label: "Paid but pending", value: logSummary.anomalyCount, cls: "text-yellow-400" },
+                { label: "Other failures", value: logSummary.failedCount, cls: "text-red-400" },
+              ].map((s) => (
+                <div key={s.label} className="bg-gray-950 px-4 py-3">
+                  <p className="text-xs text-gray-500">{s.label}</p>
+                  <p className={`text-xl font-bold font-mono ${s.cls}`}>{s.value}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="p-4 border-b border-gray-800 flex flex-wrap gap-3">
+            <div className="flex gap-1">
+              {(["all", "anomaly", "success", "failed"] as const).map((f) => (
+                <Button
+                  key={f}
+                  size="sm"
+                  variant={logFilter === f ? "default" : "outline"}
+                  onClick={() => setLogFilter(f)}
+                  className={
+                    logFilter === f
+                      ? f === "anomaly"
+                        ? "bg-yellow-600 hover:bg-yellow-700"
+                        : ""
+                      : "border-gray-700 text-gray-400"
+                  }
+                >
+                  {f === "all" ? "All" : f === "anomaly" ? "⚠ Anomalies" : f}
+                </Button>
+              ))}
+            </div>
+            <Input
+              placeholder="Filter by clientTxnId..."
+              value={txnFilter}
+              onChange={(e) => setTxnFilter(e.target.value)}
+              className="max-w-xs bg-gray-900 border-gray-700 text-gray-200 font-mono text-sm"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 min-h-[420px]">
+            {/* Event list */}
+            <div className="border-r border-gray-800 max-h-[480px] overflow-y-auto">
+              {logsLoading && !paymentLogs.length ? (
+                <div className="flex items-center justify-center h-40 text-gray-500">
+                  <Loader2 className="w-6 h-6 animate-spin mr-2" />
+                  Loading logs...
+                </div>
+              ) : paymentLogs.length === 0 ? (
+                <div className="p-6 text-gray-500 text-sm font-mono">
+                  <p>No payment logs yet.</p>
+                  <p className="mt-2 text-gray-600">
+                    Logs appear when webhooks, payment status checks, or scans run.
+                    Click &quot;Scan paid-but-pending&quot; to check recent pending orders against gateways.
+                  </p>
+                </div>
+              ) : (
+                paymentLogs.map((log) => (
+                  <button
+                    key={log._id}
+                    type="button"
+                    onClick={() => setSelectedLog(log)}
+                    className={`w-full text-left px-4 py-3 border-b border-gray-800/60 hover:bg-gray-900 transition font-mono text-xs ${
+                      selectedLog?._id === log._id ? "bg-gray-900 border-l-2 border-l-green-500" : ""
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-gray-500">{formatTs(log.createdAt)}</span>
+                      {log.anomaly && (
+                        <Badge className="bg-yellow-900/60 text-yellow-400 text-[10px] px-1 py-0">
+                          ANOMALY
+                        </Badge>
+                      )}
+                      {log.success && (
+                        <Badge className="bg-green-900/60 text-green-400 text-[10px] px-1 py-0">
+                          OK
+                        </Badge>
+                      )}
+                      <span className="text-gray-600">{log.source}</span>
+                    </div>
+                    <p className="text-gray-300 truncate">
+                      {log.clientTxnId || log.orderId || "—"}{" "}
+                      {log.orderContext?.productName ? `· ${log.orderContext.productName}` : ""}
+                    </p>
+                    {log.errorMessage && (
+                      <p className="text-red-400 truncate mt-0.5">{log.errorMessage}</p>
+                    )}
+                  </button>
+                ))
+              )}
+            </div>
+
+            {/* Terminal detail */}
+            <div className="flex flex-col max-h-[480px]">
+              {selectedLog ? (
+                <>
+                  <div className="flex items-center justify-between px-4 py-2 border-b border-gray-800 bg-gray-900">
+                    <span className="text-xs text-gray-400 font-mono">
+                      {selectedLog.clientTxnId} · {selectedLog.source}
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => copyLogForSupport(selectedLog)}
+                      className="text-green-400 hover:text-green-300 h-7 text-xs"
+                    >
+                      <Copy className="w-3 h-3 mr-1" />
+                      Copy log
+                    </Button>
+                  </div>
+                  <div
+                    ref={terminalRef}
+                    className="flex-1 overflow-y-auto p-4 font-mono text-xs leading-relaxed"
+                  >
+                    <p className="text-green-400 mb-2">
+                      $ payment-debug --order {selectedLog.clientTxnId || selectedLog.orderId}
+                    </p>
+                    <p className="text-gray-500 mb-3">
+                      flow={selectedLog.flowType || "new_order"} source={selectedLog.source}{" "}
+                      success={String(selectedLog.success)} anomaly={String(selectedLog.anomaly)}
+                      {selectedLog.duration != null && ` duration=${selectedLog.duration}ms`}
+                    </p>
+                    {selectedLog.paymentInfo && (
+                      <p className="text-cyan-400 mb-3">
+                        gateway: {selectedLog.paymentInfo.method || "?"} /{" "}
+                        {selectedLog.paymentInfo.gatewayStatus || "?"}{" "}
+                        {selectedLog.paymentInfo.transactionId &&
+                          `txn=${selectedLog.paymentInfo.transactionId}`}
+                      </p>
+                    )}
+                    {selectedLog.errorMessage && (
+                      <p className="text-red-400 mb-3">ERROR: {selectedLog.errorMessage}</p>
+                    )}
+                    {selectedLog.logs.map((entry, i) => (
+                      <div key={i} className="mb-1.5">
+                        <span className="text-gray-600">{formatTs(entry.timestamp)} </span>
+                        <span className={levelColor(entry.level)}>[{entry.level.toUpperCase()}]</span>{" "}
+                        <span className="text-gray-200">{entry.message}</span>
+                        {entry.data != null && (
+                          <pre className="text-gray-500 mt-0.5 ml-4 whitespace-pre-wrap break-all">
+                            {JSON.stringify(entry.data, null, 2)}
+                          </pre>
+                        )}
+                      </div>
+                    ))}
+                    {selectedLog.orderId && (
+                      <p className="text-gray-600 mt-4">
+                        → /admin/orders (search orderId: {selectedLog.orderId})
+                      </p>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <div className="flex-1 flex items-center justify-center text-gray-600 font-mono text-sm p-6 text-center">
+                  Select a log entry to view full trace
+                </div>
+              )}
+            </div>
+          </div>
         </CardContent>
       </Card>
     </div>

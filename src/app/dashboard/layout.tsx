@@ -36,7 +36,9 @@ import {
     Lock,
     FileText,
     ChevronRight,
-    Store
+    Store,
+    Wallet as WalletIcon,
+    ShoppingCart,
 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
@@ -46,6 +48,10 @@ import { AuthProvider } from '@/contexts/AuthContext';
 import { SessionAlertProvider } from '@/components/session-alert';
 import FloatingSupport from '@/components/component/floating-support';
 import LoginNewsPopup from '@/components/login-news-popup';
+import OrderNewsPopup from '@/components/order-news-popup';
+import PremiumPostLoginSplash from '@/components/landing/PremiumPostLoginSplash';
+import { ThemeToggle } from '@/components/ui/theme-toggle';
+import { cn } from '@/lib/utils';
 import {
     Dialog,
     DialogContent,
@@ -87,9 +93,37 @@ export default function DashboardLayout({
     const [showPhoneDialog, setShowPhoneDialog] = useState(false);
     const [phoneNumber, setPhoneNumber] = useState('+91 ');
     const [isSavingPhone, setIsSavingPhone] = useState(false);
+    const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
     useEffect(() => {
         fetchUserData();
+    }, []);
+
+    useEffect(() => {
+        const saved = localStorage.getItem('sidebar-collapsed');
+        if (saved) {
+            try {
+                setSidebarCollapsed(JSON.parse(saved));
+            } catch {
+                /* ignore */
+            }
+        }
+        const onCollapse = (e: Event) => {
+            const detail = (e as CustomEvent<{ collapsed: boolean }>).detail;
+            if (detail && typeof detail.collapsed === 'boolean') {
+                setSidebarCollapsed(detail.collapsed);
+            }
+        };
+        window.addEventListener('sidebar-collapse', onCollapse);
+        return () => window.removeEventListener('sidebar-collapse', onCollapse);
+    }, []);
+
+    /* Portals (dialogs, selects) render on document.body — mark dashboard for portal theme vars */
+    useEffect(() => {
+        document.documentElement.classList.add('premium-dashboard-active');
+        return () => {
+            document.documentElement.classList.remove('premium-dashboard-active');
+        };
     }, []);
 
     const fetchUserData = async () => {
@@ -217,7 +251,16 @@ export default function DashboardLayout({
                 title: 'Order History',
                 description: 'View your past orders and transactions',
                 icon: ShoppingBag,
-                // breadcrumb: [{ name: 'Dashboard', href: '/dashboard' }]
+            },
+            '/dashboard/wallet': {
+                title: 'My Wallet',
+                description: 'Recharge once, checkout faster on every order',
+                icon: WalletIcon,
+            },
+            '/dashboard/cart': {
+                title: 'Your Cart',
+                description: 'Review items and complete checkout',
+                icon: ShoppingCart,
             },
             '/dashboard/scripts': {
                 title: 'Proxy Setup Scripts',
@@ -301,26 +344,34 @@ export default function DashboardLayout({
     };
 
     const currentPage = getPageInfo(pathname);
+    const orderNewsOrderId = pathname.match(/^\/dashboard\/order\/([^/]+)/)?.[1] ?? null;
 
     return (
         <SessionAlertProvider>
             <AuthProvider>
-                <div className="min-h-screen bg-background">
+                <div className="premium-dashboard min-h-screen">
+                    <PremiumPostLoginSplash autoFromSession />
                     <LoginNewsPopup />
+                    {orderNewsOrderId ? (
+                      <OrderNewsPopup key={pathname} orderId={orderNewsOrderId} />
+                    ) : null}
                     {/* Sidebar */}
                     <Suspense>
                       <ResponsiveSidebar user={user} />
                     </Suspense>
 
                     {/* Main Content Area */}
-                    <div className="lg:pl-64">
+                    <div className={cn(
+                        "premium-dashboard-content-wrap transition-[padding] duration-300 min-w-0 overflow-x-hidden",
+                        sidebarCollapsed ? "lg:pl-16" : "lg:pl-64"
+                    )}>
                         {/* Top Navigation Bar */}
-                        <div className="sticky top-0 z-40 bg-background/85 backdrop-blur-xl border-b border-border/50 shadow-[0_1px_12px_-4px_hsl(var(--primary)/0.15)]">
+                        <div className="sticky top-0 z-40 premium-dashboard-topbar lg:top-0">
                             <div className="flex h-12 sm:h-14 items-center justify-between gap-2 px-3 sm:px-4 lg:px-6">
                                 {/* Page Info */}
                                 <div className="flex items-center gap-2 sm:gap-2.5 min-w-0 flex-1">
-                                    <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-primary/25 to-primary/10 border border-primary/30 shadow-sm shadow-primary/10 flex items-center justify-center shrink-0">
-                                        <currentPage.icon className="h-4 w-4 text-primary-foreground dark:text-primary" />
+                                    <div className="premium-dashboard-topbar-icon">
+                                        <currentPage.icon className="h-4 w-4" />
                                     </div>
                                     <div className="min-w-0">
                                         {currentPage.breadcrumb && currentPage.breadcrumb.length > 0 ? (
@@ -337,11 +388,11 @@ export default function DashboardLayout({
                                             </div>
                                         ) : (
                                             <>
-                                                <h1 className="text-sm sm:text-base font-semibold truncate leading-tight tracking-tight">
+                                                <h1 className="text-sm sm:text-base font-semibold truncate leading-tight tracking-tight premium-dashboard-title">
                                                     {currentPage.title}
                                                 </h1>
                                                 {currentPage.description && (
-                                                    <p className="text-[10px] sm:text-xs text-muted-foreground truncate hidden min-[420px]:block">
+                                                    <p className="text-[10px] sm:text-xs premium-dashboard-subtitle truncate hidden min-[420px]:block">
                                                         {currentPage.description}
                                                     </p>
                                                 )}
@@ -351,110 +402,115 @@ export default function DashboardLayout({
                                 </div>
 
                                 {/* Right Side Actions */}
-                                <div className="flex items-center gap-1 sm:gap-1.5 shrink-0 p-1 rounded-xl bg-gradient-to-b from-muted/50 to-muted/20 border border-border/40 shadow-sm backdrop-blur-sm">
+                                <div className="premium-dashboard-topbar-actions">
+                                    <ThemeToggle
+                                        variant="ghost"
+                                        size="icon"
+                                        className="premium-dashboard-icon-btn h-8 w-8 shrink-0"
+                                    />
                                     <WalletBadge hidden={user?.userType === 'reseller'} />
                                     <CartIcon hidden={user?.userType === 'reseller'} />
                                     <NotificationBell />
 
-                                    <div className="w-px h-5 bg-border/60 hidden sm:block" />
+                                    <div className="w-px h-5 hidden sm:block" style={{ background: 'var(--pd-border)' }} />
 
                                     <DropdownMenu>
                                         <DropdownMenuTrigger asChild>
                                             <Button
                                                 variant="ghost"
-                                                className="relative h-9 w-9 rounded-full p-0 hover:opacity-90 ring-2 ring-primary/15 ring-offset-2 ring-offset-background hover:ring-primary/35 transition-all duration-200"
+                                                className="relative h-9 w-9 rounded-full p-0 hover:opacity-90 ring-2 ring-emerald-400/20 ring-offset-2 ring-offset-background hover:ring-emerald-400/40 transition-all duration-200"
                                             >
-                                                <Avatar className="h-8 w-8 shadow-md shadow-primary/25">
+                                                <Avatar className="h-8 w-8 shadow-md shadow-emerald-500/20">
                                                     <AvatarImage src={user?.avatar} alt={user?.name || 'User'} className="object-cover" />
                                                     <AvatarFallback className="bg-gradient-to-br from-emerald-700 via-emerald-600 to-primary text-white text-xs font-bold tracking-wide">
                                                         {user?.name ? getUserInitials(user.name) : 'U'}
                                                     </AvatarFallback>
                                                 </Avatar>
-                                                <span className="absolute bottom-0.5 right-0.5 h-2.5 w-2.5 rounded-full bg-green-500 border-2 border-background shadow-sm" title="Online" />
+                                                <span className="absolute bottom-0.5 right-0.5 h-2.5 w-2.5 rounded-full bg-emerald-400 border-2 border-background shadow-sm" title="Online" />
                                             </Button>
                                         </DropdownMenuTrigger>
-                                        <DropdownMenuContent className="w-72" align="end" forceMount>
+                                        <DropdownMenuContent className="w-72 premium-dashboard-dropdown" align="end" forceMount>
                                             <DropdownMenuLabel className="p-3">
                                                 <div className="flex items-center gap-3">
                                                     <div className="relative shrink-0">
-                                                        <Avatar className="h-11 w-11 shadow-md shadow-primary/20 ring-2 ring-primary/20">
+                                                        <Avatar className="h-11 w-11 shadow-md shadow-emerald-500/15 ring-2 ring-emerald-400/25">
                                                             <AvatarImage src={user?.avatar} alt={user?.name || 'User'} className="object-cover" />
                                                             <AvatarFallback className="bg-gradient-to-br from-emerald-700 via-emerald-600 to-primary text-white font-bold">
                                                                 {user?.name ? getUserInitials(user.name) : 'U'}
                                                             </AvatarFallback>
                                                         </Avatar>
-                                                        <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full bg-green-500 border-2 border-background" />
+                                                        <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full bg-emerald-400 border-2 border-background" />
                                                     </div>
                                                     <div className="flex-1 min-w-0">
                                                         <div className="flex items-center gap-1.5">
-                                                            <p className="text-sm font-medium truncate">
+                                                            <p className="text-sm font-medium truncate premium-dropdown-name">
                                                                 {loading ? 'Loading...' : (user?.name || 'User')}
                                                             </p>
                                                             {user?.isVerified && (
-                                                                <Shield className="h-3.5 w-3.5 text-green-500 shrink-0" />
+                                                                <Shield className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
                                                             )}
                                                         </div>
-                                                        <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
+                                                        <p className="text-xs premium-dropdown-email truncate">{user?.email}</p>
                                                     </div>
                                                 </div>
                                             </DropdownMenuLabel>
 
-                                            <DropdownMenuSeparator />
+                                            <DropdownMenuSeparator className="premium-dropdown-separator" />
 
                                             <DropdownMenuGroup>
-                                                <DropdownMenuItem asChild>
-                                                    <Link href="/dashboard/my-account" className="cursor-pointer">
-                                                        <UserCircle className="mr-2.5 h-4 w-4 text-muted-foreground" />
+                                                <DropdownMenuItem asChild className="premium-dropdown-item cursor-pointer">
+                                                    <Link href="/dashboard/my-account">
+                                                        <UserCircle className="mr-2.5 h-4 w-4 premium-dropdown-icon--accent" />
                                                         My Profile
                                                     </Link>
                                                 </DropdownMenuItem>
-                                                <DropdownMenuItem asChild>
-                                                    <Link href="/dashboard/activity" className="cursor-pointer">
-                                                        <Activity className="mr-2.5 h-4 w-4 text-muted-foreground" />
+                                                <DropdownMenuItem asChild className="premium-dropdown-item cursor-pointer">
+                                                    <Link href="/dashboard/activity">
+                                                        <Activity className="mr-2.5 h-4 w-4 premium-dropdown-icon" />
                                                         Activity Log
                                                     </Link>
                                                 </DropdownMenuItem>
-                                                <DropdownMenuItem asChild>
-                                                    <Link href="/support/tickets" className="cursor-pointer">
-                                                        <MessageCircle className="mr-2.5 h-4 w-4 text-muted-foreground" />
+                                                <DropdownMenuItem asChild className="premium-dropdown-item cursor-pointer">
+                                                    <Link href="/support/tickets">
+                                                        <MessageCircle className="mr-2.5 h-4 w-4 premium-dropdown-icon" />
                                                         Support
                                                     </Link>
                                                 </DropdownMenuItem>
                                             </DropdownMenuGroup>
 
-                                            <DropdownMenuSeparator />
+                                            <DropdownMenuSeparator className="premium-dropdown-separator" />
 
                                             <DropdownMenuGroup>
-                                                <DropdownMenuItem asChild>
-                                                    <Link href="/dashboard/api-keys" className="cursor-pointer">
-                                                        <Key className="mr-2.5 h-4 w-4 text-muted-foreground" />
+                                                <DropdownMenuItem asChild className="premium-dropdown-item cursor-pointer">
+                                                    <Link href="/dashboard/api-keys">
+                                                        <Key className="mr-2.5 h-4 w-4 premium-dropdown-icon" />
                                                         API Keys
                                                     </Link>
                                                 </DropdownMenuItem>
-                                                <DropdownMenuItem asChild>
-                                                    <Link href="/dashboard/billing" className="cursor-pointer">
-                                                        <CreditCard className="mr-2.5 h-4 w-4 text-muted-foreground" />
-                                                        Billing
+                                                <DropdownMenuItem asChild className="premium-dropdown-item cursor-pointer">
+                                                    <Link href="/dashboard/wallet">
+                                                        <WalletIcon className="mr-2.5 h-4 w-4 premium-dropdown-icon" />
+                                                        Wallet
                                                     </Link>
                                                 </DropdownMenuItem>
-                                                <DropdownMenuItem asChild>
-                                                    <Link href="/dashboard/notifications" className="cursor-pointer">
-                                                        <Bell className="mr-2.5 h-4 w-4 text-muted-foreground" />
+                                                <DropdownMenuItem asChild className="premium-dropdown-item cursor-pointer">
+                                                    <Link href="/dashboard/notifications">
+                                                        <Bell className="mr-2.5 h-4 w-4 premium-dropdown-icon" />
                                                         Notifications
                                                     </Link>
                                                 </DropdownMenuItem>
-                                                <DropdownMenuItem asChild>
-                                                    <Link href="/knowledge-base" className="cursor-pointer">
-                                                        <BookOpen className="mr-2.5 h-4 w-4 text-muted-foreground" />
+                                                <DropdownMenuItem asChild className="premium-dropdown-item cursor-pointer">
+                                                    <Link href="/knowledge-base">
+                                                        <BookOpen className="mr-2.5 h-4 w-4 premium-dropdown-icon" />
                                                         Docs
                                                     </Link>
                                                 </DropdownMenuItem>
                                             </DropdownMenuGroup>
 
-                                            <DropdownMenuSeparator />
+                                            <DropdownMenuSeparator className="premium-dropdown-separator" />
 
                                             <DropdownMenuItem
-                                                className="text-red-500 focus:text-red-500 cursor-pointer"
+                                                className="text-red-600 focus:text-red-700 focus:bg-red-500/10 cursor-pointer dark:text-red-400 dark:focus:text-red-300"
                                                 onClick={handleLogout}
                                             >
                                                 <LogOut className="mr-2.5 h-4 w-4" />
@@ -467,7 +523,7 @@ export default function DashboardLayout({
                         </div>
 
                         {/* Page Content */}
-                        <main>
+                        <main className="min-w-0 overflow-x-hidden">
                             {children}
                         </main>
                         <FloatingSupport />
@@ -477,7 +533,7 @@ export default function DashboardLayout({
                     <Dialog open={showPhoneDialog} onOpenChange={(open) => {
                         if (!open) handleDismissPhone();
                     }}>
-                        <DialogContent className="w-[calc(100vw-2rem)] max-w-md mx-auto">
+                        <DialogContent className="w-[calc(100vw-2rem)] max-w-md mx-auto premium-dashboard-dialog">
                             <DialogHeader>
                                 <DialogTitle className="flex items-center gap-2 text-base">
                                     <svg className="h-4 w-4 text-[#25D366]" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>

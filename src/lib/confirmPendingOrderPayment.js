@@ -2,13 +2,13 @@ import Order from '@/models/orderModel';
 import { Cashfree } from 'cashfree-pg';
 import { getRazorpayClient } from '@/lib/razorpayClient';
 import { assignPanelCredentials } from '@/lib/panelCredentials';
-import { decrementIpStockForOrder } from '@/lib/ipStockAvailability';
 import NotificationService from '@/services/notificationService';
 
 const { resolveOrderExpiryOnPayment } = require('@/lib/advpsOrderExpiry');
 const AutoProvisioningService = require('@/services/autoProvisioningService');
 const WhatsAppService = require('@/services/whatsappService');
 import userWalletService from '@/services/userWalletService';
+const PaymentOrderLogger = require('@/services/paymentOrderLogger');
 
 Cashfree.XClientId = process.env.CASHFREE_APP_ID;
 Cashfree.XClientSecret = process.env.CASHFREE_SECRET_KEY;
@@ -249,13 +249,46 @@ async function startProvisioningIfNeeded(order) {
  * If gateway reports SUCCESS, confirm a pending buy-now order.
  * Idempotent — safe when order is already confirmed.
  */
-export async function confirmPendingOrderPayment(order, gatewayResult) {
+export async function confirmPendingOrderPayment(order, gatewayResult, opts = {}) {
   if (!order) return { confirmed: false, reason: 'order not found' };
+
+  const parentLogger = opts.logger || null;
+  const ownLogger =
+    !parentLogger && opts.logSource
+      ? PaymentOrderLogger.forOrder(order, opts.logSource)
+      : null;
+  const logger = parentLogger || ownLogger;
+
+  if (logger) {
+    logger.info('confirmPendingOrderPayment', {
+      orderStatus: order.status,
+      gatewaySuccess: !!gatewayResult?.success,
+      gatewayMethod: gatewayResult?.method,
+      gatewayStatus: gatewayResult?.status,
+    });
+    logger.setPaymentInfo({
+      method: gatewayResult?.method,
+      gatewayStatus: gatewayResult?.status || (gatewayResult?.success ? 'SUCCESS' : 'PENDING'),
+      transactionId: gatewayResult?.transactionId,
+      gatewayOrderId: gatewayResult?.gatewayOrderId,
+    });
+  }
+
   if (order.status === 'confirmed' || order.status === 'active') {
+    if (ownLogger) {
+      logger.info('Order already confirmed — idempotent skip');
+      await ownLogger.save({ success: true });
+    }
     return { confirmed: true, alreadyProcessed: true, order };
   }
 
   if (!gatewayResult?.success) {
+    if (ownLogger) {
+      await ownLogger.save({
+        success: false,
+        errorMessage: gatewayResult?.status || 'PENDING',
+      });
+    }
     return { confirmed: false, paymentStatus: gatewayResult?.status || 'PENDING' };
   }
 
@@ -284,6 +317,16 @@ export async function confirmPendingOrderPayment(order, gatewayResult) {
       };
     } catch (walletErr) {
       console.error('[confirmPendingOrderPayment] wallet re-debit failed:', walletErr.message);
+      if (logger) {
+        logger.error('Gateway paid but wallet re-debit failed', walletErr);
+        if (ownLogger) {
+          await ownLogger.save({
+            success: false,
+            anomaly: true,
+            errorMessage: 'wallet_portion_unpaid',
+          });
+        }
+      }
       return {
         confirmed: false,
         reason: 'wallet_portion_unpaid',
@@ -312,7 +355,12 @@ export async function confirmPendingOrderPayment(order, gatewayResult) {
 
   await assignPanelCredentials(order);
   await order.save();
-  await decrementIpStockForOrder(order);
+
+  const { fulfillOrderInventory } = require('@/lib/fulfillOrderInventory');
+  const inventoryResult = await fulfillOrderInventory(order);
+  if (logger && inventoryResult && !inventoryResult.skipped) {
+    logger.info('Order inventory fulfilled', inventoryResult);
+  }
 
   try {
     await NotificationService.notifyOrderConfirmed(order.user, order);
@@ -322,15 +370,40 @@ export async function confirmPendingOrderPayment(order, gatewayResult) {
 
   await startProvisioningIfNeeded(order);
 
+  if (ownLogger) {
+    logger.success('Order confirmed and saved', {
+      orderId: String(order._id),
+      paymentMethod,
+      transactionId: gatewayResult.transactionId,
+    });
+    await ownLogger.save({ success: true });
+  }
+
   return { confirmed: true, order, paymentStatus: 'SUCCESS', paymentMethod };
 }
 
 /**
  * Poll gateway APIs (with short delays) and confirm when payment landed.
  */
-export async function recoverPendingOrderPayment(order, { maxAttempts = 4, delayMs = 2000 } = {}) {
+export async function recoverPendingOrderPayment(order, opts = {}) {
+  const { maxAttempts = 4, delayMs = 2000, logSource } = opts;
   if (!order) return { confirmed: false, reason: 'order not found' };
+
+  const logger = logSource ? PaymentOrderLogger.forOrder(order, logSource) : null;
+  if (logger) {
+    logger.info('Payment recovery started', {
+      orderStatus: order.status,
+      clientTxnId: order.clientTxnId,
+      maxAttempts,
+      delayMs,
+    });
+  }
+
   if (order.status === 'confirmed' || order.status === 'active') {
+    if (logger) {
+      logger.info('Order already confirmed');
+      await logger.save({ success: true });
+    }
     return { confirmed: true, alreadyProcessed: true, order };
   }
 
@@ -338,13 +411,78 @@ export async function recoverPendingOrderPayment(order, { maxAttempts = 4, delay
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     if (attempt > 0) await sleep(delayMs);
     lastResult = await probeGatewayPayment(order);
+    if (logger) {
+      logger.debug(`Gateway probe attempt ${attempt + 1}/${maxAttempts}`, {
+        success: lastResult.success,
+        status: lastResult.status,
+        method: lastResult.method,
+      });
+    }
     if (lastResult.success) {
-      return confirmPendingOrderPayment(order, lastResult);
+      const confirmResult = await confirmPendingOrderPayment(order, lastResult, { logger });
+      if (confirmResult.confirmed) {
+        if (logger) {
+          logger.success('Recovery confirmed order via gateway probe');
+          await logger.save({ success: true });
+        }
+        return confirmResult;
+      }
+      if (logger) {
+        logger.warning('Gateway SUCCESS but confirmPendingOrderPayment failed', {
+          reason: confirmResult.reason,
+          paymentStatus: confirmResult.paymentStatus,
+        });
+        await logger.save({
+          success: false,
+          anomaly: true,
+          errorMessage: confirmResult.reason || 'confirm_failed_despite_gateway_success',
+        });
+      }
+      return { ...confirmResult, anomaly: true };
     }
     if (lastResult.status && !['PENDING', 'CREATED', 'ATTEMPTED'].includes(lastResult.status)) {
       break;
     }
   }
 
-  return { confirmed: false, paymentStatus: lastResult.status || 'PENDING', order };
+  const freshOrder = await Order.findById(order._id);
+  const finalProbe = await probeGatewayPayment(freshOrder || order);
+  const isAnomaly =
+    finalProbe.success &&
+    freshOrder &&
+    freshOrder.status !== 'confirmed' &&
+    freshOrder.status !== 'active';
+
+  if (logger) {
+    if (isAnomaly) {
+      logger.warning('ANOMALY: Gateway shows PAID but order still pending after recovery', {
+        orderStatus: freshOrder?.status,
+        gatewayMethod: finalProbe.method,
+        transactionId: finalProbe.transactionId,
+      });
+      logger.setPaymentInfo({
+        method: finalProbe.method,
+        gatewayStatus: 'SUCCESS',
+        transactionId: finalProbe.transactionId,
+        gatewayOrderId: finalProbe.gatewayOrderId,
+      });
+    } else {
+      logger.info('Recovery finished without confirming order', {
+        gatewayStatus: lastResult.status || 'PENDING',
+        orderStatus: freshOrder?.status || order.status,
+      });
+    }
+    await logger.save({
+      success: false,
+      anomaly: isAnomaly,
+      errorMessage: isAnomaly ? 'paid_but_order_pending' : lastResult.status || 'PENDING',
+    });
+  }
+
+  return {
+    confirmed: false,
+    paymentStatus: lastResult.status || 'PENDING',
+    order: freshOrder || order,
+    anomaly: isAnomaly,
+  };
 }

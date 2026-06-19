@@ -188,56 +188,26 @@ const ChangePasswordPage = () => {
   const passwordStrength = getPasswordStrength();
   const requirementStatus = getRequirementStatus();
 
-  return (
-    <div className='min-h-screen bg-background'>
-      {/* Mobile Header */}
-      <div className="lg:hidden h-16" />
-
-      {/* Header */}
-      <div className='sticky md:hidden lg:top-0 z-40 bg-background/95 backdrop-blur-sm shadow-sm border-b border-border'>
-        <div className='container mx-auto -mt-14 md:mt-0 px-3 sm:px-4 md:px-6 lg:px-8'>
-          <div className='flex h-14 sm:h-16 items-center gap-2 sm:gap-4'>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => router.back()}
-              className="hover:bg-muted rounded-full flex-shrink-0 h-8 w-8 sm:h-10 sm:w-10"
-            >
-              <ArrowLeft className="h-4 w-4 sm:h-5 sm:w-5" />
-            </Button>
-            <div className='flex items-center gap-2 sm:gap-3 min-w-0 flex-1'>
-              <div className="w-7 h-7 sm:w-8 sm:h-8 bg-primary rounded-lg flex items-center justify-center flex-shrink-0">
-                <Lock className="h-3 w-3 sm:h-4 sm:w-4 text-white" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <h1 className='text-base sm:text-lg lg:text-xl font-bold'>Change Password</h1>
-                <p className="text-xs sm:text-sm text-muted-foreground hidden xs:block">
-                  Update your account security
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className='container mx-auto px-3 sm:px-4 md:px-6 lg:px-8 py-4 sm:py-6'>
+    return (
+        <div className='premium-dashboard-page'>
+            <div className='premium-dashboard-page-inner'>
         <div className="max-w-2xl mx-auto">
           {/* Security Alert */}
-          <Alert className="mb-6">
-            <Shield className="h-4 w-4" />
-            <AlertTitle>Security Notice</AlertTitle>
-            <AlertDescription>
+          <Alert className="mb-6 border-emerald-400/25 bg-emerald-500/10 text-white">
+            <Shield className="h-4 w-4 text-emerald-300" />
+            <AlertTitle className="text-white">Security Notice</AlertTitle>
+            <AlertDescription className="text-white/55">
               After changing your password, you'll be automatically logged out from all devices for security reasons.
             </AlertDescription>
           </Alert>
 
-          <Card>
+          <Card className="premium-dashboard-card border-0">
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <KeyRound className="h-5 w-5" />
+              <CardTitle className="flex items-center gap-2 text-white">
+                <KeyRound className="h-5 w-5 text-emerald-300" />
                 Update Your Password
               </CardTitle>
-              <CardDescription>
+              <CardDescription className="text-white/45">
                 Choose a strong password to keep your account secure. Make sure it's something you haven't used before.
               </CardDescription>
             </CardHeader>
@@ -253,10 +223,7 @@ const ChangePasswordPage = () => {
                       value={formData.currentPassword}
                       onChange={(e) => handleInputChange('currentPassword', e.target.value)}
                       placeholder="Enter your current password"
-                      className={cn(
-                        "pr-10",
-                        errors.currentPassword && "border-destructive focus-visible:ring-destructive"
-                      )}
+                      className={cn("premium-dashboard-input pr-10", errors.currentPassword && "border-red-400/50")}
                     />
                     <Button
                       type="button"
@@ -421,7 +388,7 @@ const ChangePasswordPage = () => {
                   <Button
                     type="submit"
                     disabled={loading || Object.keys(errors).length > 0}
-                    className="flex-1 sm:flex-none"
+                    className="flex-1 sm:flex-none premium-btn-primary border-0"
                   >
                     {loading ? (
                       <>
@@ -440,6 +407,7 @@ const ChangePasswordPage = () => {
                     variant="outline"
                     onClick={() => router.back()}
                     disabled={loading}
+                    className="premium-btn-outline"
                   >
                     Cancel
                   </Button>
@@ -448,8 +416,8 @@ const ChangePasswordPage = () => {
             </CardContent>
           </Card>
         </div>
-      </div>
-    </div>
+            </div>
+        </div>
   );
 };
 

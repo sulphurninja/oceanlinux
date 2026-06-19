@@ -341,12 +341,7 @@ const ActivityPage = () => {
   };
 
   return (
-    <div className='min-h-screen bg-background'>
-      {/* Mobile Header */}
-      <div className="lg:hidden h-16" />
-
-      {/* Header */}
-   
+    <div className='min-h-screen bg-background min-w-0 overflow-x-hidden'>
       <div className='container mx-auto px-3 sm:px-4 md:px-6 lg:px-8 py-4 sm:py-6'>
         {/* Stats Cards */}
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">

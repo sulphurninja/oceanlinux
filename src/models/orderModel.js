@@ -12,6 +12,8 @@ const orderSchema = new mongoose.Schema({
     inventoryDecremented: { type: Boolean, default: false },
     slotIpPackageId: { type: String },
     slotIpId: { type: String },
+    /** Pre-configured company inventory row assigned on payment */
+    inventoryItemId: { type: String },
     transactionId: { type: String, default: '' },
     status: { type: String, default: 'pending' },
     ipAddress: { type: String, default: '' },

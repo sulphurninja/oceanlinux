@@ -5,10 +5,8 @@ import { Cashfree } from 'cashfree-pg';
 import crypto from 'crypto';
 import NotificationService from '@/services/notificationService';
 import { assignPanelCredentials } from '@/lib/panelCredentials';
-import { decrementIpStockForOrder } from '@/lib/ipStockAvailability';
 const { resolveOrderExpiryOnPayment } = require('@/lib/advpsOrderExpiry');
 const AutoProvisioningService = require('@/services/autoProvisioningService');
-const SlotIPPackage = require('@/models/slotIpPackageModel');
 const WhatsAppService = require('@/services/whatsappService');
 import { enforceOrderAccess } from '@/lib/apiSecurity';
 
@@ -158,7 +156,6 @@ export async function POST(request) {
       };
       await assignPanelCredentials(order);
       await order.save();
-      await decrementIpStockForOrder(order);
 
       console.log(`Order ${order._id} confirmed with Razorpay payment ${razorpay_payment_id} (order: ${razorpay_order_id})`);
       console.log(`Order expiry set to: ${expiryDate ? expiryDate.toISOString() : 'deferred (ADVPS upstream)'}`);
@@ -210,7 +207,6 @@ export async function POST(request) {
         };
         await assignPanelCredentials(order);
         await order.save();
-        await decrementIpStockForOrder(order);
 
         console.log(`Order ${order._id} confirmed with Cashfree payment ${payment.cf_payment_id} (order: ${order.clientTxnId})`);
         console.log(`Order expiry set to: ${expiryDate ? expiryDate.toISOString() : 'deferred (ADVPS upstream)'}`);
@@ -231,110 +227,44 @@ export async function POST(request) {
       console.error('Failed to create payment confirmation notification:', notifError);
     }
 
-    // Allocate a slot IP if this is a slot IP purchase
-    if (order.slotIpPackageId && !order.slotIpId) {
-      try {
-        console.log(`[PAYMENT-CONFIRM] Allocating slot IP for order ${order._id}`);
+    const { fulfillOrderInventory } = require('@/lib/fulfillOrderInventory');
+    await fulfillOrderInventory(order);
 
-        const allocated = await SlotIPPackage.findOneAndUpdate(
-          {
-            _id: order.slotIpPackageId,
-            'ips.allocated': false,
-          },
-          {
-            $set: {
-              'ips.$.allocated': true,
-              'ips.$.orderId': order._id,
-              'ips.$.allocatedAt': new Date(),
-            },
-          },
-          { new: true }
-        );
-
-        if (allocated) {
-          const slotIp = allocated.ips.find(
-            ip => ip.orderId && ip.orderId.toString() === order._id.toString()
-          );
-
-          if (slotIp) {
-            order.slotIpId = slotIp._id.toString();
-            order.ipAddress = `${slotIp.ip}:${slotIp.port}`;
-            order.username = slotIp.username;
-            order.password = slotIp.password;
-            order.provisioningStatus = 'active';
-            order.autoProvisioned = true;
-            order.provider = 'slotip';
-            await order.save();
-            console.log(`[PAYMENT-CONFIRM] Slot IP allocated: ${slotIp.proxy} -> order ${order._id}`);
-          }
-        } else {
-          console.error(`[PAYMENT-CONFIRM] No available slot IPs in package ${order.slotIpPackageId}`);
-          order.provisioningStatus = 'failed';
-          order.provisioningError = 'No available slot IPs in this package';
-          await order.save();
-        }
-      } catch (slotError) {
-        console.error(`[PAYMENT-CONFIRM] Slot IP allocation failed:`, slotError);
-        order.provisioningStatus = 'failed';
-        order.provisioningError = `Slot IP allocation failed: ${slotError.message}`;
-        await order.save();
-      }
-    }
-
-    // Trigger auto-provisioning with duplicate prevention (skip for slot IPs)
     try {
-      // Skip auto-provisioning for slot IP orders (already allocated above)
-      if (order.slotIpPackageId) {
-        console.log(`[PAYMENT-CONFIRM] Slot IP order - skipping auto-provisioning`);
-      } else {
       const freshOrder = await Order.findById(order._id);
-      const alreadyProvisioning = freshOrder?.provisioningStatus === 'provisioning' ||
-                                   freshOrder?.provisioningStatus === 'active' ||
-                                   freshOrder?.ipAddress;
-      
-      if (alreadyProvisioning) {
-        console.log(`[PAYMENT-CONFIRM] ⚠️ Order ${order._id} already provisioning/provisioned, skipping`);
-        console.log(`[PAYMENT-CONFIRM]   → Status: ${freshOrder?.provisioningStatus}`);
-        console.log(`[PAYMENT-CONFIRM]   → IP: ${freshOrder?.ipAddress || 'none'}`);
+      if (freshOrder?.slotIpPackageId || freshOrder?.inventoryItemId || freshOrder?.ipAddress) {
+        console.log(`[PAYMENT-CONFIRM] Pre-assigned inventory — skipping auto-provisioning`);
+      } else if (
+        freshOrder?.provisioningStatus === 'provisioning' ||
+        freshOrder?.provisioningStatus === 'active'
+      ) {
+        console.log(`[PAYMENT-CONFIRM] Order ${order._id} already provisioning/provisioned, skipping`);
       } else {
-        console.log(`[PAYMENT-CONFIRM] 🚀 Starting auto-provisioning for order ${order._id}`);
-        
+        console.log(`[PAYMENT-CONFIRM] Starting auto-provisioning for order ${order._id}`);
         const provisioningService = new AutoProvisioningService();
-
-        // Create notification for provisioning start
         await NotificationService.notifyOrderProvisioning(order.user, order);
-
-        // Start provisioning in background
-        provisioningService.provisionServer(order._id.toString())
-          .then(async result => {
-            console.log(`[PAYMENT-CONFIRM] Auto-provisioning completed for order ${order._id}:`, result);
-
-            // Create notification for successful provisioning
+        provisioningService
+          .provisionServer(order._id.toString())
+          .then(async (result) => {
             if (result.success && !result.alreadyProvisioned && !result.alreadyProvisioning) {
               await NotificationService.notifyOrderCompleted(order.user, order, {
                 ipAddress: result.ipAddress || 'Available in dashboard',
                 username: result.username || 'root',
-                password: result.password || 'Check dashboard'
+                password: result.password || 'Check dashboard',
               });
               WhatsAppService.notifyOrderViaWhatsApp(order.user, order).catch(() => {});
             } else if (!result.success && !result.alreadyProvisioning && !result.advpsPending) {
               await NotificationService.notifyOrderFailed(order.user, order, result.error);
-            } else if (result.advpsPending) {
-              console.log(`[PAYMENT-CONFIRM] ADVPS order pending assignment — skipping failure notification`);
             }
           })
-          .catch(async error => {
-            console.error(`[PAYMENT-CONFIRM] Auto-provisioning failed for order ${order._id}:`, error);
+          .catch(async (error) => {
             if (!String(error.message).startsWith('ADVPS_PENDING')) {
               await NotificationService.notifyOrderFailed(order.user, order, error.message);
             }
           });
-
-        console.log("[PAYMENT-CONFIRM] Auto-provisioning initiated");
       }
-      } // end of slot IP skip block
     } catch (error) {
-      console.error("[PAYMENT-CONFIRM] Error starting auto-provisioning:", error);
+      console.error('[PAYMENT-CONFIRM] Error starting auto-provisioning:', error);
     }
 
     return NextResponse.json({

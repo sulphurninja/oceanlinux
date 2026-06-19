@@ -112,11 +112,13 @@ export default function AdminDashboardPage() {
   }
 
   return (
-    <div className="p-6 space-y-6 ">
+    <div className="admin-page-container space-y-6 min-w-0 overflow-x-hidden">
       {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold">Admin Dashboard</h1>
-        <p className="text-muted-foreground">Overview of your OceanLinux platform</p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold">Admin Dashboard</h1>
+          <p className="text-muted-foreground">Overview of your OceanLinux platform</p>
+        </div>
       </div>
 
       {/* Stats Grid */}

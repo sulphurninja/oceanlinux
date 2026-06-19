@@ -4,11 +4,10 @@ import Order from '@/models/orderModel';
 import Cart from '@/models/cartModel';
 import userWalletService from '@/services/userWalletService';
 import NotificationService from '@/services/notificationService';
-import { decrementIpStockForOrder } from '@/lib/ipStockAvailability';
+import { fulfillOrderInventory } from '@/lib/fulfillOrderInventory';
 const { resolveOrderExpiryOnPayment } = require('@/lib/advpsOrderExpiry');
 
 const AutoProvisioningService = require('@/services/autoProvisioningService');
-const SlotIPPackage = require('@/models/slotIpPackageModel');
 
 /**
  * Single dispatch shim used by:
@@ -127,16 +126,9 @@ export async function confirmCheckoutFromWebhook(session, { paymentMethod, trans
   // updateMany) so model hooks / panel-credentials helpers can run
   // per-order if added later.
   const orders = await Order.find({ _id: { $in: session.orderIds } });
-  const slotOrderIds = [];
-  const provisionableOrderIds = [];
 
   for (const order of orders) {
-    if (order.status === 'confirmed') {
-      // already handled; just include for slot allocation if needed below
-      if (order.slotIpPackageId && !order.slotIpId) slotOrderIds.push(order._id);
-      else if (!order.slotIpPackageId) provisionableOrderIds.push(order._id);
-      continue;
-    }
+    if (order.status === 'confirmed') continue;
 
     order.status = 'confirmed';
     const orderExpiry = await resolveOrderExpiryOnPayment(order);
@@ -152,56 +144,27 @@ export async function confirmCheckoutFromWebhook(session, { paymentMethod, trans
       confirmedAt: new Date(),
     };
     await order.save();
-    await decrementIpStockForOrder(order);
-
-    if (order.slotIpPackageId && !order.slotIpId) {
-      slotOrderIds.push(order._id);
-    } else if (!order.slotIpPackageId) {
-      provisionableOrderIds.push(order._id);
-    }
   }
 
-  // Allocate slot IPs INLINE — same pattern as /api/payment/confirm.
-  for (const orderId of slotOrderIds) {
-    try {
-      const order = await Order.findById(orderId);
-      if (!order || !order.slotIpPackageId || order.slotIpId) continue;
+  const provisionableOrderIds = [];
 
-      const allocated = await SlotIPPackage.findOneAndUpdate(
-        { _id: order.slotIpPackageId, 'ips.allocated': false },
-        {
-          $set: {
-            'ips.$.allocated': true,
-            'ips.$.orderId': order._id,
-            'ips.$.allocatedAt': new Date(),
-          },
-        },
-        { new: true }
-      );
-
-      if (allocated) {
-        const slotIp = allocated.ips.find(
-          ip => ip.orderId && ip.orderId.toString() === order._id.toString()
-        );
-        if (slotIp) {
-          order.slotIpId = slotIp._id.toString();
-          order.ipAddress = `${slotIp.ip}:${slotIp.port}`;
-          order.username = slotIp.username;
-          order.password = slotIp.password;
-          order.provisioningStatus = 'active';
-          order.autoProvisioned = true;
-          order.provider = 'slotip';
-          await order.save();
-        }
-      } else {
-        order.provisioningStatus = 'failed';
-        order.provisioningError = 'No available slot IPs in this package';
-        await order.save();
-      }
-    } catch (slotErr) {
-      console.error('[paymentDispatch] slot IP allocation error:', slotErr);
+  for (const order of orders) {
+    const fresh = await Order.findById(order._id);
+    if (!fresh) continue;
+    await fulfillOrderInventory(fresh);
+    const updated = await Order.findById(order._id);
+    if (
+      updated?.slotIpPackageId ||
+      updated?.inventoryItemId ||
+      updated?.ipAddress ||
+      updated?.provisioningStatus === 'active'
+    ) {
+      continue;
     }
+    provisionableOrderIds.push(order._id);
   }
+
+  const slotOrderIds = orders.filter((o) => o.slotIpPackageId).map((o) => o._id);
 
   // Kick off bulk provisioning for non-slot orders (fire-and-forget).
   if (provisionableOrderIds.length) {

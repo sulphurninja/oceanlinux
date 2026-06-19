@@ -680,6 +680,7 @@ export async function POST(request) {
               case 'start': {
                 const { vmId } = await findVm();
                 const apiRes = await resellerApi.start(vmId);
+                resellerApi.invalidateVmIpCache(ipAddress);
                 await Order.findByIdAndUpdate(orderId, {
                   lastAction: 'start',
                   lastActionTime: new Date(),
@@ -700,6 +701,7 @@ export async function POST(request) {
               case 'stop': {
                 const { vmId } = await findVm();
                 const apiRes = await resellerApi.stop(vmId);
+                resellerApi.invalidateVmIpCache(ipAddress);
                 await Order.findByIdAndUpdate(orderId, {
                   lastAction: 'stop',
                   lastActionTime: new Date(),
@@ -707,20 +709,27 @@ export async function POST(request) {
                     logs: {
                       action: 'stop',
                       timestamp: new Date(),
-                      details: `Stop sent via reseller API (vmId=${vmId})`,
+                      details: `Stop sent via reseller API (vmId=${vmId}${apiRes?.task_id ? `, task=${apiRes.task_id}` : ''})`,
                       success: true,
                     },
                   },
                 });
                 return NextResponse.json({
                   success: true,
-                  result: { success: true, message: 'Stop command sent (reseller API)', apiResponse: apiRes, vmId },
+                  result: {
+                    success: true,
+                    message: apiRes?.message || 'Stop command sent (reseller API)',
+                    taskId: apiRes?.task_id || null,
+                    apiResponse: apiRes,
+                    vmId,
+                  },
                 });
               }
               case 'restart':
               case 'reboot': {
                 const { vmId } = await findVm();
                 const apiRes = await resellerApi.restart(vmId);
+                resellerApi.invalidateVmIpCache(ipAddress);
                 await Order.findByIdAndUpdate(orderId, {
                   lastAction: 'restart',
                   lastActionTime: new Date(),

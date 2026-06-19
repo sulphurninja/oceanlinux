@@ -1,5 +1,9 @@
 import IPStock from '@/models/ipStockModel';
 import Order from '@/models/orderModel';
+import {
+  usesPreconfiguredInventory,
+  countUnallocatedInventory,
+} from '@/lib/companyInventory';
 
 /** Company-linked IP stocks use numeric inventory; others use the legacy boolean. */
 export function usesStockCount(stock) {
@@ -8,6 +12,9 @@ export function usesStockCount(stock) {
 
 export function getIpStockRemaining(stock) {
   if (!stock) return 0;
+  if (usesPreconfiguredInventory(stock)) {
+    return countUnallocatedInventory(stock);
+  }
   if (usesStockCount(stock)) {
     return Math.max(0, Number(stock.stockCount) || 0);
   }

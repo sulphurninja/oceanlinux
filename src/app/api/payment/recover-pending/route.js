@@ -50,7 +50,11 @@ export async function POST(request) {
 
   for (const order of pendingOrders) {
     try {
-      const recovery = await recoverPendingOrderPayment(order, { maxAttempts: 2, delayMs: 500 });
+      const recovery = await recoverPendingOrderPayment(order, {
+        maxAttempts: 2,
+        delayMs: 500,
+        logSource: 'recover-api',
+      });
       results.push({
         orderId: order._id,
         clientTxnId: order.clientTxnId,

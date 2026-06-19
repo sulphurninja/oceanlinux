@@ -43,29 +43,18 @@ export default function WalletBadge({
   });
 
   return (
-    <div className={cn('group/wallet flex items-center rounded-lg overflow-hidden shadow-sm hover:shadow-md hover:shadow-primary/15 transition-shadow duration-200', className)}>
+    <div className={cn('premium-dashboard-wallet-pill group/wallet', className)}>
       <Link
         href="/dashboard/wallet"
-        className={cn(
-          'flex items-center gap-1 h-8 pl-2 pr-1.5 sm:pr-2',
-          'border border-r-0 border-primary/35 bg-gradient-to-r from-primary/20 to-primary/10',
-          'hover:from-primary/30 hover:to-primary/15 transition-all',
-          'text-xs font-semibold'
-        )}
+        className="premium-dashboard-wallet-link"
         title={`Wallet balance: ₹${formatted}`}
       >
-        <Wallet className="h-3.5 w-3.5 text-primary-foreground/80 dark:text-primary shrink-0" />
-        <span className="text-primary-foreground dark:text-primary-foreground tabular-nums">
-          ₹{formatted}
-        </span>
+        <Wallet className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-300 shrink-0" />
+        <span className="tabular-nums">₹{formatted}</span>
       </Link>
       <Link
         href="/dashboard/wallet"
-        className={cn(
-          'flex items-center justify-center h-8 w-7 sm:w-8',
-          'border border-primary/35 bg-gradient-to-br from-primary to-primary/85 text-primary-foreground',
-          'hover:from-primary/95 hover:to-primary/75 hover:scale-105 transition-all duration-200'
-        )}
+        className="premium-dashboard-wallet-add"
         title="Add money to wallet"
       >
         <Plus className="h-3.5 w-3.5" />

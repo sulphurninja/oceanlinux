@@ -1,5 +1,7 @@
 'use client'
 
+import { premiumBadge } from '@/lib/premium-badges';
+
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
@@ -48,6 +50,7 @@ import {
     Receipt,
     FileText
 } from 'lucide-react';
+import DashboardSearchInput from '@/components/dashboard/DashboardSearchInput';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -74,6 +77,7 @@ import {
     getOrdersPageStatus,
     hasDeliveredCredentials,
     hasOrderBeenDelivered,
+    isOrderAwaitingDelivery,
     isOrderPaid,
 } from '@/lib/orderDeliveryStatus';
 
@@ -299,28 +303,37 @@ const OrderHistory = () => {
         switch (status) {
             case 'delivered':
                 return (
-                    <Badge className="bg-green-50 text-green-700 border border-green-200 dark:bg-green-950 dark:text-green-300 dark:border-green-800">
+                    <Badge variant="outline" className={premiumBadge.success}>
                         <CheckCircle className="w-3 h-3 mr-1" />
                         Delivered
                     </Badge>
                 );
             case 'pending':
                 return (
-                    <Badge className="bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800">
-                        <Clock className="w-3 h-3 mr-1" />
-                        Pending
+                    <Badge variant="outline" className={premiumBadge.info}>
+                        {isOrderAwaitingDelivery(order) ? (
+                            <>
+                                <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                                Processing
+                            </>
+                        ) : (
+                            <>
+                                <Clock className="w-3 h-3 mr-1" />
+                                Awaiting Payment
+                            </>
+                        )}
                     </Badge>
                 );
             case 'failed':
                 return (
-                    <Badge className="bg-red-50 text-red-700 border border-red-200 dark:bg-red-950 dark:text-red-300 dark:border-red-800">
+                    <Badge variant="outline" className={premiumBadge.error}>
                         <XCircle className="w-3 h-3 mr-1" />
                         Failed
                     </Badge>
                 );
             case 'cancelled':
                 return (
-                    <Badge className="bg-gray-50 text-gray-700 border border-gray-200 dark:bg-gray-950 dark:text-gray-300 dark:border-gray-800">
+                    <Badge variant="outline" className={premiumBadge.neutral}>
                         <X className="w-3 h-3 mr-1" />
                         Cancelled
                     </Badge>
@@ -362,79 +375,33 @@ const OrderHistory = () => {
     };
 
     return (
-        <div className='min-h-screen bg-background'>
-            {/* Mobile Header */}
-            <div className="lg:hidden h-16" />
-
-            {/* Responsive Header */}
-            <div className='sticky md:hidden lg:top-0 z-40 bg-background/95 backdrop-blur-sm shadow-sm border-b border-border'>
-                <div className='container mx-auto -mt-14 md:mt-0 px-3 sm:px-4 md:px-6 lg:px-8'>
-                    <div className='flex h-14 sm:h-16 items-center justify-between gap-2 sm:gap-4'>
-                        <div className='flex items-center gap-2 sm:gap-3 min-w-0 flex-1'>
-                            <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => router.back()}
-                                className="hover:bg-muted rounded-full flex-shrink-0 h-8 w-8 sm:h-10 sm:w-10"
-                            >
-                                <ArrowLeft className="h-4 w-4 sm:h-5 sm:w-5" />
-                            </Button>
-                            <div className='flex items-center gap-2 sm:gap-3 min-w-0 flex-1'>
-                                <div className="w-7 h-7 sm:w-8 sm:h-8 bg-primary rounded-lg flex items-center justify-center flex-shrink-0">
-                                    <History className="h-3 w-3 sm:h-4 sm:w-4 text-white" />
-                                </div>
-                                <div className="min-w-0 flex-1">
-                                    <h1 className='text-base sm:text-lg lg:text-xl font-bold'>Order History</h1>
-                                    <p className="text-xs sm:text-sm text-muted-foreground hidden xs:block">All your orders & order history</p>
-                                </div>
-                            </div>
-                        </div>
-
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            className="gap-1 sm:gap-2 h-8 sm:h-9 px-2 sm:px-3 flex-shrink-0"
-                            onClick={fetchOrders}
-                            disabled={loading}
-                        >
-                            <RefreshCw className={`h-3 w-3 sm:h-4 sm:w-4 ${loading ? 'animate-spin' : ''}`} />
-                            <span className="hidden sm:inline text-xs sm:text-sm">Refresh</span>
-                        </Button>
-                    </div>
-                </div>
-            </div>
-
-            {/* Main Content */}
-            <div className='container mx-auto px-3 sm:px-4 md:px-6 lg:px-8 py-4 sm:py-6'>
+        <div className='premium-dashboard-page'>
+            <div className='premium-dashboard-page-inner'>
                 {/* Search and Filters Section */}
                 {!loading && orders.length > 0 && (
-                    <div className="mb-4 sm:mb-6 space-y-3 sm:space-y-4">
+                    <div className="premium-dashboard-toolbar mb-4 sm:mb-6 space-y-3 sm:space-y-4">
                         <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 items-stretch sm:items-center">
-                            {/* Search Bar */}
-                            <div className="relative flex-1 max-w-full">
-                                <Search className="absolute left-2.5 sm:left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                                <Input
-                                    placeholder="Search orders by product, transaction ID, or customer..."
-                                    value={searchQuery}
-                                    onChange={(e) => setSearchQuery(e.target.value)}
-                                    className="pl-8 sm:pl-10 w-full pr-8 sm:pr-10 h-9 sm:h-10 text-sm"
-                                />
-                                {searchQuery && (
-                                    <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={clearSearch}
-                                        className="absolute right-1 top-1/2 transform -translate-y-1/2 h-6 w-6 p-0 hover:bg-muted/80"
-                                    >
-                                        <XIcon className="h-3 w-3" />
-                                    </Button>
-                                )}
-                            </div>
+                            <DashboardSearchInput
+                                value={searchQuery}
+                                onChange={setSearchQuery}
+                                onClear={clearSearch}
+                                placeholder="Search orders by product, transaction ID, or customer..."
+                            />
 
-                            {/* Status Filter */}
+                            <div className="flex gap-2 shrink-0">
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="gap-1 sm:gap-2 h-9 sm:h-10 px-2 sm:px-3 premium-btn-outline"
+                                    onClick={fetchOrders}
+                                    disabled={loading}
+                                >
+                                    <RefreshCw className={`h-3 w-3 sm:h-4 sm:w-4 ${loading ? 'animate-spin' : ''}`} />
+                                    <span className="hidden sm:inline text-xs sm:text-sm">Refresh</span>
+                                </Button>
                             <div className="flex gap-2">
                                 <Select value={statusFilter} onValueChange={setStatusFilter}>
-                                    <SelectTrigger className="w-32 sm:w-36 h-9 sm:h-10 text-xs sm:text-sm">
+                                    <SelectTrigger className="premium-dashboard-select w-32 sm:w-36">
                                         <Filter className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
                                         <SelectValue placeholder="Status" />
                                     </SelectTrigger>
@@ -453,17 +420,17 @@ const OrderHistory = () => {
                                         variant="outline"
                                         size="sm"
                                         onClick={clearFilters}
-                                        className="h-9 sm:h-10 px-2 sm:px-3 text-xs sm:text-sm flex-shrink-0"
+                                        className="h-9 sm:h-10 px-2 sm:px-3 text-xs sm:text-sm flex-shrink-0 premium-btn-outline"
                                     >
                                         Clear
                                     </Button>
                                 )}
                             </div>
+                            </div>
                         </div>
 
-                        {/* Show filter summary */}
                         {(searchQuery || statusFilter !== 'all') && (
-                            <p className="text-xs sm:text-sm text-muted-foreground">
+                            <p className="text-xs sm:text-sm text-white/45">
                                 {filteredOrders.length} of {orders.length} orders
                                 {searchQuery && ` matching "${searchQuery}"`}
                                 {statusFilter !== 'all' && ` with status "${statusFilter}"`}
@@ -497,7 +464,7 @@ const OrderHistory = () => {
                         </Button>
                     </div>
                 ) : (
-                    <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4 sm:space-y-6">
+                    <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4 sm:space-y-6 premium-dashboard-tabs">
                         {/* Enhanced Tab Navigation with Counts */}
                         <div className="flex justify-center overflow-x-auto scrollbar-hide">
                             <TabsList className="grid grid-cols-3 md:grid-cols-5 h-fit w-fit min-w-0">
@@ -571,7 +538,7 @@ const OrderHistory = () => {
                                     {filteredOrders.map((order) => (
                                         <Card
                                             key={order._id}
-                                            className="hover:shadow-md transition-shadow cursor-pointer border-0 shadow-lg scale-90 bg-card"
+                                            className="premium-dashboard-order-card"
                                             onClick={() => handleDialogOpen(order)}
                                         >
                                             <CardContent className="p-3 sm:p-4 lg:p-6">
@@ -631,7 +598,7 @@ const OrderHistory = () => {
                                                                 e.stopPropagation();
                                                                 handleDialogOpen(order);
                                                             }}
-                                                            className="w-full gap-1 sm:gap-2 h-8 sm:h-9"
+                                                            className="w-full gap-1 sm:gap-2 h-8 sm:h-9 premium-btn-outline"
                                                         >
                                                             <Eye className="h-3 w-3" />
                                                             <span className="text-xs">View Details</span>
@@ -674,7 +641,7 @@ const OrderHistory = () => {
                                                             {/* Renewal payments indicator */}
                                                             {order.renewalPayments && order.renewalPayments.length > 0 && (
                                                                 <div className="mt-2 xl:mt-3">
-                                                                    <Badge variant="outline" className="text-xs xl:text-sm border-blue-200 text-blue-700 dark:border-blue-800 dark:text-blue-300">
+                                                                    <Badge variant="outline" className={cn(premiumBadge.info, "text-xs xl:text-sm")}>
                                                                         <RefreshCw className="h-3 w-3 xl:h-4 xl:w-4 mr-1" />
                                                                         {order.renewalPayments.length} renewal{order.renewalPayments.length > 1 ? 's' : ''}
                                                                     </Badge>
@@ -694,7 +661,7 @@ const OrderHistory = () => {
                                                                 </p>
                                                             )}
                                                             {order.promoCode && (
-                                                                <p className="text-xs text-green-600 font-medium">
+                                                                <p className="text-xs premium-promo-text font-medium">
                                                                     {order.promoCode} applied
                                                                 </p>
                                                             )}
@@ -707,7 +674,7 @@ const OrderHistory = () => {
                                                                 e.stopPropagation();
                                                                 handleDialogOpen(order);
                                                             }}
-                                                            className="gap-2 h-9 xl:h-10 px-3 xl:px-4"
+                                                            className="gap-2 h-9 xl:h-10 px-3 xl:px-4 premium-btn-outline"
                                                         >
                                                             <Eye className="h-4 w-4" />
                                                             <span className="hidden xl:inline">View Details</span>
@@ -723,13 +690,12 @@ const OrderHistory = () => {
                         </TabsContent>
                     </Tabs>
                 )}
-            </div>
 
             {/* Enhanced Order Details Dialog */}
             {selectedOrder && (
                 <Dialog open={Boolean(selectedOrder)} onOpenChange={() => setSelectedOrder(null)}>
-                    <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-                        <DialogHeader>
+                    <DialogContent className="premium-dashboard-dialog max-w-4xl max-h-[min(92dvh,calc(100dvh-2rem))] w-[calc(100vw-1.25rem)] overflow-hidden">
+                        <DialogHeader className="premium-dashboard-dialog-header">
                             <DialogTitle className="flex items-center gap-3">
                                 <OSIcon os={selectedOrder.os} className="h-8 w-8" />
                                 <div>
@@ -741,9 +707,9 @@ const OrderHistory = () => {
                             </DialogTitle>
                         </DialogHeader>
 
-                        <div className="space-y-6">
+                        <div className="premium-dashboard-dialog-body space-y-6">
                             {/* Order Summary */}
-                            <Card>
+                            <Card className="premium-dashboard-card border-0">
                                 <CardHeader>
                                     <CardTitle className="flex items-center gap-2">
                                         <Receipt className="h-5 w-5" />
@@ -845,7 +811,7 @@ const OrderHistory = () => {
                             </Card>
 
                             {/* Server Specifications */}
-                            <Card>
+                            <Card className="premium-dashboard-card border-0">
                                 <CardHeader>
                                     <CardTitle className="flex items-center gap-2">
                                         <Server className="h-5 w-5" />
@@ -901,7 +867,7 @@ const OrderHistory = () => {
 
                             {/* Server Access Details */}
                             {(selectedOrder.username || selectedOrder.password || selectedOrder.ipAddress || (hasOrderBeenDelivered(selectedOrder) && isOrderPaid(selectedOrder))) && (
-                                <Card>
+                                <Card className="premium-dashboard-card border-0">
                                     <CardHeader>
                                         <CardTitle className="flex items-center gap-2">
                                             <KeyRound className="h-5 w-5" />
@@ -986,11 +952,11 @@ const OrderHistory = () => {
                                                     </div>
                                                 )}
 
-                                                <div className="bg-blue-50 dark:bg-blue-950/30 p-4 rounded-lg border border-blue-200 dark:border-blue-800">
+                                                <div className="bg-sky-500/10 p-4 rounded-xl border border-sky-400/25">
                                                     <div className="flex items-start gap-3">
-                                                        <Shield className="h-5 w-5 text-blue-600 flex-shrink-0 mt-0.5" />
+                                                        <Shield className="h-5 w-5 text-sky-300 flex-shrink-0 mt-0.5" />
                                                         <div>
-                                                            <h4 className="font-semibold text-blue-800 dark:text-blue-200 mb-1">
+                                                            <h4 className="font-semibold text-sky-200 mb-1">
                                                                 Security Note
                                                             </h4>
                                                             <p className="text-sm text-blue-700 dark:text-blue-300">
@@ -1062,7 +1028,7 @@ const OrderHistory = () => {
 
                             {/* Customer Information */}
                             {(selectedOrder.customerName || selectedOrder.customerEmail) && (
-                                <Card>
+                                <Card className="premium-dashboard-card border-0">
                                     <CardHeader>
                                         <CardTitle className="flex items-center gap-2">
                                             <User className="h-5 w-5" />
@@ -1090,7 +1056,7 @@ const OrderHistory = () => {
 
                             {/* Renewal History */}
                             {selectedOrder.renewalPayments && selectedOrder.renewalPayments.length > 0 && (
-                                <Card>
+                                <Card className="premium-dashboard-card border-0">
                                     <CardHeader>
                                         <CardTitle className="flex items-center gap-2">
                                             <RefreshCw className="h-5 w-5" />
@@ -1148,10 +1114,10 @@ const OrderHistory = () => {
                             )}
 
                             {/* Action Buttons */}
-                            <div className="flex flex-col sm:flex-row gap-3 pt-4 border-t">
+                            <div className="premium-dashboard-dialog-footer flex flex-col sm:flex-row gap-3 !border-t !border-white/10">
                                 <Button
                                     onClick={() => router.push(`/dashboard/order/${selectedOrder._id}`)}
-                                    className="gap-2 flex-1"
+                                    className="gap-2 flex-1 bg-emerald-500 hover:bg-emerald-400 text-emerald-950"
                                 >
                                     <Settings className="h-4 w-4" />
                                     Manage Server
@@ -1172,7 +1138,7 @@ const OrderHistory = () => {
                                 <Button
                                     variant="outline"
                                     onClick={() => setSelectedOrder(null)}
-                                    className="gap-2"
+                                    className="gap-2 premium-btn-outline"
                                 >
                                     Close
                                 </Button>
@@ -1181,6 +1147,7 @@ const OrderHistory = () => {
                     </DialogContent>
                 </Dialog>
             )}
+            </div>
         </div>
     );
 };

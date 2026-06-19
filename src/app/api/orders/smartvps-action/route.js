@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 import { getDataFromToken } from '@/helper/getDataFromToken';
+import { resolveOrderForUserOrAdmin } from '@/lib/resolveOrderAccess';
 const SmartVPSAPI = require('@/services/smartvpsApi');
 
 const SMARTVPS_OS_TEMPLATES = {
@@ -242,8 +243,9 @@ export async function GET(request) {
       return NextResponse.json({ message: 'orderId is required' }, { status: 400 });
     }
 
-    console.log('[SMARTVPS-ACTION][GET] Searching for order:', { _id: orderId, user: userId });
-    const order = await Order.findOne({ _id: orderId, user: userId });
+    const resolved = await resolveOrderForUserOrAdmin(request, orderId);
+    if (resolved.error) return resolved.error;
+    const order = resolved.order;
     console.log('[SMARTVPS-ACTION][GET] Found order:', order ? {
       _id: order._id,
       productName: order.productName,
@@ -407,8 +409,9 @@ export async function POST(request) {
       return NextResponse.json({ message: 'orderId and action are required' }, { status: 400 });
     }
 
-    console.log('[SMARTVPS-ACTION][POST] Searching for order:', { _id: orderId, user: userId });
-    const order = await Order.findOne({ _id: orderId, user: userId });
+    const resolved = await resolveOrderForUserOrAdmin(request, orderId);
+    if (resolved.error) return resolved.error;
+    const order = resolved.order;
     console.log('[SMARTVPS-ACTION][POST] Found order:', order ? {
       _id: order._id,
       productName: order.productName,

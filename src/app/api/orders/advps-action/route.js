@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
-import { getDataFromToken } from '@/helper/getDataFromToken';
+import { resolveOrderForUserOrAdmin } from '@/lib/resolveOrderAccess';
 const AdvpsAPI = require('@/services/advpsApi');
 const {
   normalizeAdvpsPowerState,
@@ -48,15 +48,14 @@ async function resolveServiceIdForOrder(api, order, orderId) {
 export async function GET(request) {
   try {
     await connectDB();
-    const userId = await getDataFromToken(request);
-    if (!userId) return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
 
     const { searchParams } = new URL(request.url);
     const orderId = searchParams.get('orderId');
     if (!orderId) return NextResponse.json({ message: 'orderId is required' }, { status: 400 });
 
-    const order = await Order.findOne({ _id: orderId, user: userId });
-    if (!order) return NextResponse.json({ message: 'Order not found' }, { status: 404 });
+    const access = await resolveOrderForUserOrAdmin(request, orderId);
+    if (access.error) return access.error;
+    const order = access.order;
 
     const api = new AdvpsAPI();
     const resolved = await resolveServiceIdForOrder(api, order, orderId);
@@ -148,14 +147,13 @@ export async function GET(request) {
 export async function POST(request) {
   try {
     await connectDB();
-    const userId = await getDataFromToken(request);
-    if (!userId) return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
 
     const { orderId, action, payload } = await request.json();
     if (!orderId || !action) return NextResponse.json({ message: 'orderId and action are required' }, { status: 400 });
 
-    const order = await Order.findOne({ _id: orderId, user: userId });
-    if (!order) return NextResponse.json({ message: 'Order not found' }, { status: 404 });
+    const access = await resolveOrderForUserOrAdmin(request, orderId);
+    if (access.error) return access.error;
+    const order = access.order;
 
     const api = new AdvpsAPI();
     const resolved = await resolveServiceIdForOrder(api, order, orderId);

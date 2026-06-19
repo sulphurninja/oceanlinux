@@ -100,6 +100,7 @@ export async function PATCH(request, { params }) {
 
     if (body.status === 'sent' && announcement.showOnOrderPage) {
       await deactivateSiblingOrderPopups(announcement);
+      announcement.sentAt = new Date();
     }
 
     const contentChanged =

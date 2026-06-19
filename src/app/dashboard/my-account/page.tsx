@@ -523,15 +523,14 @@ const MyAccount = () => {
 
     if (loading) {
         return (
-            <div className="min-h-screen bg-background">
-                <div className="lg:hidden h-16" />
-                <div className="container mx-auto px-4 py-8">
+            <div className="premium-dashboard-page">
+                <div className="premium-dashboard-page-inner">
                     <div className="flex justify-center items-center py-12">
                         <div className="flex flex-col items-center gap-4">
-                            <div className="w-16 h-16 bg-primary/20 rounded-full animate-pulse"></div>
+                            <div className="w-16 h-16 bg-emerald-500/15 rounded-full animate-pulse"></div>
                             <div className="text-center">
-                                <div className="h-4 w-32 bg-muted rounded animate-pulse mb-2"></div>
-                                <div className="h-3 w-24 bg-muted rounded animate-pulse"></div>
+                                <div className="h-4 w-32 bg-white/10 rounded animate-pulse mb-2"></div>
+                                <div className="h-3 w-24 bg-white/5 rounded animate-pulse"></div>
                             </div>
                         </div>
                     </div>
@@ -541,35 +540,10 @@ const MyAccount = () => {
     }
 
     return (
-        <div className='min-h-screen bg-background'>
-            {/* Mobile Header */}
-            <div className="lg:hidden h-16" />
-
-            {/* Responsive Header */}
-            <div className='sticky md:hidden lg:top-0 z-40 bg-background/95 backdrop-blur-sm shadow-sm border-b border-border'>
-                <div className='container mx-auto -mt-14 md:mt-0 px-3 sm:px-4 md:px-6 lg:px-8'>
-                    <div className='flex h-14 sm:h-16 items-center justify-between gap-2 sm:gap-4'>
-                        <div className='flex items-center gap-2 sm:gap-3 min-w-0 flex-1'>
-                            <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => router.back()}
-                                className="hover:bg-muted rounded-full flex-shrink-0 h-8 w-8 sm:h-10 sm:w-10"
-                            >
-                                <ArrowLeft className="h-4 w-4 sm:h-5 sm:w-5" />
-                            </Button>
-                            <div className='flex items-center gap-2 sm:gap-3 min-w-0 flex-1'>
-                                <div className="w-7 h-7 sm:w-8 sm:h-8 bg-primary rounded-lg flex items-center justify-center flex-shrink-0">
-                                    <User className="h-3 w-3 sm:h-4 sm:w-4 text-white" />
-                                </div>
-                                <div className="min-w-0 flex-1">
-                                    <h1 className='text-base sm:text-lg lg:text-xl font-bold'>My Account</h1>
-                                    <p className="text-xs sm:text-sm text-muted-foreground hidden xs:block">Manage your profile and settings</p>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="flex gap-2">
+        <div className='premium-dashboard-page'>
+            <div className='premium-dashboard-page-inner'>
+            <div className="premium-dashboard-page-header mb-4">
+                <div className="flex gap-2 ml-auto w-full sm:w-auto justify-end">
                             {isEditing && (
                                 <>
                                     <Button
@@ -577,9 +551,9 @@ const MyAccount = () => {
                                         size="sm"
                                         onClick={() => {
                                             setIsEditing(false);
-                                            fetchUserData(); // Reset data
+                                            fetchUserData();
                                         }}
-                                        className="gap-1 h-8 sm:h-9 px-2 sm:px-3"
+                                        className="gap-1 h-8 sm:h-9 px-2 sm:px-3 premium-btn-outline"
                                     >
                                         <X className="h-3 w-3 sm:h-4 sm:w-4" />
                                         <span className="hidden sm:inline text-xs">Cancel</span>
@@ -588,7 +562,7 @@ const MyAccount = () => {
                                         size="sm"
                                         onClick={handleProfileUpdate}
                                         disabled={saving}
-                                        className="gap-1 h-8 sm:h-9 px-2 sm:px-3"
+                                        className="gap-1 h-8 sm:h-9 px-2 sm:px-3 premium-btn-primary border-0"
                                     >
                                         {saving ? (
                                             <RefreshCw className="h-3 w-3 sm:h-4 sm:w-4 animate-spin" />
@@ -604,22 +578,18 @@ const MyAccount = () => {
                                     variant="outline"
                                     size="sm"
                                     onClick={() => setIsEditing(true)}
-                                    className="gap-1 h-8 sm:h-9 px-2 sm:px-3"
+                                    className="gap-1 h-8 sm:h-9 px-2 sm:px-3 premium-btn-outline"
                                 >
                                     <Edit3 className="h-3 w-3 sm:h-4 sm:w-4" />
                                     <span className="hidden sm:inline text-xs">Edit</span>
                                 </Button>
                             )}
-                        </div>
-                    </div>
                 </div>
             </div>
 
-            {/* Main Content */}
-            <div className='container mx-auto px-3 sm:px-4 md:px-6 lg:px-8 py-4 sm:py-6'>
                 {/* Profile Header */}
                 <div className="mb-8">
-                    <Card className="border-0 shadow-lg">
+                    <Card className="premium-dashboard-card border-0">
                         <CardContent className="p-6">
                             <div className="flex flex-col md:flex-row items-start md:items-center gap-6">
                                 <div className="relative">
@@ -732,8 +702,8 @@ const MyAccount = () => {
                 </div>
 
                 {/* Tabs */}
-                <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-                    <TabsList className="grid w-full grid-cols-4 lg:grid-cols-4">
+                <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6 premium-dashboard-tabs">
+                    <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 premium-profile-tabs-list">
                         <TabsTrigger value="profile" className="flex items-center gap-2">
                             <User className="h-4 w-4" />
                             <span className="hidden sm:inline">Profile</span>
@@ -1397,28 +1367,28 @@ const MyAccount = () => {
                                 </CardHeader>
                                 <CardContent>
                                     <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                                        <div className="p-4 bg-blue-50 dark:bg-blue-950/30 rounded-lg text-center">
-                                            <div className="w-10 h-10 bg-blue-100 dark:bg-blue-900/50 rounded-lg flex items-center justify-center mx-auto mb-2">
-                                                <Server className="h-5 w-5 text-blue-600" />
+                                        <div className="p-4 rounded-xl border border-sky-400/20 bg-sky-500/10 text-center">
+                                            <div className="w-10 h-10 bg-sky-500/20 rounded-lg flex items-center justify-center mx-auto mb-2">
+                                                <Server className="h-5 w-5 text-sky-300" />
                                             </div>
-                                            <div className="text-2xl font-bold text-blue-600">{user.stats?.totalOrders}</div>
-                                            <div className="text-xs text-muted-foreground">Total Orders</div>
+                                            <div className="text-2xl font-bold tabular-nums premium-dashboard-stat-value">{user.stats?.totalOrders}</div>
+                                            <div className="premium-dashboard-stat-label mt-1">Total Orders</div>
                                         </div>
 
-                                        <div className="p-4 bg-green-50 dark:bg-green-950/30 rounded-lg text-center">
-                                            <div className="w-10 h-10 bg-green-100 dark:bg-green-900/50 rounded-lg flex items-center justify-center mx-auto mb-2">
-                                                <DollarSign className="h-5 w-5 text-green-600" />
+                                        <div className="p-4 rounded-xl border border-emerald-400/20 bg-emerald-500/10 text-center">
+                                            <div className="w-10 h-10 bg-emerald-500/20 rounded-lg flex items-center justify-center mx-auto mb-2">
+                                                <DollarSign className="h-5 w-5 text-emerald-300" />
                                             </div>
-                                            <div className="text-2xl font-bold text-green-600">{formatCurrency(user.stats?.totalSpent || 0)}</div>
-                                            <div className="text-xs text-muted-foreground">Total Spent</div>
+                                            <div className="text-2xl font-bold tabular-nums premium-dashboard-stat-value">{formatCurrency(user.stats?.totalSpent || 0)}</div>
+                                            <div className="premium-dashboard-stat-label mt-1">Total Spent</div>
                                         </div>
 
-                                        <div className="p-4 bg-purple-50 dark:bg-purple-950/30 rounded-lg text-center">
-                                            <div className="w-10 h-10 bg-purple-100 dark:bg-purple-900/50 rounded-lg flex items-center justify-center mx-auto mb-2">
-                                                <Calendar className="h-5 w-5 text-purple-600" />
+                                        <div className="p-4 rounded-xl border border-violet-400/20 bg-violet-500/10 text-center col-span-2 md:col-span-1">
+                                            <div className="w-10 h-10 bg-violet-500/20 rounded-lg flex items-center justify-center mx-auto mb-2">
+                                                <Calendar className="h-5 w-5 text-violet-300" />
                                             </div>
-                                            <div className="text-2xl font-bold text-purple-600">{user.stats?.accountAge}</div>
-                                            <div className="text-xs text-muted-foreground">Days Active</div>
+                                            <div className="text-2xl font-bold tabular-nums premium-dashboard-stat-value">{user.stats?.accountAge}</div>
+                                            <div className="premium-dashboard-stat-label mt-1">Days Active</div>
                                         </div>
 
                                         {/* <div className="p-4 bg-orange-50 dark:bg-orange-950/30 rounded-lg text-center">
@@ -1437,18 +1407,18 @@ const MyAccount = () => {
                                                 <span className="text-sm font-medium">Account Progress</span>
                                                 <span className="text-sm text-muted-foreground">85%</span>
                                             </div>
-                                            <div className="w-full bg-gray-200 rounded-full h-2">
-                                                <div className="bg-primary h-2 rounded-full" style={{ width: '85%' }}></div>
+                                            <div className="w-full bg-white/10 rounded-full h-2">
+                                                <div className="bg-emerald-500 h-2 rounded-full" style={{ width: '85%' }}></div>
                                             </div>
                                         </div>
 
                                         <div>
                                             <div className="flex justify-between items-center mb-2">
-                                                <span className="text-sm font-medium">Profile Completeness</span>
-                                                <span className="text-sm text-muted-foreground">92%</span>
+                                                <span className="text-sm font-medium text-white/80">Profile Completeness</span>
+                                                <span className="text-sm text-white/45">92%</span>
                                             </div>
-                                            <div className="w-full bg-gray-200 rounded-full h-2">
-                                                <div className="bg-green-500 h-2 rounded-full" style={{ width: '92%' }}></div>
+                                            <div className="w-full bg-white/10 rounded-full h-2">
+                                                <div className="bg-emerald-400 h-2 rounded-full" style={{ width: '92%' }}></div>
                                             </div>
                                         </div>
                                     </div>
@@ -1467,19 +1437,19 @@ const MyAccount = () => {
                                     </CardDescription>
                                 </CardHeader>
                                 <CardContent className="space-y-3">
-                                    <Button variant="outline" className="w-full justify-start gap-2" onClick={() => router.push('/dashboard/orders')}>
+                                    <Button variant="outline" className="w-full justify-start gap-2 premium-btn-outline" onClick={() => router.push('/dashboard/orders')}>
                                         <CreditCard className="h-4 w-4" />
                                         View Orders
                                     </Button>
-                                    <Button variant="outline" className="w-full justify-start gap-2" onClick={() => router.push('/dashboard/viewLinux')}>
+                                    <Button variant="outline" className="w-full justify-start gap-2 premium-btn-outline" onClick={() => router.push('/dashboard/viewLinux')}>
                                         <Server className="h-4 w-4" />
                                         Manage Servers
                                     </Button>
-                                    <Button variant="outline" className="w-full justify-start gap-2" onClick={() => router.push('/support/tickets')}>
+                                    <Button variant="outline" className="w-full justify-start gap-2 premium-btn-outline" onClick={() => router.push('/support/tickets')}>
                                         <ExternalLink className="h-4 w-4" />
                                         Support Tickets
                                     </Button>
-                                    <Button variant="outline" className="w-full justify-start gap-2">
+                                    <Button variant="outline" className="w-full justify-start gap-2 premium-btn-outline">
                                         <Download className="h-4 w-4" />
                                         Export Data
                                     </Button>
@@ -1506,21 +1476,21 @@ const MyAccount = () => {
                 </Tabs>
 
                 {/* Danger Zone */}
-                <Card className="border-red-200 bg-red-50/50 dark:border-red-800 dark:bg-red-950/30 mt-8">
+                <Card className="premium-dashboard-card border-red-400/20 bg-red-950/20 mt-8">
                     <CardHeader>
-                        <CardTitle className="flex items-center gap-2 text-red-600">
+                        <CardTitle className="flex items-center gap-2 text-red-300">
                             <AlertCircle className="h-5 w-5" />
                             Danger Zone
                         </CardTitle>
-                        <CardDescription>
+                        <CardDescription className="text-white/45">
                             Irreversible and destructive actions
                         </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">
-                        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 border border-red-200 dark:border-red-800 rounded-lg">
+                        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 border border-red-400/25 bg-red-950/30 rounded-xl">
                             <div>
-                                <h4 className="font-semibold text-red-800 dark:text-red-200">Delete Account</h4>
-                                <p className="text-sm text-red-600 dark:text-red-400">
+                                <h4 className="font-semibold text-red-200">Delete Account</h4>
+                                <p className="text-sm text-red-300/80">
                                     Permanently delete your account and all associated data. This action cannot be undone.
                                 </p>
                             </div>

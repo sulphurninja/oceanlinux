@@ -254,6 +254,7 @@ export async function POST(request) {
     const recovery = await recoverPendingOrderPayment(order, {
       maxAttempts: returnedFromPayment ? 5 : 2,
       delayMs: returnedFromPayment ? 1500 : 0,
+      logSource: 'status-api',
     });
 
     if (recovery.confirmed) {
@@ -274,6 +275,27 @@ export async function POST(request) {
     }
 
     const gatewayProbe = await probeGatewayPayment(order);
+
+    if (gatewayProbe.success && order.status === 'pending') {
+      const PaymentOrderLogger = require('@/services/paymentOrderLogger');
+      const logger = PaymentOrderLogger.forOrder(order, 'status-api');
+      logger.warning('Final probe: gateway PAID but order still pending (webhook/recovery missed)', {
+        clientTxnId: order.clientTxnId,
+        gatewayMethod: gatewayProbe.method,
+        transactionId: gatewayProbe.transactionId,
+      });
+      logger.setPaymentInfo({
+        method: gatewayProbe.method,
+        gatewayStatus: 'SUCCESS',
+        transactionId: gatewayProbe.transactionId,
+        gatewayOrderId: gatewayProbe.gatewayOrderId,
+      });
+      await logger.save({
+        success: false,
+        anomaly: true,
+        errorMessage: 'paid_but_order_pending_on_status_check',
+      });
+    }
 
     return NextResponse.json({
       paymentStatus: gatewayProbe.status || 'PENDING',

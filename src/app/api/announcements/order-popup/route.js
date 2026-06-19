@@ -3,11 +3,8 @@ import Announcement from '@/models/announcementModel';
 import Order from '@/models/orderModel';
 import IPStock from '@/models/ipStockModel';
 import mongoose from 'mongoose';
-import { getDataFromToken } from '@/helper/getDataFromToken';
-import {
-  resolveProviderFromOrder,
-  resolveCompanyIdFromIpStock,
-} from '@/lib/orderAnnouncementTarget';
+import { getDataFromToken, AuthError } from '@/helper/getDataFromToken';
+import { pickOrderPageAnnouncement } from '@/lib/orderPopupMatch';
 
 function isValidHttpUrl(value) {
   if (!value) return false;
@@ -34,76 +31,98 @@ function sanitizePopup(doc) {
   };
 }
 
+function userOwnsOrder(order, userId) {
+  return String(order.user) === String(userId);
+}
+
+async function loadIpStockForOrder(order) {
+  if (!order?.ipStockId) return null;
+
+  const rawId = String(order.ipStockId).trim();
+  if (!rawId) return null;
+
+  let ipStock = null;
+
+  if (mongoose.Types.ObjectId.isValid(rawId)) {
+    ipStock = await IPStock.findById(rawId).populate('company', 'name slug').lean();
+  }
+
+  if (!ipStock) {
+    ipStock = await IPStock.findOne({ _id: rawId }).populate('company', 'name slug').lean();
+  }
+
+  return ipStock;
+}
+
 export async function GET(request) {
   try {
     await connectDB();
 
-    const userId = await getDataFromToken(request);
-    if (!userId) {
-      return Response.json({ message: 'Unauthorized' }, { status: 401 });
+    let userId;
+    try {
+      userId = getDataFromToken(request);
+    } catch (error) {
+      const message = error instanceof AuthError ? error.message : 'Unauthorized';
+      return Response.json({ message }, { status: 401 });
     }
 
     const { searchParams } = new URL(request.url);
-    const orderId = searchParams.get('orderId');
+    const orderId = searchParams.get('orderId')?.trim();
     if (!orderId) {
       return Response.json({ message: 'orderId is required' }, { status: 400 });
     }
 
-    const order = await Order.findOne({ _id: orderId, user: userId }).lean();
-    if (!order) {
+    if (!mongoose.Types.ObjectId.isValid(orderId)) {
+      return Response.json({ message: 'Invalid orderId' }, { status: 400 });
+    }
+
+    const order = await Order.findById(orderId).lean();
+    if (!order || !userOwnsOrder(order, userId)) {
       return Response.json({ message: 'Order not found' }, { status: 404 });
     }
 
-    let ipStock = null;
-    if (order.ipStockId) {
-      ipStock = await IPStock.findById(order.ipStockId)
-        .populate('company', 'name slug')
-        .lean();
-    }
+    const ipStock = await loadIpStockForOrder(order);
 
-    const provider = resolveProviderFromOrder(order, ipStock);
-    const companyId = resolveCompanyIdFromIpStock(ipStock);
-
-    const baseQuery = { status: 'sent', showOnOrderPage: true };
-
-    if (companyId) {
-      const companyPopup = await Announcement.findOne({
-        ...baseQuery,
-        targetCompany: new mongoose.Types.ObjectId(companyId),
-      })
-        .sort({ sentAt: -1, createdAt: -1 })
-        .populate('targetCompany', 'name slug')
-        .lean();
-
-      if (companyPopup) {
-        const company = companyPopup.targetCompany;
-        companyPopup.targetLabel = company
-          ? `${company.name} (/company/${company.slug})`
-          : 'Company';
-        return Response.json({ popup: sanitizePopup(companyPopup), match: 'company' });
-      }
-    }
-
-    const providerPopup = await Announcement.findOne({
-      ...baseQuery,
-      targetProvider: provider,
-      $or: [{ targetCompany: null }, { targetCompany: { $exists: false } }],
-    })
+    const announcements = await Announcement.find({ showOnOrderPage: true })
       .sort({ sentAt: -1, createdAt: -1 })
+      .populate('targetCompany', 'name slug')
       .lean();
 
-    if (providerPopup) {
-      providerPopup.targetLabel = provider.toUpperCase();
-      return Response.json({ popup: sanitizePopup(providerPopup), match: 'provider', provider });
+    const result = pickOrderPageAnnouncement(order, ipStock, announcements);
+
+    if (result.popup) {
+      const popup = { ...result.popup };
+      if (result.match === 'company') {
+        const company = popup.targetCompany;
+        popup.targetLabel = company?.name
+          ? `${company.name}${company.slug ? ` (/company/${company.slug})` : ''}`
+          : 'Company';
+      } else {
+        popup.targetLabel = (result.provider || 'provider').toUpperCase();
+      }
+
+      return Response.json({
+        popup: sanitizePopup(popup),
+        match: result.match,
+        provider: result.provider,
+        companyId: result.companyId,
+      });
     }
 
     return Response.json({
       popup: null,
-      hint: companyId
-        ? `No live company news for this order's company. Provider is "${provider}".`
-        : `No live provider news for "${provider}". Add news in the matching admin column and enable it.`,
-      provider,
-      companyId: companyId || null,
+      hint: result.companyId
+        ? `No live company news for this order's company. Resolved provider is "${result.provider}".`
+        : `No live provider news for "${result.provider}". Publish in Admin → Announcements → Manage Order News → ${result.provider.toUpperCase()}.`,
+      provider: result.provider,
+      companyId: result.companyId,
+      debug: {
+        orderProvider: order.provider || null,
+        advpsServiceId: order.advpsServiceId || null,
+        ipStockId: order.ipStockId || null,
+        ipStockTags: ipStock?.tags || [],
+        liveOrderNewsCount: announcements.filter((a) => a.status === 'sent').length,
+      },
     });
   } catch (error) {
     console.error('Error fetching order popup announcement:', error);

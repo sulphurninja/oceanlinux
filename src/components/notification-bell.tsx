@@ -1,18 +1,13 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Bell, Check, X, Eye, Trash2, ExternalLink } from 'lucide-react';
+import { Bell, Check, ExternalLink } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import {
     DropdownMenu,
     DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuLabel,
-    DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
@@ -30,6 +25,12 @@ interface Notification {
     priority: 'low' | 'medium' | 'high' | 'urgent';
 }
 
+/** Strip HTML so broken <img> tags don't float in the dropdown */
+function plainNotificationText(text: string): string {
+    if (!text) return '';
+    return text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
 const NotificationBell = () => {
     const [notifications, setNotifications] = useState<Notification[]>([]);
     const [unreadCount, setUnreadCount] = useState(0);
@@ -39,7 +40,6 @@ const NotificationBell = () => {
 
     useEffect(() => {
         fetchNotifications();
-        // Poll for new notifications every 30 seconds
         const interval = setInterval(fetchNotifications, 30000);
         return () => clearInterval(interval);
     }, []);
@@ -69,7 +69,7 @@ const NotificationBell = () => {
             });
 
             if (response.ok) {
-                fetchNotifications(); // Refresh notifications
+                fetchNotifications();
             }
         } catch (error) {
             console.error('Error marking notifications as read:', error);
@@ -88,16 +88,14 @@ const NotificationBell = () => {
         setIsOpen(false);
     };
 
-    const getNotificationIcon = (iconName: string, priority: string) => {
+    const getNotificationIcon = (priority: string) => {
         const iconClass = cn(
             "h-4 w-4 flex-shrink-0",
             priority === 'urgent' && "text-destructive",
-            priority === 'high' && "text-primary",
-            priority === 'medium' && "text-muted-foreground",
-            priority === 'low' && "text-muted-foreground/70"
+            priority === 'high' && "text-emerald-600 dark:text-emerald-400",
+            (priority === 'medium' || priority === 'low') && "text-muted-foreground"
         );
 
-        // You can expand this with more icons based on the iconName
         return <Bell className={iconClass} />;
     };
 
@@ -123,15 +121,13 @@ const NotificationBell = () => {
                     variant="ghost"
                     size="icon"
                     className={cn(
-                      'relative h-8 w-8 rounded-lg border transition-all duration-200',
-                      unreadCount > 0
-                        ? 'border-primary/30 bg-primary/5 hover:bg-primary/15 hover:border-primary/50'
-                        : 'border-border/60 hover:bg-muted/50 hover:border-primary/30'
+                      'premium-dashboard-icon-btn relative',
+                      unreadCount > 0 && 'premium-dashboard-icon-btn--active'
                     )}
                 >
-                    <Bell className={cn('h-4 w-4', unreadCount > 0 && 'text-primary')} />
+                    <Bell className="h-4 w-4" />
                     {unreadCount > 0 && (
-                        <span className="absolute -top-1 -right-1 h-[17px] min-w-[17px] px-0.5 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-[10px] font-semibold border-2 border-background shadow-sm">
+                        <span className="absolute -top-1 -right-1 h-[17px] min-w-[17px] px-0.5 rounded-full bg-emerald-500 text-white flex items-center justify-center text-[10px] font-semibold border-2 border-background shadow-sm">
                             {unreadCount > 99 ? '99+' : unreadCount}
                         </span>
                     )}
@@ -139,11 +135,11 @@ const NotificationBell = () => {
             </DropdownMenuTrigger>
             <DropdownMenuContent
                 align="end"
-                className="w-[380px] p-0 border-border"
+                className="w-[min(380px,calc(100vw-1.5rem))] p-0 premium-dashboard-dropdown premium-notification-panel"
                 sideOffset={8}
             >
-                <div className="flex items-center justify-between p-4 border-b border-border">
-                    <h3 className="font-semibold text-base">Notifications</h3>
+                <div className="premium-notification-header flex items-center justify-between p-4">
+                    <h3 className="font-semibold text-base premium-dropdown-name">Notifications</h3>
                     {unreadCount > 0 && (
                         <Button
                             variant="ghost"
@@ -152,7 +148,7 @@ const NotificationBell = () => {
                                 e.stopPropagation();
                                 markAsRead();
                             }}
-                            className="h-8 text-xs gap-1.5 hover:bg-muted"
+                            className="h-8 text-xs gap-1.5 premium-notification-action"
                         >
                             <Check className="h-3.5 w-3.5" />
                             Mark all read
@@ -160,51 +156,55 @@ const NotificationBell = () => {
                     )}
                 </div>
 
-                <div className="max-h-[420px] overflow-y-auto">
+                <div className="premium-notification-scroll max-h-[420px] overflow-y-auto">
                     {loading ? (
                         <div className="flex items-center justify-center py-12">
                             <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
                         </div>
                     ) : notifications.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-                            <div className="w-12 h-12 bg-muted/50 rounded-xl flex items-center justify-center mb-3">
+                        <div className="flex flex-col items-center justify-center py-12 px-4">
+                            <div className="w-12 h-12 rounded-xl flex items-center justify-center mb-3 border premium-notification-empty-icon">
                                 <Bell className="h-6 w-6 text-muted-foreground" />
                             </div>
-                            <p className="text-sm font-medium">No notifications yet</p>
-                            <p className="text-xs text-muted-foreground mt-1">We'll notify you when something arrives</p>
+                            <p className="text-sm font-medium premium-dropdown-name">No notifications yet</p>
+                            <p className="text-xs premium-dropdown-email mt-1 text-center">We&apos;ll notify you when something arrives</p>
                         </div>
                     ) : (
-                        <div className="divide-y divide-border">
-                            {notifications.map((notification) => (
+                        <div className="divide-y premium-notification-divide">
+                            {notifications.map((notification) => {
+                                const message = plainNotificationText(notification.message);
+                                return (
                                 <div
                                     key={notification._id}
                                     className={cn(
-                                        "flex items-start gap-3 p-4 cursor-pointer transition-colors hover:bg-muted/50",
-                                        !notification.read && "bg-primary/5"
+                                        "premium-notification-item flex items-start gap-3 p-4 cursor-pointer transition-colors",
+                                        !notification.read && "premium-notification-item--unread"
                                     )}
                                     onClick={() => handleNotificationClick(notification)}
                                 >
                                     <div className="flex-shrink-0 mt-0.5">
-                                        {getNotificationIcon(notification.icon, notification.priority)}
+                                        {getNotificationIcon(notification.priority)}
                                     </div>
                                     <div className="flex-1 min-w-0 space-y-1">
                                         <div className="flex items-start justify-between gap-2">
-                                            <p className="font-semibold text-sm leading-tight">
+                                            <p className="font-semibold text-sm leading-tight premium-dropdown-name">
                                                 {notification.title}
                                             </p>
                                             {!notification.read && (
-                                                <div className="w-2 h-2 bg-primary rounded-full flex-shrink-0 mt-1"></div>
+                                                <div className="w-2 h-2 bg-emerald-500 rounded-full flex-shrink-0 mt-1.5"></div>
                                             )}
                                         </div>
-                                        <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">
-                                            {notification.message}
-                                        </p>
-                                        <div className="flex items-center gap-2 text-xs text-muted-foreground pt-0.5">
+                                        {message ? (
+                                            <p className="text-xs premium-dropdown-email line-clamp-2 leading-relaxed">
+                                                {message}
+                                            </p>
+                                        ) : null}
+                                        <div className="flex items-center gap-2 text-xs premium-dropdown-email pt-0.5">
                                             <span>{formatTimeAgo(notification.createdAt)}</span>
                                             {notification.actionUrl && (
                                                 <>
-                                                    <span>•</span>
-                                                    <span className="text-primary flex items-center gap-1">
+                                                    <span className="opacity-40">•</span>
+                                                    <span className="premium-notification-link flex items-center gap-1">
                                                         View
                                                         <ExternalLink className="h-3 w-3" />
                                                     </span>
@@ -213,14 +213,15 @@ const NotificationBell = () => {
                                         </div>
                                     </div>
                                 </div>
-                            ))}
+                            )})}
                         </div>
                     )}
                 </div>
 
-                <div className="border-t border-border">
+                <div className="premium-notification-footer border-t">
                     <button
-                        className="w-full p-3 text-center text-sm text-primary font-medium hover:bg-muted/50 transition-colors"
+                        type="button"
+                        className="w-full p-3 text-center text-sm font-medium premium-notification-link hover:bg-emerald-500/5 transition-colors"
                         onClick={() => {
                             router.push('/dashboard/notifications');
                             setIsOpen(false);

@@ -72,7 +72,7 @@ export default function ResellersPage() {
     };
 
     return (
-        <div className="p-6 space-y-6">
+        <div className="admin-page-container space-y-6 min-w-0 overflow-x-hidden">
             <div className="flex justify-between items-center">
                 <div>
                     <h1 className="text-3xl font-bold tracking-tight">Resellers</h1>

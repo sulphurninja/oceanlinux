@@ -111,13 +111,17 @@ async function runSync(req: Request) {
       // DO NOT touch name, tags, or anything else
       const existingDefaults = toPlainMap(existing.defaultConfigurations);
       
-      await IPStock.findByIdAndUpdate(existing._id, {
-        available: isAvailable,
+      const updateFields: Record<string, unknown> = {
         defaultConfigurations: {
           ...existingDefaults,
           smartvps: smartvpsBlock
         }
-      });
+      };
+      if (!existing.availabilityManual) {
+        updateFields.available = isAvailable;
+      }
+
+      await IPStock.findByIdAndUpdate(existing._id, updateFields);
       
       updated++;
       console.log(`[SVPS-SYNC] Updated: ${existing.name} - available: ${isAvailable}, qty: ${qty}`);
@@ -183,7 +187,7 @@ async function runSync(req: Request) {
     const packageName = fullName.split(/[\s(]/)[0];
     
     // If this base package name is not in the current API response, mark unavailable
-    if (!activeNames.has(packageName) && doc.available) {
+    if (!activeNames.has(packageName) && doc.available && !doc.availabilityManual) {
       await IPStock.findByIdAndUpdate(doc._id, { available: false });
       disabled++;
       console.log(`[SVPS-SYNC] Disabled (not in API): ${doc.name} (extracted: ${packageName})`);

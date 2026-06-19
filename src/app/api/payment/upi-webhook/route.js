@@ -3,7 +3,7 @@ import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 import NotificationService from '@/services/notificationService';
 import { assignPanelCredentials } from '@/lib/panelCredentials';
-import { decrementIpStockForOrder } from '@/lib/ipStockAvailability';
+import { fulfillOrderInventory } from '@/lib/fulfillOrderInventory';
 const { resolveOrderExpiryOnPayment } = require('@/lib/advpsOrderExpiry');
 import {
   findDispatchTarget,
@@ -237,7 +237,7 @@ export async function POST(request) {
       };
       await assignPanelCredentials(order);
       await order.save();
-      await decrementIpStockForOrder(order);
+      await fulfillOrderInventory(order);
 
       console.log(`[UPI Webhook] Order ${order._id} confirmed with UPI txn ${upi_txn_id}`);
       console.log(`[UPI Webhook] Order expiry set to: ${expiryDate ? expiryDate.toISOString() : 'deferred (ADVPS upstream)'}`);
@@ -256,6 +256,7 @@ export async function POST(request) {
         const freshOrder = await Order.findById(order._id);
         const alreadyProvisioning = freshOrder?.provisioningStatus === 'provisioning' ||
                                      freshOrder?.provisioningStatus === 'active' ||
+                                     freshOrder?.inventoryItemId ||
                                      freshOrder?.ipAddress;
         
         if (alreadyProvisioning) {
