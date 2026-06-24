@@ -139,6 +139,7 @@ const ProxySetupTerminal = () => {
         try {
             const response = await fetch('/api/terminal/proxy-setup', {
                 method: 'POST',
+                credentials: 'include',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     ip: serverIp,
@@ -200,6 +201,7 @@ const ProxySetupTerminal = () => {
 
             const response = await fetch('/api/terminal/proxy-setup', {
                 method: 'POST',
+                credentials: 'include',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     ip: serverIp,

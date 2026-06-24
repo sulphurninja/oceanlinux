@@ -19,10 +19,9 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import PremiumAuthBackground from '@/components/landing/PremiumAuthBackground';
-import PremiumPostLoginSplash from '@/components/landing/PremiumPostLoginSplash';
 import Tilt3DCard from '@/components/landing/Tilt3DCard';
 import { useHeroParallax } from '@/hooks/useTilt3D';
-import { JUST_LOGGED_IN_KEY, LOGIN_POPUP_SHOWN_KEY, POST_LOGIN_SPLASH_DONE_KEY } from '@/lib/post-login';
+import { JUST_LOGGED_IN_KEY, LOGIN_POPUP_SHOWN_KEY, POST_LOGIN_SPLASH_DONE_KEY, setPostLoginLoadingScreen } from '@/lib/post-login';
 
 const trustItems = [
   { icon: Zap, label: "Instant setup" },
@@ -39,7 +38,6 @@ function GetStartedPage({ className, ...props }: React.ComponentPropsWithoutRef<
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [showPostLoginSplash, setShowPostLoginSplash] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState('');
   const [mounted, setMounted] = useState(false);
   const router = useRouter();
@@ -83,8 +81,8 @@ function GetStartedPage({ className, ...props }: React.ComponentPropsWithoutRef<
         sessionStorage.removeItem(LOGIN_POPUP_SHOWN_KEY);
         sessionStorage.removeItem(POST_LOGIN_SPLASH_DONE_KEY);
         sessionStorage.setItem(JUST_LOGGED_IN_KEY, '1');
-        setShowPostLoginSplash(true);
-        setIsLoading(false);
+        setPostLoginLoadingScreen();
+        router.replace('/dashboard');
         return;
       } else {
         setError(data.message || 'An error occurred during signup.');
@@ -97,14 +95,6 @@ function GetStartedPage({ className, ...props }: React.ComponentPropsWithoutRef<
   };
 
   return (
-    <>
-      {showPostLoginSplash && (
-        <PremiumPostLoginSplash
-          active
-          title="Welcome aboard"
-          onComplete={() => router.push('/dashboard')}
-        />
-      )}
     <div
       ref={ref}
       className={cn(
@@ -288,7 +278,6 @@ function GetStartedPage({ className, ...props }: React.ComponentPropsWithoutRef<
         </Tilt3DCard>
       </div>
     </div>
-    </>
   );
 }
 

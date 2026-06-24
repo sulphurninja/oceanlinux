@@ -19,6 +19,8 @@ import {
   confirmCheckoutFromWebhook,
 } from '@/lib/paymentDispatch';
 const AutoProvisioningService = require('@/services/autoProvisioningService');
+import NotificationService from '@/services/notificationService';
+const WhatsAppService = require('@/services/whatsappService');
 const SlotIPPackage = require('@/models/slotIpPackageModel');
 const HostycareAPI = require('@/services/hostycareApi');
 const SmartVPSAPI = require('@/services/smartvpsApi');
@@ -200,6 +202,12 @@ export async function POST(request) {
       const { fulfillOrderInventory } = require('@/lib/fulfillOrderInventory');
       await fulfillOrderInventory(order);
 
+      try {
+        await NotificationService.notifyOrderConfirmed(order.user, order);
+      } catch (notifErr) {
+        console.error('[WEBHOOK] Failed to send order confirmation notification:', notifErr.message);
+      }
+
       const PaymentOrderLogger = require('@/services/paymentOrderLogger');
       const webhookLogger = PaymentOrderLogger.forOrder(order, 'webhook');
       webhookLogger.success('Cashfree webhook confirmed order', {
@@ -227,6 +235,18 @@ export async function POST(request) {
         const freshOrder = await Order.findById(order._id);
         if (freshOrder?.slotIpPackageId || freshOrder?.inventoryItemId || freshOrder?.ipAddress) {
           console.log(`[WEBHOOK] Pre-assigned inventory — skipping auto-provisioning`);
+          try {
+            const ready = await Order.findById(order._id);
+            if (ready && NotificationService.isOrderDeliverable(ready)) {
+              await NotificationService.notifyOrderCompleted(order.user, ready, {
+                ipAddress: ready.ipAddress,
+                username: ready.username,
+                password: ready.password,
+              });
+            }
+          } catch (completeErr) {
+            console.error('[WEBHOOK] Failed to notify inventory order completion:', completeErr.message);
+          }
         } else if (
           freshOrder?.provisioningStatus === 'provisioning' ||
           freshOrder?.provisioningStatus === 'active'
@@ -255,6 +275,12 @@ export async function POST(request) {
                 console.log(`[AUTO-PROVISION] ✅ SUCCESS! Details:`);
                 console.log(`   - Service ID: ${result.serviceId || 'N/A'}`);
                 console.log(`   - IP Address: ${result.ipAddress || 'N/A'}`);
+                NotificationService.notifyOrderCompleted(order.user, order, {
+                  ipAddress: result.ipAddress || 'Available in dashboard',
+                  username: result.username || 'root',
+                  password: result.password || 'Check dashboard',
+                }).catch((err) => console.error('[WEBHOOK] notifyOrderCompleted failed:', err.message));
+                WhatsAppService.notifyOrderViaWhatsApp(order.user, order).catch(() => {});
               } else if (result?.alreadyProvisioned || result?.alreadyProvisioning) {
                 console.log(`[AUTO-PROVISION] ⚠️ SKIPPED - Already handled by another process`);
                 console.log(`   - Already Provisioned: ${result?.alreadyProvisioned}`);

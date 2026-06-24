@@ -1,6 +1,7 @@
 import Notification from '../models/notificationModel.js';
 import connectDB from '../lib/db.js';
 import User from '../models/userModel.js';
+import Order from '../models/orderModel.js';
 
 // Import EmailService
 const EmailService = require('../lib/sendgrid');
@@ -199,8 +200,64 @@ class NotificationService {
     );
   }
 
+  static resolveCustomerEmail(user, order) {
+    return (
+      user?.email ||
+      order?.customerEmail ||
+      order?.paymentDetails?.customer_email ||
+      order?.webhookCustomerEmail ||
+      null
+    );
+  }
+
+  static isOrderDeliverable(order) {
+    if (!order) return false;
+    if (order.status === 'active' || order.provisioningStatus === 'active') return true;
+    const ip = String(order.ipAddress || '').trim();
+    return ip.length > 0 && ip.toLowerCase() !== 'pending' && !ip.startsWith('Pending');
+  }
+
+  static async _claimOrderEmailFlag(orderId, field) {
+    await connectDB();
+    const path = `paymentDetails.${field}`;
+    return Order.findOneAndUpdate(
+      {
+        _id: orderId,
+        $or: [
+          { [`paymentDetails.${field}`]: { $exists: false } },
+          { [`paymentDetails.${field}`]: null },
+        ],
+      },
+      { $set: { [path]: new Date() } },
+      { new: true }
+    );
+  }
+
+  static async _sendOrderCompletionEmail(userId, order, emailService, serverDetails = {}) {
+    const user = await this.getUserDetails(userId);
+    const toEmail = this.resolveCustomerEmail(user, order);
+    if (!toEmail) return false;
+
+    const claimed = await this._claimOrderEmailFlag(order._id, 'completionEmailSentAt');
+    if (!claimed) {
+      console.log(`[NOTIFICATION] Completion email already sent for order ${order._id}`);
+      return false;
+    }
+
+    await emailService.sendOrderSuccessEmail(
+      toEmail,
+      user?.name || 'Customer',
+      String(order._id),
+      order.productName,
+      order.price,
+      serverDetails.ipAddress || order.ipAddress || 'Check dashboard'
+    );
+    console.log(`[NOTIFICATION] Order completion email sent to ${toEmail}`);
+    return true;
+  }
+
   static async notifyOrderConfirmed(userId, order) {
-    return this.create(
+    const notification = await this.create(
       userId,
       'order_confirmed',
       'Payment Confirmed',
@@ -212,6 +269,45 @@ class NotificationService {
         priority: 'high'
       }
     );
+
+    this.sendEmailAsync(async (emailService) => {
+      const user = await this.getUserDetails(userId);
+      const toEmail = this.resolveCustomerEmail(user, order);
+      if (!toEmail) {
+        console.warn(`[NOTIFICATION] No email for payment confirmation on order ${order._id}`);
+        return;
+      }
+
+      const claimed = await this._claimOrderEmailFlag(order._id, 'confirmationEmailSentAt');
+      if (!claimed) {
+        console.log(`[NOTIFICATION] Payment confirmation email already sent for order ${order._id}`);
+      } else {
+        await emailService.sendOrderPaymentConfirmedEmail(
+          toEmail,
+          user?.name || 'Customer',
+          String(order._id),
+          order.productName,
+          order.price,
+          {
+            transactionId: order.transactionId,
+            clientTxnId: order.clientTxnId,
+            expiryDate: order.expiryDate,
+          }
+        );
+        console.log(`[NOTIFICATION] Payment confirmation email sent to ${toEmail}`);
+      }
+
+      const fresh = await Order.findById(order._id).lean();
+      if (this.isOrderDeliverable(fresh)) {
+        await this._sendOrderCompletionEmail(userId, fresh, emailService, {
+          ipAddress: fresh.ipAddress,
+          username: fresh.username,
+          password: fresh.password,
+        });
+      }
+    });
+
+    return notification;
   }
 
   static async notifyOrderProvisioning(userId, order) {
@@ -246,19 +342,7 @@ class NotificationService {
 
     // Send email notification (non-blocking)
     this.sendEmailAsync(async (emailService) => {
-      const user = await this.getUserDetails(userId);
-      if (user?.email) {
-        await emailService.sendOrderSuccessEmail(
-          user.email,
-          user.name || 'Customer',
-          order._id.toString(),
-          order.productName,
-          order.price,
-          serverDetails.ipAddress || order.ipAddress || 'Check dashboard',
-          { username: serverDetails.username, password: serverDetails.password }
-        );
-        console.log(`[NOTIFICATION] Order completion email sent to ${user.email}`);
-      }
+      await this._sendOrderCompletionEmail(userId, order, emailService, serverDetails);
     });
 
     return notification;

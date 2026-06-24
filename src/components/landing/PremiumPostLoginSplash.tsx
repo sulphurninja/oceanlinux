@@ -1,14 +1,16 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
 import PremiumAuthBackground from "@/components/landing/PremiumAuthBackground";
 import {
-  JUST_LOGGED_IN_KEY,
   POST_LOGIN_SPLASH_DONE_KEY,
   POST_LOGIN_SPLASH_EVENT,
   POST_LOGIN_SPLASH_MS,
+  clearPostLoginLoadingScreen,
+  isPostLoginSplashPending,
+  setPostLoginLoadingScreen,
 } from "@/lib/post-login";
 
 const STEPS = [
@@ -29,6 +31,7 @@ type PremiumPostLoginSplashProps = {
 function finishSplash(onComplete?: () => void) {
   if (typeof window === "undefined") return;
   sessionStorage.setItem(POST_LOGIN_SPLASH_DONE_KEY, "1");
+  clearPostLoginLoadingScreen();
   window.dispatchEvent(new CustomEvent(POST_LOGIN_SPLASH_EVENT));
   onComplete?.();
 }
@@ -46,21 +49,12 @@ export default function PremiumPostLoginSplash({
   const onCompleteRef = useRef(onComplete);
   onCompleteRef.current = onComplete;
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     setMounted(true);
-  }, []);
-
-  useEffect(() => {
-    if (active) {
-      setVisible(true);
-      return;
-    }
-
-    if (!autoFromSession || typeof window === "undefined") return;
-
-    const justLoggedIn = sessionStorage.getItem(JUST_LOGGED_IN_KEY) === "1";
-    const splashDone = sessionStorage.getItem(POST_LOGIN_SPLASH_DONE_KEY) === "1";
-    if (justLoggedIn && !splashDone) {
+    const shouldShow =
+      active || (autoFromSession && isPostLoginSplashPending());
+    if (shouldShow) {
+      setPostLoginLoadingScreen();
       setVisible(true);
     }
   }, [active, autoFromSession]);

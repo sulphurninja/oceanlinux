@@ -1929,6 +1929,19 @@ body {
   }
 
   /* Post-login splash — premium emerald loader */
+  html.oceanlinux-post-login-loading .premium-dashboard {
+    visibility: hidden;
+  }
+
+  html.oceanlinux-post-login-loading body {
+    background: linear-gradient(
+      165deg,
+      hsl(158 42% 10%) 0%,
+      hsl(152 36% 16%) 42%,
+      hsl(160 40% 11%) 100%
+    );
+  }
+
   .premium-post-login-splash {
     color-scheme: dark;
   }

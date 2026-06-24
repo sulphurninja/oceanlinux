@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -18,8 +18,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import PremiumAuthBackground from '@/components/landing/PremiumAuthBackground';
-import PremiumPostLoginSplash from '@/components/landing/PremiumPostLoginSplash';
-import { JUST_LOGGED_IN_KEY, LOGIN_POPUP_SHOWN_KEY, POST_LOGIN_SPLASH_DONE_KEY } from '@/lib/post-login';
+import { JUST_LOGGED_IN_KEY, LOGIN_POPUP_SHOWN_KEY, POST_LOGIN_SPLASH_DONE_KEY, setPostLoginLoadingScreen } from '@/lib/post-login';
 import Tilt3DCard from '@/components/landing/Tilt3DCard';
 import { useHeroParallax } from '@/hooks/useTilt3D';
 
@@ -29,15 +28,41 @@ const trustItems = [
   { icon: Clock, label: "24/7 support" },
 ];
 
+function resolveSafeReturnPath(path: string | null | undefined): string | null {
+  if (!path || !path.startsWith('/') || path.startsWith('//')) return null;
+  return path;
+}
+
+function resolvePostLoginPath(
+  userType: string | undefined,
+  returnToParam: string | null
+): string {
+  const fromQuery = resolveSafeReturnPath(returnToParam);
+  if (fromQuery) return fromQuery;
+
+  try {
+    const stored = localStorage.getItem('redirectAfterLogin');
+    const fromStorage = resolveSafeReturnPath(stored);
+    if (fromStorage) {
+      localStorage.removeItem('redirectAfterLogin');
+      return fromStorage;
+    }
+  } catch {
+    /* ignore */
+  }
+
+  return userType === 'reseller' ? '/dashboard/reseller-wallet' : '/dashboard';
+}
+
 function LoginPage({ className, ...props }: React.ComponentPropsWithoutRef<"div">) {
   const [formData, setFormData] = useState({ email: '', password: '' });
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [showPostLoginSplash, setShowPostLoginSplash] = useState(false);
-  const [redirectPath, setRedirectPath] = useState('/dashboard');
   const [mounted, setMounted] = useState(false);
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const returnTo = searchParams.get('returnTo');
   const { ref, offset } = useHeroParallax(10);
 
   useEffect(() => {
@@ -46,18 +71,14 @@ function LoginPage({ className, ...props }: React.ComponentPropsWithoutRef<"div"
 
   useEffect(() => {
     const checkUser = async () => {
-      const response = await fetch('/api/users/me');
+      const response = await fetch('/api/users/me', { credentials: 'include' });
       if (response.ok) {
         const data = await response.json();
-        if (data?.userType === 'reseller') {
-          router.push('/dashboard/reseller-wallet');
-        } else {
-          router.push('/dashboard');
-        }
+        router.replace(resolvePostLoginPath(data?.userType, returnTo));
       }
     };
     checkUser();
-  }, [router]);
+  }, [router, returnTo]);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -75,12 +96,13 @@ function LoginPage({ className, ...props }: React.ComponentPropsWithoutRef<"div"
     if (response.ok) {
       sessionStorage.removeItem(LOGIN_POPUP_SHOWN_KEY);
       sessionStorage.removeItem(POST_LOGIN_SPLASH_DONE_KEY);
-      sessionStorage.setItem(JUST_LOGGED_IN_KEY, '1');
-      const path =
-        data.result?.userType === 'reseller' ? '/dashboard/reseller-wallet' : '/dashboard';
-      setRedirectPath(path);
-      setShowPostLoginSplash(true);
-      setIsLoading(false);
+      const path = resolvePostLoginPath(data.result?.userType, returnTo);
+      const isDashboard = path.startsWith('/dashboard');
+      if (isDashboard) {
+        sessionStorage.setItem(JUST_LOGGED_IN_KEY, '1');
+        setPostLoginLoadingScreen();
+      }
+      router.replace(path);
       return;
     } else {
       setError(data.message || 'Invalid email or password.');
@@ -89,13 +111,6 @@ function LoginPage({ className, ...props }: React.ComponentPropsWithoutRef<"div"
   };
 
   return (
-    <>
-      {showPostLoginSplash && (
-        <PremiumPostLoginSplash
-          active
-          onComplete={() => router.push(redirectPath)}
-        />
-      )}
     <div
       ref={ref}
       className={cn(
@@ -245,7 +260,6 @@ function LoginPage({ className, ...props }: React.ComponentPropsWithoutRef<"div"
         </Tilt3DCard>
       </div>
     </div>
-    </>
   );
 }
 
