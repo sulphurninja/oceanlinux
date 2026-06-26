@@ -233,6 +233,7 @@ class NotificationService {
     );
   }
 
+<<<<<<< HEAD
   static async claimExpiryReminderFlag(orderId, expiryDateIso, daysBefore = 2) {
     await connectDB();
     const field = daysBefore === 2 ? 'expiryReminder2dFor' : `expiryReminder${daysBefore}dFor`;
@@ -280,6 +281,8 @@ class NotificationService {
     );
   }
 
+=======
+>>>>>>> 97582c8e282e62a59b89f926a157d7ffdeb634d8
   static async _sendOrderCompletionEmail(userId, order, emailService, serverDetails = {}) {
     const user = await this.getUserDetails(userId);
     const toEmail = this.resolveCustomerEmail(user, order);
