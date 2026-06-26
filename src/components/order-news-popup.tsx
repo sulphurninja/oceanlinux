@@ -203,18 +203,10 @@ export default function OrderNewsPopup({ orderId }: { orderId: string }) {
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
         className={cn(
-          "premium-login-news-dialog premium-order-news-dialog premium-dialog-mobile-sheet",
-          "!flex !flex-col p-0 gap-0 !overflow-hidden",
-          "border-0 shadow-2xl",
-          "w-[calc(100vw-1.25rem)] max-w-none sm:max-w-xl md:max-w-2xl",
-          "!max-h-[min(92dvh,calc(100dvh-1.5rem-env(safe-area-inset-top)-env(safe-area-inset-bottom)))]",
-          "rounded-2xl z-[101]",
-          "max-sm:fixed max-sm:left-1/2 max-sm:-translate-x-1/2",
-          "max-sm:bottom-[max(0.5rem,env(safe-area-inset-bottom))] max-sm:top-auto max-sm:translate-y-0",
+          "premium-login-news-dialog premium-order-news-dialog premium-news-dialog premium-dialog-mobile-sheet",
+          "border-0 shadow-2xl rounded-2xl",
           "max-sm:data-[state=open]:slide-in-from-bottom-8 max-sm:data-[state=closed]:slide-out-to-bottom-8",
-          "sm:top-1/2 sm:left-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 sm:bottom-auto",
-          "sm:data-[state=open]:slide-in-from-bottom-0 sm:data-[state=open]:zoom-in-95",
-          "[&>button[class*='absolute']]:hidden"
+          "sm:data-[state=open]:zoom-in-95"
         )}
       >
         <div className="h-0.5 w-full shrink-0 bg-gradient-to-r from-emerald-600/80 via-emerald-400 to-emerald-500/60" />
@@ -225,7 +217,7 @@ export default function OrderNewsPopup({ orderId }: { orderId: string }) {
         />
 
         <div
-          className="relative shrink-0 border-b px-4 pb-4 pt-5 sm:px-6 sm:pb-5 sm:pt-6"
+          className="premium-news-dialog-header relative shrink-0 border-b px-4 pb-3 pt-4 sm:px-5 sm:pb-4 sm:pt-5"
           style={{ borderColor: "var(--pd-border)" }}
         >
           <button
@@ -264,7 +256,7 @@ export default function OrderNewsPopup({ orderId }: { orderId: string }) {
             </div>
 
             <DialogTitle
-              className="premium-order-news-title text-xl font-bold leading-snug tracking-tight sm:text-2xl md:text-3xl"
+              className="premium-news-dialog-title premium-order-news-title font-bold tracking-tight"
               style={{ color: "var(--pd-title)" }}
             >
               {popup.title}
@@ -272,9 +264,9 @@ export default function OrderNewsPopup({ orderId }: { orderId: string }) {
           </div>
         </div>
 
-        <div className="premium-login-news-body min-h-0 shrink px-4 py-4 sm:px-6 sm:py-5">
+        <div className="premium-news-dialog-scroll px-4 py-3 sm:px-5 sm:py-4">
           <div
-            className="premium-login-news-content rounded-2xl border px-5 py-5 sm:px-6 sm:py-6 flex-1 min-h-0 overflow-y-auto sm:max-h-[min(52vh,520px)]"
+            className="premium-login-news-content rounded-xl border px-3.5 py-3.5 sm:px-4 sm:py-4"
             style={{ borderColor: "var(--pd-border)", background: "var(--pd-surface-soft)" }}
           >
             <NewsContent text={popup.content} />
@@ -282,7 +274,7 @@ export default function OrderNewsPopup({ orderId }: { orderId: string }) {
         </div>
 
         <div
-          className="shrink-0 border-t px-4 py-3 sm:px-6 sm:py-4 pb-[max(0.875rem,env(safe-area-inset-bottom))]"
+          className="shrink-0 border-t px-4 py-3 sm:px-5 sm:py-3.5 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
           style={{ borderColor: "var(--pd-border)", background: "var(--pd-dialog-bg)" }}
         >
           <div className="flex flex-col-reverse gap-2.5 sm:flex-row sm:items-center sm:justify-end sm:gap-3">

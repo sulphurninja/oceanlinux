@@ -24,6 +24,11 @@ import {
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { broadcastWallet } from '@/lib/walletClient';
+import {
+  openRazorpayModal,
+  prepareRazorpayOverlay,
+} from '@/lib/razorpayCheckout';
+import { triggerWalletSuccessBird } from '@/lib/oceanBirdFly';
 
 interface WalletTxn {
   _id?: string;
@@ -122,6 +127,7 @@ export default function WalletPage() {
       return;
     }
     setSubmitting(true);
+    setRechargeOpen(false);
     try {
       const res = await fetch('/api/wallet/recharge/initiate', {
         method: 'POST',
@@ -140,8 +146,10 @@ export default function WalletPage() {
       }
 
       if (actualMethod === 'razorpay') {
+        await prepareRazorpayOverlay();
         await openRazorpay(data);
       } else if (actualMethod === 'cashfree') {
+        await prepareRazorpayOverlay();
         await openCashfree(data);
       } else if (actualMethod === 'upi') {
         if (data.upi?.payment_url) {
@@ -153,27 +161,16 @@ export default function WalletPage() {
     } catch (err: any) {
       toast.error(err.message || 'Recharge failed');
       setSubmitting(false);
+      setRechargeOpen(true);
     }
   };
 
   const openRazorpay = async (data: any) => {
-    let attempts = 0;
-    while (typeof window.Razorpay === 'undefined' && attempts < 20) {
-      await new Promise(r => setTimeout(r, 100));
-      attempts++;
-    }
-    if (typeof window.Razorpay === 'undefined') throw new Error('Razorpay SDK not loaded');
-
-    const options = {
-      key: data.razorpay.key,
-      amount: data.razorpay.amount,
-      currency: data.razorpay.currency,
-      name: 'OceanLinux',
+    await openRazorpayModal({
+      data,
       description: `Wallet recharge ₹${rechargeAmount}`,
-      order_id: data.razorpay.order_id,
-      prefill: { name: data.customer.name, email: data.customer.email },
-      theme: { color: '#3b82f6' },
-      handler: async (response: any) => {
+      themeColor: '#10b981',
+      onSuccess: async (response) => {
         try {
           const confirmRes = await fetch('/api/wallet/recharge/confirm', {
             method: 'POST',
@@ -188,7 +185,7 @@ export default function WalletPage() {
           });
           const cd = await confirmRes.json();
           if (confirmRes.ok && cd.success) {
-            toast.success(`Wallet recharged with ₹${data.razorpay.amount / 100}`);
+            triggerWalletSuccessBird();
             setRechargeOpen(false);
             await fetchWallet();
           } else {
@@ -200,12 +197,12 @@ export default function WalletPage() {
           setSubmitting(false);
         }
       },
-      modal: {
-        ondismiss: () => setSubmitting(false),
+      onDismiss: () => setSubmitting(false),
+      onFailed: () => {
+        setSubmitting(false);
+        toast.error('Payment failed. Please try again.');
       },
-    };
-    const rzp = new window.Razorpay(options);
-    rzp.open();
+    });
   };
 
   const openCashfree = async (data: any) => {

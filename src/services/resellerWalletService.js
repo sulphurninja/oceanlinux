@@ -148,6 +148,48 @@ class ResellerWalletService {
     }
 
     /**
+     * Deduct for renewal (does not increment totalOrders)
+     */
+    async deductForRenewal(resellerId, amount, orderId, description = 'Order renewal') {
+        const session = await mongoose.startSession();
+        session.startTransaction();
+
+        try {
+            const reseller = await Reseller.findById(resellerId).session(session);
+            if (!reseller) throw new Error('Reseller not found');
+            if (reseller.status !== 'active') throw new Error('Reseller account is not active');
+
+            const availableBalance = reseller.wallet.balance + (reseller.wallet.creditLimit || 0);
+            if (availableBalance < amount) {
+                throw new Error(`Insufficient wallet balance. Available: ₹${availableBalance}, Required: ₹${amount}`);
+            }
+
+            const previousBalance = reseller.wallet.balance;
+            reseller.wallet.balance -= amount;
+            reseller.wallet.transactions.push({
+                type: 'deduction',
+                amount: -amount,
+                previousBalance,
+                newBalance: reseller.wallet.balance,
+                orderId,
+                description,
+                createdAt: new Date(),
+            });
+            reseller.stats.totalSpent += amount;
+
+            await reseller.save({ session });
+            await session.commitTransaction();
+
+            return { success: true, newBalance: reseller.wallet.balance };
+        } catch (error) {
+            await session.abortTransaction();
+            throw error;
+        } finally {
+            session.endSession();
+        }
+    }
+
+    /**
      * Get wallet balance and history
      * @param {string} resellerId 
      */

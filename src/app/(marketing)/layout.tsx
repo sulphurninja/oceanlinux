@@ -1,9 +1,14 @@
 import AuthAwarePublicLayout from "@/components/landing/AuthAwarePublicLayout";
+import { GoogleAuthProvider } from "@/components/auth/GoogleSignIn";
 
 export default function MarketingLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  return <AuthAwarePublicLayout>{children}</AuthAwarePublicLayout>;
+  return (
+    <GoogleAuthProvider>
+      <AuthAwarePublicLayout>{children}</AuthAwarePublicLayout>
+    </GoogleAuthProvider>
+  );
 }

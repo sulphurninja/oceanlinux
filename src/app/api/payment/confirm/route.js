@@ -234,6 +234,17 @@ export async function POST(request) {
       const freshOrder = await Order.findById(order._id);
       if (freshOrder?.slotIpPackageId || freshOrder?.inventoryItemId || freshOrder?.ipAddress) {
         console.log(`[PAYMENT-CONFIRM] Pre-assigned inventory — skipping auto-provisioning`);
+        try {
+          if (NotificationService.isOrderDeliverable(freshOrder)) {
+            await NotificationService.notifyOrderCompleted(order.user, freshOrder, {
+              ipAddress: freshOrder.ipAddress,
+              username: freshOrder.username,
+              password: freshOrder.password,
+            });
+          }
+        } catch (completeErr) {
+          console.error('[PAYMENT-CONFIRM] Failed to notify inventory order completion:', completeErr.message);
+        }
       } else if (
         freshOrder?.provisioningStatus === 'provisioning' ||
         freshOrder?.provisioningStatus === 'active'

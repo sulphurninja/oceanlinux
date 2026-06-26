@@ -1,20 +1,23 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
 import PremiumAuthBackground from "@/components/landing/PremiumAuthBackground";
 import {
-  JUST_LOGGED_IN_KEY,
   POST_LOGIN_SPLASH_DONE_KEY,
   POST_LOGIN_SPLASH_EVENT,
   POST_LOGIN_SPLASH_MS,
+  clearPostLoginLoadingScreen,
+  isPostLoginSplashPending,
+  setPostLoginLoadingScreen,
 } from "@/lib/post-login";
+import { triggerLoginBird } from "@/lib/oceanBirdFly";
 
 const STEPS = [
-  "Securing your session",
-  "Loading your dashboard",
-  "Preparing your workspace",
+  "Authenticating credentials",
+  "Syncing your environment",
+  "Opening dashboard",
 ];
 
 type PremiumPostLoginSplashProps = {
@@ -29,6 +32,7 @@ type PremiumPostLoginSplashProps = {
 function finishSplash(onComplete?: () => void) {
   if (typeof window === "undefined") return;
   sessionStorage.setItem(POST_LOGIN_SPLASH_DONE_KEY, "1");
+  clearPostLoginLoadingScreen();
   window.dispatchEvent(new CustomEvent(POST_LOGIN_SPLASH_EVENT));
   onComplete?.();
 }
@@ -46,21 +50,12 @@ export default function PremiumPostLoginSplash({
   const onCompleteRef = useRef(onComplete);
   onCompleteRef.current = onComplete;
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     setMounted(true);
-  }, []);
-
-  useEffect(() => {
-    if (active) {
-      setVisible(true);
-      return;
-    }
-
-    if (!autoFromSession || typeof window === "undefined") return;
-
-    const justLoggedIn = sessionStorage.getItem(JUST_LOGGED_IN_KEY) === "1";
-    const splashDone = sessionStorage.getItem(POST_LOGIN_SPLASH_DONE_KEY) === "1";
-    if (justLoggedIn && !splashDone) {
+    const shouldShow =
+      active || (autoFromSession && isPostLoginSplashPending());
+    if (shouldShow) {
+      setPostLoginLoadingScreen();
       setVisible(true);
     }
   }, [active, autoFromSession]);
@@ -82,7 +77,10 @@ export default function PremiumPostLoginSplash({
       setExiting(true);
       window.setTimeout(() => {
         setVisible(false);
-        finishSplash(() => onCompleteRef.current?.());
+        finishSplash(() => {
+          window.setTimeout(() => triggerLoginBird(), 180);
+          onCompleteRef.current?.();
+        });
       }, 420);
     }, duration);
 
@@ -144,12 +142,12 @@ export default function PremiumPostLoginSplash({
             <img src="/ol.png" alt="" className="premium-post-login-logo" />
           </div>
 
-          <p className="premium-section-eyebrow mb-2">OceanLinux</p>
-          <h2 className="text-lg sm:text-xl font-semibold text-white tracking-tight mb-1">
+          <p className="premium-section-eyebrow mb-2 tracking-[0.22em]">OceanLinux</p>
+          <h2 className="text-xl sm:text-2xl font-semibold text-white tracking-tight mb-1">
             {title}
           </h2>
-          <p key={step} className="text-sm text-white/50 premium-post-login-step">
-            {STEPS[step]}...
+          <p key={step} className="text-sm text-white/45 premium-post-login-step font-light">
+            {STEPS[step]}
           </p>
 
           <div className="premium-post-login-bar mt-6">

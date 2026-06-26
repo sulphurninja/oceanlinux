@@ -6,6 +6,8 @@ import { Loader2, CheckCircle2, XCircle, Clock, ShieldAlert } from "lucide-react
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { fetchWalletSummary } from "@/lib/walletClient";
+import { triggerPaymentSuccessBird } from "@/lib/oceanBirdFly";
+import { redirectToLogin } from "@/lib/redirectToLogin";
 
 // Create a client component that uses useSearchParams
 function PaymentCallbackContent() {
@@ -14,6 +16,14 @@ function PaymentCallbackContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const retried = useRef(false);
+
+  useEffect(() => {
+    if (status !== "success") return;
+    triggerPaymentSuccessBird(
+      searchParams.get("client_txn_id"),
+      searchParams.get("type"),
+    );
+  }, [status, searchParams]);
 
   useEffect(() => {
     const verifyPayment = async () => {
@@ -461,7 +471,7 @@ function PaymentCallbackContent() {
                   variant="outline"
                   className="w-full"
                   size="lg"
-                  onClick={() => router.push("/login")}
+                  onClick={() => redirectToLogin('/dashboard/viewLinux')}
                 >
                   Log In Again
                 </Button>

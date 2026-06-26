@@ -284,6 +284,84 @@ class EmailService {
     });
   }
 
+  // ========== ORDER PAYMENT CONFIRMED ==========
+  async sendOrderPaymentConfirmedEmail(
+    email,
+    name,
+    orderId,
+    productName,
+    price,
+    { transactionId, clientTxnId, expiryDate } = {}
+  ) {
+    const txn = transactionId || clientTxnId || '—';
+    const expiryLine = expiryDate
+      ? new Date(expiryDate).toLocaleDateString('en-IN', {
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+        })
+      : null;
+
+    const content = `
+      <div style="text-align:center;margin-bottom:32px;">
+        <div style="display:inline-block;background:linear-gradient(135deg,#dbeafe,#e0e7ff);color:#4338ca;font-size:12px;font-weight:600;padding:6px 16px;border-radius:20px;">✅ Payment Confirmed</div>
+      </div>
+
+      <h1 style="margin:0 0 16px;font-size:24px;font-weight:700;color:#0f172a;text-align:center;">Thank you for your order!</h1>
+
+      <p style="margin:0 0 32px;color:#475569;font-size:15px;line-height:1.7;text-align:center;">
+        Hi ${name}, we received your payment and your order is confirmed. ${
+          expiryLine
+            ? 'Your service is being prepared — credentials will appear in your dashboard when ready.'
+            : 'Setup is starting now — we will email you again when your server is ready.'
+        }
+      </p>
+
+      <div style="background:#f8fafc;border-radius:12px;padding:20px;margin-bottom:24px;border:1px solid #e2e8f0;">
+        <table width="100%" cellpadding="0" cellspacing="0">
+          <tr>
+            <td style="padding:6px 0;"><span style="color:#64748b;font-size:13px;">Product</span></td>
+            <td style="padding:6px 0;text-align:right;"><span style="color:#0f172a;font-size:13px;font-weight:600;">${productName}</span></td>
+          </tr>
+          <tr>
+            <td style="padding:6px 0;"><span style="color:#64748b;font-size:13px;">Amount paid</span></td>
+            <td style="padding:6px 0;text-align:right;"><span style="color:#10b981;font-size:13px;font-weight:600;">₹${price}</span></td>
+          </tr>
+          <tr>
+            <td style="padding:6px 0;"><span style="color:#64748b;font-size:13px;">Transaction</span></td>
+            <td style="padding:6px 0;text-align:right;"><span style="color:#0f172a;font-size:12px;font-family:monospace;">${txn}</span></td>
+          </tr>
+          ${
+            expiryLine
+              ? `<tr>
+            <td style="padding:6px 0;"><span style="color:#64748b;font-size:13px;">Valid until</span></td>
+            <td style="padding:6px 0;text-align:right;"><span style="color:#8b5cf6;font-size:13px;font-weight:600;">${expiryLine}</span></td>
+          </tr>`
+              : ''
+          }
+          <tr>
+            <td style="padding:6px 0;"><span style="color:#64748b;font-size:13px;">Order ID</span></td>
+            <td style="padding:6px 0;text-align:right;"><span style="color:#0f172a;font-size:13px;">#${orderId}</span></td>
+          </tr>
+        </table>
+      </div>
+
+      <div style="text-align:center;margin-bottom:24px;">
+        <a href="${this.baseUrl}/dashboard/order/${orderId}" style="display:inline-block;background:linear-gradient(135deg,#8b5cf6,#3b82f6);color:#ffffff;font-size:14px;font-weight:600;padding:14px 32px;border-radius:10px;text-decoration:none;">View Order →</a>
+      </div>
+
+      <p style="margin:0;color:#64748b;font-size:13px;text-align:center;">
+        Questions? Reply to this email or visit <a href="${this.baseUrl}/support" style="color:#8b5cf6;text-decoration:none;">Support</a>.
+      </p>
+    `;
+
+    return this.sendEmail({
+      to: email,
+      subject: '✅ Order Payment Confirmed - OceanLinux',
+      html: getTemplate(content, `Payment confirmed for ${productName}`),
+    });
+  }
+
   // ========== ORDER SUCCESS ==========
   async sendOrderSuccessEmail(email, name, orderId, productName, price, ipAddress) {
     const content = `

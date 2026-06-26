@@ -9,9 +9,9 @@ import { hashUserPassword } from '@/lib/userPassword';
 import { findUserByEmail, normalizeEmail } from '@/lib/userEmail';
 
 export async function POST(request) {
-    await connectDB();
-
     try {
+        await connectDB();
+
         const reqBody = await request.json();
         const { name, email, password } = reqBody;
 
@@ -20,6 +20,13 @@ export async function POST(request) {
 
         if (!trimmedName || !normalizedEmail || !password) {
             return new NextResponse(JSON.stringify({ message: 'Name, email and password are required' }), {
+                status: 400,
+                headers: { 'Content-Type': 'application/json' }
+            });
+        }
+
+        if (String(password).length < 8) {
+            return new NextResponse(JSON.stringify({ message: 'Password must be at least 8 characters' }), {
                 status: 400,
                 headers: { 'Content-Type': 'application/json' }
             });
@@ -42,11 +49,11 @@ export async function POST(request) {
             password: hashedPassword,
         });
 
-        const tokenData = {
-            id: newUser._id,
-            email: newUser.email,
-        };
-        const token = jwt.sign(tokenData, process.env.TOKEN_SECRET, { expiresIn: "1d" });
+        const token = jwt.sign(
+            { id: newUser._id, email: newUser.email },
+            process.env.TOKEN_SECRET,
+            { expiresIn: '1d' }
+        );
 
         try {
             const emailService = new EmailService();
@@ -55,10 +62,26 @@ export async function POST(request) {
             console.error('Welcome email failed:', emailError);
         }
 
-        return new NextResponse(JSON.stringify({ user: newUser, token }), {
+        const safeUser = {
+            _id: newUser._id,
+            name: newUser.name,
+            email: newUser.email,
+            userType: newUser.userType,
+        };
+
+        const response = new NextResponse(JSON.stringify({ result: safeUser }), {
             status: 201,
             headers: { 'Content-Type': 'application/json' }
         });
+
+        response.cookies.set('token', token, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'strict',
+            path: '/',
+        });
+
+        return response;
     } catch (error) {
         if (error?.code === 11000) {
             const field = Object.keys(error.keyPattern || {})[0] || 'field';

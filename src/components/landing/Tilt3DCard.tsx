@@ -16,6 +16,7 @@ type Tilt3DCardProps = {
   glow?: boolean;
   glareTone?: GlareTone;
   maxGlare?: number;
+  interactive?: boolean;
 };
 
 function buildGlareBackground(
@@ -43,17 +44,22 @@ export default function Tilt3DCard({
   glow = true,
   glareTone = "light",
   maxGlare = 0.22,
+  interactive = true,
 }: Tilt3DCardProps) {
-  const { ref, style, glare } = useTilt3D(maxTilt, scale, maxGlare);
+  const { ref, style, glare } = useTilt3D(
+    interactive ? maxTilt : 0,
+    interactive ? scale : 1,
+    interactive ? maxGlare : 0
+  );
 
   const glareOpacity =
     glareTone === "emerald" ? glare.opacity * 0.85 : glare.opacity;
 
   return (
     <div
-      ref={ref}
-      className={cn("tilt-3d-wrap", float && "animate-float-3d", className)}
-      style={style}
+      ref={interactive ? ref : undefined}
+      className={cn("tilt-3d-wrap", float && interactive && "animate-float-3d", className)}
+      style={interactive ? style : undefined}
     >
       <div
         className={cn(
@@ -63,7 +69,7 @@ export default function Tilt3DCard({
           innerClassName
         )}
       >
-        {glareTone !== "none" && (
+        {glareTone !== "none" && interactive && (
           <div
             className="tilt-3d-glare pointer-events-none absolute inset-0 z-20 rounded-[inherit]"
             style={{

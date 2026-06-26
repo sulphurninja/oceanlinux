@@ -101,7 +101,7 @@ function ResetPasswordForm() {
 
   if (!tokenValid) {
     return (
-      <div className="premium-auth-shell flex items-center justify-center p-6 min-h-dvh">
+      <div className="premium-auth-shell hero-premium-bg premium-auth-shell--centered flex-1 min-h-0 w-full max-w-full">
           <Card className="premium-auth-card w-full max-w-md border-0 shadow-none">
             <CardHeader className="text-center space-y-4">
               <div className="mx-auto w-16 h-16 bg-red-100 dark:bg-red-900 rounded-full flex items-center justify-center">
@@ -141,7 +141,7 @@ function ResetPasswordForm() {
 
   if (success) {
     return (
-      <div className="premium-auth-shell flex items-center justify-center p-6 min-h-dvh">
+      <div className="premium-auth-shell hero-premium-bg premium-auth-shell--centered flex-1 min-h-0 w-full max-w-full">
           <Card className="premium-auth-card w-full max-w-md border-0 shadow-none">
             <CardHeader className="text-center space-y-4">
               <div className="mx-auto w-16 h-16 bg-green-100 dark:bg-green-900 rounded-full flex items-center justify-center">
@@ -325,7 +325,7 @@ function ResetPasswordForm() {
 export default function ResetPasswordPage() {
   return (
     <Suspense fallback={
-      <div className="premium-auth-shell flex items-center justify-center min-h-dvh">
+      <div className="premium-auth-shell premium-auth-shell--centered flex-1 min-h-0 w-full max-w-full">
         <div className="w-8 h-8 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin"></div>
       </div>
     }>

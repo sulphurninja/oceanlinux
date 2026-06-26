@@ -11,6 +11,7 @@ import { isSlotIpOrder } from '@/lib/slotIpOrder';
 const HostycareAPI = require('@/services/hostycareApi');
 const SmartVPSAPI = require('@/services/smartvpsApi');
 const { getAdvpsRebuildResetFields, isAdvpsOrder } = require('@/lib/advpsRebuildLimit');
+const { notifyRenewalCompleted } = require('@/lib/renewalNotifications');
 
 // Initialize payment gateways
 Cashfree.XClientId = process.env.CASHFREE_APP_ID;
@@ -157,6 +158,10 @@ async function processRenewal(order, paymentInfo) {
     $push: { renewalPayments: renewalPayment },
     $unset: { pendingRenewal: 1 }
   });
+
+  notifyRenewalCompleted(order._id, newExpiryDate, pendingRenewal.renewalTxnId).catch((err) =>
+    console.error('[RECOVER] renewal notification failed:', err.message),
+  );
 
   return {
     orderId: order._id,

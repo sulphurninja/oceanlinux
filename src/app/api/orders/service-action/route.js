@@ -119,6 +119,79 @@ async function resolveCompanyNetbayApi(order) {
 }
 
 /**
+ * Pull the current password for a reseller (Hostheaven) VM and persist it onto
+ * the order when it differs from what we have stored. Hostheaven now rotates
+ * the root/login password on every reinstall, so a stale `order.password`
+ * would otherwise show the customer a credential that no longer works. Safe to
+ * call on every status/sync — it only writes when the value actually changed.
+ *
+ * @returns {Promise<{changed: boolean, password: string|null, error?: string}>}
+ */
+async function syncResellerOrderPassword(resellerApi, order, orderId, vmId) {
+  try {
+    const newPass = await resellerApi.getVmPassword(vmId);
+    if (newPass && newPass !== order.password) {
+      await Order.findByIdAndUpdate(orderId, {
+        password: newPass,
+        lastSyncTime: new Date(),
+        $push: {
+          logs: {
+            action: 'sync',
+            timestamp: new Date(),
+            details: 'Password refreshed from reseller panel (Hostheaven)',
+            success: true,
+          },
+        },
+      });
+      console.log(`[SERVICE-ACTION] 🔑 Reseller password refreshed for order ${orderId} (vmId=${vmId})`);
+      return { changed: true, password: newPass };
+    }
+    return { changed: false, password: newPass || order.password || null };
+  } catch (err) {
+    console.warn(`[SERVICE-ACTION] Reseller password sync failed (vmId=${vmId}): ${err.message}`);
+    return { changed: false, password: order.password || null, error: err.message };
+  }
+}
+
+/**
+ * Background watcher: Hostheaven assigns the new password during/after the
+ * rebuild, which can lag a few seconds behind the reinstall call returning.
+ * Poll the details endpoint until the password changes from what it was before
+ * the rebuild (or a sane max attempts), then persist it. Runs detached — the
+ * HTTP response to the user returns immediately.
+ */
+function watchResellerPasswordAfterReinstall(resellerApi, orderId, vmId, previousPassword) {
+  const delays = [8000, 12000, 15000, 20000, 30000, 30000, 45000, 60000];
+  (async () => {
+    for (let i = 0; i < delays.length; i++) {
+      await new Promise((r) => setTimeout(r, delays[i]));
+      try {
+        const newPass = await resellerApi.getVmPassword(vmId);
+        if (newPass && newPass !== previousPassword) {
+          await Order.findByIdAndUpdate(orderId, {
+            password: newPass,
+            lastSyncTime: new Date(),
+            $push: {
+              logs: {
+                action: 'reinstall',
+                timestamp: new Date(),
+                details: 'New password captured from reseller panel after reinstall',
+                success: true,
+              },
+            },
+          });
+          console.log(`[SERVICE-ACTION] 🔑 Post-reinstall password captured for order ${orderId} (attempt ${i + 1})`);
+          return;
+        }
+      } catch (err) {
+        console.warn(`[SERVICE-ACTION] Post-reinstall password poll ${i + 1} failed (vmId=${vmId}): ${err.message}`);
+      }
+    }
+    console.warn(`[SERVICE-ACTION] Post-reinstall password not captured in time for order ${orderId} (vmId=${vmId}) — Sync will retry.`);
+  })().catch((err) => console.error('[SERVICE-ACTION] Post-reinstall password watcher crashed:', err.message));
+}
+
+/**
  * Convert Reseller-API ISO objects into the flat `{ [id]: name }` shape the
  * dashboard's reinstall dropdown expects.
  *
@@ -754,6 +827,9 @@ export async function POST(request) {
                   found.vmId,
                   { overviewRaw: found.raw }
                 );
+                // Hostheaven rotates the password on reinstall — refresh it on
+                // every sync so the dashboard always shows working credentials.
+                const pwdSync = await syncResellerOrderPassword(resellerApi, order, orderId, found.vmId);
                 await Order.findByIdAndUpdate(orderId, { lastSyncTime: new Date() });
                 return NextResponse.json({
                   success: true,
@@ -762,6 +838,11 @@ export async function POST(request) {
                   powerSource: source,
                   provider: 'reseller-api',
                   vmId: found.vmId,
+                  syncResult: {
+                    credentialsUpdated: pwdSync.changed,
+                    changes: pwdSync.changed ? ['password'] : [],
+                    lastSyncTime: new Date().toISOString(),
+                  },
                   lastSync: new Date().toISOString(),
                 });
               }
@@ -795,7 +876,19 @@ export async function POST(request) {
                 }
                 const cls = classifyResellerIso(chosenIso);
 
+                // Capture the pre-rebuild password so the background watcher can
+                // tell when Hostheaven has rotated it to the new value.
+                let previousPassword = order.password || null;
+                try {
+                  const beforePass = await resellerApi.getVmPassword(vmId);
+                  if (beforePass) previousPassword = beforePass;
+                } catch (_) { /* non-fatal — fall back to stored password */ }
+
                 const apiRes = await resellerApi.rebuild(vmId, chosenIsoId);
+
+                // Hostheaven assigns a brand-new password during the rebuild —
+                // poll for it in the background and persist once it changes.
+                watchResellerPasswordAfterReinstall(resellerApi, orderId, vmId, previousPassword);
 
                 const update = {
                   $set: {
@@ -821,10 +914,11 @@ export async function POST(request) {
                     accepted: true,
                     vmId,
                     isoId: chosenIsoId,
-                    message: 'Rebuild submitted via reseller API',
+                    message: 'Rebuild submitted via reseller API. New password will appear shortly (auto-synced).',
                     newOs: cls.osLabel || null,
                     newUsername: cls.username || null,
                     osFamily: cls.family || null,
+                    passwordRefreshing: true,
                     raw: apiRes,
                   },
                 });
@@ -1777,6 +1871,10 @@ export async function GET(request) {
               { overviewRaw: found.raw }
             );
 
+            // Refresh the password too — Hostheaven rotates it on reinstall, and
+            // this GET is what the dashboard polls after a reinstall completes.
+            const pwdSync = await syncResellerOrderPassword(resellerApi, order, orderId, found.vmId);
+
             await Order.findByIdAndUpdate(orderId, { lastSyncTime: new Date() });
 
             return NextResponse.json({
@@ -1792,7 +1890,8 @@ export async function GET(request) {
               powerSource: source,
               details: found.raw || null,
               syncResult: {
-                credentialsUpdated: false,
+                credentialsUpdated: pwdSync.changed,
+                changes: pwdSync.changed ? ['password'] : [],
                 lastSyncTime: new Date().toISOString(),
               },
               lastSync: new Date().toISOString(),

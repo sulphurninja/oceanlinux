@@ -9,6 +9,11 @@ import {
   isCompanyVisibleOrder,
   buildCompanyStockIdVariants,
 } from '@/lib/companyOrders';
+import {
+  defaultOsForServerType,
+  normalizeOsForServerType,
+  resolveUsernameForOs,
+} from '@/lib/companyInventory';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -41,7 +46,7 @@ export async function GET() {
 
   await connectDB();
 
-  const stocks = await IPStock.find({ company: company.id }).select('_id name').lean();
+  const stocks = await IPStock.find({ company: company.id }).select('_id name serverType').lean();
   const stockIds = stocks.map(s => s._id.toString());
 
   if (stockIds.length === 0) {
@@ -62,14 +67,20 @@ export async function GET() {
     .lean();
 
   const stockMap = {};
-  stocks.forEach(s => { stockMap[s._id.toString()] = s.name; });
+  stocks.forEach(s => {
+    stockMap[s._id.toString()] = { name: s.name, serverType: s.serverType };
+  });
 
   const enriched = orders
     .filter(isCompanyVisibleOrder)
-    .map(o => ({
-      ...o,
-      stockName: stockMap[String(o.ipStockId)] || 'Unknown',
-    }));
+    .map(o => {
+      const stock = stockMap[String(o.ipStockId)] || {};
+      return {
+        ...o,
+        stockName: stock.name || 'Unknown',
+        serverType: stock.serverType || 'Linux',
+      };
+    });
 
   return NextResponse.json(
     { orders: enriched, filterVersion: COMPANY_FILTER_VERSION },
@@ -90,8 +101,9 @@ export async function PUT(request) {
     return NextResponse.json({ error: 'Order ID is required' }, { status: 400, headers: responseHeaders() });
   }
 
-  const stocks = await IPStock.find({ company: company.id }).select('_id').lean();
+  const stocks = await IPStock.find({ company: company.id }).select('_id serverType').lean();
   const stockIds = stocks.map(s => s._id.toString());
+  const stockTypeMap = Object.fromEntries(stocks.map((s) => [s._id.toString(), s.serverType]));
 
   const order = await Order.findOne({
     _id: orderId,
@@ -103,11 +115,16 @@ export async function PUT(request) {
     return NextResponse.json({ error: 'Order not found or not authorized' }, { status: 404, headers: responseHeaders() });
   }
 
+  const serverType = stockTypeMap[String(order.ipStockId)] || 'Linux';
+  const normalizedOs = os !== undefined
+    ? normalizeOsForServerType(os, serverType)
+    : (order.os || defaultOsForServerType(serverType));
+
   const updateFields = {};
   if (ipAddress !== undefined) updateFields.ipAddress = ipAddress;
-  if (username !== undefined) updateFields.username = username;
+  if (username !== undefined) updateFields.username = resolveUsernameForOs(username, normalizedOs);
   if (password !== undefined) updateFields.password = password;
-  if (os !== undefined) updateFields.os = os;
+  if (os !== undefined) updateFields.os = normalizedOs;
   updateFields.status = 'active';
   updateFields.provisioningStatus = 'active';
 

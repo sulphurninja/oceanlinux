@@ -4,6 +4,7 @@ import Script from "next/script";
 import "./globals.css";
 import { Toaster } from "sonner";
 import { ThemeProvider } from "@/components/theme-provider";
+import OceanBirdFlyRoot from "@/components/landing/OceanBirdFlyRoot";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -124,6 +125,7 @@ export default function RootLayout({
             }
           }}
         />
+        <OceanBirdFlyRoot />
         {children}
         </ThemeProvider>
       </body>

@@ -1,10 +1,25 @@
 import mongoose from "mongoose";
+import dns from "dns";
+
+dns.setDefaultResultOrder("ipv4first");
 
 // Global variable to track the connection promise (for serverless environments)
 let cached = global.mongoose;
 
 if (!cached) {
   cached = global.mongoose = { conn: null, promise: null };
+}
+
+function normalizeMongoUrl(url) {
+  if (!url) return url;
+  const trimmed = url.trim();
+  if (
+    (trimmed.startsWith("'") && trimmed.endsWith("'")) ||
+    (trimmed.startsWith('"') && trimmed.endsWith('"'))
+  ) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
 }
 
 async function connectDB() {
@@ -19,7 +34,7 @@ async function connectDB() {
     return cached.conn;
   }
 
-  const MONGOOSE_URL = process.env.MONGOOSE_URL;
+  const MONGOOSE_URL = normalizeMongoUrl(process.env.MONGOOSE_URL);
 
   if (!MONGOOSE_URL) {
     throw new Error('MONGOOSE_URL environment variable is not defined');
@@ -33,6 +48,7 @@ async function connectDB() {
       maxPoolSize: 10,
       serverSelectionTimeoutMS: 10000, // 10 second timeout for initial connection
       socketTimeoutMS: 45000, // 45 second timeout for socket operations
+      family: 4,
     });
 
     cached.conn = await cached.promise;

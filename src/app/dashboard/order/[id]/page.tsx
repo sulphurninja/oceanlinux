@@ -110,6 +110,8 @@ type SlotIpConnection = {
 
 import { isSlotIpOrder } from '@/lib/slotIpOrder';
 import { isOrderAwaitingDelivery, isOrderPaid, hasOrderBeenDelivered } from '@/lib/orderDeliveryStatus';
+import { openRazorpayModal } from '@/lib/razorpayCheckout';
+import { triggerRenewalSuccessBird } from '@/lib/oceanBirdFly';
 
 function parseSlotIpConnection(order: Order): SlotIpConnection | null {
   const raw = (order.ipAddress || '').trim();
@@ -374,7 +376,7 @@ const OrderDetails = () => {
   // Virtualizor automation enabled; otherwise we just fetch the manual
   // server-action request status to populate the request UI.
   useEffect(() => {
-    if (order && !loading) {
+    if (order && !loading && !isSlotIpOrder(order)) {
       const provider = getProviderFromOrder(order, ipStock);
       const hasNativeServiceId = (provider === 'hostycare' && order.hostycareServiceId) ||
         (provider === 'smartvps' && (order.smartvpsServiceId || order.ipAddress)) ||
@@ -738,6 +740,8 @@ const OrderDetails = () => {
 
   // Check if server management actions are available
   const isServerManagementAvailable = (order: Order, ipStock: IPStock | null): boolean => {
+    if (isSlotIpOrder(order)) return false;
+
     const provider = getProviderFromOrder(order, ipStock);
 
     console.log('[ORDER-DETAILS] Checking server management availability:', {
@@ -805,6 +809,7 @@ const OrderDetails = () => {
    */
   const isOrderCompanyAutomated = (orderArg: Order | null, stock: IPStock | null): boolean => {
     if (!orderArg) return false;
+    if (isSlotIpOrder(orderArg)) return false;
     if (!hasCompanyAnyAutomation(stock)) return false;
     const prov = getProviderFromOrder(orderArg, stock);
     if (prov === 'oceanlinux') return true;
@@ -900,7 +905,11 @@ const OrderDetails = () => {
         console.log('[ORDER-DETAILS] Power state unchanged (transient/busy):', data);
       }
 
-      if (provider === 'advps' && data.credentialsUpdated) {
+      // Re-read the order whenever the provider reported a credential change so
+      // the dashboard shows the fresh password immediately. Hostheaven (reseller
+      // API) rotates the password on reinstall and reports it via
+      // syncResult.credentialsUpdated; ADVPS reports it top-level.
+      if (data.credentialsUpdated || data.syncResult?.credentialsUpdated) {
         await fetchOrder();
       }
 
@@ -1712,23 +1721,12 @@ const OrderDetails = () => {
 
   const handleRazorpayRenewal = async (data: any) => {
     try {
-      console.log("[RENEWAL] Initializing Razorpay renewal checkout");
-
-      if (!window.Razorpay) {
-        throw new Error("Razorpay SDK not loaded");
-      }
-
-      const options = {
-        key: data.razorpay.key,
-        amount: data.razorpay.amount,
-        currency: data.razorpay.currency,
-        name: "OceanLinux",
+      await openRazorpayModal({
+        data,
         description: `Renewal: ${order?.productName}`,
-        order_id: data.razorpay.order_id,
-        handler: async function (response: any) {
-          console.log("[RENEWAL] Razorpay payment successful:", response);
+        themeColor: '#3399cc',
+        onSuccess: async (response) => {
           toast.success("Payment successful! Processing renewal...");
-
           try {
             const confirmRes = await fetch("/api/payment/renew-confirm", {
               method: "POST",
@@ -1740,56 +1738,37 @@ const OrderDetails = () => {
                 paymentMethod: 'razorpay',
                 razorpayPaymentId: response.razorpay_payment_id,
                 razorpayOrderId: response.razorpay_order_id,
-                razorpaySignature: response.razorpay_signature
-              })
+                razorpaySignature: response.razorpay_signature,
+              }),
             });
 
             const confirmData = await confirmRes.json();
 
             if (confirmRes.ok && confirmData.success) {
+              triggerRenewalSuccessBird();
               if (confirmData.companyApproval?.status === 'pending') {
                 toast.success('Payment received — your provider will approve the renewal shortly.');
-              } else {
-                toast.success('Service renewed successfully!');
               }
               await fetchOrder();
             } else {
               toast.error("Payment successful but renewal processing failed. Please contact support.");
             }
-          } catch (error) {
+          } catch {
             toast.error("Payment successful but renewal confirmation failed. Please contact support.");
           } finally {
             setActionBusy(null);
           }
         },
-        prefill: {
-          name: data.customer.name,
-          email: data.customer.email,
-          contact: data.customer.phone
+        onDismiss: () => {
+          cancelPendingRenewal(data.renewalTxnId);
+          setActionBusy(null);
         },
-        theme: {
-          color: "#3399cc"
+        onFailed: () => {
+          cancelPendingRenewal(data.renewalTxnId);
+          toast.error("Payment failed. Wallet amount returned if it was used.");
+          setActionBusy(null);
         },
-        modal: {
-          ondismiss: function () {
-            console.log('[RENEWAL] Razorpay modal dismissed');
-            cancelPendingRenewal(data.renewalTxnId);
-            setActionBusy(null);
-          },
-        },
-      };
-
-      const rzp = new window.Razorpay(options);
-
-      rzp.on('payment.failed', function (response: any) {
-        console.error("[RENEWAL] Razorpay payment failed:", response);
-        cancelPendingRenewal(data.renewalTxnId);
-        toast.error("Payment failed. Wallet amount returned if it was used.");
-        setActionBusy(null);
       });
-
-      rzp.open();
-
     } catch (error: any) {
       console.error("[RENEWAL] Razorpay renewal error:", error);
       await cancelPendingRenewal(data.renewalTxnId);
@@ -2098,10 +2077,11 @@ const OrderDetails = () => {
     ? !!(slotIpConnection?.ip && slotIpConnection?.username)
     : !!(order.ipAddress && order.username);
   const usesLivePowerUi =
-    provider === 'hostycare' ||
+    !slotIpOrder &&
+    (provider === 'hostycare' ||
     provider === 'smartvps' ||
     (provider === 'advps' && !!order.advpsServiceId) ||
-    isOrderCompanyAutomated(order, ipStock);
+    isOrderCompanyAutomated(order, ipStock));
   const currentListPrice = getCurrentListPriceFromStock(ipStock, order.memory);
   const renewalPrice = renewalPaymentTotals.total;
   const renewalPriceNote = getOrderRenewalPriceNote(order, currentListPrice);
@@ -2939,7 +2919,7 @@ const OrderDetails = () => {
                 )}
 
                 {/* Recent Activity */}
-                {(order.lastAction || order.lastActionTime) && (
+                {(order.lastAction || order.lastActionTime) && !slotIpOrder && (
                   <Card className="border-border hover:shadow-md transition-shadow">
                     <CardHeader className="pb-3">
                       <CardTitle className="flex items-center gap-2 text-base lg:text-lg">
@@ -2983,7 +2963,7 @@ const OrderDetails = () => {
                 {/* Manual Server Action Requests - For non-auto-provisioned products.
                     Hidden when the company has Virtualizor or reseller-API automation;
                     those orders use the regular Server Control card above. */}
-                {provider === 'oceanlinux' && !hasCompanyAnyAutomation(ipStock) && (
+                {provider === 'oceanlinux' && !hasCompanyAnyAutomation(ipStock) && !slotIpOrder && (
                   <Card className="border-border hover:shadow-md transition-shadow">
                     <CardHeader className="pb-3">
                       <CardTitle className="flex items-center gap-2 text-base lg:text-lg">
@@ -3497,9 +3477,11 @@ const OrderDetails = () => {
                               {getProviderDisplayName(provider)} Service
                             </h4>
                             <p className="text-xs text-muted-foreground mb-2">
-                              {provider === 'oceanlinux'
-                                ? 'This service is directly managed by OceanLinux. Server management tools are not available through this interface.'
-                                : 'This service is offered with a partner provider.'}
+                              {slotIpOrder
+                                ? 'This is a Slot IP proxy order. Use the connection details above — start, stop, and server controls are not available.'
+                                : provider === 'oceanlinux'
+                                  ? 'This service is directly managed by OceanLinux. Server management tools are not available through this interface.'
+                                  : 'This service is offered with a partner provider.'}
                             </p>
                             {order.ipAddress && (
                               <p className="text-xs text-muted-foreground">

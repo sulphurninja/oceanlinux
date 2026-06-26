@@ -86,6 +86,7 @@ interface CreateKeyForm {
 }
 
 const AVAILABLE_PERMISSIONS = [
+  { id: 'wallet:read', label: 'View Wallet', description: 'Read wallet balance and transactions' },
   { id: 'servers:read', label: 'View Servers', description: 'Read access to server information' },
   { id: 'servers:write', label: 'Manage Servers', description: 'Create, update, and delete servers' },
   { id: 'orders:read', label: 'View Orders', description: 'Read access to order information' },

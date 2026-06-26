@@ -27,6 +27,13 @@ import PublicPageHero from '@/components/landing/PublicPageHero';
 
 const APIDocsPage = () => {
   const [copiedCode, setCopiedCode] = React.useState<string>('');
+  const [apiBase, setApiBase] = React.useState('https://oceanlinux.com/api/v1');
+
+  React.useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setApiBase(`${window.location.origin}/api/v1`);
+    }
+  }, []);
 
   const copyToClipboard = (code: string, id: string) => {
     navigator.clipboard.writeText(code);
@@ -83,7 +90,7 @@ const APIDocsPage = () => {
                   </div>
                   <div>
                     <p className="font-semibold text-white">Base URL</p>
-                    <p className="text-xs text-white/45">oceanlinux.com/api/v1</p>
+                    <p className="text-xs text-white/45">{apiBase.replace('https://', '').replace('http://', '')}</p>
                   </div>
                 </div>
               </CardContent>
@@ -198,7 +205,7 @@ const APIDocsPage = () => {
                       language="bash"
                       code={`curl -H "Authorization: Bearer YOUR_API_KEY" \\
      -H "Content-Type: application/json" \\
-     https://oceanlinux.com/api/v1/wallet`}
+     ${apiBase}/wallet`}
                     />
                   </div>
 
@@ -299,7 +306,7 @@ const APIDocsPage = () => {
                           id="wallet-get"
                           language="bash"
                           code={`curl -H "Authorization: Bearer YOUR_API_KEY" \\
-     https://oceanlinux.com/api/v1/wallet`}
+     ${apiBase}/wallet`}
                         />
                       </div>
 
@@ -384,7 +391,7 @@ const APIDocsPage = () => {
                           id="servers-list"
                           language="bash"
                           code={`curl -H "Authorization: Bearer YOUR_API_KEY" \\
-     https://oceanlinux.com/api/v1/servers`}
+     ${apiBase}/servers`}
                         />
                       </div>
 
@@ -420,14 +427,14 @@ const APIDocsPage = () => {
      -H "Authorization: Bearer YOUR_API_KEY" \\
      -H "Content-Type: application/json" \\
      -d '{
-       "serverId": "64f8a5b2c1234567890abcde",
-       "duration": 3,
+       "serverId": "PRODUCT_ID_FROM_LIST",
+       "memory": "4GB",
+       "duration": 1,
        "specifications": {
-         "os": "Ubuntu 22.04",
-         "hostname": "my-server"
+         "os": "Ubuntu 22"
        }
      }' \\
-     https://oceanlinux.com/api/v1/servers/purchase`}
+     ${apiBase}/servers/purchase`}
                         />
                       </div>
 
@@ -436,15 +443,19 @@ const APIDocsPage = () => {
                         <div className="space-y-2 text-sm">
                           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 p-2 border border-primary/30 rounded">
                             <code>serverId</code>
-                            <span className="text-muted-foreground">Required - Server ID from listing</span>
+                            <span className="text-muted-foreground">Required — product id from GET /servers</span>
+                          </div>
+                          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 p-2 border border-primary/30 rounded">
+                            <code>memory</code>
+                            <span className="text-muted-foreground">Required — plan key (e.g. 4GB)</span>
                           </div>
                           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 p-2 border border-primary/30 rounded">
                             <code>duration</code>
-                            <span className="text-muted-foreground">Required - Duration in months</span>
+                            <span className="text-muted-foreground">Optional — months (default 1)</span>
                           </div>
                           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 p-2 border border-primary/30 rounded">
-                            <code>specifications</code>
-                            <span className="text-muted-foreground">Optional - OS, hostname, etc.</span>
+                            <code>specifications.os</code>
+                            <span className="text-muted-foreground">Ubuntu 22, CentOS 7, or Windows 2022 64</span>
                           </div>
                         </div>
                       </div>
@@ -496,21 +507,21 @@ const APIDocsPage = () => {
                           id="my-servers"
                           language="bash"
                           code={`curl -H "Authorization: Bearer YOUR_API_KEY" \\
-     https://oceanlinux.com/api/v1/servers/my-servers`}
+     ${apiBase}/servers/my-servers`}
                         />
                       </div>
 
                       <div>
-                        <h4 className="font-medium mb-2">{`POST /v1/servers/{serverId}/reboot`}</h4>
+                        <h4 className="font-medium mb-2">{`POST /v1/servers/{orderId}/reboot`}</h4>
                         <p className="text-sm text-muted-foreground mb-4">
-                          Reboot a specific server.
+                          Reboot your server using the order id from my-servers.
                         </p>
                         <CodeBlock
                           id="server-reboot"
                           language="bash"
                           code={`curl -X POST \\
      -H "Authorization: Bearer YOUR_API_KEY" \\
-     https://oceanlinux.com/api/v1/servers/64f8a5b2c1234567890abcde/reboot`}
+     ${apiBase}/servers/ORDER_ID/reboot`}
                         />
                       </div>
                     </TabsContent>
@@ -633,7 +644,7 @@ const APIDocsPage = () => {
                           code={`const axios = require('axios');
 
 const API_KEY = 'your_api_key_here';
-const BASE_URL = 'https://oceanlinux.com/api/v1';
+const BASE_URL = '${apiBase}';
 
 async function purchaseServer() {
   try {
@@ -649,10 +660,11 @@ async function purchaseServer() {
 
     // Purchase server
     const purchase = await axios.post(\`\${BASE_URL}/servers/purchase\`, {
-      serverId: '64f8a5b2c1234567890abcde',
-      duration: 3,
+      serverId: 'PRODUCT_ID_FROM_LIST',
+      memory: '4GB',
+      duration: 1,
       specifications: {
-        os: 'Ubuntu 22.04',
+        os: 'Ubuntu 22',
         hostname: 'my-api-server'
       }
     }, {
@@ -690,7 +702,7 @@ purchaseServer();`}
 import json
 
 API_KEY = 'your_api_key_here'
-BASE_URL = 'https://oceanlinux.com/api/v1'
+BASE_URL = '${apiBase}'
 
 def purchase_server():
     headers = {
@@ -708,10 +720,11 @@ def purchase_server():
 
         # Purchase server
         purchase_data = {
-            'serverId': '64f8a5b2c1234567890abcde',
-            'duration': 3,
+            'serverId': 'PRODUCT_ID_FROM_LIST',
+            'memory': '4GB',
+            'duration': 1,
             'specifications': {
-                'os': 'Ubuntu 22.04',
+                'os': 'Ubuntu 22',
                 'hostname': 'my-api-server'
             }
         }
@@ -751,7 +764,7 @@ if __name__ == "__main__":
 
 class OceanLinuxAPI {
     private $apiKey;
-    private $baseUrl = 'https://oceanlinux.com/api/v1';
+    private $baseUrl = '${apiBase}';
 
     public function __construct($apiKey) {
         $this->apiKey = $apiKey;
@@ -790,9 +803,10 @@ class OceanLinuxAPI {
         return $this->makeRequest('GET', '/wallet');
     }
 
-    public function purchaseServer($serverId, $duration, $specifications = []) {
+    public function purchaseServer($serverId, $memory, $duration = 1, $specifications = []) {
         $data = [
             'serverId' => $serverId,
+            'memory' => $memory,
             'duration' => $duration,
             'specifications' => $specifications
         ];
@@ -811,10 +825,11 @@ try {
 
     // Purchase server
     $result = $api->purchaseServer(
-        '64f8a5b2c1234567890abcde',
-        3,
+        'PRODUCT_ID_FROM_LIST',
+        '4GB',
+        1,
         [
-            'os' => 'Ubuntu 22.04',
+            'os' => 'Ubuntu 22',
             'hostname' => 'my-api-server'
         ]
     );

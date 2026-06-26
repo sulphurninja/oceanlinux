@@ -199,20 +199,10 @@ export default function LoginNewsPopup() {
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
         className={cn(
-          "premium-login-news-dialog premium-dialog-mobile-sheet",
-          "!flex !flex-col p-0 gap-0 !overflow-hidden",
-          "border-0 shadow-2xl",
-          "w-[calc(100vw-1.25rem)] max-w-none sm:max-w-xl md:max-w-2xl lg:max-w-3xl",
-          "!max-h-[min(92dvh,calc(100dvh-1.5rem-env(safe-area-inset-top)-env(safe-area-inset-bottom)))]",
-          "rounded-2xl z-[101]",
-          /* Mobile: bottom sheet */
-          "max-sm:fixed max-sm:left-1/2 max-sm:-translate-x-1/2",
-          "max-sm:bottom-[max(0.5rem,env(safe-area-inset-bottom))] max-sm:top-auto max-sm:translate-y-0",
+          "premium-login-news-dialog premium-news-dialog premium-dialog-mobile-sheet",
+          "border-0 shadow-2xl rounded-2xl",
           "max-sm:data-[state=open]:slide-in-from-bottom-8 max-sm:data-[state=closed]:slide-out-to-bottom-8",
-          /* Desktop: centered modal */
-          "sm:top-1/2 sm:left-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 sm:bottom-auto",
-          "sm:data-[state=open]:slide-in-from-bottom-0 sm:data-[state=open]:zoom-in-95",
-          "[&>button[class*='absolute']]:hidden"
+          "sm:data-[state=open]:zoom-in-95"
         )}
       >
         <div className="h-0.5 w-full shrink-0 bg-gradient-to-r from-emerald-600/80 via-emerald-400 to-emerald-500/60" />
@@ -222,8 +212,11 @@ export default function LoginNewsPopup() {
           aria-hidden="true"
         />
 
-        {/* Header — fixed, never scrolls away */}
-        <div className="relative shrink-0 border-b px-4 pb-4 pt-5 sm:px-6 sm:pb-5 sm:pt-6" style={{ borderColor: 'var(--pd-border)' }}>
+        {/* Header */}
+        <div
+          className="premium-news-dialog-header relative shrink-0 border-b px-4 pb-3 pt-4 sm:px-5 sm:pb-4 sm:pt-5"
+          style={{ borderColor: 'var(--pd-border)' }}
+        >
           <div className="pointer-events-none absolute -right-8 -top-8 h-28 w-28 rounded-full bg-emerald-500/10 blur-2xl" />
 
           <button
@@ -236,14 +229,14 @@ export default function LoginNewsPopup() {
           </button>
 
           <div className="relative z-10 pr-10">
-            <div className="mb-3 flex flex-wrap items-center gap-2.5 sm:mb-4 sm:gap-3">
+            <div className="mb-2 flex flex-wrap items-center gap-2 sm:mb-2.5 sm:gap-2.5">
               <div
                 className={cn(
-                  "flex h-10 w-10 items-center justify-center rounded-xl border bg-gradient-to-br shadow-sm sm:h-11 sm:w-11",
+                  "flex h-9 w-9 items-center justify-center rounded-lg border bg-gradient-to-br shadow-sm sm:h-10 sm:w-10",
                   meta.tone
                 )}
               >
-                <TypeIcon className="h-5 w-5" />
+                <TypeIcon className="h-4 w-4 sm:h-5 sm:w-5" />
               </div>
               <span
                 className={cn(
@@ -255,15 +248,18 @@ export default function LoginNewsPopup() {
               </span>
             </div>
 
-            <DialogTitle className="text-xl font-bold leading-snug tracking-tight sm:text-2xl md:text-3xl" style={{ color: 'var(--pd-title)' }}>
+            <DialogTitle className="premium-news-dialog-title font-bold tracking-tight" style={{ color: 'var(--pd-title)' }}>
               {popup.title}
             </DialogTitle>
           </div>
         </div>
 
-        {/* Body — news scrolls only when long; WhatsApp always visible below */}
-        <div className="premium-login-news-body min-h-0 shrink px-4 py-4 sm:px-6 sm:py-5">
-          <div className="premium-login-news-content rounded-2xl border px-5 py-5 sm:px-6 sm:py-6 flex-1 min-h-0 overflow-y-auto sm:max-h-[min(52vh,520px)]" style={{ borderColor: 'var(--pd-border)', background: 'var(--pd-surface-soft)' }}>
+        {/* Scrollable body — content + WhatsApp */}
+        <div className="premium-news-dialog-scroll px-4 py-3 sm:px-5 sm:py-4">
+          <div
+            className="premium-login-news-content rounded-xl border px-3.5 py-3.5 sm:px-4 sm:py-4"
+            style={{ borderColor: 'var(--pd-border)', background: 'var(--pd-surface-soft)' }}
+          >
             <NewsContent text={popup.content} />
           </div>
 
@@ -272,21 +268,21 @@ export default function LoginNewsPopup() {
               href={popup.communityLink}
               target="_blank"
               rel="noopener noreferrer"
-              className="group relative mt-4 block overflow-hidden rounded-xl border border-[#25D366]/25 bg-[#25D366]/[0.06] transition-all hover:border-[#25D366]/40 hover:shadow-lg hover:shadow-[#25D366]/10"
+              className="group relative mt-3 block overflow-hidden rounded-xl border border-[#25D366]/25 bg-[#25D366]/[0.06] transition-all hover:border-[#25D366]/40 hover:shadow-lg hover:shadow-[#25D366]/10"
             >
-              <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:gap-4">
-                <div className="flex items-center gap-3 sm:flex-1">
-                  <WhatsAppLogo size={48} />
+              <div className="flex flex-col gap-2.5 p-3 sm:flex-row sm:items-center sm:gap-3 sm:p-3.5">
+                <div className="flex items-center gap-3 sm:flex-1 min-w-0">
+                  <WhatsAppLogo size={40} />
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold text-white sm:text-base">
+                    <p className="text-sm font-semibold text-white">
                       Join WhatsApp Community
                     </p>
-                    <p className="mt-0.5 text-xs text-white/45 sm:text-sm">
+                    <p className="mt-0.5 text-xs text-white/45">
                       Get updates, support and offers
                     </p>
                   </div>
                 </div>
-                <span className="flex w-full shrink-0 items-center justify-center gap-2 rounded-xl bg-[#25D366] px-4 py-2.5 text-sm font-semibold text-white transition-colors group-hover:bg-[#20bd5a] sm:w-auto">
+                <span className="flex w-full shrink-0 items-center justify-center gap-2 rounded-lg bg-[#25D366] px-3 py-2 text-sm font-semibold text-white transition-colors group-hover:bg-[#20bd5a] sm:w-auto">
                   Join Now
                   <ArrowRight className="h-4 w-4" />
                 </span>
@@ -295,8 +291,8 @@ export default function LoginNewsPopup() {
           )}
         </div>
 
-        {/* Footer — always visible, never clipped */}
-        <div className="shrink-0 border-t px-4 py-3 sm:px-6 sm:py-4 pb-[max(0.875rem,env(safe-area-inset-bottom))]" style={{ borderColor: 'var(--pd-border)', background: 'var(--pd-dialog-bg)' }}>
+        {/* Footer — always visible */}
+        <div className="shrink-0 border-t px-4 py-3 sm:px-5 sm:py-3.5 pb-[max(0.75rem,env(safe-area-inset-bottom))]" style={{ borderColor: 'var(--pd-border)', background: 'var(--pd-dialog-bg)' }}>
           <div className="flex flex-col-reverse gap-2.5 sm:flex-row sm:items-center sm:justify-end sm:gap-3">
             <Button
               variant="outline"

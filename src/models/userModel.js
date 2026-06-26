@@ -15,7 +15,18 @@ const userSchema = new mongoose.Schema({
     },
     password: {
         type: String,
-        required: true
+        default: ''
+    },
+    googleId: {
+        type: String,
+        unique: true,
+        sparse: true,
+        default: null
+    },
+    authProvider: {
+        type: String,
+        enum: ['local', 'google'],
+        default: 'local'
     },
     // Additional profile fields
     avatar: {
@@ -33,6 +44,15 @@ const userSchema = new mongoose.Schema({
     phone: {
         type: String,
         default: ''
+    },
+    // Billing address — required for GST-compliant invoices (determines
+    // CGST+SGST for intra-state vs IGST for inter-state supply).
+    billingAddress: {
+        line: { type: String, default: '' },
+        city: { type: String, default: '' },
+        state: { type: String, default: '' },
+        pincode: { type: String, default: '' },
+        country: { type: String, default: 'India' },
     },
     company: {
         type: String,

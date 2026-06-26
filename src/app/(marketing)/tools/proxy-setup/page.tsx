@@ -2,6 +2,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import {
     Terminal,
     Server,
@@ -65,8 +66,22 @@ interface PortAttempt {
     error?: string;
 }
 
+async function proxySetupRequest(body: Record<string, unknown>) {
+    const response = await fetch('/api/terminal/proxy-setup', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    });
+    const data = await response.json();
+    return { response, data };
+}
+
 const PublicProxySetupPage = () => {
+    const router = useRouter();
     const terminalRef = useRef<HTMLDivElement>(null);
+    const [authChecked, setAuthChecked] = useState(false);
+    const [isLoggedIn, setIsLoggedIn] = useState(false);
 
     // Connection state
     const [step, setStep] = useState<Step>('credentials');
@@ -112,6 +127,31 @@ const PublicProxySetupPage = () => {
             terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
         }
     }, [logs]);
+
+    useEffect(() => {
+        fetch('/api/users/me', { credentials: 'include' })
+            .then((res) => {
+                setIsLoggedIn(res.ok);
+                setAuthChecked(true);
+            })
+            .catch(() => {
+                setIsLoggedIn(false);
+                setAuthChecked(true);
+            });
+    }, []);
+
+    const handleAuthRequired = (status: number, message?: string) => {
+        if (status === 401) {
+            toast.error('Please sign in to use the Proxy Setup Tool');
+            router.push('/login?returnTo=/tools/proxy-setup');
+            return true;
+        }
+        if (status === 403) {
+            toast.error(message || 'You can only run this on servers in your OceanLinux account');
+            return true;
+        }
+        return false;
+    };
 
     const addLog = (type: LogType, message: string) => {
         setLogs(prev => [...prev, { type, message, timestamp: new Date() }]);
@@ -165,18 +205,17 @@ const PublicProxySetupPage = () => {
         addLog('command', `ssh ${serverUsername}@${serverIp} -p 22`);
 
         try {
-            const response = await fetch('/api/terminal/proxy-setup', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    ip: serverIp,
-                    username: serverUsername,
-                    password: serverPassword,
-                    action: 'detect'
-                })
+            const { response, data } = await proxySetupRequest({
+                ip: serverIp,
+                username: serverUsername,
+                password: serverPassword,
+                action: 'detect',
             });
 
-            const data = await response.json();
+            if (handleAuthRequired(response.status, data.message)) {
+                setStep('credentials');
+                return;
+            }
 
             if (data.success) {
                 // Update port attempt statuses from the server response
@@ -255,22 +294,21 @@ const PublicProxySetupPage = () => {
             addLog('info', `Installing Squid proxy server...`);
             setProgress(20);
 
-            const response = await fetch('/api/terminal/proxy-setup', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    ip: serverIp,
-                    username: serverUsername,
-                    password: serverPassword,
-                    proxyUsername: proxyUsername,
-                    proxyPassword: proxyPassword,
-                    action: 'full-setup'
-                })
+            const { response, data } = await proxySetupRequest({
+                ip: serverIp,
+                username: serverUsername,
+                password: serverPassword,
+                proxyUsername: proxyUsername,
+                proxyPassword: proxyPassword,
+                action: 'full-setup',
             });
 
             clearInterval(progressInterval);
 
-            const data = await response.json();
+            if (handleAuthRequired(response.status, data.message)) {
+                setStep('proxy-setup');
+                return;
+            }
 
             if (data.success) {
                 setProgress(100);
@@ -342,7 +380,7 @@ const PublicProxySetupPage = () => {
                 eyebrow="Free Tool"
                 title="One-Click"
                 titleAccent="Proxy Setup"
-                description="Install and configure a Squid proxy server on your Linux VPS in seconds. No terminal commands required. Works with Ubuntu, CentOS, Debian, and more."
+                description="Install Squid proxy on your OceanLinux VPS in seconds. Sign in with your account — tool works only on servers you own."
                 badge={
                     <span className="premium-chip inline-flex items-center gap-2">
                         <Zap className="w-4 h-4" />
@@ -368,6 +406,30 @@ const PublicProxySetupPage = () => {
 
             <section className="premium-page-section">
                 <div className="container mx-auto container-padding">
+                    {!authChecked ? (
+                        <div className="flex justify-center py-16">
+                            <Loader2 className="h-8 w-8 animate-spin text-emerald-400" />
+                        </div>
+                    ) : !isLoggedIn ? (
+                        <Card className="max-w-lg mx-auto border-emerald-500/20 bg-emerald-500/5">
+                            <CardHeader className="text-center">
+                                <Shield className="h-10 w-10 text-emerald-400 mx-auto mb-2" />
+                                <CardTitle>Sign in required</CardTitle>
+                                <CardDescription>
+                                    The Proxy Setup Tool is available to OceanLinux customers only.
+                                    Sign in, then use the IP of a server in your account.
+                                </CardDescription>
+                            </CardHeader>
+                            <CardContent className="flex flex-col sm:flex-row gap-3 justify-center">
+                                <Button asChild className="premium-btn-primary">
+                                    <Link href="/login?returnTo=/tools/proxy-setup">Sign in</Link>
+                                </Button>
+                                <Button asChild variant="outline" className="premium-btn-outline">
+                                    <Link href="/get-started">Create account</Link>
+                                </Button>
+                            </CardContent>
+                        </Card>
+                    ) : (
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
                         {/* Left Column - Credentials & Controls */}
                         <div className="space-y-6">
@@ -783,6 +845,7 @@ const PublicProxySetupPage = () => {
                             </Card>
                         </div>
                     </div>
+                    )}
                 </div>
             </section>
 

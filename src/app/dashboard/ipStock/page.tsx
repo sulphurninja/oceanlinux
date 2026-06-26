@@ -62,6 +62,8 @@ import {
   Wallet as WalletIcon,
   Sparkles,
   RefreshCw,
+  CheckCircle2,
+  XCircle,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { z } from "zod";
@@ -71,6 +73,7 @@ import Link from "next/link";
 import AddToCartButton from "@/components/cart/AddToCartButton";
 import { fetchWalletSummary } from "@/lib/walletClient";
 import { customerStockUnavailableMessage } from "@/lib/customerStockMessages";
+import { openRazorpayModal } from "@/lib/razorpayCheckout";
 
 // Keep all existing interfaces and global declarations unchanged...
 
@@ -865,116 +868,63 @@ function IPStockContent() {
   };
 
   const handleRazorpayPayment = async (data: any) => {
-    console.log('[Razorpay] Starting payment initialization');
-    console.log('[Razorpay] Payment data:', data);
-
-    // Wait for Razorpay SDK to be loaded (with timeout)
-    let attempts = 0;
-    const maxAttempts = 20; // 2 seconds total
-    while (typeof window.Razorpay === 'undefined' && attempts < maxAttempts) {
-      console.log(`[Razorpay] Waiting for SDK to load... (attempt ${attempts + 1}/${maxAttempts})`);
-      await new Promise(resolve => setTimeout(resolve, 100));
-      attempts++;
-    }
-
-    // Check if Razorpay SDK is loaded
-    if (typeof window.Razorpay === 'undefined') {
-      console.error('[Razorpay] SDK not loaded after waiting');
-      throw new Error('Razorpay SDK not available');
-    }
-
-    console.log('[Razorpay] SDK loaded successfully');
-
-    // Check if razorpay data exists in response
-    if (!data.razorpay) {
-      console.error('[Razorpay] Missing razorpay object in response');
-      throw new Error('Razorpay payment data missing');
-    }
-
-    if (!data.razorpay.order_id) {
-      console.error('[Razorpay] Missing order_id in razorpay data');
+    if (!data.razorpay?.order_id) {
       throw new Error('Razorpay order ID missing');
     }
 
-    console.log('[Razorpay] All checks passed, order_id:', data.razorpay.order_id);
+    const sanitizeForRazorpay = (text: string) => {
+      if (!text) return '';
+      return text.replace(/[^\w\s\-\.]/g, '').trim().substring(0, 255);
+    };
 
-    try {
-
-      // Sanitize text for Razorpay
-      const sanitizeForRazorpay = (text: string) => {
-        if (!text) return '';
-        return text.replace(/[^\w\s\-\.]/g, '').trim().substring(0, 255);
-      };
-
-      const options = {
-        key: data.razorpay.key,
-        amount: data.razorpay.amount,
-        currency: data.razorpay.currency,
-        name: 'OceanLinux',
-        description: sanitizeForRazorpay(`${selectedProduct?.name} - ${selectedProduct?.memory}`),
-        order_id: data.razorpay.order_id,
-        prefill: {
-          name: sanitizeForRazorpay(data.customer.name),
-          email: data.customer.email,
+    await openRazorpayModal({
+      data: {
+        ...data,
+        customer: {
+          ...data.customer,
+          name: sanitizeForRazorpay(data.customer?.name),
         },
-        theme: {
-          color: '#3b82f6'
-        },
-        handler: async function (response: any) {
-          console.log('Razorpay payment successful:', response);
-          toast.success("Payment successful! Processing order...");
+      },
+      description: sanitizeForRazorpay(`${selectedProduct?.name} - ${selectedProduct?.memory}`),
+      themeColor: '#3b82f6',
+      onSuccess: async (response) => {
+        toast.success("Payment successful! Processing order...");
+        try {
+          const confirmRes = await fetch("/api/payment/confirm", {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              clientTxnId: data.clientTxnId,
+              paymentMethod: 'razorpay',
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_signature: response.razorpay_signature,
+            }),
+          });
 
-          try {
-            const confirmRes = await fetch("/api/payment/confirm", {
-              method: "POST",
-              credentials: "include",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                clientTxnId: data.clientTxnId,
-                paymentMethod: 'razorpay',
-                razorpay_payment_id: response.razorpay_payment_id,
-                razorpay_order_id: response.razorpay_order_id,
-                razorpay_signature: response.razorpay_signature
-              })
-            });
-
-            if (confirmRes.ok) {
-              toast.success("Order confirmed! Redirecting...");
-              router.push(`/payment/callback?client_txn_id=${data.clientTxnId}&payment_id=${response.razorpay_payment_id}`);
-            } else {
-              toast.error("Payment confirmed but order processing failed. Please contact support.");
-              router.push(`/payment/callback?client_txn_id=${data.clientTxnId}&status=processing_failed`);
-            }
-          } catch (error) {
-            console.error('Error confirming payment:', error);
-            toast.error("Payment successful but order confirmation failed. Please contact support.");
-            router.push(`/payment/callback?client_txn_id=${data.clientTxnId}&status=confirmation_failed`);
+          if (confirmRes.ok) {
+            toast.success("Order confirmed! Redirecting...");
+            router.push(`/payment/callback?client_txn_id=${data.clientTxnId}&payment_id=${response.razorpay_payment_id}`);
+          } else {
+            toast.error("Payment confirmed but order processing failed. Please contact support.");
+            router.push(`/payment/callback?client_txn_id=${data.clientTxnId}&status=processing_failed`);
           }
-        },
-        modal: {
-          ondismiss: function () {
-            console.log('Razorpay payment modal dismissed');
-            setPaymentInitiating(false);
-            cancelPendingPayment(data.clientTxnId);
-          }
+        } catch (error) {
+          console.error('Error confirming payment:', error);
+          toast.error("Payment successful but order confirmation failed. Please contact support.");
+          router.push(`/payment/callback?client_txn_id=${data.clientTxnId}&status=confirmation_failed`);
         }
-      };
-
-      console.log('[Razorpay] Creating Razorpay instance with options:', { 
-        ...options, 
-        key: options.key ? '***' + options.key.slice(-4) : 'MISSING',
-        amount: options.amount,
-        order_id: options.order_id
-      });
-
-      const razorpay = new window.Razorpay(options);
-      console.log('[Razorpay] Instance created successfully, opening modal');
-      razorpay.open();
-
-    } catch (error: any) {
-      console.error("[Razorpay] Error:", error);
-      throw new Error('Razorpay initialization failed: ' + (error?.message || 'Unknown error'));
-    }
+      },
+      onDismiss: () => {
+        setPaymentInitiating(false);
+        cancelPendingPayment(data.clientTxnId);
+      },
+      onFailed: () => {
+        setPaymentInitiating(false);
+        toast.error('Payment failed. Please try again.');
+      },
+    });
   };
 
   const categoryCards = [
@@ -1634,43 +1584,56 @@ function CompactServerPlanRow({
 
   return (
     <div className={cn(
-      "premium-dashboard-card rounded-lg transition-colors overflow-hidden",
-      inStock ? "hover:border-emerald-400/25" : "opacity-75"
+      "premium-dashboard-card rounded-lg transition-all overflow-hidden border-l-4",
+      inStock
+        ? "border-l-emerald-400 hover:border-emerald-400/40"
+        : "border-l-red-500 opacity-75"
     )}>
       {/* Main Row - Always Visible */}
       <div 
-        className="flex items-center gap-3 p-3 cursor-pointer"
+        className={cn(
+          "flex items-center gap-3 p-3 cursor-pointer",
+          !inStock && "cursor-default"
+        )}
         onClick={() => setIsExpanded(!isExpanded)}
       >
         {/* Icon */}
         <div className={cn(
-          "w-8 h-8 rounded-lg flex items-center justify-center border flex-shrink-0",
+          "w-9 h-9 rounded-lg flex items-center justify-center border flex-shrink-0",
           inStock
-            ? "bg-emerald-500/20 border-emerald-400/35"
-            : "bg-white/5 border-white/10"
+            ? "bg-emerald-500/25 border-emerald-400/45"
+            : "bg-red-500/15 border-red-400/35"
         )}>
-          {stock.serverType === 'VPS' ? (
-            <Cloud className={cn("h-4 w-4", inStock ? "text-sky-300" : "text-white/35")} />
+          {!inStock ? (
+            <XCircle className="h-4 w-4 text-red-400" />
+          ) : stock.serverType === 'VPS' ? (
+            <Cloud className="h-4 w-4 text-sky-300" />
           ) : (
-            <Server className={cn("h-4 w-4", inStock ? "text-emerald-300" : "text-white/35")} />
+            <Server className="h-4 w-4 text-emerald-300" />
           )}
         </div>
 
         {/* Name & Type */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <h3 className="font-semibold text-sm md:text-base text-white">{stock.name}</h3>
+            <h3 className={cn(
+              "font-semibold text-sm md:text-base",
+              inStock ? "text-white" : "text-white/45 line-through decoration-white/25"
+            )}>
+              {stock.name}
+            </h3>
             <Badge variant="outline" className={cn(premiumBadge.neutral, "text-[10px] px-1.5 py-0 h-5")}>
               {stock.serverType}
             </Badge>
-            {!inStock && (
-              <Badge variant="outline" className={cn(premiumBadge.error, "text-[10px] gap-1 px-1.5 py-0 h-5")}>
-                Out of stock
+            {inStock ? (
+              <Badge variant="outline" className={cn(premiumBadge.success, "text-[10px] gap-1 px-2 py-0 h-5 font-semibold")}>
+                <CheckCircle2 className="h-3 w-3" />
+                {showUnits ? `${unitsLeft} in stock` : 'Available'}
               </Badge>
-            )}
-            {inStock && showUnits && (
-              <Badge variant="outline" className={cn(premiumBadge.success, "text-[10px] gap-1 px-1.5 py-0 h-5")}>
-                {unitsLeft} in stock
+            ) : (
+              <Badge variant="outline" className="text-[10px] gap-1 px-2 py-0 h-5 font-semibold bg-red-500/20 text-red-300 border-red-400/40">
+                <XCircle className="h-3 w-3" />
+                Out of stock
               </Badge>
             )}
             {inStock && hasPromoCodes && (
@@ -1689,11 +1652,34 @@ function CompactServerPlanRow({
           </p>
         </div>
 
-        {/* Price & Expand */}
-        <div className="flex items-center gap-3 flex-shrink-0">
+        {/* Status + Price */}
+        <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
+          <div className={cn(
+            "hidden sm:flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide",
+            inStock
+              ? "bg-emerald-500/20 text-emerald-300 border border-emerald-400/30"
+              : "bg-red-500/20 text-red-300 border border-red-400/35"
+          )}>
+            {inStock ? (
+              <>
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                In stock
+              </>
+            ) : (
+              <>
+                <span className="h-1.5 w-1.5 rounded-full bg-red-400" />
+                Sold out
+              </>
+            )}
+          </div>
           <div className="text-right">
             <p className="text-xs text-white/45">From</p>
-            <p className="font-bold text-base md:text-lg text-emerald-300">₹{startingPrice}</p>
+            <p className={cn(
+              "font-bold text-base md:text-lg",
+              inStock ? "text-emerald-300" : "text-white/35"
+            )}>
+              ₹{startingPrice}
+            </p>
           </div>
           <ChevronDown 
             className={cn(
@@ -1717,11 +1703,26 @@ function CompactServerPlanRow({
                   {memoryOptions.map(([memory, details]) => (
                     <div
                       key={memory}
-                      className="flex items-center justify-between gap-3 p-2.5 rounded-md bg-white/[0.04] border border-white/10 hover:border-emerald-400/35 transition-colors"
+                      className={cn(
+                        "flex items-center justify-between gap-3 p-2.5 rounded-md border transition-colors",
+                        inStock
+                          ? "bg-white/[0.04] border-white/10 hover:border-emerald-400/35"
+                          : "bg-white/[0.02] border-red-400/10 opacity-80"
+                      )}
                     >
-                      <span className="text-sm font-medium flex-1 text-white/90">{memory}</span>
+                      <span className={cn(
+                        "text-sm font-medium flex-1",
+                        inStock ? "text-white/90" : "text-white/45"
+                      )}>
+                        {memory}
+                      </span>
                       <div className="flex items-center gap-2">
-                        <span className="font-bold text-base text-emerald-300">₹{details.price}</span>
+                        <span className={cn(
+                          "font-bold text-base",
+                          inStock ? "text-emerald-300" : "text-white/35"
+                        )}>
+                          ₹{details.price}
+                        </span>
                         <AddToCartButton
                           kind="ipstock"
                           ipStockId={stock._id}
@@ -1739,18 +1740,25 @@ function CompactServerPlanRow({
                             onBuyNow(stock.name, memory, details.price!, stock._id, undefined, inStock);
                           }}
                           disabled={!inStock || verifyingPurchaseKey === `${stock._id}:${memory}`}
-                          className="h-8 px-3 gap-1.5 premium-btn-primary border-0"
+                          className={cn(
+                            "h-8 px-3 gap-1.5 border-0",
+                            inStock
+                              ? "premium-btn-primary"
+                              : "bg-red-500/15 text-red-300 hover:bg-red-500/20 cursor-not-allowed"
+                          )}
                         >
                           {verifyingPurchaseKey === `${stock._id}:${memory}` ? (
                             <Loader2 className="h-3 w-3 animate-spin" />
-                          ) : (
+                          ) : inStock ? (
                             <Zap className="h-3 w-3" />
+                          ) : (
+                            <XCircle className="h-3 w-3" />
                           )}
                           {verifyingPurchaseKey === `${stock._id}:${memory}`
                             ? 'Checking…'
                             : inStock
                               ? 'Buy Now'
-                              : 'Out of stock'}
+                              : 'Sold out'}
                         </Button>
                       </div>
                     </div>

@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from "next/link";
+import { performLogoutWithCelebration } from "@/lib/logoutWithCelebration";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetTrigger, SheetContent } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
@@ -39,6 +40,14 @@ interface NavItem {
   badge?: string;
   children?: NavItem[];
 }
+
+const getUserInitials = (name: string) =>
+  name
+    .split(' ')
+    .map((n) => n[0])
+    .join('')
+    .toUpperCase()
+    .substring(0, 2);
 
 const ResponsiveSidebar = ({ user }: { user?: any }) => {
   const [open, setOpen] = useState(false);
@@ -83,36 +92,38 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
 
     setIsLoggingOut(true);
 
-    try {
-      const response = await fetch('/api/auth/logout', {
-        method: 'POST',
-        credentials: 'include',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
+    await performLogoutWithCelebration(async () => {
+      try {
+        const response = await fetch('/api/auth/logout', {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        });
 
-      if (response.ok) {
         const itemsToClear = ['lastClientTxnId', 'user', 'preferences'];
         itemsToClear.forEach(item => {
           localStorage.removeItem(item);
           sessionStorage.removeItem(item);
         });
 
-        toast.success('Logged out successfully');
         setOpen(false);
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.message || 'Logout failed');
+        }
+
         window.location.href = '/login';
-      } else {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Logout failed');
+      } catch (error) {
+        console.error('Logout error:', error);
+        toast.error('Logout failed. Redirecting anyway...');
+        window.location.href = '/login';
+      } finally {
+        setIsLoggingOut(false);
       }
-    } catch (error) {
-      console.error('Logout error:', error);
-      toast.error('Logout failed. Redirecting anyway...');
-      window.location.href = '/login';
-    } finally {
-      setIsLoggingOut(false);
-    }
+    });
   };
 
   const navItems: NavItem[] = [
@@ -232,6 +243,7 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
         )}>
           <img
             src='/ol.png'
+            data-ocean-brand-logo
             className={cn(
               "transition-all duration-200 hover:scale-105",
               isCollapsed && !isMobile ? "h-20 w-auto" : "h-12 w-auto"
@@ -329,61 +341,57 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
         </nav>
       </div>
 
-      {/* Footer */}
+      {/* Footer — account card + sign out */}
       <div className={cn(
-        "border-t premium-sidebar-divider",
-        isCollapsed && !isMobile ? "p-3" : "p-3"
+        "shrink-0 p-3",
+        isCollapsed && !isMobile ? "px-2" : "px-3"
       )}>
-        {/* Theme Toggle */}
         <div className={cn(
-          "flex items-center mb-2",
-          isCollapsed && !isMobile ? "justify-center" : "justify-between"
+          "premium-sidebar-account-card rounded-xl",
+          isCollapsed && !isMobile ? "p-2" : "p-3"
         )}>
-          {(!isCollapsed || isMobile) && (
-            <span className="text-xs premium-sidebar-muted">Theme</span>
-          )}
-          <ThemeToggle />
-        </div>
-
-        {/* Help Link */}
-        {(!isCollapsed || isMobile) && (
-          <Button
-            onClick={() => {
-              router.push('/support/tickets');
-              isMobile && setOpen(false);
-            }}
-            variant="ghost"
-            className="w-full justify-start premium-sidebar-footer-btn h-8 text-sm"
-          >
-            <HelpCircle className="h-4 w-4 mr-2" />
-            Help & Support
-          </Button>
-        )}
-
-        <Separator className="my-2" />
-
-        {/* Logout Button */}
-        <Button
-          onClick={handleLogout}
-          variant="ghost"
-          className={cn(
-            "transition-all duration-200 text-red-500 hover:text-destructive hover:bg-destructive/10 h-8 text-sm",
-            isCollapsed && !isMobile ? "w-full justify-center px-0" : "w-full justify-start"
-          )}
-          disabled={isLoggingOut}
-          title={isCollapsed && !isMobile ? "Sign Out" : undefined}
-        >
-          {isLoggingOut ? (
-            <div className="h-4 w-4 animate-spin rounded-full border-2 border-destructive border-t-transparent" />
+          {(!isCollapsed || isMobile) ? (
+            <div className="flex items-center gap-2.5 mb-3 min-w-0">
+              <div className="premium-sidebar-account-avatar">
+                {user?.name ? getUserInitials(user.name) : 'U'}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold truncate premium-sidebar-brand leading-tight">
+                  {user?.name || 'My Account'}
+                </p>
+                <p className="text-[11px] premium-sidebar-muted truncate mt-0.5">
+                  {user?.email || 'Signed in'}
+                </p>
+              </div>
+            </div>
           ) : (
-            <LogOutIcon className="h-4 w-4" />
+            <div className="flex justify-center mb-2">
+              <div className="premium-sidebar-account-avatar">
+                {user?.name ? getUserInitials(user.name) : 'U'}
+              </div>
+            </div>
           )}
-          {(!isCollapsed || isMobile) && (
-            <span className="ml-2">
-              {isLoggingOut ? "Signing out..." : "Sign Out"}
-            </span>
-          )}
-        </Button>
+
+          <button
+            type="button"
+            onClick={handleLogout}
+            disabled={isLoggingOut}
+            title={isCollapsed && !isMobile ? 'Sign Out' : undefined}
+            className={cn(
+              "premium-sidebar-signout-btn",
+              isCollapsed && !isMobile && "px-2"
+            )}
+          >
+            {isLoggingOut ? (
+              <div className="h-4 w-4 animate-spin rounded-full border-2 border-red-400/80 border-t-transparent shrink-0" />
+            ) : (
+              <LogOutIcon className="h-4 w-4 shrink-0" />
+            )}
+            {(!isCollapsed || isMobile) && (
+              <span>{isLoggingOut ? 'Signing out...' : 'Sign Out'}</span>
+            )}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -410,7 +418,7 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
           </Sheet>
 
           <div className="flex justify-center items-center space-x-2">
-            <img src='/ol.png' className='h-10 sm:h-12 w-auto object-contain' alt="OceanLinux" />
+            <img src='/ol.png' data-ocean-brand-logo className='h-10 sm:h-12 w-auto object-contain' alt="OceanLinux" />
           </div>
 
           <div className="flex items-center gap-1">

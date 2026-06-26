@@ -67,7 +67,26 @@ import { cn } from '@/lib/utils';
 import { useTheme } from 'next-themes';
 import RealActivityFeed from '@/components/real-activity-feed';
 
+const INDIAN_STATES = [
+    'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh', 'Goa',
+    'Gujarat', 'Haryana', 'Himachal Pradesh', 'Jharkhand', 'Karnataka', 'Kerala',
+    'Madhya Pradesh', 'Maharashtra', 'Manipur', 'Meghalaya', 'Mizoram', 'Nagaland',
+    'Odisha', 'Punjab', 'Rajasthan', 'Sikkim', 'Tamil Nadu', 'Telangana', 'Tripura',
+    'Uttar Pradesh', 'Uttarakhand', 'West Bengal',
+    'Andaman and Nicobar Islands', 'Chandigarh', 'Dadra and Nagar Haveli and Daman and Diu',
+    'Delhi', 'Jammu and Kashmir', 'Ladakh', 'Lakshadweep', 'Puducherry',
+];
+
+interface BillingAddress {
+    line?: string;
+    city?: string;
+    state?: string;
+    pincode?: string;
+    country?: string;
+}
+
 interface UserProfile {
+    _id?: string;
     name: string;
     email: string;
     avatar?: string;
@@ -76,6 +95,7 @@ interface UserProfile {
     phone?: string;
     company?: string;
     website?: string;
+    billingAddress?: BillingAddress;
     socialLinks?: {
         github?: string;
         twitter?: string;
@@ -116,6 +136,13 @@ const MyAccount = () => {
         phone: '',
         company: '',
         website: '',
+        billingAddress: {
+            line: '',
+            city: '',
+            state: '',
+            pincode: '',
+            country: 'India'
+        },
         socialLinks: {
             github: '',
             twitter: '',
@@ -214,6 +241,13 @@ const MyAccount = () => {
                     github: data.socialLinks?.github || '',
                     twitter: data.socialLinks?.twitter || '',
                     linkedin: data.socialLinks?.linkedin || ''
+                },
+                billingAddress: {
+                    line: data.billingAddress?.line || '',
+                    city: data.billingAddress?.city || '',
+                    state: data.billingAddress?.state || '',
+                    pincode: data.billingAddress?.pincode || '',
+                    country: data.billingAddress?.country || 'India'
                 },
                 stats: {
                     totalOrders: data.stats?.totalOrders || 0,
@@ -1011,6 +1045,87 @@ const MyAccount = () => {
                                 </CardContent>
                             </Card>
                         </div>
+
+                        {/* Billing Address */}
+                        <Card>
+                            <CardHeader>
+                                <CardTitle className="flex items-center gap-2">
+                                    <MapPin className="h-5 w-5" />
+                                    Billing Address
+                                </CardTitle>
+                                <CardDescription>
+                                    Used on your GST invoices. State decides CGST+SGST (within Maharashtra) vs IGST.
+                                </CardDescription>
+                            </CardHeader>
+                            <CardContent className="space-y-4">
+                                <div>
+                                    <Label htmlFor="addr-line">Address</Label>
+                                    <Input
+                                        id="addr-line"
+                                        value={user.billingAddress?.line || ''}
+                                        onChange={(e) => setUser({
+                                            ...user,
+                                            billingAddress: { ...user.billingAddress, line: e.target.value }
+                                        })}
+                                        disabled={!isEditing}
+                                        className={cn(!isEditing && "bg-muted")}
+                                        placeholder="House / Building, Street, Area"
+                                    />
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    <div>
+                                        <Label htmlFor="addr-city">City</Label>
+                                        <Input
+                                            id="addr-city"
+                                            value={user.billingAddress?.city || ''}
+                                            onChange={(e) => setUser({
+                                                ...user,
+                                                billingAddress: { ...user.billingAddress, city: e.target.value }
+                                            })}
+                                            disabled={!isEditing}
+                                            className={cn(!isEditing && "bg-muted")}
+                                            placeholder="City"
+                                        />
+                                    </div>
+                                    <div>
+                                        <Label htmlFor="addr-state">State</Label>
+                                        <Select
+                                            value={user.billingAddress?.state || ''}
+                                            onValueChange={(value) => setUser({
+                                                ...user,
+                                                billingAddress: { ...user.billingAddress, state: value }
+                                            })}
+                                            disabled={!isEditing}
+                                        >
+                                            <SelectTrigger className={cn(!isEditing && "bg-muted")}>
+                                                <SelectValue placeholder="Select state" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {INDIAN_STATES.map((s) => (
+                                                    <SelectItem key={s} value={s}>{s}</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    <div>
+                                        <Label htmlFor="addr-pin">PIN Code</Label>
+                                        <Input
+                                            id="addr-pin"
+                                            inputMode="numeric"
+                                            maxLength={6}
+                                            value={user.billingAddress?.pincode || ''}
+                                            onChange={(e) => setUser({
+                                                ...user,
+                                                billingAddress: { ...user.billingAddress, pincode: e.target.value.replace(/\D/g, '').slice(0, 6) }
+                                            })}
+                                            disabled={!isEditing}
+                                            className={cn(!isEditing && "bg-muted")}
+                                            placeholder="6-digit PIN"
+                                        />
+                                    </div>
+                                </div>
+                            </CardContent>
+                        </Card>
                     </TabsContent>
 
                     {/* Security Tab */}

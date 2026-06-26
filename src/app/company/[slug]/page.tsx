@@ -18,7 +18,8 @@ import {
   Building2, Server, Package, Loader2, LogOut, Lock, Save, Eye, EyeOff,
   Globe, KeyRound, Search, ArrowUpDown, CalendarDays, ClipboardList,
   Play, Square, RotateCcw, HardDriveIcon, CheckCircle, XCircle, Clock,
-  MessageSquare, RefreshCw, IndianRupee,
+  MessageSquare, RefreshCw, IndianRupee, Terminal, MemoryStick, AlertTriangle, User,
+  ChevronDown, ChevronUp,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { COMPANY_FILTER_VERSION, isCompanyVisibleOrder } from '@/lib/companyOrders';
@@ -48,6 +49,60 @@ function orderStatusBadgeProps(status: string): {
   return { variant: 'outline', className: 'text-[10px] h-4 capitalize' };
 }
 
+function formatOrderDate(value?: string) {
+  if (!value) return '—';
+  return new Date(value).toLocaleDateString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
+function getDaysUntilExpiry(expiryDate?: string) {
+  if (!expiryDate) return null;
+  return Math.ceil((new Date(expiryDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+}
+
+function getValidityDays(createdAt?: string, expiryDate?: string) {
+  if (!createdAt || !expiryDate) return null;
+  return Math.max(
+    0,
+    Math.ceil((new Date(expiryDate).getTime() - new Date(createdAt).getTime()) / (1000 * 60 * 60 * 24))
+  );
+}
+
+function OSIcon({ os, className = 'h-9 w-9' }: { os?: string; className?: string }) {
+  const osLower = (os || '').toLowerCase();
+  if (osLower.includes('ubuntu')) {
+    return <img src="/ubuntu.png" className={cn(className, 'rounded-lg object-cover shadow-sm shrink-0')} alt={os} />;
+  }
+  if (osLower.includes('centos')) {
+    return <img src="/centos.png" className={cn(className, 'rounded-lg object-cover shadow-sm shrink-0')} alt={os} />;
+  }
+  if (osLower.includes('windows')) {
+    return <img src="/windows.png" className={cn(className, 'rounded-lg object-cover shadow-sm shrink-0')} alt={os} />;
+  }
+  return (
+    <div className={cn(className, 'rounded-lg bg-muted flex items-center justify-center text-base shrink-0')}>
+      🐧
+    </div>
+  );
+}
+
+function styleProductName(content: string) {
+  const regex = /(\([^)]*\)|[a-zA-Z]+)/g;
+  return content.split(regex).map((part, index) => {
+    if (part.match(/\([^)]*\)/) || part.match(/[a-zA-Z]/)) {
+      return (
+        <span key={index} className="text-emerald-700 dark:text-emerald-300 font-semibold">
+          {part}
+        </span>
+      );
+    }
+    return part;
+  });
+}
+
 interface InventoryItem {
   _id: string;
   ipAddress: string;
@@ -72,7 +127,44 @@ interface Stock {
   tags: string[];
 }
 
-const OS_OPTIONS = ['Windows 2022 64', 'Ubuntu 22', 'CentOS 7'] as const;
+const LINUX_OS_OPTIONS = ['Ubuntu 22', 'CentOS 7'] as const;
+const VPS_OS_OPTIONS = ['Windows 2022 64'] as const;
+
+function defaultOsForStock(serverType: string): string {
+  return serverType === 'VPS' ? 'Windows 2022 64' : 'Ubuntu 22';
+}
+
+function osOptionsForStock(serverType: string): readonly string[] {
+  return serverType === 'VPS' ? VPS_OS_OPTIONS : LINUX_OS_OPTIONS;
+}
+
+function defaultUsernameForOs(os: string): string {
+  if (os === 'Windows 2022 64') return 'Administrator';
+  return 'root';
+}
+
+function defaultInventoryFormForStock(stock: Pick<Stock, 'serverType'>) {
+  const os = defaultOsForStock(stock.serverType);
+  return {
+    ipAddress: '',
+    username: defaultUsernameForOs(os),
+    password: '',
+    os,
+  };
+}
+
+function normalizeInventoryFormForStock(
+  form: { ipAddress: string; username: string; password: string; os: string },
+  stock: Pick<Stock, 'serverType'>
+) {
+  const allowed = osOptionsForStock(stock.serverType);
+  const os = allowed.includes(form.os) ? form.os : defaultOsForStock(stock.serverType);
+  return {
+    ...form,
+    os,
+    username: defaultUsernameForOs(os),
+  };
+}
 
 interface Order {
   _id: string;
@@ -89,6 +181,8 @@ interface Order {
   createdAt: string;
   expiryDate?: string;
   stockName: string;
+  serverType?: string;
+  ipStockId?: string;
 }
 
 interface ActionRequest {
@@ -188,6 +282,7 @@ export default function CompanyDashboard() {
   const [editOs, setEditOs] = useState('');
   const [saving, setSaving] = useState(false);
   const [visiblePasswords, setVisiblePasswords] = useState<Set<string>>(new Set());
+  const [expandedOrderIds, setExpandedOrderIds] = useState<Set<string>>(new Set());
 
   // Action request processing
   const [processingRequest, setProcessingRequest] = useState<ActionRequest | null>(null);
@@ -316,19 +411,17 @@ export default function CompanyDashboard() {
     }
   };
 
-  const addInventory = async (stockId: string, mode: 'bulk' | 'single') => {
+  const addInventory = async (stockId: string, mode: 'bulk' | 'single', stock: Stock) => {
     setSavingStockId(stockId);
     try {
       const payload: Record<string, unknown> = { stockId, action: 'addInventory' };
       if (mode === 'bulk') {
         payload.bulkLines = inventoryBulkDrafts[stockId] || '';
       } else {
-        const form = inventoryFormDrafts[stockId] || {
-          ipAddress: '',
-          username: 'Administrator',
-          password: '',
-          os: 'Windows 2022 64',
-        };
+        const form = normalizeInventoryFormForStock(
+          inventoryFormDrafts[stockId] || defaultInventoryFormForStock(stock),
+          stock
+        );
         if (!form.ipAddress || !form.password) {
           toast.error('IP address and password are required');
           return;
@@ -348,7 +441,7 @@ export default function CompanyDashboard() {
         else {
           setInventoryFormDrafts(prev => ({
             ...prev,
-            [stockId]: { ipAddress: '', username: 'Administrator', password: '', os: 'Windows 2022 64' },
+            [stockId]: defaultInventoryFormForStock(stock),
           }));
         }
         toast.success(`Added ${data.added} server(s) — auto-deliver on payment`);
@@ -385,20 +478,23 @@ export default function CompanyDashboard() {
     }
   };
 
-  const getInventoryForm = (stockId: string) =>
-    inventoryFormDrafts[stockId] || {
-      ipAddress: '',
-      username: 'Administrator',
-      password: '',
-      os: 'Windows 2022 64',
-    };
+  const getInventoryForm = (stock: Stock) =>
+    normalizeInventoryFormForStock(
+      inventoryFormDrafts[stock._id] || defaultInventoryFormForStock(stock),
+      stock
+    );
 
   const openEditOrder = (order: Order) => {
+    const serverType = order.serverType || 'Linux';
+    const allowed = osOptionsForStock(serverType);
+    const os = order.os && allowed.includes(order.os)
+      ? order.os
+      : defaultOsForStock(serverType);
     setEditOrder(order);
     setEditIp(order.ipAddress || '');
-    setEditUsername(order.username || '');
+    setEditUsername(order.username || defaultUsernameForOs(os));
     setEditPassword(order.password || '');
-    setEditOs(order.os || '');
+    setEditOs(os);
   };
 
   const saveOrderCreds = async () => {
@@ -495,6 +591,15 @@ export default function CompanyDashboard() {
     setVisiblePasswords(prev => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleOrderDetails = (id: string) => {
+    setExpandedOrderIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   };
@@ -652,7 +757,11 @@ export default function CompanyDashboard() {
               const count = stock.stockCount ?? 0;
               const inStock = count > 0;
               const hasPreconfig = stock.usesPreconfiguredInventory;
-              const form = getInventoryForm(stock._id);
+              const form = getInventoryForm(stock);
+              const osOptions = osOptionsForStock(stock.serverType);
+              const bulkPlaceholder = stock.serverType === 'VPS'
+                ? 'Bulk add (one per line):\n103.151.44.189,Administrator,password123,Windows 2022 64'
+                : 'Bulk add (one per line):\n103.151.44.190,root,pass456,Ubuntu 22\n103.151.44.191,root,pass789,CentOS 7';
               const expanded = expandedStockId === stock._id;
               return (
               <Card key={stock._id}>
@@ -746,14 +855,15 @@ export default function CompanyDashboard() {
                           />
                           <Select
                             value={form.os}
+                            disabled={stock.serverType === 'VPS'}
                             onValueChange={(v) => setInventoryFormDrafts(prev => ({
                               ...prev,
-                              [stock._id]: { ...form, os: v },
+                              [stock._id]: normalizeInventoryFormForStock({ ...form, os: v }, stock),
                             }))}
                           >
                             <SelectTrigger><SelectValue /></SelectTrigger>
                             <SelectContent>
-                              {OS_OPTIONS.map((os) => (
+                              {osOptions.map((os) => (
                                 <SelectItem key={os} value={os}>{os}</SelectItem>
                               ))}
                             </SelectContent>
@@ -762,13 +872,13 @@ export default function CompanyDashboard() {
                         <Button
                           size="sm"
                           className="mb-3"
-                          onClick={() => addInventory(stock._id, 'single')}
+                          onClick={() => addInventory(stock._id, 'single', stock)}
                           disabled={savingStockId === stock._id}
                         >
                           Add 1 server
                         </Button>
                         <Textarea
-                          placeholder={'Bulk add (one per line):\n103.151.44.189,Administrator,password123,Windows 2022 64\n103.151.44.190,Administrator,pass456,Ubuntu 22'}
+                          placeholder={bulkPlaceholder}
                           value={inventoryBulkDrafts[stock._id] || ''}
                           onChange={(e) => setInventoryBulkDrafts(prev => ({ ...prev, [stock._id]: e.target.value }))}
                           rows={4}
@@ -777,7 +887,7 @@ export default function CompanyDashboard() {
                         <Button
                           variant="secondary"
                           size="sm"
-                          onClick={() => addInventory(stock._id, 'bulk')}
+                          onClick={() => addInventory(stock._id, 'bulk', stock)}
                           disabled={savingStockId === stock._id}
                         >
                           Add from bulk paste
@@ -904,41 +1014,201 @@ export default function CompanyDashboard() {
                 <Card><CardContent className="py-12 text-center"><Package className="h-10 w-10 mx-auto text-muted-foreground mb-3" /><p className="text-sm text-muted-foreground">{visibleOrders.length === 0 ? 'No orders yet.' : 'No orders match your filters.'}</p></CardContent></Card>
               ) : filteredOrders.filter(isCompanyVisibleOrder).map((order) => {
                 const { label, ...statusBadge } = orderStatusBadgeProps(order.status);
+                const daysLeft = getDaysUntilExpiry(order.expiryDate);
+                const validityDays = getValidityDays(order.createdAt, order.expiryDate);
+                const isExpired = daysLeft !== null && daysLeft < 0;
+                const isExpanded = expandedOrderIds.has(order._id);
+
                 return (
-                <Card key={order._id}>
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between gap-4">
+                <Card key={order._id} className="overflow-hidden">
+                  <CardContent className="p-2.5 sm:p-3">
+                    <div className="flex items-start gap-2.5 sm:gap-3">
+                      <OSIcon os={order.os} className="h-8 w-8 sm:h-9 sm:w-9" />
+
                       <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <h3 className="font-medium text-sm">{order.productName}</h3>
-                          <Badge variant="outline" className="text-[10px] h-4">{order.memory}</Badge>
-                          <Badge variant="secondary" className="text-[10px] h-4">{order.stockName}</Badge>
-                          <Badge {...statusBadge}>{label || order.status}</Badge>
-                        </div>
-                        <div className="flex items-center gap-4 mt-1.5 text-xs text-muted-foreground flex-wrap">
-                          {order.customerName && <span>{order.customerName}</span>}
-                          <div className="flex items-center gap-1">
-                            <Globe className="h-3 w-3" />
-                            <span className={order.ipAddress ? 'text-foreground font-mono' : 'text-amber-500'}>{order.ipAddress || 'Not set'}</span>
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <h3 className="font-semibold text-xs sm:text-sm leading-snug break-words">
+                              {styleProductName(order.productName)}
+                            </h3>
+                            <div className="mt-1 flex flex-wrap items-center gap-1">
+                              <Badge variant="outline" className="text-[10px] h-4 px-1.5">
+                                <MemoryStick className="h-2.5 w-2.5 mr-0.5" />
+                                {order.memory}
+                              </Badge>
+                              <Badge variant="secondary" className="text-[10px] h-4 px-1.5">
+                                {order.stockName}
+                              </Badge>
+                              {order.os && (
+                                <Badge variant="outline" className="text-[10px] h-4 px-1.5">
+                                  <Terminal className="h-2.5 w-2.5 mr-0.5" />
+                                  {order.os}
+                                </Badge>
+                              )}
+                              <Badge {...statusBadge}>{label || order.status}</Badge>
+                            </div>
                           </div>
-                          <div className="flex items-center gap-1">
-                            <KeyRound className="h-3 w-3" />
-                            {order.password ? (
-                              <span className="font-mono flex items-center gap-1">
-                                {visiblePasswords.has(order._id) ? order.password : '••••••'}
-                                <button onClick={() => togglePasswordVisibility(order._id)} className="hover:text-foreground">
-                                  {visiblePasswords.has(order._id) ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
-                                </button>
+
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="gap-1 shrink-0 h-7 text-xs px-2"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openEditOrder(order);
+                            }}
+                          >
+                            <Save className="h-3 w-3" />
+                            <span className="hidden sm:inline">Update</span>
+                          </Button>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => toggleOrderDetails(order._id)}
+                          className="mt-2 w-full text-left rounded-md border border-dashed border-border/80 bg-muted/20 px-2.5 py-1.5 hover:bg-muted/40 transition-colors"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="min-w-0 flex-1 text-[11px] sm:text-xs text-muted-foreground truncate">
+                              {order.customerName && (
+                                <span className="font-medium text-foreground">{order.customerName}</span>
+                              )}
+                              {order.customerName && order.ipAddress && <span className="mx-1">·</span>}
+                              {order.ipAddress && (
+                                <span className="font-mono">{order.ipAddress}</span>
+                              )}
+                              {(order.customerName || order.ipAddress) && (order.createdAt || order.expiryDate) && (
+                                <span className="mx-1">·</span>
+                              )}
+                              <span>
+                                {formatOrderDate(order.createdAt)}
+                                {order.expiryDate && ` → ${formatOrderDate(order.expiryDate)}`}
                               </span>
-                            ) : <span className="text-amber-500">Not set</span>}
+                            </div>
+                            <span className="inline-flex items-center gap-0.5 shrink-0 text-[11px] font-medium text-primary">
+                              {isExpanded ? (
+                                <>
+                                  Hide
+                                  <ChevronUp className="h-3.5 w-3.5" />
+                                </>
+                              ) : (
+                                <>
+                                  Details
+                                  <ChevronDown className="h-3.5 w-3.5" />
+                                </>
+                              )}
+                            </span>
                           </div>
-                          <span className="hidden sm:inline">{new Date(order.createdAt).toLocaleDateString()}</span>
-                        </div>
+                        </button>
+
+                        {isExpanded && (
+                          <div className="mt-2 space-y-2 animate-in fade-in-0 slide-in-from-top-1 duration-200">
+                            <div className="rounded-lg border bg-muted/30 px-2.5 py-2 space-y-1.5 text-xs">
+                              {order.customerName && (
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <User className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                                  <span className="font-medium truncate">{order.customerName}</span>
+                                  {order.customerEmail && (
+                                    <span className="text-muted-foreground truncate hidden sm:inline">
+                                      ({order.customerEmail})
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+
+                              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                                <div className="flex items-center gap-1.5 min-w-0">
+                                  <Globe className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                                  <span className={cn('font-mono', order.ipAddress ? 'text-foreground' : 'text-amber-600')}>
+                                    {order.ipAddress || 'IP not set'}
+                                  </span>
+                                </div>
+
+                                <div className="flex items-center gap-1.5">
+                                  <KeyRound className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                                  {order.password ? (
+                                    <span className="font-mono flex items-center gap-1">
+                                      {visiblePasswords.has(order._id) ? order.password : '••••••'}
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          togglePasswordVisibility(order._id);
+                                        }}
+                                        className="hover:text-foreground"
+                                      >
+                                        {visiblePasswords.has(order._id) ? (
+                                          <EyeOff className="h-3.5 w-3.5" />
+                                        ) : (
+                                          <Eye className="h-3.5 w-3.5" />
+                                        )}
+                                      </button>
+                                    </span>
+                                  ) : (
+                                    <span className="text-amber-600">Password not set</span>
+                                  )}
+                                </div>
+
+                                {order.username && (
+                                  <div className="flex items-center gap-1.5 text-muted-foreground">
+                                    <span>User:</span>
+                                    <span className="font-mono text-foreground">{order.username}</span>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-3 gap-1.5 text-xs">
+                              <div className="rounded-md border px-2 py-1.5 bg-background">
+                                <p className="text-[9px] uppercase tracking-wide text-muted-foreground">Buy date</p>
+                                <p className="mt-0.5 font-medium flex items-center gap-1 text-[11px] sm:text-xs">
+                                  <CalendarDays className="h-3 w-3 text-muted-foreground shrink-0" />
+                                  {formatOrderDate(order.createdAt)}
+                                </p>
+                              </div>
+
+                              <div className="rounded-md border px-2 py-1.5 bg-background">
+                                <p className="text-[9px] uppercase tracking-wide text-muted-foreground">Expire date</p>
+                                <p className={cn(
+                                  'mt-0.5 font-medium flex items-center gap-1 text-[11px] sm:text-xs',
+                                  isExpired && 'text-red-600'
+                                )}>
+                                  <Clock className="h-3 w-3 text-muted-foreground shrink-0" />
+                                  {formatOrderDate(order.expiryDate)}
+                                </p>
+                              </div>
+
+                              <div className="rounded-md border px-2 py-1.5 bg-background">
+                                <p className="text-[9px] uppercase tracking-wide text-muted-foreground">Validity</p>
+                                <p className="mt-0.5 font-medium text-[11px] sm:text-xs">
+                                  {validityDays !== null ? `${validityDays} days` : '—'}
+                                  {daysLeft !== null && !isExpired && (
+                                    <span className="text-muted-foreground font-normal block sm:inline">
+                                      {' '}· {daysLeft}d left
+                                    </span>
+                                  )}
+                                </p>
+                              </div>
+                            </div>
+
+                            {order.expiryDate && (
+                              <div>
+                                {isExpired ? (
+                                  <Badge variant="destructive" className="text-[10px] h-5">
+                                    <AlertTriangle className="h-3 w-3 mr-1" />
+                                    Expired {Math.abs(daysLeft!)} days ago
+                                  </Badge>
+                                ) : daysLeft !== null && daysLeft <= 7 ? (
+                                  <Badge variant="outline" className="text-[10px] h-5 border-amber-300 text-amber-700 bg-amber-50">
+                                    <Clock className="h-3 w-3 mr-1" />
+                                    Expires in {daysLeft} days
+                                  </Badge>
+                                ) : null}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
-                      <Button size="sm" variant="outline" className="gap-1.5 shrink-0" onClick={() => openEditOrder(order)}>
-                        <Save className="h-3.5 w-3.5" />
-                        Update
-                      </Button>
                     </div>
                   </CardContent>
                 </Card>
@@ -1163,12 +1433,19 @@ export default function CompanyDashboard() {
               <div><Label>Password</Label><Input value={editPassword} onChange={(e) => setEditPassword(e.target.value)} placeholder="Server password" className="mt-1.5" /></div>
               <div>
                 <Label>Operating System</Label>
-                <Select value={editOs} onValueChange={setEditOs}>
+                <Select
+                  value={editOs}
+                  disabled={editOrder?.serverType === 'VPS'}
+                  onValueChange={(v) => {
+                    setEditOs(v);
+                    setEditUsername(defaultUsernameForOs(v));
+                  }}
+                >
                   <SelectTrigger className="mt-1.5"><SelectValue placeholder="Select OS" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="Ubuntu 22">Ubuntu 22</SelectItem>
-                    <SelectItem value="CentOS 7">CentOS 7</SelectItem>
-                    <SelectItem value="Windows 2022 64">Windows 2022</SelectItem>
+                    {osOptionsForStock(editOrder?.serverType || 'Linux').map((os) => (
+                      <SelectItem key={os} value={os}>{os}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>

@@ -46,10 +46,23 @@ interface Order {
         _id?: string;
         name?: string;
         email?: string;
+        phone?: string;
+        billingAddress?: {
+            line?: string;
+            city?: string;
+            state?: string;
+            pincode?: string;
+            country?: string;
+        };
     };
+    invoiceNumber?: string;
+    customerName?: string;
+    customerEmail?: string;
     productName: string;
     memory: string;
     price: number;
+    originalPrice?: number;
+    promoDiscount?: number;
     status: string;
     provisioningStatus?: string;
     provisioningError?: string;
@@ -93,6 +106,21 @@ function formatPaymentGatewayName(method: string): string {
     if (value === 'upi') return 'UPI';
     if (value === 'wallet') return 'Wallet';
     return method;
+}
+
+function getDaysUntilExpiry(expiryDate?: string | null): number | null {
+    if (!expiryDate) return null;
+    const now = new Date();
+    const expiry = new Date(expiryDate);
+    if (Number.isNaN(expiry.getTime())) return null;
+    return Math.ceil((expiry.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+function getExpiryTone(daysLeft: number | null): string {
+    if (daysLeft === null) return 'text-muted-foreground';
+    if (daysLeft < 0) return 'text-red-600 dark:text-red-400';
+    if (daysLeft <= 7) return 'text-amber-600 dark:text-amber-400';
+    return 'text-foreground';
 }
 
 type OrderPaymentBreakdown =
@@ -241,6 +269,10 @@ const ManageOrders = () => {
         dateTo: undefined,
     });
     const [showFilters, setShowFilters] = useState(false);
+    const [exportOpen, setExportOpen] = useState(false);
+    const [exportPreset, setExportPreset] = useState<'thisMonth' | 'lastMonth' | 'last30' | 'thisYear' | 'all' | 'custom'>('thisMonth');
+    const [exportFrom, setExportFrom] = useState('');
+    const [exportTo, setExportTo] = useState('');
     const [batchProvisioning, setBatchProvisioning] = useState(false);
     const [generatingCreds, setGeneratingCreds] = useState(false);
     const [updating, setUpdating] = useState(false);
@@ -635,6 +667,37 @@ const ManageOrders = () => {
     const formatInr = (amount?: number) =>
         amount != null ? `₹${amount.toLocaleString('en-IN')}` : '';
 
+    const renderOrderExpiryCell = (order: Order) => {
+        if (!order.expiryDate) {
+            return <span className="text-xs text-muted-foreground">—</span>;
+        }
+
+        const expiry = new Date(order.expiryDate);
+        if (Number.isNaN(expiry.getTime())) {
+            return <span className="text-xs text-muted-foreground">—</span>;
+        }
+
+        const daysLeft = getDaysUntilExpiry(order.expiryDate);
+        const tone = getExpiryTone(daysLeft);
+
+        return (
+            <div className="space-y-0.5">
+                <div className={`text-xs whitespace-nowrap font-medium ${tone}`}>
+                    {format(expiry, 'MMM dd, yyyy')}
+                </div>
+                {daysLeft !== null && (
+                    <div className={`text-[10px] ${tone}`}>
+                        {daysLeft < 0
+                            ? `Expired ${Math.abs(daysLeft)}d ago`
+                            : daysLeft === 0
+                              ? 'Expires today'
+                              : `${daysLeft}d left`}
+                    </div>
+                )}
+            </div>
+        );
+    };
+
     const renderOrderPaymentCell = (order: Order, compact = false) => {
         const info = getOrderPaymentBreakdown(order);
 
@@ -827,38 +890,124 @@ const ManageOrders = () => {
 
     const hasActiveFilters = searchTerm || Object.values(filters).some(v => v);
 
-    const exportToCSV = () => {
-        const csvData = filteredOrders.map(order => ({
-            'Order ID': order._id,
-            'Customer Name': order.user?.name || 'N/A',
-            'Customer Email': order.user?.email || 'N/A',
-            'Product': order.productName,
-            'Memory': order.memory,
-            'Price': order.price,
-            'Status': normalizeAdminOrderStatus(order.status),
-            'Provisioning Status': order.provisioningStatus || 'N/A',
-            'Provider': order.provider || 'hostycare',
-            'IP Address': order.ipAddress || 'N/A',
-            'Username': order.username || 'N/A',
-            'OS': order.os || 'N/A',
-            'Transaction ID': order.transactionId || 'N/A',
-            'Created At': format(new Date(order.createdAt), 'yyyy-MM-dd HH:mm:ss'),
-            'Expiry Date': order.expiryDate ? format(new Date(order.expiryDate), 'yyyy-MM-dd') : 'N/A',
-        }));
+    // ── GST report export (CSV for Excel) ──────────────────────────────────
+    const GST_SELLER_STATE = 'Maharashtra';
+    const GST_RATE = 18;
+    const GST_SAC_CODE = '998315'; // Hosting & IT infrastructure provisioning services
 
-        const headers = Object.keys(csvData[0] || {});
-        const csvContent = [
-            headers.join(','),
-            ...csvData.map(row => headers.map(header => `"${row[header as keyof typeof row]}"`).join(','))
-        ].join('\n');
+    const resolveExportRange = (): { from: Date; to: Date } | null => {
+        const now = new Date();
+        const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
+        const endOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999);
+        switch (exportPreset) {
+            case 'thisMonth':
+                return { from: new Date(now.getFullYear(), now.getMonth(), 1), to: endOfDay(now) };
+            case 'lastMonth': {
+                const from = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+                const to = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+                return { from, to };
+            }
+            case 'last30':
+                return { from: startOfDay(new Date(now.getTime() - 29 * 86400000)), to: endOfDay(now) };
+            case 'thisYear':
+                return { from: new Date(now.getFullYear(), 0, 1), to: endOfDay(now) };
+            case 'all':
+                return { from: new Date(0), to: endOfDay(now) };
+            case 'custom':
+                if (!exportFrom || !exportTo) return null;
+                return { from: new Date(`${exportFrom}T00:00:00`), to: new Date(`${exportTo}T23:59:59.999`) };
+            default:
+                return null;
+        }
+    };
+
+    const exportGstReport = () => {
+        const range = resolveExportRange();
+        if (!range) {
+            toast.error('Please select a valid date range');
+            return;
+        }
+
+        const r2 = (n: number) => Math.round(n * 100) / 100;
+        const div = 1 + GST_RATE / 100; // prices are GST-inclusive
+
+        const rows = filteredOrders
+            .filter((order) => {
+                const created = new Date(order.createdAt).getTime();
+                return isOrderPaid(order) && created >= range.from.getTime() && created <= range.to.getTime();
+            })
+            .map((order) => {
+                const price = Number(order.price || 0);
+                const orig = Number(order.originalPrice ?? price);
+                const grossTaxable = r2(orig / div);
+                const taxableAmount = r2(price / div);
+                const discountTaxable = r2(Math.max(0, grossTaxable - taxableAmount));
+                const gst = r2(price - taxableAmount);
+
+                const billing = order.user?.billingAddress || {};
+                const state = (billing.state || '').trim();
+                const intra = !!state && state.toLowerCase() === GST_SELLER_STATE.toLowerCase();
+                const cgst = intra ? r2(gst / 2) : 0;
+                const sgst = intra ? r2(gst - cgst) : 0;
+                const igst = intra ? 0 : gst;
+
+                const invoiceNo = order.invoiceNumber || `OL-${order._id.slice(-8).toUpperCase()}`;
+                const partyName = order.customerName || order.user?.name || 'N/A';
+                const addressParts = [billing.line, billing.city].filter(Boolean);
+                // Strip emojis / pictographs and collapse spaces — plain name only.
+                const cleanName = (s: string) =>
+                    (s || '')
+                        .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}\u{FE00}-\u{FE0F}\u{1F1E6}-\u{1F1FF}\u{200D}]/gu, '')
+                        .replace(/\s{2,}/g, ' ')
+                        .trim();
+                const baseName = cleanName(order.productName);
+                const itemName = order.memory ? `${baseName} - ${order.memory}` : baseName;
+
+                return {
+                    'Invoice No': invoiceNo,
+                    'Invoice Date': format(new Date(order.createdAt), 'dd-MM-yyyy'),
+                    'Party name': partyName,
+                    'GST Number(If Applicable)': '',
+                    'Address': addressParts.join(', '),
+                    'Pincode': billing.pincode || '',
+                    'State Of Supply': state || '',
+                    'Item Name': itemName,
+                    'SAC Code': GST_SAC_CODE,
+                    'Qty': 1,
+                    'Rate': grossTaxable,
+                    'gross amount': grossTaxable,
+                    'Discount': discountTaxable,
+                    'Taxable Amount': taxableAmount,
+                    'CGST': cgst,
+                    'SGST': sgst,
+                    'IGST': igst,
+                    'Net Invoice Value': price,
+                };
+            });
+
+        if (rows.length === 0) {
+            toast.error('No paid orders found in the selected period');
+            return;
+        }
+
+        const headers = Object.keys(rows[0]);
+        const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+        const csvContent =
+            '\ufeff' +
+            [
+                headers.map(esc).join(','),
+                ...rows.map((row) => headers.map((h) => esc(row[h as keyof typeof row])).join(',')),
+            ].join('\r\n');
 
         const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
         const link = document.createElement('a');
         link.href = URL.createObjectURL(blob);
-        link.download = `orders_export_${format(new Date(), 'yyyy-MM-dd_HHmmss')}.csv`;
+        link.download = `gst-report_${format(range.from, 'yyyy-MM-dd')}_to_${format(range.to, 'yyyy-MM-dd')}.csv`;
         link.click();
-        
-        toast.success(`Exported ${csvData.length} orders to CSV`);
+        URL.revokeObjectURL(link.href);
+
+        setExportOpen(false);
+        toast.success(`Exported ${rows.length} invoice${rows.length > 1 ? 's' : ''} to GST report`);
     };
 
     return (
@@ -876,8 +1025,7 @@ const ManageOrders = () => {
                         <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
                             <Button
                                 variant="outline"
-                                onClick={exportToCSV}
-                                disabled={filteredOrders.length === 0}
+                                onClick={() => setExportOpen(true)}
                                 className="gap-2"
                                 size="sm"
                             >
@@ -1312,9 +1460,39 @@ const ManageOrders = () => {
                                                 </div>
                                             </div>
 
-                                            <p className="text-[11px] text-muted-foreground">
-                                                {format(new Date(order.createdAt), 'MMM dd, yyyy')}
-                                            </p>
+                                            <div className="grid grid-cols-2 gap-2 text-[11px]">
+                                                <div className="rounded-lg bg-muted/40 px-2.5 py-2">
+                                                    <p className="text-[10px] text-muted-foreground">Created</p>
+                                                    <p className="mt-1 font-medium">
+                                                        {format(new Date(order.createdAt), 'MMM dd, yyyy')}
+                                                    </p>
+                                                </div>
+                                                <div className="rounded-lg bg-muted/40 px-2.5 py-2">
+                                                    <p className="text-[10px] text-muted-foreground">Expiry</p>
+                                                    {order.expiryDate ? (
+                                                        <div className="mt-1">
+                                                            <p className={`font-medium ${getExpiryTone(getDaysUntilExpiry(order.expiryDate))}`}>
+                                                                {format(new Date(order.expiryDate), 'MMM dd, yyyy')}
+                                                            </p>
+                                                            {(() => {
+                                                                const daysLeft = getDaysUntilExpiry(order.expiryDate);
+                                                                if (daysLeft === null) return null;
+                                                                return (
+                                                                    <p className={`text-[10px] ${getExpiryTone(daysLeft)}`}>
+                                                                        {daysLeft < 0
+                                                                            ? `Expired ${Math.abs(daysLeft)}d ago`
+                                                                            : daysLeft === 0
+                                                                              ? 'Expires today'
+                                                                              : `${daysLeft}d left`}
+                                                                    </p>
+                                                                );
+                                                            })()}
+                                                        </div>
+                                                    ) : (
+                                                        <p className="mt-1 text-muted-foreground">—</p>
+                                                    )}
+                                                </div>
+                                            </div>
 
                                             {renderOrderActions(order)}
                                         </CardContent>
@@ -1325,7 +1503,7 @@ const ManageOrders = () => {
 
                         {/* Desktop table — only when sidebar + table fit */}
                         <div className="hidden xl:block w-full min-w-0 overflow-x-auto rounded-xl border bg-card shadow-sm">
-                            <Table className="min-w-[1100px]">
+                            <Table className="min-w-[1220px]">
                                 <TableHeader>
                                     <TableRow className="bg-muted/40 hover:bg-muted/40">
                                         <TableHead className="font-semibold">Customer</TableHead>
@@ -1337,14 +1515,15 @@ const ManageOrders = () => {
                                         <TableHead className="font-semibold">Provisioning</TableHead>
                                         <TableHead className="font-semibold">Provider</TableHead>
                                         <TableHead className="font-semibold">IP Address</TableHead>
-                                        <TableHead className="font-semibold">Date</TableHead>
+                                        <TableHead className="font-semibold">Created</TableHead>
+                                        <TableHead className="font-semibold">Expiry</TableHead>
                                         <TableHead className="font-semibold">Actions</TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
                                     {loading ? (
                                         <TableRow>
-                                            <TableCell colSpan={11} className="h-32 text-center">
+                                            <TableCell colSpan={12} className="h-32 text-center">
                                                 <div className="flex items-center justify-center gap-2">
                                                     <Loader2 className="h-6 w-6 animate-spin" />
                                                     <span>Loading orders...</span>
@@ -1353,7 +1532,7 @@ const ManageOrders = () => {
                                         </TableRow>
                                     ) : paginatedOrders.length === 0 ? (
                                         <TableRow>
-                                            <TableCell colSpan={11} className="h-32 text-center text-muted-foreground">
+                                            <TableCell colSpan={12} className="h-32 text-center text-muted-foreground">
                                                 {hasActiveFilters ? 'No orders match your search criteria.' : 'No orders found.'}
                                             </TableCell>
                                         </TableRow>
@@ -1393,6 +1572,7 @@ const ManageOrders = () => {
                                                         {format(new Date(order.createdAt), 'MMM dd, yyyy')}
                                                     </div>
                                                 </TableCell>
+                                                <TableCell>{renderOrderExpiryCell(order)}</TableCell>
                                                 <TableCell>{renderOrderActions(order)}</TableCell>
                                             </TableRow>
                                         ))
@@ -1934,6 +2114,75 @@ const ManageOrders = () => {
                     </DialogContent>
                 </Dialog>
             )}
+
+            {/* GST Report Export Dialog */}
+            <Dialog open={exportOpen} onOpenChange={setExportOpen}>
+                <DialogContent className="max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Download className="w-4 h-4" />
+                            Export GST Report
+                        </DialogTitle>
+                        <DialogDescription>
+                            Choose a duration. A GST-ready Excel/CSV (CGST/SGST/IGST by state) will be generated for paid orders in that period.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="space-y-4 py-2">
+                        <div>
+                            <Label className="text-sm">Duration</Label>
+                            <Select value={exportPreset} onValueChange={(v) => setExportPreset(v as typeof exportPreset)}>
+                                <SelectTrigger className="mt-1">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="thisMonth">This Month</SelectItem>
+                                    <SelectItem value="lastMonth">Last Month</SelectItem>
+                                    <SelectItem value="last30">Last 30 Days</SelectItem>
+                                    <SelectItem value="thisYear">This Year</SelectItem>
+                                    <SelectItem value="all">All Time</SelectItem>
+                                    <SelectItem value="custom">Custom Range</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+
+                        {exportPreset === 'custom' && (
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <Label htmlFor="export-from" className="text-sm">From</Label>
+                                    <Input
+                                        id="export-from"
+                                        type="date"
+                                        value={exportFrom}
+                                        onChange={(e) => setExportFrom(e.target.value)}
+                                        className="mt-1"
+                                    />
+                                </div>
+                                <div>
+                                    <Label htmlFor="export-to" className="text-sm">To</Label>
+                                    <Input
+                                        id="export-to"
+                                        type="date"
+                                        value={exportTo}
+                                        onChange={(e) => setExportTo(e.target.value)}
+                                        className="mt-1"
+                                    />
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    <DialogFooter className="gap-2 sm:gap-0">
+                        <DialogClose asChild>
+                            <Button variant="outline" size="sm">Cancel</Button>
+                        </DialogClose>
+                        <Button size="sm" onClick={exportGstReport} className="gap-2">
+                            <Download className="w-4 h-4" />
+                            Download Report
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
 
             {/* Transfer VPS Dialog */}
             {transferOrder && (

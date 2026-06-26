@@ -18,7 +18,7 @@ export default function AuthAwarePublicLayout({
 
   return (
     <PublicPageLayout
-      className={isAuthPage ? "h-dvh overflow-hidden" : "min-h-dvh"}
+      className={isAuthPage ? "h-svh max-h-svh overflow-hidden w-full max-w-[100vw]" : "min-h-dvh w-full max-w-[100vw]"}
       showHeader={!isAuthPage}
       showFooter={!isAuthPage}
       showSupport={!isAuthPage}

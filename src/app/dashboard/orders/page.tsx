@@ -48,7 +48,8 @@ import {
     ShoppingCart,
     History,
     Receipt,
-    FileText
+    FileText,
+    Download
 } from 'lucide-react';
 import DashboardSearchInput from '@/components/dashboard/DashboardSearchInput';
 import { Input } from '@/components/ui/input';
@@ -174,6 +175,7 @@ const OrderHistory = () => {
     const [filteredOrders, setFilteredOrders] = useState<Order[]>([]);
     const [loading, setLoading] = useState(true);
     const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+    const [downloadingInvoiceId, setDownloadingInvoiceId] = useState<string | null>(null);
 
     // Filter states
     const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -372,6 +374,28 @@ const OrderHistory = () => {
 
     const handleDialogOpen = (order: Order) => {
         setSelectedOrder(order);
+    };
+
+    const handleDownloadInvoice = async (orderId: string) => {
+        setDownloadingInvoiceId(orderId);
+        try {
+            const res = await fetch(`/api/invoice/download?orderId=${orderId}`);
+            if (!res.ok) throw new Error('Failed to download invoice');
+            const blob = await res.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `invoice-${orderId}.pdf`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            window.URL.revokeObjectURL(url);
+            toast.success('Invoice downloaded!');
+        } catch (err) {
+            toast.error('Failed to download invoice');
+        } finally {
+            setDownloadingInvoiceId(null);
+        }
     };
 
     return (
@@ -1121,6 +1145,20 @@ const OrderHistory = () => {
                                 >
                                     <Settings className="h-4 w-4" />
                                     Manage Server
+                                </Button>
+
+                                <Button
+                                    variant="outline"
+                                    onClick={() => handleDownloadInvoice(selectedOrder._id)}
+                                    disabled={downloadingInvoiceId === selectedOrder._id}
+                                    className="gap-2 flex-1 premium-btn-outline"
+                                >
+                                    {downloadingInvoiceId === selectedOrder._id ? (
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                    ) : (
+                                        <Download className="h-4 w-4" />
+                                    )}
+                                    {downloadingInvoiceId === selectedOrder._id ? 'Generating...' : 'Download Invoice'}
                                 </Button>
 
                                 {getOrderStatus(selectedOrder) === 'failed' && (

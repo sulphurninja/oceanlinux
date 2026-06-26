@@ -364,6 +364,37 @@ class ResellerApi {
     return this._request(`/api/users/orders/${encodeURIComponent(vmId)}/details`);
   }
 
+  /**
+   * Pull the VM's current login/root password out of a details payload.
+   * Hostheaven returns it on the order details endpoint as `password`, but we
+   * probe a few common aliases so a panel-side rename doesn't silently break
+   * the post-reinstall credential sync.
+   */
+  static extractVmPassword(details) {
+    if (!details || typeof details !== 'object') return null;
+    const candidate =
+      details.password ||
+      details.rootPassword ||
+      details.root_password ||
+      details.vmPassword ||
+      details.loginPassword ||
+      details.osPassword ||
+      details?.credentials?.password ||
+      null;
+    const pwd = typeof candidate === 'string' ? candidate.trim() : '';
+    return pwd || null;
+  }
+
+  /**
+   * Fetch the VM's current password from the details endpoint. Hostheaven
+   * auto-rotates this on every rebuild/reinstall, so callers use this after a
+   * reinstall to refresh the stored credential.
+   */
+  async getVmPassword(vmId) {
+    const details = await this.getVmDetails(vmId);
+    return ResellerApi.extractVmPassword(details);
+  }
+
   async getZones() {
     return this._request('/api/users/zones');
   }

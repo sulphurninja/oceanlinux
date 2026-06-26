@@ -9,6 +9,8 @@ import {
   parseInventoryBulkLines,
   syncStockCountFromInventory,
   normalizeOs,
+  normalizeOsForServerType,
+  resolveUsernameForOs,
   VALID_OS,
 } from '@/lib/companyInventory';
 import { COMPANY_FILTER_VERSION } from '@/lib/companyOrders';
@@ -98,7 +100,7 @@ export async function PUT(request) {
     const newItems = [];
 
     if (bulkLines) {
-      const { items: parsed, errors } = parseInventoryBulkLines(bulkLines);
+      const { items: parsed, errors } = parseInventoryBulkLines(bulkLines, stock.serverType);
       if (parsed.length === 0) {
         return NextResponse.json(
           { error: 'No valid lines. Format: ip,username,password,OS (one per line)', errors },
@@ -110,12 +112,13 @@ export async function PUT(request) {
 
     if (Array.isArray(items)) {
       for (const row of items) {
-        if (!row?.ipAddress || !row?.username || !row?.password) continue;
+        if (!row?.ipAddress || !row?.password) continue;
+        const os = normalizeOsForServerType(row.os, stock.serverType);
         newItems.push({
           ipAddress: String(row.ipAddress).trim(),
-          username: String(row.username).trim(),
+          username: resolveUsernameForOs(row.username, os),
           password: String(row.password).trim(),
-          os: normalizeOs(row.os),
+          os,
           allocated: false,
           orderId: null,
           allocatedAt: null,

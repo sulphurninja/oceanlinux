@@ -20,6 +20,7 @@ const { executeAdvpsUpstreamRenewal } = require('@/lib/advpsRenewal');
 const { pickAdvpsExpiryDate } = require('@/lib/advpsOrderExpiry');
 const { extractAdvpsStatusCredentials } = require('@/lib/advpsStatusNormalize');
 const HostycareAPI = require('@/services/hostycareApi');
+const { notifyRenewalCompleted } = require('@/lib/renewalNotifications');
 
 // Initialize Cashfree
 Cashfree.XClientId = process.env.CASHFREE_APP_ID;
@@ -99,6 +100,11 @@ export async function POST(request) {
       logger.logWarning('Renewal already processed - idempotency check');
       await logger.finalize(true, order.expiryDate);
       const existingRenewal = order.renewalPayments.find(rp => rp.renewalTxnId === renewalTxnId);
+      notifyRenewalCompleted(
+        order,
+        existingRenewal?.newExpiry || order.expiryDate,
+        renewalTxnId,
+      ).catch((err) => console.error('[RENEWAL-CONFIRM] renewal notification failed:', err.message));
       return NextResponse.json({
         success: true,
         message: 'Renewal was already processed',
@@ -688,6 +694,10 @@ export async function POST(request) {
 
     // Finalize logger with success
     await logger.finalize(true, newExpiryDate);
+
+    notifyRenewalCompleted(updatedOrder, newExpiryDate, renewalTxnId).catch((err) =>
+      console.error('[RENEWAL-CONFIRM] renewal notification failed:', err.message),
+    );
 
     // Prepare success response with provider-specific information
     const response = {

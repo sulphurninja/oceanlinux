@@ -43,6 +43,7 @@ import {
 } from '@/lib/cartClient';
 import { broadcastWallet, fetchWalletSummary } from '@/lib/walletClient';
 import { useConfirmDialog } from '@/hooks/useConfirmDialog';
+import { openRazorpayModal, prepareRazorpayOverlay } from '@/lib/razorpayCheckout';
 
 declare global {
   interface Window {
@@ -219,6 +220,7 @@ export default function CartPage() {
       }
 
       if (actualMethod === 'razorpay') {
+        await prepareRazorpayOverlay();
         await openRazorpay(initData);
       } else if (actualMethod === 'cashfree') {
         await openCashfree(initData);
@@ -236,23 +238,11 @@ export default function CartPage() {
   };
 
   const openRazorpay = async (data: any) => {
-    let attempts = 0;
-    while (typeof window.Razorpay === 'undefined' && attempts < 20) {
-      await new Promise(r => setTimeout(r, 100));
-      attempts++;
-    }
-    if (typeof window.Razorpay === 'undefined') throw new Error('Razorpay SDK not loaded');
-
-    const options = {
-      key: data.razorpay.key,
-      amount: data.razorpay.amount,
-      currency: data.razorpay.currency,
-      name: 'OceanLinux',
+    await openRazorpayModal({
+      data,
       description: `Cart checkout (${data.orderIds.length} item${data.orderIds.length > 1 ? 's' : ''})`,
-      order_id: data.razorpay.order_id,
-      prefill: { name: data.customer.name, email: data.customer.email },
-      theme: { color: '#3b82f6' },
-      handler: async (response: any) => {
+      themeColor: '#3b82f6',
+      onSuccess: async (response) => {
         try {
           const confirmRes = await fetch('/api/cart/checkout/confirm', {
             method: 'POST',
@@ -278,12 +268,12 @@ export default function CartPage() {
           setCheckingOut(false);
         }
       },
-      modal: {
-        ondismiss: () => setCheckingOut(false),
+      onDismiss: () => setCheckingOut(false),
+      onFailed: () => {
+        setCheckingOut(false);
+        toast.error('Payment failed. Please try again.');
       },
-    };
-    const rzp = new window.Razorpay(options);
-    rzp.open();
+    });
   };
 
   const openCashfree = async (data: any) => {

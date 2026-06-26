@@ -196,10 +196,10 @@ function PricingCard({ plan }: { plan: Plan }) {
             ))}
           </ul>
 
-          <Link href={`/get-started?plan=${planSlug(plan.name)}`}>
+          <Link href={`/get-started?plan=${planSlug(plan.name)}`} className="block w-full mt-auto shrink-0 relative z-[1]">
             <button
               type="button"
-              className={plan.popular ? "premium-btn-primary" : "premium-btn-outline"}
+              className={`w-full min-h-11 px-6 py-3 text-sm sm:text-base font-semibold ${plan.popular ? "premium-btn-primary premium-btn-primary--card" : "premium-btn-outline premium-btn-outline--card"}`}
             >
               {plan.popular ? "Get Started" : "Choose Plan"}
             </button>

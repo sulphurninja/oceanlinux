@@ -10,9 +10,12 @@ export function isCronAuthorized(request) {
   const secret = process.env.CRON_SECRET;
   if (!secret) return false;
   const url = new URL(request.url);
+  const authHeader = request.headers.get('authorization') || '';
+  const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
   const provided =
     request.headers.get('x-cron-secret') ||
-    url.searchParams.get('secret');
+    url.searchParams.get('secret') ||
+    bearer;
   return provided === secret;
 }
 
@@ -26,9 +29,12 @@ export function enforceCronSecret(request) {
     );
   }
   const url = new URL(request.url);
+  const authHeader = request.headers.get('authorization') || '';
+  const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
   const provided =
     request.headers.get('x-cron-secret') ||
-    url.searchParams.get('secret');
+    url.searchParams.get('secret') ||
+    bearer;
   if (provided !== secret) {
     return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
   }

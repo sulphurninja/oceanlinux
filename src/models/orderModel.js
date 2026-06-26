@@ -15,6 +15,10 @@ const orderSchema = new mongoose.Schema({
     /** Pre-configured company inventory row assigned on payment */
     inventoryItemId: { type: String },
     transactionId: { type: String, default: '' },
+    // Sequential, human-friendly invoice number (e.g. OL-00001). Assigned the
+    // first time an invoice PDF is generated for orders placed on/after the
+    // 26-Jun-2026 cutoff. Older orders keep the legacy id-based number.
+    invoiceNumber: { type: String, default: '', index: true },
     status: { type: String, default: 'pending' },
     ipAddress: { type: String, default: '' },
     username: { type: String, default: '' },

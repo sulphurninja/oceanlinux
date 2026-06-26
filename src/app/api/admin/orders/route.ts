@@ -12,7 +12,7 @@ export async function GET() {
     await connectDB();
 
     const orders = await Order.find({})
-      .populate('user', 'name email')
+      .populate('user', 'name email phone billingAddress')
       .sort({ createdAt: -1 })
       .lean();   // ⬅️ faster response
 

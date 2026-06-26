@@ -38,7 +38,7 @@ function AuthShell({
   return (
     <div
       ref={ref}
-      className="premium-auth-shell hero-premium-bg premium-auth-shell--centered h-full"
+      className="premium-auth-shell hero-premium-bg premium-auth-shell--centered flex-1 min-h-0 w-full max-w-full"
     >
       <PremiumAuthBackground parallaxX={offset.x} parallaxY={offset.y} />
 
@@ -53,7 +53,7 @@ function AuthShell({
           mounted && "animate-slide-up opacity-0 stagger-1 [animation-fill-mode:forwards]"
         )}
       >
-        <Tilt3DCard maxTilt={4} scale={1.008} glow glareTone="emerald" maxGlare={0.09} className="w-full">
+        <Tilt3DCard interactive={false} glow={false} glareTone="none" className="w-full max-w-full">
           {children}
         </Tilt3DCard>
       </div>

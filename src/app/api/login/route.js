@@ -8,9 +8,9 @@ import { verifyUserPassword } from '@/lib/userPassword';
 import { findUserByEmail } from '@/lib/userEmail';
 
 export async function POST(request) {
-    await connectDB();
-
     try {
+        await connectDB();
+
         const reqBody = await request.json();
         const { email, password } = reqBody;
 
@@ -18,6 +18,17 @@ export async function POST(request) {
         if (!existingUser) {
             return new NextResponse(JSON.stringify({ message: "User doesn't exist." }), {
                 status: 404,
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+        }
+
+        if (!existingUser.password && existingUser.googleId) {
+            return new NextResponse(JSON.stringify({
+                message: 'This account uses Google Sign-In. Please continue with Google.',
+            }), {
+                status: 400,
                 headers: {
                     'Content-Type': 'application/json'
                 }
@@ -55,7 +66,11 @@ export async function POST(request) {
         // Send success response
         return response;
     } catch (error) {
-        return new NextResponse(JSON.stringify({ message: 'Something went wrong.' }), {
+        console.error('[login]', error);
+        const message = error?.message?.includes('MongoDB') || error?.code === 'ECONNREFUSED'
+            ? 'Database connection failed. Please try again later.'
+            : 'Something went wrong.';
+        return new NextResponse(JSON.stringify({ message }), {
             status: 500,
             headers: {
                 'Content-Type': 'application/json'

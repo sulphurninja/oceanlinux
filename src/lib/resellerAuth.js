@@ -8,8 +8,12 @@ import crypto from 'crypto';
  */
 export async function authenticateReseller(request) {
     try {
-        const apiKey = request.headers.get('x-api-key');
-        const apiSecret = request.headers.get('x-api-secret');
+        const apiKey =
+            request.headers.get('x-api-key') ||
+            request.headers.get('x-reseller-api-key');
+        const apiSecret =
+            request.headers.get('x-api-secret') ||
+            request.headers.get('x-reseller-api-secret');
 
         if (!apiKey || !apiSecret) {
             return { success: false, message: 'Missing API credentials', status: 401 };

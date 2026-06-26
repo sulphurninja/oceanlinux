@@ -1,8 +1,9 @@
 'use client'
 
 import React, { createContext, useContext, useEffect, useState, ReactNode, useCallback } from 'react';
-import { useRouter, usePathname } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import { useSessionAlert } from '@/components/session-alert';
+import { redirectToLogin } from '@/lib/redirectToLogin';
 
 // Define a type for the user state
 type User = {
@@ -34,7 +35,6 @@ interface AuthProviderProps {
 export const AuthProvider = ({ children }: AuthProviderProps) => {
     const [user, setUser] = useState<User>(null);
     const [isLoading, setIsLoading] = useState(true);
-    const router = useRouter();
     const pathname = usePathname();
     const { showAlert } = useSessionAlert();
 
@@ -101,32 +101,17 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 
     const logout = useCallback(async () => {
         try {
-            const res = await fetch('/api/auth/logout', {
+            await fetch('/api/auth/logout', {
                 method: 'POST',
                 credentials: 'include'
             });
-
-            // Clear local storage
-            localStorage.removeItem('lastClientTxnId');
-            localStorage.removeItem('lastRenewalTxnId');
-            localStorage.removeItem('renewalOrderId');
-            localStorage.removeItem('redirectAfterLogin');
-            
-            setUser(null);
-            
-            if (res.ok) {
-                router.push('/login');
-            } else {
-                // Still redirect even if logout API fails
-                router.push('/login');
-            }
         } catch (error) {
             console.error('Logout error:', error);
-            // Still clear state and redirect on error
+        } finally {
             setUser(null);
-            router.push('/login');
+            redirectToLogin();
         }
-    }, [router]);
+    }, []);
 
     useEffect(() => {
         fetchUser();

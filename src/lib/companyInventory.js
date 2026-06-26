@@ -12,6 +12,37 @@ function normalizeOs(raw) {
   return 'Windows 2022 64';
 }
 
+function defaultUsernameForOs(os) {
+  const normalized = normalizeOs(os);
+  return normalized === 'Windows 2022 64' ? 'Administrator' : 'root';
+}
+
+function resolveUsernameForOs(username, os) {
+  const normalized = normalizeOs(os);
+  const trimmed = String(username || '').trim();
+  const expected = defaultUsernameForOs(normalized);
+
+  if (!trimmed) return expected;
+  if (normalized === 'Windows 2022 64' && trimmed.toLowerCase() === 'root') return 'Administrator';
+  if (normalized !== 'Windows 2022 64' && trimmed.toLowerCase() === 'administrator') return 'root';
+  return trimmed;
+}
+
+function defaultOsForServerType(serverType) {
+  return serverType === 'VPS' ? 'Windows 2022 64' : 'Ubuntu 22';
+}
+
+function allowedOsForServerType(serverType) {
+  return serverType === 'VPS' ? ['Windows 2022 64'] : ['Ubuntu 22', 'CentOS 7'];
+}
+
+function normalizeOsForServerType(rawOs, serverType) {
+  const normalized = normalizeOs(rawOs);
+  const allowed = allowedOsForServerType(serverType);
+  if (allowed.includes(normalized)) return normalized;
+  return defaultOsForServerType(serverType);
+}
+
 /** Company stock uses embedded inventory rows (vs plain stockCount). */
 function usesPreconfiguredInventory(stock) {
   return !!(stock?.company && Array.isArray(stock.inventoryItems) && stock.inventoryItems.length > 0);
@@ -23,7 +54,7 @@ function countUnallocatedInventory(stock) {
 }
 
 /** Parse bulk lines: ip,user,pass,os OR ip|user|pass|os (one per line) */
-function parseInventoryBulkLines(text) {
+function parseInventoryBulkLines(text, serverType = 'Linux') {
   const lines = String(text || '')
     .split('\n')
     .map((l) => l.trim())
@@ -40,15 +71,16 @@ function parseInventoryBulkLines(text) {
       continue;
     }
     const [ipAddress, username, password, osPart] = parts;
-    if (!ipAddress || !username || !password) {
-      errors.push({ line: i + 1, content: line, reason: 'Missing ip, username, or password' });
+    if (!ipAddress || !password) {
+      errors.push({ line: i + 1, content: line, reason: 'Missing ip or password' });
       continue;
     }
+    const os = normalizeOsForServerType(osPart, serverType);
     items.push({
       ipAddress,
-      username,
+      username: resolveUsernameForOs(username, os),
       password,
-      os: normalizeOs(osPart),
+      os,
       allocated: false,
       orderId: null,
       allocatedAt: null,
@@ -133,6 +165,11 @@ async function allocateCompanyInventoryForOrder(order) {
 module.exports = {
   VALID_OS,
   normalizeOs,
+  defaultUsernameForOs,
+  resolveUsernameForOs,
+  defaultOsForServerType,
+  allowedOsForServerType,
+  normalizeOsForServerType,
   usesPreconfiguredInventory,
   countUnallocatedInventory,
   parseInventoryBulkLines,

@@ -27,6 +27,7 @@ import {
     Shield,
     UserCircle,
     Phone,
+    MapPin,
     Calendar,
     Bell,
     Home,
@@ -50,6 +51,7 @@ import FloatingSupport from '@/components/component/floating-support';
 import LoginNewsPopup from '@/components/login-news-popup';
 import OrderNewsPopup from '@/components/order-news-popup';
 import PremiumPostLoginSplash from '@/components/landing/PremiumPostLoginSplash';
+import { performLogoutWithCelebration } from '@/lib/logoutWithCelebration';
 import { ThemeToggle } from '@/components/ui/theme-toggle';
 import { cn } from '@/lib/utils';
 import {
@@ -63,6 +65,14 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
+interface BillingAddress {
+    line?: string;
+    city?: string;
+    state?: string;
+    pincode?: string;
+    country?: string;
+}
+
 interface UserData {
     _id: string;
     name: string;
@@ -72,7 +82,18 @@ interface UserData {
     createdAt: string;
     isVerified?: boolean;
     userType?: 'customer' | 'reseller' | 'admin';
+    billingAddress?: BillingAddress;
 }
+
+const INDIAN_STATES = [
+    'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh', 'Goa',
+    'Gujarat', 'Haryana', 'Himachal Pradesh', 'Jharkhand', 'Karnataka', 'Kerala',
+    'Madhya Pradesh', 'Maharashtra', 'Manipur', 'Meghalaya', 'Mizoram', 'Nagaland',
+    'Odisha', 'Punjab', 'Rajasthan', 'Sikkim', 'Tamil Nadu', 'Telangana', 'Tripura',
+    'Uttar Pradesh', 'Uttarakhand', 'West Bengal',
+    'Andaman and Nicobar Islands', 'Chandigarh', 'Dadra and Nagar Haveli and Daman and Diu',
+    'Delhi', 'Jammu and Kashmir', 'Ladakh', 'Lakshadweep', 'Puducherry',
+];
 
 interface PageInfo {
     title: string;
@@ -93,6 +114,9 @@ export default function DashboardLayout({
     const [showPhoneDialog, setShowPhoneDialog] = useState(false);
     const [phoneNumber, setPhoneNumber] = useState('+91 ');
     const [isSavingPhone, setIsSavingPhone] = useState(false);
+    const [showAddressDialog, setShowAddressDialog] = useState(false);
+    const [addressForm, setAddressForm] = useState({ line: '', city: '', state: '', pincode: '' });
+    const [isSavingAddress, setIsSavingAddress] = useState(false);
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
     useEffect(() => {
@@ -133,7 +157,20 @@ export default function DashboardLayout({
                 const userData = await response.json();
                 setUser(userData);
 
-                if (!userData.phone) {
+                // Billing address is mandatory (needed for GST-correct invoices).
+                // Prompt for it first; only fall back to the optional phone prompt
+                // once the address is on file.
+                const addr = userData.billingAddress || {};
+                const addressComplete = !!(addr.line && addr.city && addr.state && addr.pincode);
+                if (!addressComplete) {
+                    setAddressForm({
+                        line: addr.line || '',
+                        city: addr.city || '',
+                        state: addr.state || '',
+                        pincode: addr.pincode || '',
+                    });
+                    setTimeout(() => setShowAddressDialog(true), 1000);
+                } else if (!userData.phone) {
                     const dismissed = sessionStorage.getItem('phonePromptDismissed');
                     if (!dismissed) {
                         setTimeout(() => setShowPhoneDialog(true), 1200);
@@ -177,34 +214,68 @@ export default function DashboardLayout({
         setShowPhoneDialog(false);
     };
 
-    const handleLogout = async () => {
+    const handleSaveAddress = async () => {
+        const line = addressForm.line.trim();
+        const city = addressForm.city.trim();
+        const state = addressForm.state.trim();
+        const pincode = addressForm.pincode.trim();
+        if (!line || !city || !state || !/^\d{6}$/.test(pincode)) {
+            toast.error('Please fill address, city, state and a valid 6-digit PIN code');
+            return;
+        }
+        setIsSavingAddress(true);
         try {
-            const response = await fetch('/api/auth/logout', {
+            const billingAddress = { line, city, state, pincode, country: 'India' };
+            const response = await fetch('/api/users/update', {
                 method: 'POST',
-                credentials: 'include',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ billingAddress }),
             });
+            if (!response.ok) throw new Error('Failed to update address');
+            toast.success('Billing address saved!');
+            setUser(prev => prev ? { ...prev, billingAddress } : prev);
+            setShowAddressDialog(false);
+            // If phone is still missing, surface that prompt next.
+            if (user && !user.phone) {
+                const dismissed = sessionStorage.getItem('phonePromptDismissed');
+                if (!dismissed) setTimeout(() => setShowPhoneDialog(true), 600);
+            }
+        } catch (error) {
+            console.error('Error saving address:', error);
+            toast.error('Failed to save address. Please try again.');
+        } finally {
+            setIsSavingAddress(false);
+        }
+    };
 
-            if (response.ok) {
-                // Clear local storage
+    const handleLogout = async () => {
+        await performLogoutWithCelebration(async () => {
+            try {
+                const response = await fetch('/api/auth/logout', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                });
+
                 const itemsToClear = ['lastClientTxnId', 'user', 'preferences'];
                 itemsToClear.forEach(item => {
                     localStorage.removeItem(item);
                     sessionStorage.removeItem(item);
                 });
 
-                toast.success('Logged out successfully');
+                if (!response.ok) {
+                    toast.error('Failed to logout');
+                }
+
                 window.location.href = '/login';
-            } else {
-                toast.error('Failed to logout');
+            } catch (error) {
+                console.error('Logout error:', error);
+                toast.error('Logout failed. Redirecting anyway...');
+                window.location.href = '/login';
             }
-        } catch (error) {
-            console.error('Logout error:', error);
-            toast.error('Logout failed. Redirecting anyway...');
-            window.location.href = '/login';
-        }
+        });
     };
 
     const getUserInitials = (name: string) => {
@@ -528,6 +599,94 @@ export default function DashboardLayout({
                         </main>
                         <FloatingSupport />
                     </div>
+
+                    {/* Billing Address Prompt Dialog (compulsory — needed for GST invoices) */}
+                    <Dialog open={showAddressDialog} onOpenChange={() => { /* compulsory: cannot dismiss */ }}>
+                        <DialogContent
+                            className="w-[calc(100vw-2rem)] max-w-md mx-auto premium-dashboard-dialog [&>button]:hidden"
+                            onPointerDownOutside={(e) => e.preventDefault()}
+                            onEscapeKeyDown={(e) => e.preventDefault()}
+                            onInteractOutside={(e) => e.preventDefault()}
+                        >
+                            <DialogHeader>
+                                <DialogTitle className="flex items-center gap-2 text-base">
+                                    <MapPin className="h-4 w-4 text-primary" />
+                                    Add Your Billing Address
+                                </DialogTitle>
+                                <DialogDescription className="text-sm">
+                                    We need your billing address to generate GST-compliant invoices.
+                                    This is required for all accounts.
+                                </DialogDescription>
+                            </DialogHeader>
+                            <div className="space-y-3 py-2">
+                                <div className="space-y-1.5">
+                                    <Label htmlFor="addr-line" className="text-sm">Address</Label>
+                                    <Input
+                                        id="addr-line"
+                                        value={addressForm.line}
+                                        onChange={(e) => setAddressForm(p => ({ ...p, line: e.target.value }))}
+                                        placeholder="House / Building, Street, Area"
+                                        className="text-sm h-10"
+                                    />
+                                </div>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div className="space-y-1.5">
+                                        <Label htmlFor="addr-city" className="text-sm">City</Label>
+                                        <Input
+                                            id="addr-city"
+                                            value={addressForm.city}
+                                            onChange={(e) => setAddressForm(p => ({ ...p, city: e.target.value }))}
+                                            placeholder="City"
+                                            className="text-sm h-10"
+                                        />
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <Label htmlFor="addr-pin" className="text-sm">PIN Code</Label>
+                                        <Input
+                                            id="addr-pin"
+                                            inputMode="numeric"
+                                            maxLength={6}
+                                            value={addressForm.pincode}
+                                            onChange={(e) => setAddressForm(p => ({ ...p, pincode: e.target.value.replace(/\D/g, '').slice(0, 6) }))}
+                                            placeholder="6-digit PIN"
+                                            className="text-sm h-10"
+                                        />
+                                    </div>
+                                </div>
+                                <div className="space-y-1.5">
+                                    <Label htmlFor="addr-state" className="text-sm">State</Label>
+                                    <select
+                                        id="addr-state"
+                                        value={addressForm.state}
+                                        onChange={(e) => setAddressForm(p => ({ ...p, state: e.target.value }))}
+                                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                                    >
+                                        <option value="">Select your state…</option>
+                                        {INDIAN_STATES.map((s) => (
+                                            <option key={s} value={s}>{s}</option>
+                                        ))}
+                                    </select>
+                                    <p className="text-xs text-muted-foreground">
+                                        GST is applied based on your state (CGST+SGST within Maharashtra, otherwise IGST).
+                                    </p>
+                                </div>
+                            </div>
+                            <DialogFooter>
+                                <Button
+                                    size="sm"
+                                    onClick={handleSaveAddress}
+                                    disabled={isSavingAddress}
+                                    className="w-full gap-2 text-sm"
+                                >
+                                    {isSavingAddress ? (
+                                        <><div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white" />Saving...</>
+                                    ) : (
+                                        <>Save Billing Address</>
+                                    )}
+                                </Button>
+                            </DialogFooter>
+                        </DialogContent>
+                    </Dialog>
 
                     {/* Phone Number Prompt Dialog */}
                     <Dialog open={showPhoneDialog} onOpenChange={(open) => {

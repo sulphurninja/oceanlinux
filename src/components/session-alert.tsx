@@ -2,6 +2,7 @@
 
 import { useEffect, useState, createContext, useContext, ReactNode, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import { redirectToLogin } from '@/lib/redirectToLogin';
 import {
   AlertDialog,
   AlertDialogContent,
@@ -48,11 +49,11 @@ interface SessionAlertConfig {
   iconColor: string;
   primaryAction?: {
     label: string;
-    action: () => void;
+    action: () => void | Promise<void>;
   };
   secondaryAction?: {
     label: string;
-    action: () => void;
+    action: () => void | Promise<void>;
   };
   autoClose?: number; // ms
 }
@@ -81,10 +82,7 @@ const getAlertConfig = (
       iconColor: 'text-amber-500',
       primaryAction: {
         label: 'Log In Again',
-        action: () => {
-          localStorage.setItem('redirectAfterLogin', window.location.pathname);
-          router?.push('/login');
-        }
+        action: () => redirectToLogin(),
       },
       secondaryAction: {
         label: 'Go to Home',
@@ -99,7 +97,7 @@ const getAlertConfig = (
       iconColor: 'text-red-500',
       primaryAction: {
         label: 'Log In',
-        action: () => router?.push('/login')
+        action: () => redirectToLogin(),
       }
     },
     unauthorized: {
@@ -110,7 +108,7 @@ const getAlertConfig = (
       iconColor: 'text-red-500',
       primaryAction: {
         label: 'Log In',
-        action: () => router?.push('/login')
+        action: () => redirectToLogin(),
       },
       secondaryAction: {
         label: 'Go Back',
@@ -166,10 +164,7 @@ const getAlertConfig = (
       iconColor: 'text-blue-500',
       primaryAction: {
         label: 'Log In',
-        action: () => {
-          localStorage.setItem('redirectAfterLogin', window.location.pathname);
-          router?.push('/login');
-        }
+        action: () => redirectToLogin(),
       },
       secondaryAction: {
         label: 'Create Account',

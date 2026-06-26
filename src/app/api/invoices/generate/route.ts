@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
+import User from '@/models/userModel';
 import { jsPDF } from 'jspdf';
+import { getOrdersPageStatus } from '@/lib/orderDeliveryStatus';
+import { getOrAssignInvoiceNumber } from '@/lib/invoiceNumber';
 import fs from 'fs';
 import path from 'path';
 
@@ -9,12 +12,14 @@ const ORG = {
   brand: 'Ocean Linux',
   legal: 'Backtick Labs',
   tagline: 'Most Affordable Premium Linux VPS Hosting',
-  address: 'Salt Lake City, Kolkata',
+  address: 'Pune, Maharashtra - 411057',
   email: 'hello@oceanlinux.com',
   web: 'oceanlinux.com',
-  showGST: false,
+  showGST: true,
   gstRatePct: 18,
-  gstin: '',
+  gstin: '27OHIPS9274R1ZO',
+  state: 'Maharashtra', // seller's state — drives CGST+SGST vs IGST
+  sac: '998315', // SAC code — hosting & IT infrastructure provisioning services
 };
 const ADMIN_KEY = process.env.INVOICE_ADMIN_KEY || '';
 
@@ -102,6 +107,9 @@ export async function GET(req: NextRequest) {
     await connectDB();
     const order = await Order.findOne({ transactionId: txId }).lean();
     if (!order) return NextResponse.json({ error: 'Order not found for this transactionId' }, { status: 404 });
+    const orderUser: any = (order as any).user
+      ? await User.findById((order as any).user).lean()
+      : null;
 
     const productName = makeCompliantName(clean(order.productName || 'N/A'));
     const memory = clean(order.memory || 'N/A');
@@ -122,7 +130,18 @@ export async function GET(req: NextRequest) {
     const discount = Number(order.promoDiscount ?? 0);
     const taxable = ORG.showGST ? price * (100 / (100 + ORG.gstRatePct)) : price;
     const gstAmt = ORG.showGST ? Math.round(price - taxable) : 0;
-    const invoiceNum = `OL-${order._id.toString().slice(-8).toUpperCase()}`;
+    const cgst = Math.round(gstAmt / 2);
+    const sgst = gstAmt - cgst;
+
+    // Customer billing address (order snapshot, else current profile).
+    const billing: any = (order as any).billingAddress || (orderUser && orderUser.billingAddress) || {};
+    const custState = clean(billing.state || '');
+    const custCity = clean(billing.city || '');
+    const custPin = clean(billing.pincode || '');
+    const custLine = clean(billing.line || '');
+    const isIntraState = !!custState && custState.trim().toLowerCase() === ORG.state.toLowerCase();
+
+    const invoiceNum = await getOrAssignInvoiceNumber(order);
 
     const doc = new jsPDF();
     const W = 210, M = 20, R = W - M;
@@ -148,11 +167,12 @@ export async function GET(req: NextRequest) {
     setColor(doc, C.greenLt); doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
     doc.text(invoiceNum, R, 32, { align: 'right' });
 
-    const badgeColors: Record<string, readonly number[]> = {
-      active: C.green, completed: C.green, confirmed: C.green, pending: C.amber, failed: C.red,
-    };
-    const badgeColor = badgeColors[status] || C.slate5;
-    const badgeText = status.toUpperCase();
+    // A delivered order means payment is settled → PAID invoice. Every other
+    // state produces a provisional PENDING invoice that clearly shows payment
+    // is not yet done.
+    const isPaid = getOrdersPageStatus(order as any) === 'delivered';
+    const badgeColor = isPaid ? C.green : C.amber;
+    const badgeText = isPaid ? 'PAID' : 'PENDING';
     doc.setFont('helvetica', 'bold'); doc.setFontSize(7);
     const badgeW = doc.getTextWidth(badgeText) + 10;
     setFill(doc, badgeColor);
@@ -163,7 +183,7 @@ export async function GET(req: NextRequest) {
     let y = 64;
     const metaItems = [
       { label: 'INVOICE DATE', value: fmtDate(createdAt) },
-      { label: 'DUE DATE', value: 'Paid' },
+      { label: 'PAYMENT STATUS', value: isPaid ? 'Paid' : 'Pending' },
       { label: 'SERVICE PERIOD', value: expiry ? `${fmtDate(createdAt)} to ${fmtDate(expiry)}` : fmtDate(createdAt) },
     ];
     const colStarts = [M, M + 50, M + 100];
@@ -186,6 +206,26 @@ export async function GET(req: NextRequest) {
     doc.text(customerEmail, M, y + 13);
 
     const col2 = 125;
+    // Customer address + place of supply (under BILL TO).
+    let billY = y + 13;
+    const custParts: string[] = [];
+    if (custLine) custParts.push(custLine);
+    const cityPin = [custCity, custPin].filter(Boolean).join(' - ');
+    if (cityPin) custParts.push(cityPin);
+    if (custState) custParts.push(custState);
+    if (custParts.length) {
+      billY += 5;
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); setColor(doc, C.slate7);
+      const custAddrLines = doc.splitTextToSize(custParts.join(', '), col2 - M - 8) as string[];
+      doc.text(custAddrLines, M, billY);
+      billY += custAddrLines.length * 4.2;
+    }
+    if (custState) {
+      billY += 4.5;
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); setColor(doc, C.slate9);
+      doc.text(`Place of Supply: ${custState}`, M, billY);
+    }
+
     doc.setFont('helvetica', 'bold'); doc.setFontSize(7); setColor(doc, C.green);
     doc.text('ISSUED BY', col2, y);
     doc.setFont('helvetica', 'bold'); doc.setFontSize(10); setColor(doc, C.slate9);
@@ -193,32 +233,49 @@ export async function GET(req: NextRequest) {
     doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); setColor(doc, C.slate7);
     let fy = y + 13;
     doc.text(ORG.legal, col2, fy); fy += 5;
-    doc.text(ORG.address, col2, fy); fy += 5;
+    doc.setFontSize(8);
+    const addrLines = doc.splitTextToSize(ORG.address, R - col2) as string[];
+    doc.text(addrLines, col2, fy);
+    fy += addrLines.length * 4.2 + 1;
+    doc.setFontSize(8.5);
     doc.text(ORG.email, col2, fy);
+    if (ORG.gstin) {
+      fy += 5;
+      doc.setFont('helvetica', 'bold'); setColor(doc, C.slate9);
+      doc.text(`GSTIN: ${ORG.gstin}`, col2, fy);
+    }
+    fy = Math.max(fy, billY);
 
-    y += 34; hr(doc, y);
+    y = fy + 6; hr(doc, y);
 
     // ── LINE ITEMS TABLE ─────────────────────────────────────────────────
       y += 8;
     setFill(doc, C.dark);
     doc.roundedRect(M, y, R - M, 10, 1.5, 1.5, 'F');
+    const periodColX = 122;
     doc.setFont('helvetica', 'bold'); doc.setFontSize(7); setColor(doc, C.slate4);
     doc.text('DESCRIPTION', M + 4, y + 7);
-    doc.text('CONFIGURATION', 110, y + 7);
+    doc.text('BILLING PERIOD', periodColX, y + 7);
     setColor(doc, C.greenLt); doc.text('AMOUNT', R - 4, y + 7, { align: 'right' });
-    y += 14;
+    y += 15;
 
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); setColor(doc, C.slate9);
-    const descLines = doc.splitTextToSize(productName, 80);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(10); setColor(doc, C.slate9);
+    const descLines = doc.splitTextToSize(productName, 90) as string[];
     doc.text(descLines, M + 4, y);
-    doc.setFontSize(9); setColor(doc, C.slate7);
-    const cfgParts = [`RAM: ${memory}`]; if (os) cfgParts.push(`OS: ${os}`);
-    const cfgLines = doc.splitTextToSize(cfgParts.join(' · '), 50);
-    doc.text(cfgLines, 110, y);
+    let descBottom = y + descLines.length * 5;
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8); setColor(doc, C.slate5);
+    const cfgParts = [`RAM: ${memory}`]; if (os) cfgParts.push(`OS: ${os}`); cfgParts.push(`SAC: ${ORG.sac}`);
+    doc.text(cfgParts.join('   ·   '), M + 4, descBottom);
+    descBottom += 5;
+
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); setColor(doc, C.slate7);
+    const periodLines = expiry ? [fmtDate(createdAt), `to ${fmtDate(expiry)}`] : [fmtDate(createdAt)];
+    doc.text(periodLines, periodColX, y);
+
     doc.setFont('helvetica', 'bold'); doc.setFontSize(10); setColor(doc, C.dark);
     doc.text(`Rs ${formatINR(price)}`, R - 4, y, { align: 'right' });
 
-    y += Math.max(descLines.length, cfgLines.length) * 5 + 4;
+    y = Math.max(descBottom, y + periodLines.length * 5) + 2;
     hr(doc, y);
 
     // ── TOTALS ───────────────────────────────────────────────────────────
@@ -226,13 +283,15 @@ export async function GET(req: NextRequest) {
     const totalsLabelX = 115;
     const totalsValX = R - 4;
 
-    if (discount > 0 || ORG.showGST) {
-      doc.setFont('helvetica', 'normal'); doc.setFontSize(9); setColor(doc, C.slate5);
-      doc.text('Subtotal', totalsLabelX, y);
-      setColor(doc, C.slate9); doc.text(`Rs ${formatINR(originalPrice)}`, totalsValX, y, { align: 'right' });
+    const totalsRow = (label: string, value: string, labelColor: readonly number[] = C.slate5, valueColor: readonly number[] = C.slate9) => {
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+      setColor(doc, labelColor); doc.text(label, totalsLabelX, y);
+      setColor(doc, valueColor); doc.text(value, totalsValX, y, { align: 'right' });
       y += 7;
-    }
+    };
+
     if (discount > 0) {
+      totalsRow('Subtotal', `Rs ${formatINR(originalPrice)}`);
       doc.setFont('helvetica', 'normal'); doc.setFontSize(9); setColor(doc, C.green);
       doc.text('Discount', totalsLabelX, y);
       if (order.promoCode) {
@@ -243,42 +302,49 @@ export async function GET(req: NextRequest) {
       y += 7;
     }
     if (ORG.showGST) {
-      doc.setFont('helvetica', 'normal'); doc.setFontSize(9); setColor(doc, C.slate5);
-      doc.text(`GST (${ORG.gstRatePct}%)`, totalsLabelX, y);
-      setColor(doc, C.slate9); doc.text(`Rs ${formatINR(gstAmt)}`, totalsValX, y, { align: 'right' });
-      y += 7;
+      // GST-inclusive price → taxable value + tax. Same-state supply splits into
+      // CGST+SGST; otherwise a single IGST line is shown.
+      totalsRow('Taxable Value', `Rs ${formatINR(taxable)}`);
+      if (isIntraState) {
+        totalsRow(`CGST (${ORG.gstRatePct / 2}%)`, `Rs ${formatINR(cgst)}`);
+        totalsRow(`SGST (${ORG.gstRatePct / 2}%)`, `Rs ${formatINR(sgst)}`);
+      } else {
+        totalsRow(`IGST (${ORG.gstRatePct}%)`, `Rs ${formatINR(gstAmt)}`);
+      }
     }
 
     y += 2;
     setFill(doc, C.dark);
     doc.roundedRect(totalsLabelX - 4, y - 5, R - totalsLabelX + 8, 13, 2, 2, 'F');
-    setColor(doc, C.greenLt); doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
-    doc.text('TOTAL', totalsLabelX, y + 3.5);
+    setColor(doc, C.greenLt); doc.setFont('helvetica', 'bold'); doc.setFontSize(ORG.showGST ? 9 : 10);
+    doc.text(ORG.showGST ? 'TOTAL (incl. GST)' : 'TOTAL', totalsLabelX, y + 3.5);
     setColor(doc, C.white); doc.setFontSize(12);
     doc.text(`Rs ${formatINR(price)}`, totalsValX, y + 3.5, { align: 'right' });
-    y += 20;
 
-    // ── SERVICE DETAILS ──────────────────────────────────────────────────
-    y = checkPage(doc, y, 55);
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(7); setColor(doc, C.green);
-    doc.text('SERVICE DETAILS', M, y); y += 6;
+    // Decorative status seal — green PAID when delivered, amber PENDING else.
+    {
+      const sealX = 48;
+      const sealY = y - 1;
+      const sealColor = isPaid ? C.green : C.amber;
+      const sealInk = isPaid ? C.greenDk : [180, 83, 9] as const;
+      const sealText = isPaid ? 'PAID' : 'PENDING';
+      setDraw(doc, sealColor);
+      doc.setLineWidth(1.3); doc.circle(sealX, sealY, 12, 'S');
+      doc.setLineWidth(0.4); doc.circle(sealX, sealY, 14, 'S');
+      setColor(doc, sealInk);
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(isPaid ? 13 : 10);
+      doc.text(sealText, sealX, sealY + 1, { align: 'center', angle: 14 });
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(5.5);
+      doc.text(isPaid ? fmtDate(createdAt) : 'Payment due', sealX, sealY + 6, { align: 'center', angle: 14 });
+    }
 
-    const serviceRows = [
-      ip && ['Server IP', ip], uname && ['Username', uname],
-      passwd && ['Password', maskSecret(passwd)], os && ['Operating System', os],
-      ['Provisioning', (order.provisioningStatus !== 'failed' && order.autoProvisioned) ? 'Auto-Provisioned' : 'Manual'],
-      expiry && ['Valid Until', fmtDate(expiry)], ['Activated On', fmtDate(createdAt)],
-    ].filter(Boolean) as [string, string][];
-
-    serviceRows.forEach((row, i) => {
-      if (i % 2 === 0) { setFill(doc, C.slate1); doc.roundedRect(M, y - 3.5, R - M, 9, 0.5, 0.5, 'F'); }
-      doc.setFont('helvetica', 'normal'); doc.setFontSize(8); setColor(doc, C.slate5);
-      doc.text(row[0], M + 4, y + 2);
-      doc.setFont('helvetica', 'bold'); doc.setFontSize(8.5); setColor(doc, C.slate9);
-      doc.text(row[1], 85, y + 2);
-      y += 9;
-    });
-    y += 4;
+    // Amount Paid — standard on hosting invoices.
+    y += 12;
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); setColor(doc, C.slate5);
+    doc.text('Amount Paid', totalsLabelX, y);
+    setColor(doc, isPaid ? C.greenDk : C.slate9);
+    doc.text(`Rs ${formatINR(isPaid ? price : 0)}`, totalsValX, y, { align: 'right' });
+    y += 12;
 
     // ── PAYMENT INFO ─────────────────────────────────────────────────────
     y = checkPage(doc, y, 40);
@@ -288,8 +354,8 @@ export async function GET(req: NextRequest) {
     const payRows = [
       txId && ['Payment ID', txId], gatewayOrderId && ['Gateway Order ID', gatewayOrderId],
       clientTxnId && ['Transaction Ref', clientTxnId],
-      ['Payment Status', status.charAt(0).toUpperCase() + status.slice(1)],
-      ['Payment Date', fmtDate(createdAt)],
+      ['Payment Status', isPaid ? 'Paid' : 'Pending'],
+      ['Payment Date', isPaid ? fmtDate(createdAt) : 'Not paid yet'],
     ].filter(Boolean) as [string, string][];
 
     payRows.forEach((row, i) => {
@@ -302,11 +368,47 @@ export async function GET(req: NextRequest) {
     });
     y += 6;
 
+    // ── PENDING PAYMENT NOTICE (unpaid / undelivered orders) ─────────────
+    if (!isPaid) {
+      const noticeText =
+        'This is a provisional invoice. Payment for this order has not been received yet, ' +
+        'so the service is not active. Please complete the payment to activate your order.';
+      const noticeLines = doc.splitTextToSize(noticeText, R - M - 8) as string[];
+      const noticeBoxH = noticeLines.length * 3.8 + 11;
+      y = checkPage(doc, y, noticeBoxH + 6);
+      setFill(doc, [254, 226, 226]); setDraw(doc, C.red); doc.setLineWidth(0.4);
+      doc.roundedRect(M, y, R - M, noticeBoxH, 2, 2, 'FD');
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); setColor(doc, [185, 28, 28]);
+      doc.text('PAYMENT PENDING', M + 4, y + 6);
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(7); setColor(doc, C.slate7);
+      doc.text(noticeLines, M + 4, y + 10.5);
+      y += noticeBoxH + 6;
+    }
+
+    // ── IMPORTANT NOTE / DISCLAIMER ──────────────────────────────────────
+    const disclaimerText =
+      'The customer is solely responsible for all activities carried out using the purchased ' +
+      `service/product. ${ORG.brand} (${ORG.legal}) does not take any responsibility, guarantee, ` +
+      'or liability for any illegal, fraudulent, abusive, or unauthorized activity performed using ' +
+      "this product. Any such misuse is entirely the customer's responsibility.";
+    const discLines = doc.splitTextToSize(disclaimerText, R - M - 8) as string[];
+    const discBoxH = discLines.length * 3.8 + 11;
+    y = checkPage(doc, y, discBoxH + 6);
+    setFill(doc, [254, 243, 199]);
+    setDraw(doc, C.amber);
+    doc.setLineWidth(0.4);
+    doc.roundedRect(M, y, R - M, discBoxH, 2, 2, 'FD');
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); setColor(doc, [180, 83, 9]);
+    doc.text('IMPORTANT NOTE', M + 4, y + 6);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(7); setColor(doc, C.slate7);
+    doc.text(discLines, M + 4, y + 10.5);
+    y += discBoxH + 6;
+
     // ── TERMS ────────────────────────────────────────────────────────────
     y = checkPage(doc, y, 25);
     hr(doc, y); y += 5;
     doc.setFont('helvetica', 'normal'); doc.setFontSize(7); setColor(doc, C.slate4);
-    const termsText = `This invoice is issued by ${ORG.brand} (${ORG.legal}). Digital services once provisioned are non-returnable. 7-day money-back guarantee on new orders (subject to eligibility). Disputes: Kolkata / West Bengal jurisdiction. Support: ${ORG.email}`;
+    const termsText = `This invoice is issued by ${ORG.brand} (${ORG.legal}). Digital services once provisioned are non-returnable. Disputes: Kolkata / West Bengal jurisdiction. Support: ${ORG.email}`;
     doc.text(doc.splitTextToSize(termsText, R - M), M, y);
 
     // ── FOOTER ───────────────────────────────────────────────────────────

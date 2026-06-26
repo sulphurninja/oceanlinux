@@ -42,6 +42,7 @@ interface ResellerData {
     stats: {
         totalOrders: number;
         totalSpent: number;
+        totalRecharge?: number;
     };
     pricing: {
         globalMarkup: {
@@ -51,6 +52,15 @@ interface ResellerData {
         };
         customPrices?: Record<string, number>;
     };
+}
+
+interface RecentOrder {
+    _id: string;
+    productName: string;
+    memory: string;
+    price: number;
+    status: string;
+    createdAt: string;
 }
 
 interface IPStock {
@@ -73,6 +83,7 @@ export default function ResellerDetailsPage() {
     });
     const [ipStocks, setIpStocks] = useState<IPStock[]>([]);
     const [customPrices, setCustomPrices] = useState<Record<string, number>>({});
+    const [recentOrders, setRecentOrders] = useState<RecentOrder[]>([]);
 
     useEffect(() => {
         fetchResellerDetails();
@@ -100,6 +111,7 @@ export default function ResellerDetailsPage() {
             const data = await res.json();
             if (data.success) {
                 setReseller(data.reseller);
+                setRecentOrders(data.recentOrders || []);
                 if (data.reseller.pricing?.globalMarkup) {
                     setPricing(data.reseller.pricing.globalMarkup);
                 }
@@ -215,7 +227,7 @@ export default function ResellerDetailsPage() {
                 </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                 {/* Wallet Overview Card */}
                 <Card>
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -232,11 +244,23 @@ export default function ResellerDetailsPage() {
 
                 <Card>
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                        <CardTitle className="text-sm font-medium">Total Added</CardTitle>
+                        <Wallet className="h-4 w-4 text-green-600" />
+                    </CardHeader>
+                    <CardContent>
+                        <div className="text-2xl font-bold text-green-600">₹{(reseller.stats?.totalRecharge ?? 0).toLocaleString()}</div>
+                        <p className="text-xs text-muted-foreground">Admin recharges</p>
+                    </CardContent>
+                </Card>
+
+                <Card>
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                         <CardTitle className="text-sm font-medium">Total Spent</CardTitle>
                         <CreditCard className="h-4 w-4 text-muted-foreground" />
                     </CardHeader>
                     <CardContent>
                         <div className="text-2xl font-bold">₹{reseller.stats?.totalSpent?.toLocaleString()}</div>
+                        <p className="text-xs text-muted-foreground">Buy + renew via API</p>
                     </CardContent>
                 </Card>
 
@@ -262,24 +286,69 @@ export default function ResellerDetailsPage() {
                 <TabsContent value="overview" className="space-y-4">
                     <Card>
                         <CardHeader>
+                            <CardTitle>Recent API Orders</CardTitle>
+                            <CardDescription>Product, rate, and status for each buy</CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            <div className="rounded-md border overflow-x-auto">
+                                <table className="w-full text-sm">
+                                    <thead className="bg-muted text-muted-foreground">
+                                        <tr>
+                                            <th className="p-3 text-left font-medium">Product</th>
+                                            <th className="p-3 text-left font-medium">Plan</th>
+                                            <th className="p-3 text-left font-medium">Rate</th>
+                                            <th className="p-3 text-left font-medium">Status</th>
+                                            <th className="p-3 text-left font-medium">Date</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {recentOrders.map((order) => (
+                                            <tr key={order._id} className="border-t">
+                                                <td className="p-3 font-medium">{order.productName}</td>
+                                                <td className="p-3">{order.memory || '—'}</td>
+                                                <td className="p-3 font-bold">₹{order.price?.toLocaleString()}</td>
+                                                <td className="p-3">
+                                                    <Badge variant="outline">{order.status}</Badge>
+                                                </td>
+                                                <td className="p-3 text-muted-foreground">
+                                                    {new Date(order.createdAt).toLocaleString()}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                        {recentOrders.length === 0 && (
+                                            <tr>
+                                                <td colSpan={5} className="p-6 text-center text-muted-foreground">
+                                                    No orders yet
+                                                </td>
+                                            </tr>
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </CardContent>
+                    </Card>
+
+                    <Card>
+                        <CardHeader>
                             <CardTitle>Recent Transactions</CardTitle>
+                            <CardDescription>Recharges (+) and purchases (-) with rate in description</CardDescription>
                         </CardHeader>
                         <CardContent>
                             <div className="space-y-4">
-                                {(reseller.wallet?.transactions || []).slice(0, 5).map((txn, i) => (
+                                {(reseller.wallet?.transactions || []).slice().reverse().slice(0, 10).map((txn, i) => (
                                     <div key={i} className="flex items-center justify-between border-b pb-2 last:border-0">
                                         <div className="flex items-center gap-3">
                                             <div className={`p-2 rounded-full ${txn.type === 'deduction' ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>
                                                 {txn.type === 'deduction' ? <TrendingUp className="h-4 w-4 rotate-180" /> : <Wallet className="h-4 w-4" />}
                                             </div>
                                             <div>
-                                                <p className="font-medium capitalize">{txn.type}</p>
+                                                <p className="font-medium capitalize">{txn.type === 'recharge' ? 'Funds Added' : txn.type}</p>
                                                 <p className="text-xs text-muted-foreground">{txn.description}</p>
                                             </div>
                                         </div>
                                         <div className="text-right">
                                             <p className={`font-bold ${txn.amount > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                                {txn.amount > 0 ? '+' : ''}{txn.amount}
+                                                {txn.amount > 0 ? '+' : ''}₹{Math.abs(txn.amount).toLocaleString()}
                                             </p>
                                             <p className="text-xs text-muted-foreground">
                                                 {new Date(txn.createdAt).toLocaleDateString()}

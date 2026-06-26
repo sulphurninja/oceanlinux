@@ -6,6 +6,7 @@ import Order from '@/models/orderModel';
 import { calculateRenewalExpiryDate } from '@/lib/expiryHelper';
 import { isSlotIpOrder, SLOT_IP_NO_RENEWAL_MESSAGE } from '@/lib/slotIpOrder';
 const { getAdvpsRebuildResetFields, isAdvpsOrder } = require('@/lib/advpsRebuildLimit');
+const { notifyRenewalCompleted } = require('@/lib/renewalNotifications');
 
 async function getCompanySession() {
   const cookieStore = await cookies();
@@ -131,6 +132,10 @@ export async function POST(request) {
       proposedNewExpiry: newExpiry, // commit the actual extension
     };
     await renewalReq.save();
+
+    notifyRenewalCompleted(order._id, newExpiry, renewalReq.renewalTxnId).catch((err) =>
+      console.error('[COMPANY-RENEWAL] renewal notification failed:', err.message),
+    );
 
     return NextResponse.json({
       success: true,
