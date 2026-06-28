@@ -12,9 +12,14 @@ import {
   normalizeOsForServerType,
   resolveUsernameForOs,
 } from '@/lib/companyInventory';
+import Order from '@/models/orderModel';
 import { COMPANY_FILTER_VERSION } from '@/lib/companyOrders';
+import { buildCompanyValidityMismatchReport } from '@/lib/companyValidityMismatch';
 const { hasCompanyResellerApi, getCompanyResellerApiConfig } = require('@/lib/companyResellerApi');
-const { fetchResellerCredentialsByIp } = require('@/lib/companyResellerInventorySync');
+const {
+  fetchResellerCredentialsByIp,
+  syncAllInventoryExpiriesFromReseller,
+} = require('@/lib/companyResellerInventorySync');
 
 async function getCompanySession() {
   const cookieStore = await cookies();
@@ -34,6 +39,8 @@ function serializeInventoryItem(item) {
     username: item.username,
     password: item.allocated ? '********' : item.password,
     os: item.os,
+    expiryDate: item.expiryDate || null,
+    addedAt: item.addedAt || null,
     allocated: !!item.allocated,
     orderId: item.orderId ? String(item.orderId) : null,
     allocatedAt: item.allocatedAt || null,
@@ -89,6 +96,45 @@ export async function PUT(request) {
   const body = await request.json();
   const { stockId, stockCount, action, items, bulkLines, removeItemId, ipAddress, addToInventory } = body;
 
+  if (action === 'syncAllResellerExpiries') {
+    const companyDoc = await Company.findById(company.id).select('resellerApi name').lean();
+    if (!hasCompanyResellerApi(companyDoc)) {
+      return NextResponse.json(
+        { error: 'Hostheaven sync is not enabled. Ask admin to enable Reseller API on your company.' },
+        { status: 403 }
+      );
+    }
+
+    const stocks = await IPStock.find({ company: company.id });
+    const { updated, failed } = await syncAllInventoryExpiriesFromReseller(companyDoc, stocks);
+
+    const stockIds = stocks.map((s) => s._id);
+    const orders = stockIds.length
+      ? await Order.find({
+          ipStockId: { $in: stockIds },
+          status: { $nin: ['cancelled', 'failed'] },
+        })
+          .select('_id expiryDate createdAt ipStockId')
+          .lean()
+      : [];
+
+    const serializedStocks = stocks.map((s) => serializeStock(s.toObject?.() || s));
+    const mismatches = buildCompanyValidityMismatchReport(serializedStocks, orders);
+
+    return NextResponse.json({
+      success: true,
+      message: `Synced expiry for ${updated.length} VPS`,
+      updatedCount: updated.length,
+      failedCount: failed.length,
+      updated,
+      failed,
+      mismatches,
+      mismatchCount: mismatches.length,
+      mismatchIps: mismatches.map((m) => m.ipAddress),
+      stocks: serializedStocks,
+    });
+  }
+
   if (!stockId) {
     return NextResponse.json({ error: 'stockId is required' }, { status: 400 });
   }
@@ -142,6 +188,8 @@ export async function PUT(request) {
           username: credentials.username,
           password: credentials.password,
           os: credentials.os,
+          expiryDate: credentials.expiryDate || null,
+          addedAt: new Date(),
           allocated: false,
           orderId: null,
           allocatedAt: null,
@@ -157,6 +205,7 @@ export async function PUT(request) {
           username: credentials.username,
           os: credentials.os,
           serverName: credentials.serverName,
+          expiryDate: credentials.expiryDate || null,
         },
         stock: serializeStock(synced.toObject?.() || synced),
       });
@@ -191,6 +240,8 @@ export async function PUT(request) {
           username: resolveUsernameForOs(row.username, os),
           password: String(row.password).trim(),
           os,
+          expiryDate: row.expiryDate ? new Date(row.expiryDate) : null,
+          addedAt: new Date(),
           allocated: false,
           orderId: null,
           allocatedAt: null,
@@ -230,7 +281,7 @@ export async function PUT(request) {
   }
 
   return NextResponse.json(
-    { error: 'Unknown action. Use setStockCount, addInventory, removeInventory, or syncResellerCredentials' },
+    { error: 'Unknown action. Use setStockCount, addInventory, removeInventory, syncResellerCredentials, or syncAllResellerExpiries' },
     { status: 400 }
   );
 }

@@ -417,6 +417,36 @@ class ResellerApi {
   }
 
   /**
+   * Service expiry from overview row and/or VM details (Hostheaven: `expiresAt`).
+   * Returns a Date or null.
+   */
+  static extractVmExpiryDate(...sources) {
+    const { parseAdvpsExpiryDate } = require('@/lib/advpsOrderExpiry');
+    const keys = [
+      'expiresAt',
+      'expiryDate',
+      'expiry',
+      'validUntil',
+      'validTill',
+      'renewalDate',
+      'endDate',
+      'subscriptionEnd',
+      'nextDueDate',
+    ];
+
+    for (const src of sources) {
+      if (!src || typeof src !== 'object') continue;
+      for (const key of keys) {
+        if (src[key] != null && src[key] !== '') {
+          const d = parseAdvpsExpiryDate(src[key]);
+          if (d) return d;
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
    * Fetch the VM's current password from the details endpoint. Hostheaven
    * auto-rotates this on every rebuild/reinstall, so callers use this after a
    * reinstall to refresh the stored credential.

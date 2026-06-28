@@ -23,6 +23,11 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { COMPANY_FILTER_VERSION, isCompanyVisibleOrder } from '@/lib/companyOrders';
+import {
+  buildCompanyInventoryActivity,
+  buildCompanyValidityMismatchReport,
+} from '@/lib/companyValidityMismatch';
+import { getCompanyValidityDays } from '@/lib/expiryHelper';
 
 function orderStatusBadgeProps(status: string): {
   variant: 'default' | 'secondary' | 'outline' | 'destructive';
@@ -109,6 +114,9 @@ interface InventoryItem {
   username: string;
   password: string;
   os: string;
+  expiryDate?: string | null;
+  addedAt?: string | null;
+  allocatedAt?: string | null;
   allocated: boolean;
   orderId?: string | null;
 }
@@ -150,11 +158,26 @@ function defaultInventoryFormForStock(stock: Pick<Stock, 'serverType'>) {
     username: defaultUsernameForOs(os),
     password: '',
     os,
+    expiryDate: '',
   };
 }
 
+function formatInventoryExpiry(value?: string | Date | null) {
+  if (!value) return '—';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function toDateInputValue(value?: string | Date | null) {
+  if (!value) return '';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toISOString().slice(0, 10);
+}
+
 function normalizeInventoryFormForStock(
-  form: { ipAddress: string; username: string; password: string; os: string },
+  form: { ipAddress: string; username: string; password: string; os: string; expiryDate?: string },
   stock: Pick<Stock, 'serverType'>
 ) {
   const allowed = osOptionsForStock(stock.serverType);
@@ -261,12 +284,14 @@ export default function CompanyDashboard() {
   const [stockCountDrafts, setStockCountDrafts] = useState<Record<string, string>>({});
   const [inventoryBulkDrafts, setInventoryBulkDrafts] = useState<Record<string, string>>({});
   const [inventoryFormDrafts, setInventoryFormDrafts] = useState<
-    Record<string, { ipAddress: string; username: string; password: string; os: string }>
+    Record<string, { ipAddress: string; username: string; password: string; os: string; expiryDate?: string }>
   >({});
   const [expandedStockId, setExpandedStockId] = useState<string | null>(null);
   const [hasResellerSync, setHasResellerSync] = useState(false);
   const [resellerLabel, setResellerLabel] = useState('Hostheaven');
   const [syncingStockId, setSyncingStockId] = useState<string | null>(null);
+  const [syncingAllExpiries, setSyncingAllExpiries] = useState(false);
+  const [lastSyncFailed, setLastSyncFailed] = useState<Array<{ ipAddress: string; error: string }>>([]);
 
   // Order filters
   const [searchTerm, setSearchTerm] = useState('');
@@ -419,6 +444,55 @@ export default function CompanyDashboard() {
     }
   };
 
+  const syncAllExpiries = async () => {
+    setSyncingAllExpiries(true);
+    try {
+      const res = await fetch('/api/company/stocks', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'syncAllResellerExpiries' }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Sync all failed');
+      }
+
+      if (Array.isArray(data.stocks)) {
+        setStocks(data.stocks);
+        setStockCountDrafts(Object.fromEntries(data.stocks.map((s: Stock) => [s._id, String(s.stockCount ?? 0)])));
+      }
+
+      setLastSyncFailed(
+        Array.isArray(data.failed)
+          ? data.failed.map((f: { ipAddress: string; error?: string }) => ({
+              ipAddress: f.ipAddress,
+              error: f.error || 'Sync failed',
+            }))
+          : []
+      );
+
+      const mismatchIps: string[] = data.mismatchIps || [];
+      if (data.failedCount > 0) {
+        toast.warning(`${data.updatedCount} synced, ${data.failedCount} failed (panel par nahi mile)`);
+      } else {
+        toast.success(`${data.updatedCount} VPS ki expiry Hostheaven se sync ho gayi`);
+      }
+
+      if (mismatchIps.length > 0) {
+        toast.error(
+          `${mismatchIps.length} IP par panel expiry kam hai — extend karo: ${mismatchIps.slice(0, 5).join(', ')}${mismatchIps.length > 5 ? '…' : ''}`,
+          { duration: 8000 }
+        );
+      } else if (data.updatedCount > 0) {
+        toast.success('Sab VPS OK — panel expiry customer validity se match hai');
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Sync all expiry failed');
+    } finally {
+      setSyncingAllExpiries(false);
+    }
+  };
+
   const syncResellerCredentials = async (stockId: string, stock: Stock, addToInventory: boolean) => {
     const form = normalizeInventoryFormForStock(
       inventoryFormDrafts[stockId] || defaultInventoryFormForStock(stock),
@@ -453,7 +527,7 @@ export default function CompanyDashboard() {
           ...prev,
           [stockId]: defaultInventoryFormForStock(stock),
         }));
-        toast.success(`${data.credentials?.ipAddress || form.ipAddress} added via ${resellerLabel} sync`);
+        toast.success(`${data.credentials?.ipAddress || form.ipAddress} added via ${resellerLabel} sync${data.credentials?.expiryDate ? ` · expires ${formatInventoryExpiry(data.credentials.expiryDate)}` : ''}`);
       } else if (data.credentials) {
         setInventoryFormDrafts(prev => ({
           ...prev,
@@ -462,9 +536,13 @@ export default function CompanyDashboard() {
             username: data.credentials.username,
             password: data.credentials.password,
             os: data.credentials.os,
+            expiryDate: toDateInputValue(data.credentials.expiryDate),
           },
         }));
-        toast.success(`Password synced from ${resellerLabel}`);
+        const expiryHint = data.credentials.expiryDate
+          ? ` · expiry ${formatInventoryExpiry(data.credentials.expiryDate)}`
+          : '';
+        toast.success(`Password synced from ${resellerLabel}${expiryHint}`);
       }
     } catch (err: any) {
       toast.error(err.message || 'Hostheaven sync failed');
@@ -488,7 +566,10 @@ export default function CompanyDashboard() {
           toast.error('IP address and password are required');
           return;
         }
-        payload.items = [form];
+        payload.items = [{
+          ...form,
+          expiryDate: form.expiryDate ? new Date(form.expiryDate).toISOString() : undefined,
+        }];
       }
       const res = await fetch('/api/company/stocks', {
         method: 'PUT',
@@ -712,6 +793,18 @@ export default function CompanyDashboard() {
     return 0;
   }, [actionRequests, requestStatusFilter]);
 
+  const validityMismatches = useMemo(
+    () => buildCompanyValidityMismatchReport(stocks, visibleOrders),
+    [stocks, visibleOrders]
+  );
+
+  const inventoryActivity = useMemo(
+    () => buildCompanyInventoryActivity(stocks, validityMismatches.length),
+    [stocks, validityMismatches.length]
+  );
+
+  const customerValidityDays = useMemo(() => getCompanyValidityDays(new Date()), []);
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -812,7 +905,8 @@ export default function CompanyDashboard() {
 
         {/* ── Stocks Tab ── */}
         {tab === 'stocks' && (
-          <div className="space-y-2">
+          <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_340px] gap-4 items-start">
+            <div className="space-y-2 min-w-0">
             {stocks.length === 0 ? (
               <Card><CardContent className="py-12 text-center"><Server className="h-10 w-10 mx-auto text-muted-foreground mb-3" /><p className="text-sm text-muted-foreground">No IP stocks assigned to your company yet.</p></CardContent></Card>
             ) : stocks.map((stock) => {
@@ -939,12 +1033,12 @@ export default function CompanyDashboard() {
                               </div>
                             </div>
                             <p className="text-[11px] text-muted-foreground">
-                              Sync fills username/password/OS from the panel. Sync &amp; Add saves the server in one step.
+                              Sync fills username, password, OS, and expiry from the panel. Sync &amp; Add saves the server in one step.
                             </p>
                           </div>
                         )}
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 mb-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2 mb-3">
                           <Input
                             placeholder="IP Address"
                             value={form.ipAddress}
@@ -1000,6 +1094,16 @@ export default function CompanyDashboard() {
                               ))}
                             </SelectContent>
                           </Select>
+                          <Input
+                            type="date"
+                            title="Expiry date (auto-filled on Hostheaven sync)"
+                            value={form.expiryDate || ''}
+                            onChange={(e) => setInventoryFormDrafts(prev => ({
+                              ...prev,
+                              [stock._id]: { ...form, expiryDate: e.target.value },
+                            }))}
+                            className="text-sm"
+                          />
                         </div>
                         <Button
                           size="sm"
@@ -1035,6 +1139,7 @@ export default function CompanyDashboard() {
                                 <th className="text-left p-2">User</th>
                                 <th className="text-left p-2">Password</th>
                                 <th className="text-left p-2">OS</th>
+                                <th className="text-left p-2">Expiry</th>
                                 <th className="text-left p-2">Status</th>
                                 <th className="p-2"></th>
                               </tr>
@@ -1068,6 +1173,16 @@ export default function CompanyDashboard() {
                                     )}
                                   </td>
                                   <td className="p-2">{item.os}</td>
+                                  <td className="p-2 whitespace-nowrap">
+                                    {item.expiryDate ? (
+                                      <span className="flex items-center gap-1 text-amber-700 dark:text-amber-300">
+                                        <CalendarDays className="h-3 w-3 shrink-0" />
+                                        {formatInventoryExpiry(item.expiryDate)}
+                                      </span>
+                                    ) : (
+                                      <span className="text-muted-foreground">—</span>
+                                    )}
+                                  </td>
                                   <td className="p-2">
                                     {item.allocated ? (
                                       <Badge className="text-[10px] bg-muted">Sold</Badge>
@@ -1098,6 +1213,187 @@ export default function CompanyDashboard() {
                 </CardContent>
               </Card>
             );})}
+            </div>
+
+            <aside className="space-y-3 xl:sticky xl:top-4">
+              <Card className="border-primary/20">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm flex items-center gap-2">
+                    <ClipboardList className="h-4 w-4 text-primary" />
+                    Inventory activity
+                  </CardTitle>
+                  <CardDescription className="text-xs">
+                    Adds &amp; sales from your pre-configured server pool.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3 text-sm">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="rounded-lg border bg-muted/30 p-2.5">
+                      <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Added today</p>
+                      <p className="text-xl font-bold text-emerald-600">{inventoryActivity.addedToday}</p>
+                    </div>
+                    <div className="rounded-lg border bg-muted/30 p-2.5">
+                      <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Sold today</p>
+                      <p className="text-xl font-bold">{inventoryActivity.soldToday}</p>
+                    </div>
+                    <div className="rounded-lg border bg-muted/30 p-2.5">
+                      <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Ready</p>
+                      <p className="text-xl font-bold">{inventoryActivity.readyCount}</p>
+                    </div>
+                    <div className="rounded-lg border bg-muted/30 p-2.5">
+                      <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Sold total</p>
+                      <p className="text-xl font-bold">{inventoryActivity.soldCount}</p>
+                    </div>
+                  </div>
+                  {inventoryActivity.recentSoldByDay.length > 0 && (
+                    <div>
+                      <p className="text-xs font-medium mb-1.5">Recent sales by day</p>
+                      <div className="space-y-1">
+                        {inventoryActivity.recentSoldByDay.map((row) => (
+                          <div key={row.label} className="flex items-center justify-between text-xs rounded-md border px-2 py-1.5">
+                            <span className="text-muted-foreground">{row.label}</span>
+                            <Badge variant="secondary" className="text-[10px] h-5">{row.count} sold</Badge>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card className={cn(
+                'border-amber-500/40',
+                validityMismatches.length > 0 ? 'bg-amber-50/80 dark:bg-amber-950/20' : ''
+              )}>
+                <CardHeader className="pb-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <CardTitle className="text-sm flex items-center gap-2">
+                        <AlertTriangle className={cn(
+                          'h-4 w-4 shrink-0',
+                          validityMismatches.length > 0 ? 'text-amber-600' : 'text-muted-foreground'
+                        )} />
+                        Panel vs customer validity
+                      </CardTitle>
+                      <CardDescription className="text-xs mt-1">
+                        Website par customer ko <strong>buy date + {customerValidityDays} din</strong> dikhta hai.
+                        Neeche woh VPS jahan <strong>panel ki original expiry</strong> usse pehle khatam ho rahi hai.
+                      </CardDescription>
+                    </div>
+                    {hasResellerSync && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="shrink-0 text-xs h-8"
+                        onClick={syncAllExpiries}
+                        disabled={syncingAllExpiries}
+                      >
+                        {syncingAllExpiries ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <>
+                            <RefreshCw className="h-3.5 w-3.5 mr-1" />
+                            Sync all expiry
+                          </>
+                        )}
+                      </Button>
+                    )}
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {hasResellerSync && (
+                    <p className="text-[11px] text-muted-foreground rounded-md border border-dashed px-2 py-1.5">
+                      Purane VPS jin par expiry nahi hai? <strong>Sync all expiry</strong> dabao — saari IP Hostheaven se update hongi, error wali IPs neeche dikhengi.
+                    </p>
+                  )}
+                  {validityMismatches.length === 0 ? (
+                    <p className="text-xs text-muted-foreground py-2">
+                      {hasResellerSync
+                        ? 'Koi mismatch nahi — ya abhi tak expiry sync nahi hui. Purane VPS ke liye upar Sync all expiry dabao.'
+                        : 'Hostheaven sync enable karo, phir expiry sync kar sakte ho.'}
+                    </p>
+                  ) : (
+                    <>
+                      <p className="text-xs font-medium text-amber-800 dark:text-amber-200">
+                        {validityMismatches.length} VPS — panel pehle khatam, customer baad mein. Hostheaven par expiry extend karo.
+                      </p>
+                      <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
+                        {validityMismatches.map((row) => (
+                          <div
+                            key={row.id}
+                            className="rounded-lg border border-amber-500/30 bg-background/80 p-2.5 text-xs space-y-1.5"
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <p className="font-mono font-medium truncate">{row.ipAddress}</p>
+                                <p className="text-[10px] text-muted-foreground truncate">{row.stockName}</p>
+                                {row.status === 'sold' && row.soldAt && (
+                                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                                    Sold: {formatInventoryExpiry(row.soldAt)}
+                                  </p>
+                                )}
+                                {row.status === 'ready' && (
+                                  <p className="text-[10px] text-blue-600 dark:text-blue-400 mt-0.5">
+                                    Abhi sell karo to customer ko {row.customerDaysOnSale} din milenge
+                                  </p>
+                                )}
+                              </div>
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  'text-[10px] shrink-0',
+                                  row.status === 'ready'
+                                    ? 'border-blue-300 text-blue-700'
+                                    : 'border-muted-foreground/30'
+                                )}
+                              >
+                                {row.status === 'ready' ? 'In stock' : 'Sold'}
+                              </Badge>
+                            </div>
+                            <div className="grid grid-cols-2 gap-1.5">
+                              <div className="rounded bg-red-500/10 px-2 py-1">
+                                <p className="text-[10px] text-muted-foreground">Panel VPS (Hostheaven)</p>
+                                <p className="font-semibold text-red-700 dark:text-red-300">{row.panelDaysLeft}d left</p>
+                                <p className="text-[10px] text-muted-foreground">Original: {formatInventoryExpiry(row.panelExpiry)}</p>
+                              </div>
+                              <div className="rounded bg-emerald-500/10 px-2 py-1">
+                                <p className="text-[10px] text-muted-foreground">Website (customer)</p>
+                                <p className="font-semibold text-emerald-700 dark:text-emerald-300">
+                                  {row.customerDaysOnSale}d from buy
+                                </p>
+                                <p className="text-[10px] text-muted-foreground">Until: {formatInventoryExpiry(row.customerExpiry)}</p>
+                              </div>
+                            </div>
+                            <p className="text-[10px] text-amber-800 dark:text-amber-200 font-medium">
+                              Hostheaven par <strong>{row.gapDays} din</strong> extend karo — panel {formatInventoryExpiry(row.panelExpiry)} pe khatam, customer {formatInventoryExpiry(row.customerExpiry)} tak
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                  {lastSyncFailed.length > 0 && (
+                    <div className="space-y-1.5 pt-1 border-t border-dashed">
+                      <p className="text-xs font-medium text-red-700 dark:text-red-300">
+                        {lastSyncFailed.length} IP — Hostheaven se expiry nahi mili
+                      </p>
+                      <div className="space-y-1 max-h-32 overflow-y-auto">
+                        {lastSyncFailed.map((row) => (
+                          <div
+                            key={row.ipAddress}
+                            className="rounded border border-red-500/20 bg-red-500/5 px-2 py-1 text-[11px]"
+                          >
+                            <p className="font-mono font-medium">{row.ipAddress}</p>
+                            <p className="text-muted-foreground truncate">{row.error}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </aside>
           </div>
         )}
 

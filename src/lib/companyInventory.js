@@ -84,6 +84,7 @@ function parseInventoryBulkLines(text, serverType = 'Linux') {
       allocated: false,
       orderId: null,
       allocatedAt: null,
+      addedAt: new Date(),
     });
   }
 
@@ -145,6 +146,8 @@ async function allocateCompanyInventoryForOrder(order) {
     order.username = item.username;
     order.password = item.password;
     order.os = item.os || order.os;
+    // Customer expiry stays from payment (buy date + 30 days).
+    // item.expiryDate is the original Hostheaven panel expiry for company tracking only.
     order.provisioningStatus = 'active';
     order.status = 'active';
     order.autoProvisioned = true;

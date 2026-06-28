@@ -20,6 +20,10 @@ const IPStockSchema = new mongoose.Schema({
     allocated: { type: Boolean, default: false },
     orderId: { type: mongoose.Schema.Types.ObjectId, ref: 'Order', default: null },
     allocatedAt: { type: Date, default: null },
+    /** When this row was added to inventory (for company activity stats). */
+    addedAt: { type: Date, default: Date.now },
+    /** Optional — synced from Hostheaven `expiresAt` when adding inventory. */
+    expiryDate: { type: Date, default: null },
   }],
   serverType: {
     type: String,
