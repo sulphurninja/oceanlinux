@@ -1581,6 +1581,45 @@ html {
     padding-bottom: max(0.875rem, env(safe-area-inset-bottom));
   }
 
+  /* Purchase dialog — compact, no scroll on typical screens */
+  .premium-dashboard-dialog--purchase {
+    max-height: calc(100dvh - 1rem) !important;
+    height: auto !important;
+  }
+
+  .premium-dashboard-dialog-body--compact {
+    overflow: visible !important;
+    flex: 0 1 auto !important;
+    min-height: 0 !important;
+  }
+
+  @media (max-width: 639px) {
+    .premium-dashboard-dialog--purchase {
+      left: 50% !important;
+      right: auto !important;
+      top: 50% !important;
+      bottom: auto !important;
+      transform: translate(-50%, -50%) !important;
+      width: calc(100vw - 1.5rem) !important;
+      max-width: 28rem !important;
+      border-radius: 1rem !important;
+    }
+
+    .premium-dashboard-dialog-footer--purchase {
+      padding-left: 0.75rem;
+      padding-right: 0.75rem;
+      padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+    }
+
+    .premium-dashboard-dialog--purchase .premium-dashboard-dialog-body--compact {
+      @apply px-3 py-3;
+    }
+
+    .premium-dashboard-dialog--purchase .premium-dashboard-dialog-header {
+      @apply px-3 py-3;
+    }
+  }
+
   .premium-payment-pill {
     @apply px-3 py-1.5 rounded-lg border text-xs font-medium transition-all;
   }

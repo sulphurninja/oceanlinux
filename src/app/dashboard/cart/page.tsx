@@ -42,6 +42,7 @@ import {
   type CartLine,
 } from '@/lib/cartClient';
 import { broadcastWallet, fetchWalletSummary } from '@/lib/walletClient';
+import { PurchaseDisclaimerNotice } from '@/components/purchase/PurchaseDisclaimerNotice';
 import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 import { openRazorpayModal, prepareRazorpayOverlay } from '@/lib/razorpayCheckout';
 
@@ -65,6 +66,7 @@ export default function CartPage() {
   const [busyItem, setBusyItem] = useState<string | null>(null);
   const [checkingOut, setCheckingOut] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [purchaseDisclaimerAccepted, setPurchaseDisclaimerAccepted] = useState(false);
 
   const formatINR = useMemo(() => new Intl.NumberFormat('en-IN', {
     style: 'currency', currency: 'INR', maximumFractionDigits: 2,
@@ -187,6 +189,10 @@ export default function CartPage() {
 
   const onCheckout = async () => {
     if (!cart || cart.items.length === 0) return;
+    if (!purchaseDisclaimerAccepted) {
+      toast.error('Please read and accept the purchase notice before checkout');
+      return;
+    }
     if (cart.hasInvalidItems) {
       toast.error('Please remove unavailable items before checking out');
       return;
@@ -564,12 +570,20 @@ export default function CartPage() {
                     Some items are unavailable. Remove them before checkout.
                   </div>
                 )}
+              </CardContent>
+
+              <div className="border-t border-border/60 px-4 sm:px-6 py-3 sm:py-4 space-y-3 shrink-0">
+                <PurchaseDisclaimerNotice
+                  compact
+                  checked={purchaseDisclaimerAccepted}
+                  onCheckedChange={setPurchaseDisclaimerAccepted}
+                />
 
                 <Button
                   className="w-full premium-btn-pay border-0"
                   size="lg"
                   onClick={onCheckout}
-                  disabled={checkingOut || cart!.hasInvalidItems || cart!.items.length === 0}
+                  disabled={checkingOut || cart!.hasInvalidItems || cart!.items.length === 0 || !purchaseDisclaimerAccepted}
                 >
                   {checkingOut ? (
                     <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Processing</>
@@ -583,7 +597,7 @@ export default function CartPage() {
                     Top up wallet to skip the gateway →
                   </Link>
                 )}
-              </CardContent>
+              </div>
             </Card>
           </div>
         </div>

@@ -2,7 +2,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import {
     Terminal,
     Server,
@@ -78,10 +77,7 @@ async function proxySetupRequest(body: Record<string, unknown>) {
 }
 
 const PublicProxySetupPage = () => {
-    const router = useRouter();
     const terminalRef = useRef<HTMLDivElement>(null);
-    const [authChecked, setAuthChecked] = useState(false);
-    const [isLoggedIn, setIsLoggedIn] = useState(false);
 
     // Connection state
     const [step, setStep] = useState<Step>('credentials');
@@ -127,31 +123,6 @@ const PublicProxySetupPage = () => {
             terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
         }
     }, [logs]);
-
-    useEffect(() => {
-        fetch('/api/users/me', { credentials: 'include' })
-            .then((res) => {
-                setIsLoggedIn(res.ok);
-                setAuthChecked(true);
-            })
-            .catch(() => {
-                setIsLoggedIn(false);
-                setAuthChecked(true);
-            });
-    }, []);
-
-    const handleAuthRequired = (status: number, message?: string) => {
-        if (status === 401) {
-            toast.error('Please sign in to use the Proxy Setup Tool');
-            router.push('/login?returnTo=/tools/proxy-setup');
-            return true;
-        }
-        if (status === 403) {
-            toast.error(message || 'You can only run this on servers in your OceanLinux account');
-            return true;
-        }
-        return false;
-    };
 
     const addLog = (type: LogType, message: string) => {
         setLogs(prev => [...prev, { type, message, timestamp: new Date() }]);
@@ -211,11 +182,6 @@ const PublicProxySetupPage = () => {
                 password: serverPassword,
                 action: 'detect',
             });
-
-            if (handleAuthRequired(response.status, data.message)) {
-                setStep('credentials');
-                return;
-            }
 
             if (data.success) {
                 // Update port attempt statuses from the server response
@@ -305,11 +271,6 @@ const PublicProxySetupPage = () => {
 
             clearInterval(progressInterval);
 
-            if (handleAuthRequired(response.status, data.message)) {
-                setStep('proxy-setup');
-                return;
-            }
-
             if (data.success) {
                 setProgress(100);
                 addLog('success', '✓ Squid proxy installed');
@@ -380,7 +341,7 @@ const PublicProxySetupPage = () => {
                 eyebrow="Free Tool"
                 title="One-Click"
                 titleAccent="Proxy Setup"
-                description="Install Squid proxy on your OceanLinux VPS in seconds. Sign in with your account — tool works only on servers you own."
+                description="Install Squid proxy on any Linux VPS in seconds. No account required — paste your server IP, username, and password to get started."
                 badge={
                     <span className="premium-chip inline-flex items-center gap-2">
                         <Zap className="w-4 h-4" />
@@ -406,30 +367,6 @@ const PublicProxySetupPage = () => {
 
             <section className="premium-page-section">
                 <div className="container mx-auto container-padding">
-                    {!authChecked ? (
-                        <div className="flex justify-center py-16">
-                            <Loader2 className="h-8 w-8 animate-spin text-emerald-400" />
-                        </div>
-                    ) : !isLoggedIn ? (
-                        <Card className="max-w-lg mx-auto border-emerald-500/20 bg-emerald-500/5">
-                            <CardHeader className="text-center">
-                                <Shield className="h-10 w-10 text-emerald-400 mx-auto mb-2" />
-                                <CardTitle>Sign in required</CardTitle>
-                                <CardDescription>
-                                    The Proxy Setup Tool is available to OceanLinux customers only.
-                                    Sign in, then use the IP of a server in your account.
-                                </CardDescription>
-                            </CardHeader>
-                            <CardContent className="flex flex-col sm:flex-row gap-3 justify-center">
-                                <Button asChild className="premium-btn-primary">
-                                    <Link href="/login?returnTo=/tools/proxy-setup">Sign in</Link>
-                                </Button>
-                                <Button asChild variant="outline" className="premium-btn-outline">
-                                    <Link href="/get-started">Create account</Link>
-                                </Button>
-                            </CardContent>
-                        </Card>
-                    ) : (
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
                         {/* Left Column - Credentials & Controls */}
                         <div className="space-y-6">
@@ -845,7 +782,6 @@ const PublicProxySetupPage = () => {
                             </Card>
                         </div>
                     </div>
-                    )}
                 </div>
             </section>
 
@@ -918,14 +854,14 @@ const PublicProxySetupPage = () => {
             </section>
             {/* Proxy Credentials Dialog */}
             <Dialog open={showProxyDialog} onOpenChange={setShowProxyDialog}>
-                <DialogContent className="premium-auth-card sm:max-w-md border-0">
+                <DialogContent className="sm:max-w-md bg-background text-foreground">
                     <DialogHeader>
-                        <DialogTitle className="flex items-center gap-2">
-                            <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-                                <Shield className="h-5 w-5 text-primary" />
+                        <DialogTitle className="flex items-center gap-2 text-foreground">
+                            <div className="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center">
+                                <Shield className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
                             </div>
                             <div>
-                                <span>Create Proxy Credentials</span>
+                                <span className="text-foreground">Create Proxy Credentials</span>
                                 <p className="text-sm font-normal text-muted-foreground mt-0.5">
                                     Set up authentication for your proxy server
                                 </p>
@@ -935,14 +871,14 @@ const PublicProxySetupPage = () => {
                     
                     <div className="space-y-4 py-4">
                         {detectedOs && (
-                            <div className="flex items-center gap-2 p-3 bg-muted/50 rounded-lg">
+                            <div className="flex items-center gap-2 p-3 bg-muted rounded-lg border border-border">
                                 <img 
                                     src={detectedOs.includes('ubuntu') ? '/ubuntu.png' : '/centos.png'} 
                                     className="w-6 h-6 rounded" 
                                     alt={detectedOs}
                                     onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
                                 />
-                                <span className="text-sm">
+                                <span className="text-sm text-foreground">
                                     Detected: <strong className="capitalize">{detectedOs}</strong>
                                 </span>
                                 <Badge variant="outline" className="ml-auto text-xs">
@@ -952,7 +888,7 @@ const PublicProxySetupPage = () => {
                         )}
 
                         <div className="space-y-2">
-                            <Label htmlFor="proxyUser" className="flex items-center gap-2">
+                            <Label htmlFor="proxyUser" className="flex items-center gap-2 text-foreground">
                                 <User className="h-4 w-4 text-muted-foreground" />
                                 Proxy Username
                             </Label>
@@ -962,11 +898,12 @@ const PublicProxySetupPage = () => {
                                 onChange={(e) => setProxyUsername(e.target.value)}
                                 placeholder="myproxyuser"
                                 autoFocus
+                                className="bg-background text-foreground border-input"
                             />
                         </div>
 
                         <div className="space-y-2">
-                            <Label htmlFor="proxyPass" className="flex items-center gap-2">
+                            <Label htmlFor="proxyPass" className="flex items-center gap-2 text-foreground">
                                 <Key className="h-4 w-4 text-muted-foreground" />
                                 Proxy Password
                             </Label>
@@ -977,13 +914,13 @@ const PublicProxySetupPage = () => {
                                     value={proxyPassword}
                                     onChange={(e) => setProxyPassword(e.target.value)}
                                     placeholder="••••••••"
-                                    className="pr-10"
+                                    className="pr-10 bg-background text-foreground border-input"
                                 />
                                 <Button
                                     type="button"
                                     variant="ghost"
                                     size="icon"
-                                    className="absolute right-0 top-0 h-full px-3"
+                                    className="absolute right-0 top-0 h-full px-3 text-muted-foreground"
                                     onClick={() => setShowProxyPassword(!showProxyPassword)}
                                 >
                                     {showProxyPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -1009,13 +946,13 @@ const PublicProxySetupPage = () => {
                     </div>
 
                     <DialogFooter className="gap-2">
-                        <Button variant="outline" onClick={() => setShowProxyDialog(false)} className="premium-btn-outline">
+                        <Button variant="outline" onClick={() => setShowProxyDialog(false)}>
                             Cancel
                         </Button>
                         <Button 
                             onClick={handleSetupProxy}
                             disabled={!proxyUsername || !proxyPassword}
-                            className="premium-btn-primary gap-2"
+                            className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white"
                         >
                             <Play className="h-4 w-4" />
                             Install Proxy

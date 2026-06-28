@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { NodeSSH } from 'node-ssh';
-import { enforceProxyServerAccess } from '@/lib/apiSecurity';
 
 const SSH_PORTS = [22, 3052];
 
@@ -49,9 +48,7 @@ export async function POST(request) {
       );
     }
 
-    const accessDenied = await enforceProxyServerAccess(request, ip);
-    if (accessDenied) return accessDenied;
-
+    // Public free tool — any Linux VPS credentials; no account/IP ownership gate.
     console.log(`[PROXY-SETUP] Connecting to ${ip} as ${username}`);
 
     const conn = await connectWithFallback(ssh, ip, username, password);

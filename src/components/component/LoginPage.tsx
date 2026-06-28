@@ -60,10 +60,7 @@ function LoginPage({ className, ...props }: React.ComponentPropsWithoutRef<"div"
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-<<<<<<< HEAD
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
-=======
->>>>>>> 97582c8e282e62a59b89f926a157d7ffdeb634d8
   const [mounted, setMounted] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -76,7 +73,6 @@ function LoginPage({ className, ...props }: React.ComponentPropsWithoutRef<"div"
 
   useEffect(() => {
     const checkUser = async () => {
-<<<<<<< HEAD
       try {
         const response = await fetch('/api/users/me', { credentials: 'include' });
         if (response.ok) {
@@ -85,12 +81,6 @@ function LoginPage({ className, ...props }: React.ComponentPropsWithoutRef<"div"
         }
       } catch {
         /* not logged in or server unavailable */
-=======
-      const response = await fetch('/api/users/me', { credentials: 'include' });
-      if (response.ok) {
-        const data = await response.json();
-        router.replace(resolvePostLoginPath(data?.userType, returnTo));
->>>>>>> 97582c8e282e62a59b89f926a157d7ffdeb634d8
       }
     };
     checkUser();
@@ -131,21 +121,6 @@ function LoginPage({ className, ...props }: React.ComponentPropsWithoutRef<"div"
         return;
       }
 
-<<<<<<< HEAD
-=======
-    if (response.ok) {
-      sessionStorage.removeItem(LOGIN_POPUP_SHOWN_KEY);
-      sessionStorage.removeItem(POST_LOGIN_SPLASH_DONE_KEY);
-      const path = resolvePostLoginPath(data.result?.userType, returnTo);
-      const isDashboard = path.startsWith('/dashboard');
-      if (isDashboard) {
-        sessionStorage.setItem(JUST_LOGGED_IN_KEY, '1');
-        setPostLoginLoadingScreen();
-      }
-      router.replace(path);
-      return;
-    } else {
->>>>>>> 97582c8e282e62a59b89f926a157d7ffdeb634d8
       setError(data.message || 'Invalid email or password.');
     } catch {
       setError('Unable to reach the server. Please try again.');

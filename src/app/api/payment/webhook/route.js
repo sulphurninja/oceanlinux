@@ -20,10 +20,7 @@ import {
 } from '@/lib/paymentDispatch';
 const AutoProvisioningService = require('@/services/autoProvisioningService');
 import NotificationService from '@/services/notificationService';
-<<<<<<< HEAD
 const { notifyRenewalCompleted } = require('@/lib/renewalNotifications');
-=======
->>>>>>> 97582c8e282e62a59b89f926a157d7ffdeb634d8
 const WhatsAppService = require('@/services/whatsappService');
 const SlotIPPackage = require('@/models/slotIpPackageModel');
 const HostycareAPI = require('@/services/hostycareApi');

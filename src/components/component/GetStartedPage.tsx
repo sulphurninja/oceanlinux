@@ -24,10 +24,7 @@ import PremiumAuthBackground from '@/components/landing/PremiumAuthBackground';
 import Tilt3DCard from '@/components/landing/Tilt3DCard';
 import { useHeroParallax } from '@/hooks/useTilt3D';
 import { JUST_LOGGED_IN_KEY, LOGIN_POPUP_SHOWN_KEY, POST_LOGIN_SPLASH_DONE_KEY, setPostLoginLoadingScreen } from '@/lib/post-login';
-<<<<<<< HEAD
 import { AuthDivider, GoogleSignInButton } from '@/components/auth/GoogleSignIn';
-=======
->>>>>>> 97582c8e282e62a59b89f926a157d7ffdeb634d8
 
 const trustItems = [
   { icon: Shield, label: "Secure signup" },
@@ -99,10 +96,7 @@ function GetStartedPage({ className, ...props }: React.ComponentPropsWithoutRef<
   const [showPassword, setShowPassword] = useState(false);
   const [passwordFocused, setPasswordFocused] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-<<<<<<< HEAD
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
-=======
->>>>>>> 97582c8e282e62a59b89f926a157d7ffdeb634d8
   const [selectedPlan, setSelectedPlan] = useState('');
   const [mounted, setMounted] = useState(false);
   const router = useRouter();

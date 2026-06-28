@@ -74,6 +74,7 @@ import AddToCartButton from "@/components/cart/AddToCartButton";
 import { fetchWalletSummary } from "@/lib/walletClient";
 import { customerStockUnavailableMessage } from "@/lib/customerStockMessages";
 import { openRazorpayModal } from "@/lib/razorpayCheckout";
+import { PurchaseDisclaimerNotice } from "@/components/purchase/PurchaseDisclaimerNotice";
 
 // Keep all existing interfaces and global declarations unchanged...
 
@@ -165,6 +166,7 @@ function IPStockContent() {
   } | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [paymentInitiating, setPaymentInitiating] = useState(false);
+  const [purchaseDisclaimerAccepted, setPurchaseDisclaimerAccepted] = useState(false);
 
   // Search and filter states
   const [searchTerm, setSearchTerm] = useState("");
@@ -470,6 +472,7 @@ function IPStockContent() {
       }
 
       setSelectedProduct({ name: productName, memory, price, ipStockId, slotIpPackageId });
+      setPurchaseDisclaimerAccepted(false);
       setShowDialog(true);
       setPromoCode("");
       setPromoDiscount(0);
@@ -597,6 +600,10 @@ function IPStockContent() {
 
   const handleProceedToPayment = async () => {
     if (!selectedProduct) return;
+    if (!purchaseDisclaimerAccepted) {
+      toast.error('Please read and accept the purchase notice before paying');
+      return;
+    }
 
     setPaymentInitiating(true);
     try {
@@ -1282,225 +1289,136 @@ function IPStockContent() {
       </div>
 
       {/* Keep the existing Purchase Dialog unchanged */}
-      <Dialog open={showDialog} onOpenChange={setShowDialog}>
-        <DialogContent className="premium-dashboard-dialog max-h-[min(92dvh,calc(100dvh-2rem))] w-[calc(100vw-1.25rem)] max-w-3xl sm:max-w-4xl overflow-hidden">
-          <DialogHeader className="premium-dashboard-dialog-header">
-            <DialogTitle className="flex items-center gap-2 premium-dashboard-title">
-              <CreditCard className="h-5 w-5 text-emerald-400" />
+      <Dialog
+        open={showDialog}
+        onOpenChange={(open) => {
+          setShowDialog(open);
+          if (!open) setPurchaseDisclaimerAccepted(false);
+        }}
+      >
+        <DialogContent className="premium-dashboard-dialog premium-dashboard-dialog--purchase max-w-md w-[calc(100vw-1.5rem)] sm:w-full overflow-hidden p-0 gap-0">
+          <DialogHeader className="premium-dashboard-dialog-header !py-3 sm:!py-4 space-y-0.5">
+            <DialogTitle className="flex items-center gap-2 premium-dashboard-title text-base sm:text-lg">
+              <CreditCard className="h-4 w-4 sm:h-5 sm:w-5 text-emerald-400 shrink-0" />
               Complete Your Purchase
             </DialogTitle>
-            <DialogDescription className="premium-dashboard-subtitle">
-              Review your order and apply any promo codes before proceeding to payment.
-            </DialogDescription>
+            {selectedProduct && (
+              <p className="text-sm font-semibold premium-price-accent pt-0.5">
+                Total: ₹{getDiscountedPrice().toFixed(2)}
+              </p>
+            )}
           </DialogHeader>
 
-          <div className="premium-dashboard-dialog-body space-y-5">
-            {/* Order Summary */}
+          <div className="premium-dashboard-dialog-body premium-dashboard-dialog-body--compact space-y-3 !py-3 sm:!py-4">
             {selectedProduct && (
-              <Card className="premium-dashboard-card border-0">
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-base">Order Summary</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Plan:</span>
-                    <span className="font-medium">{selectedProduct.name}</span>
+              <div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2.5 space-y-1.5">
+                <p className="text-xs sm:text-sm font-medium leading-snug line-clamp-2">{selectedProduct.name}</p>
+                <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                  <span>{selectedProduct.memory}</span>
+                  <span className={cn(promoApplied && 'line-through')}>₹{selectedProduct.price}</span>
+                </div>
+                {promoApplied && (
+                  <div className="flex justify-between text-xs text-primary">
+                    <span>Discount</span>
+                    <span>−₹{promoDiscount.toFixed(2)}</span>
                   </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Configuration:</span>
-                    <span className="font-medium">{selectedProduct.memory}</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Original Price:</span>
-                    <span className={cn("font-medium", promoApplied && "line-through text-muted-foreground")}>
-                      ₹{selectedProduct.price}
-                    </span>
-                  </div>
-                  {promoApplied && (
-                    <div className="flex justify-between text-sm text-primary">
-                      <span className="flex items-center gap-1">
-                        <Percent className="h-3 w-3" />
-                        Discount:
-                      </span>
-                      <span className="font-medium">-₹{promoDiscount.toFixed(2)}</span>
-                    </div>
-                  )}
-                  <Separator />
-                  <div className="flex justify-between">
-                    <span className="font-semibold text-white/80">Total:</span>
-                    <span className="text-lg font-bold premium-price-accent">₹{getDiscountedPrice().toFixed(2)}</span>
-                  </div>
-                </CardContent>
-              </Card>
+                )}
+              </div>
             )}
 
-            {/* Promo Code Section */}
-            <Card className="premium-dashboard-card border-0">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base flex items-center gap-2 premium-dashboard-title">
-                  <Tag className="h-4 w-4 text-emerald-400" />
-                  Promo Code
-                </CardTitle>
-                <CardDescription className="premium-dashboard-subtitle">Have a promo code? Apply it to get a discount!</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="flex flex-col sm:flex-row gap-2 sm:items-stretch">
-                  <Input
-                    placeholder="Enter promo code"
-                    value={promoCode}
-                    onChange={(e) => setPromoCode(e.target.value.toUpperCase())}
-                    disabled={promoApplied}
-                    className="flex-1 premium-dashboard-input h-10"
-                  />
-                  {!promoApplied ? (
-                    <Button
-                      variant="ghost"
-                      onClick={validatePromoCode}
-                      disabled={!promoCode.trim() || promoValidating}
-                      className="premium-btn-apply w-full sm:w-auto sm:min-w-[6.5rem]"
-                    >
-                      {promoValidating ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        "Apply"
-                      )}
-                    </Button>
-                  ) : (
-                    <Button
-                      onClick={removePromoCode}
-                      className="h-10 shrink-0 rounded-xl px-5 text-sm font-semibold bg-red-500/15 border border-red-400/30 text-red-300 hover:bg-red-500/25 hover:text-red-200 w-full sm:w-auto"
-                    >
-                      Remove
-                    </Button>
-                  )}
-                </div>
-                {promoMessage && (
-                  <p className={cn(
-                    "text-xs mt-2",
-                    promoApplied ? "text-primary" : "text-destructive"
-                  )}>
-                    {promoMessage}
-                  </p>
-                )}
-              </CardContent>
-            </Card>
+            <div className="flex gap-2">
+              <Input
+                placeholder="Promo code"
+                value={promoCode}
+                onChange={(e) => setPromoCode(e.target.value.toUpperCase())}
+                disabled={promoApplied}
+                className="h-9 flex-1 premium-dashboard-input text-sm"
+              />
+              {!promoApplied ? (
+                <Button
+                  variant="ghost"
+                  onClick={validatePromoCode}
+                  disabled={!promoCode.trim() || promoValidating}
+                  className="premium-btn-apply h-9 px-3 shrink-0 text-sm"
+                >
+                  {promoValidating ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Apply'}
+                </Button>
+              ) : (
+                <Button onClick={removePromoCode} variant="outline" className="h-9 px-3 shrink-0 text-sm">
+                  Remove
+                </Button>
+              )}
+            </div>
+            {promoMessage && (
+              <p className={cn('text-[11px] -mt-1', promoApplied ? 'text-primary' : 'text-destructive')}>
+                {promoMessage}
+              </p>
+            )}
 
-            {/* Wallet balance */}
-            <Card className="premium-dashboard-card border-0 border-emerald-400/15">
-              <CardContent className="pt-4 pb-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2">
-                    <WalletIcon className="h-4 w-4 text-primary" />
-                    <div>
-                      <p className="text-sm font-medium">Use wallet balance</p>
-                      <p className="text-xs text-muted-foreground">
-                        Available: ₹{walletBalance.toLocaleString('en-IN')}
-                      </p>
-                    </div>
-                  </div>
-                  <Switch
-                    checked={useWallet}
-                    onCheckedChange={setUseWallet}
-                    disabled={walletBalance <= 0 || paymentInitiating}
-                  />
-                </div>
-                {useWallet && paymentTotals.walletApplied > 0 && (
-                  <div className="mt-3 space-y-1 text-sm border-t border-border/60 pt-3">
-                    <div className="flex justify-between text-muted-foreground">
-                      <span>Order total</span>
-                      <span>₹{paymentTotals.total.toLocaleString('en-IN')}</span>
-                    </div>
-                    <div className="flex justify-between premium-promo-text">
-                      <span>From wallet</span>
-                      <span>−₹{paymentTotals.walletApplied.toLocaleString('en-IN')}</span>
-                    </div>
-                    <div className="flex justify-between font-semibold">
-                      <span>{paymentTotals.gatewayCharge > 0 ? 'Pay via gateway' : 'Fully covered by wallet'}</span>
-                      <span>₹{paymentTotals.gatewayCharge.toLocaleString('en-IN')}</span>
-                    </div>
-                  </div>
-                )}
-                {walletBalance < paymentTotals.total && useWallet && paymentTotals.gatewayCharge > 0 && (
-                  <p className="text-[11px] text-muted-foreground mt-2">
-                    Only ₹{paymentTotals.gatewayCharge.toLocaleString('en-IN')} will be charged on {paymentMethod === 'upi' ? 'UPI' : paymentMethod === 'cashfree' ? 'Cashfree' : 'Razorpay'}.
+            <div className="flex items-center justify-between gap-2 rounded-lg border border-border/60 px-3 py-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <WalletIcon className="h-4 w-4 text-primary shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-xs font-medium leading-none">Wallet</p>
+                  <p className="text-[10px] text-muted-foreground truncate">
+                    ₹{walletBalance.toLocaleString('en-IN')} available
                   </p>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Payment Method Selection - Inline & Minimal */}
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-sm">
-              <span className="text-white/50 shrink-0">
-                {paymentTotals.gatewayCharge > 0 ? 'Pay remainder via:' : 'Payment method:'}
-              </span>
-              <div className="flex flex-wrap gap-1.5">
-                <button
-                  onClick={() => setPaymentMethod('razorpay')}
-                  disabled={paymentTotals.gatewayCharge === 0}
-                  className={cn(
-                    "premium-payment-pill",
-                    paymentMethod === 'razorpay' ? "premium-payment-pill--active" : "premium-payment-pill--inactive",
-                    paymentTotals.gatewayCharge === 0 && "opacity-40 cursor-not-allowed"
-                  )}
-                >
-                  Razorpay
-                </button>
-                <button
-                  onClick={() => setPaymentMethod('upi')}
-                  disabled={paymentTotals.gatewayCharge === 0}
-                  className={cn(
-                    "premium-payment-pill",
-                    paymentMethod === 'upi' ? "premium-payment-pill--active" : "premium-payment-pill--inactive",
-                    paymentTotals.gatewayCharge === 0 && "opacity-40 cursor-not-allowed"
-                  )}
-                >
-                  UPI
-                </button>
-                <button
-                  onClick={() => setPaymentMethod('cashfree')}
-                  disabled={paymentTotals.gatewayCharge === 0}
-                  className={cn(
-                    "premium-payment-pill",
-                    paymentMethod === 'cashfree' ? "premium-payment-pill--active" : "premium-payment-pill--inactive",
-                    paymentTotals.gatewayCharge === 0 && "opacity-40 cursor-not-allowed"
-                  )}
-                >
-                  Cashfree
-                </button>
+                </div>
               </div>
+              <Switch
+                checked={useWallet}
+                onCheckedChange={setUseWallet}
+                disabled={walletBalance <= 0 || paymentInitiating}
+              />
             </div>
 
-            {/* Payment Info */}
-            <Card className="premium-dashboard-card border-0 border-emerald-400/20 bg-emerald-500/5">
-              <CardContent className="pt-6">
-                <div className="flex gap-3">
-                  <Info className="h-5 w-5 text-primary flex-shrink-0 mt-0.5" />
-                  <div className="space-y-2 text-sm">
-                    <p className="font-medium">Secure Payment</p>
-                    <p className="text-muted-foreground">
-                      {paymentTotals.gatewayCharge > 0
-                        ? `You'll pay ₹${paymentTotals.gatewayCharge.toLocaleString('en-IN')} via the gateway${paymentTotals.walletApplied > 0 ? ` (₹${paymentTotals.walletApplied.toLocaleString('en-IN')} from wallet)` : ''}.`
-                        : 'Your wallet balance covers the full order amount.'}
-                    </p>
-                  </div>
+            {paymentTotals.gatewayCharge > 0 && (
+              <div className="space-y-1.5">
+                <p className="text-[11px] text-muted-foreground">Pay via</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {(['razorpay', 'upi', 'cashfree'] as const).map((method) => (
+                    <button
+                      key={method}
+                      type="button"
+                      onClick={() => setPaymentMethod(method)}
+                      className={cn(
+                        'premium-payment-pill capitalize text-[11px] px-2.5 py-1',
+                        paymentMethod === method ? 'premium-payment-pill--active' : 'premium-payment-pill--inactive'
+                      )}
+                    >
+                      {method}
+                    </button>
+                  ))}
                 </div>
-              </CardContent>
-            </Card>
+                {useWallet && paymentTotals.walletApplied > 0 && (
+                  <p className="text-[10px] text-muted-foreground">
+                    ₹{paymentTotals.walletApplied.toLocaleString('en-IN')} from wallet · ₹
+                    {paymentTotals.gatewayCharge.toLocaleString('en-IN')} on gateway
+                  </p>
+                )}
+              </div>
+            )}
           </div>
 
-          <DialogFooter className="premium-dashboard-dialog-footer flex-col-reverse sm:flex-row gap-2 sm:gap-3">
+          <DialogFooter className="premium-dashboard-dialog-footer premium-dashboard-dialog-footer--purchase !flex-col !items-stretch gap-2 !py-3 sm:!py-3">
+            <PurchaseDisclaimerNotice
+              compact
+              checked={purchaseDisclaimerAccepted}
+              onCheckedChange={setPurchaseDisclaimerAccepted}
+            />
+            <div className="flex flex-col-reverse sm:flex-row gap-2 sm:justify-end w-full">
             <Button
               variant="outline"
               onClick={() => setShowDialog(false)}
               disabled={paymentInitiating}
-              className="w-full sm:w-auto premium-btn-outline"
+              className="w-full sm:w-auto premium-btn-outline order-2 sm:order-1"
             >
               Cancel
             </Button>
             <Button
               onClick={handleProceedToPayment}
-              disabled={paymentInitiating}
-              className="w-full sm:w-auto flex-1 sm:flex-none premium-btn-pay"
+              disabled={paymentInitiating || !purchaseDisclaimerAccepted}
+              className="w-full sm:w-auto sm:flex-none premium-btn-pay order-1 sm:order-2"
             >
               {paymentInitiating ? (
                 <span className="flex items-center gap-2">
@@ -1513,15 +1431,20 @@ function IPStockContent() {
                   Pay with Wallet (₹{paymentTotals.total.toLocaleString('en-IN')})
                 </span>
               ) : (
-                <span className="flex items-center gap-2">
-                  <CreditCard className="h-4 w-4" />
-                  Pay ₹{paymentTotals.gatewayCharge.toLocaleString('en-IN')}
+                <span className="flex flex-col sm:flex-row items-center gap-0.5 sm:gap-2 text-center sm:text-left">
+                  <span className="inline-flex items-center gap-2">
+                    <CreditCard className="h-4 w-4 shrink-0" />
+                    Pay ₹{paymentTotals.gatewayCharge.toLocaleString('en-IN')}
+                  </span>
                   {paymentTotals.walletApplied > 0 && (
-                    <span className="text-xs opacity-80">(+ ₹{paymentTotals.walletApplied.toLocaleString('en-IN')} wallet)</span>
+                    <span className="text-[11px] sm:text-xs opacity-80">
+                      (+ ₹{paymentTotals.walletApplied.toLocaleString('en-IN')} wallet)
+                    </span>
                   )}
                 </span>
               )}
             </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>
