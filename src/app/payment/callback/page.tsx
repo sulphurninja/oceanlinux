@@ -104,13 +104,31 @@ function PaymentCallbackContent() {
                 ? 'Wallet recharge already confirmed.'
                 : `Wallet recharged successfully! New balance: ₹${cd.newBalance}`);
               toast.success('Wallet recharged');
-              // Refresh the topbar wallet pill before navigating away.
               fetchWalletSummary().catch(() => { });
               setTimeout(() => router.push('/dashboard/wallet'), 2500);
-            } else {
-              setStatus('failed');
-              setMessage(cd.message || 'Recharge could not be verified yet. It will reflect once the gateway confirms.');
+              return;
             }
+
+            setStatus('processing');
+            setMessage('Payment received — adding money to your wallet, please wait…');
+            const pollRes = await fetch('/api/payment/status', {
+              method: 'POST',
+              credentials: 'include',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ clientTxnId, returnedFromPayment: true }),
+            });
+            const pollData = pollRes.ok ? await pollRes.json() : null;
+            if (pollData?.paymentStatus === 'SUCCESS') {
+              setStatus('success');
+              setMessage(`Wallet recharged successfully! New balance: ₹${pollData.newBalance}`);
+              toast.success('Wallet recharged');
+              fetchWalletSummary().catch(() => { });
+              setTimeout(() => router.push('/dashboard/wallet'), 2500);
+              return;
+            }
+
+            setStatus('failed');
+            setMessage(cd.message || pollData?.message || 'Recharge could not be verified yet. It will reflect once the gateway confirms.');
           } catch (e: any) {
             setStatus('failed');
             setMessage('Could not verify recharge yet. Please check your wallet page.');
@@ -144,13 +162,32 @@ function PaymentCallbackContent() {
                 ? 'Checkout already confirmed. Your orders are being provisioned.'
                 : `Checkout confirmed for ${cd.orderIds?.length || ''} order(s). Provisioning servers now…`);
               toast.success('Cart checkout confirmed');
-              // Wallet may have been partially used — refresh the topbar pill.
               fetchWalletSummary().catch(() => { });
               setTimeout(() => router.push('/dashboard/viewLinux'), 3000);
-            } else {
-              setStatus('failed');
-              setMessage(cd.message || 'Checkout verification pending. Your orders will appear shortly.');
+              return;
             }
+
+            // Confirm failed — poll gateway recovery (webhook may still land).
+            setStatus('processing');
+            setMessage('Payment received — confirming your orders, please wait…');
+            const pollRes = await fetch('/api/payment/status', {
+              method: 'POST',
+              credentials: 'include',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ clientTxnId, returnedFromPayment: true }),
+            });
+            const pollData = pollRes.ok ? await pollRes.json() : null;
+            if (pollData?.paymentStatus === 'SUCCESS') {
+              setStatus('success');
+              setMessage(`Checkout confirmed for ${pollData.orderIds?.length || ''} order(s). Provisioning servers now…`);
+              toast.success('Cart checkout confirmed');
+              fetchWalletSummary().catch(() => { });
+              setTimeout(() => router.push('/dashboard/viewLinux'), 3000);
+              return;
+            }
+
+            setStatus('failed');
+            setMessage(cd.message || pollData?.message || 'Checkout verification pending. Your orders will appear shortly.');
           } catch (e: any) {
             setStatus('failed');
             setMessage('Could not verify checkout yet. Check your orders page in a minute.');

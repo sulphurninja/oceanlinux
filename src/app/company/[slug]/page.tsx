@@ -264,6 +264,9 @@ export default function CompanyDashboard() {
     Record<string, { ipAddress: string; username: string; password: string; os: string }>
   >({});
   const [expandedStockId, setExpandedStockId] = useState<string | null>(null);
+  const [hasResellerSync, setHasResellerSync] = useState(false);
+  const [resellerLabel, setResellerLabel] = useState('Hostheaven');
+  const [syncingStockId, setSyncingStockId] = useState<string | null>(null);
 
   // Order filters
   const [searchTerm, setSearchTerm] = useState('');
@@ -344,9 +347,14 @@ export default function CompanyDashboard() {
       fetch(`/api/company/orders?_=${Date.now()}`, { cache: 'no-store' }),
     ]);
     if (stockRes.ok) {
-      const rows: Stock[] = await stockRes.json();
+      const payload = await stockRes.json();
+      const rows: Stock[] = Array.isArray(payload) ? payload : (payload.stocks ?? []);
       setStocks(rows);
       setStockCountDrafts(Object.fromEntries(rows.map(s => [s._id, String(s.stockCount ?? 0)])));
+      if (!Array.isArray(payload)) {
+        setHasResellerSync(!!payload.hasResellerSync);
+        setResellerLabel(payload.resellerLabel || 'Hostheaven');
+      }
     }
     if (orderRes.ok) {
       const data = await orderRes.json();
@@ -408,6 +416,60 @@ export default function CompanyDashboard() {
       toast.error('Failed to update stock');
     } finally {
       setSavingStockId(null);
+    }
+  };
+
+  const syncResellerCredentials = async (stockId: string, stock: Stock, addToInventory: boolean) => {
+    const form = normalizeInventoryFormForStock(
+      inventoryFormDrafts[stockId] || defaultInventoryFormForStock(stock),
+      stock
+    );
+    if (!form.ipAddress.trim()) {
+      toast.error('Enter IP address first');
+      return;
+    }
+
+    setSyncingStockId(stockId);
+    try {
+      const res = await fetch('/api/company/stocks', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          stockId,
+          action: 'syncResellerCredentials',
+          ipAddress: form.ipAddress.trim(),
+          addToInventory,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Sync failed');
+      }
+
+      if (addToInventory && data.stock) {
+        setStocks(prev => prev.map(s => s._id === stockId ? data.stock : s));
+        setStockCountDrafts(prev => ({ ...prev, [stockId]: String(data.stock.stockCount) }));
+        setInventoryFormDrafts(prev => ({
+          ...prev,
+          [stockId]: defaultInventoryFormForStock(stock),
+        }));
+        toast.success(`${data.credentials?.ipAddress || form.ipAddress} added via ${resellerLabel} sync`);
+      } else if (data.credentials) {
+        setInventoryFormDrafts(prev => ({
+          ...prev,
+          [stockId]: {
+            ipAddress: data.credentials.ipAddress,
+            username: data.credentials.username,
+            password: data.credentials.password,
+            os: data.credentials.os,
+          },
+        }));
+        toast.success(`Password synced from ${resellerLabel}`);
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Hostheaven sync failed');
+    } finally {
+      setSyncingStockId(null);
     }
   };
 
@@ -827,6 +889,61 @@ export default function CompanyDashboard() {
                         <p className="text-xs text-muted-foreground mb-3">
                           Add IP + credentials in advance. When a customer pays, the next available server is assigned instantly (like Slot IP).
                         </p>
+
+                        {hasResellerSync && (
+                          <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3 mb-3 space-y-2">
+                            <p className="text-xs font-medium text-emerald-700 dark:text-emerald-300 flex items-center gap-1.5">
+                              <RefreshCw className="h-3.5 w-3.5" />
+                              {resellerLabel} sync — enter IP only, password fetched automatically
+                            </p>
+                            <div className="flex flex-col sm:flex-row gap-2">
+                              <Input
+                                placeholder="IP Address (e.g. 192.168.1.10)"
+                                value={form.ipAddress}
+                                onChange={(e) => setInventoryFormDrafts(prev => ({
+                                  ...prev,
+                                  [stock._id]: { ...form, ipAddress: e.target.value },
+                                }))}
+                                className="sm:flex-1 font-mono"
+                              />
+                              <div className="flex gap-2 shrink-0">
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => syncResellerCredentials(stock._id, stock, false)}
+                                  disabled={syncingStockId === stock._id || savingStockId === stock._id}
+                                >
+                                  {syncingStockId === stock._id ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <>
+                                      <RefreshCw className="h-3.5 w-3.5 mr-1" />
+                                      Sync
+                                    </>
+                                  )}
+                                </Button>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  className="bg-emerald-600 hover:bg-emerald-700"
+                                  onClick={() => syncResellerCredentials(stock._id, stock, true)}
+                                  disabled={syncingStockId === stock._id || savingStockId === stock._id}
+                                >
+                                  {syncingStockId === stock._id ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    'Sync & Add'
+                                  )}
+                                </Button>
+                              </div>
+                            </div>
+                            <p className="text-[11px] text-muted-foreground">
+                              Sync fills username/password/OS from the panel. Sync &amp; Add saves the server in one step.
+                            </p>
+                          </div>
+                        )}
+
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 mb-3">
                           <Input
                             placeholder="IP Address"
@@ -844,15 +961,30 @@ export default function CompanyDashboard() {
                               [stock._id]: { ...form, username: e.target.value },
                             }))}
                           />
-                          <Input
-                            placeholder="Password"
-                            type="password"
-                            value={form.password}
-                            onChange={(e) => setInventoryFormDrafts(prev => ({
-                              ...prev,
-                              [stock._id]: { ...form, password: e.target.value },
-                            }))}
-                          />
+                          <div className="relative">
+                            <Input
+                              placeholder="Password"
+                              type={visiblePasswords.has(`form-${stock._id}`) ? 'text' : 'password'}
+                              value={form.password}
+                              onChange={(e) => setInventoryFormDrafts(prev => ({
+                                ...prev,
+                                [stock._id]: { ...form, password: e.target.value },
+                              }))}
+                              className="pr-9 font-mono"
+                            />
+                            <button
+                              type="button"
+                              title={visiblePasswords.has(`form-${stock._id}`) ? 'Hide password' : 'Show password'}
+                              onClick={() => togglePasswordVisibility(`form-${stock._id}`)}
+                              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                            >
+                              {visiblePasswords.has(`form-${stock._id}`) ? (
+                                <EyeOff className="h-4 w-4" />
+                              ) : (
+                                <Eye className="h-4 w-4" />
+                              )}
+                            </button>
+                          </div>
                           <Select
                             value={form.os}
                             disabled={stock.serverType === 'VPS'}
@@ -901,6 +1033,7 @@ export default function CompanyDashboard() {
                               <tr>
                                 <th className="text-left p-2">IP</th>
                                 <th className="text-left p-2">User</th>
+                                <th className="text-left p-2">Password</th>
                                 <th className="text-left p-2">OS</th>
                                 <th className="text-left p-2">Status</th>
                                 <th className="p-2"></th>
@@ -911,6 +1044,29 @@ export default function CompanyDashboard() {
                                 <tr key={item._id} className="border-t">
                                   <td className="p-2 font-mono">{item.ipAddress}</td>
                                   <td className="p-2">{item.username}</td>
+                                  <td className="p-2">
+                                    {item.allocated ? (
+                                      <span className="text-muted-foreground">••••••</span>
+                                    ) : item.password ? (
+                                      <span className="font-mono flex items-center gap-1">
+                                        {visiblePasswords.has(`inv-${item._id}`) ? item.password : '••••••'}
+                                        <button
+                                          type="button"
+                                          title={visiblePasswords.has(`inv-${item._id}`) ? 'Hide password' : 'Show password'}
+                                          onClick={() => togglePasswordVisibility(`inv-${item._id}`)}
+                                          className="text-muted-foreground hover:text-foreground"
+                                        >
+                                          {visiblePasswords.has(`inv-${item._id}`) ? (
+                                            <EyeOff className="h-3.5 w-3.5" />
+                                          ) : (
+                                            <Eye className="h-3.5 w-3.5" />
+                                          )}
+                                        </button>
+                                      </span>
+                                    ) : (
+                                      <span className="text-muted-foreground">—</span>
+                                    )}
+                                  </td>
                                   <td className="p-2">{item.os}</td>
                                   <td className="p-2">
                                     {item.allocated ? (

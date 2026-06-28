@@ -3,6 +3,11 @@ import crypto from 'crypto';
 import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 import { confirmPendingOrderPayment } from '@/lib/confirmPendingOrderPayment';
+import {
+  findDispatchTarget,
+  confirmCheckoutFromWebhook,
+  confirmRechargeFromWebhook,
+} from '@/lib/paymentDispatch';
 const PaymentOrderLogger = require('@/services/paymentOrderLogger');
 
 /**
@@ -54,6 +59,47 @@ export async function POST(request) {
 
   if (!razorpayOrderId && !receipt) {
     return NextResponse.json({ success: false, message: 'Missing order reference' }, { status: 400 });
+  }
+
+  const txnRef = receipt || razorpayOrderId;
+
+  // Cart checkout + wallet recharge use parent docs keyed by clientTxnId.
+  const dispatch = await findDispatchTarget(txnRef);
+  if (dispatch?.kind === 'checkout') {
+    console.log(`[RAZORPAY-WEBHOOK] Cart checkout session matched: ${dispatch.doc._id}`);
+    const result = await confirmCheckoutFromWebhook(dispatch.doc, {
+      paymentMethod: 'razorpay',
+      transactionId: paymentId,
+      paymentDetails: {
+        razorpay_payment_id: paymentId,
+        razorpay_order_id: razorpayOrderId,
+        webhookEvent: eventType,
+        webhookReceivedAt: new Date(),
+      },
+    });
+    return NextResponse.json({
+      success: !!result.success,
+      message: 'Cart checkout webhook processed',
+      ...result,
+    });
+  }
+  if (dispatch?.kind === 'recharge') {
+    console.log(`[RAZORPAY-WEBHOOK] Wallet recharge matched: ${dispatch.doc._id}`);
+    const result = await confirmRechargeFromWebhook(dispatch.doc, {
+      paymentMethod: 'razorpay',
+      transactionId: paymentId,
+      paymentDetails: {
+        razorpay_payment_id: paymentId,
+        razorpay_order_id: razorpayOrderId,
+        webhookEvent: eventType,
+        webhookReceivedAt: new Date(),
+      },
+    });
+    return NextResponse.json({
+      success: !!result.success,
+      message: 'Wallet recharge webhook processed',
+      ...result,
+    });
   }
 
   let order =

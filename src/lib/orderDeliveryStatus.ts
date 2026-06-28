@@ -1,7 +1,7 @@
 /**
  * Shared helpers for splitting orders between:
- *  - /dashboard/viewLinux  → paid + delivered servers (even if password still syncing)
- *  - /dashboard/orders     → ALL orders (pending / failed / delivered history)
+ *  - /dashboard/viewLinux  → paid servers (including while provisioning)
+ *  - /dashboard/orders     → ALL orders (pending payment / failed / delivered history)
  */
 
 export type OrderLike = {
@@ -79,7 +79,7 @@ export function getDaysUntilExpiry(expiryDate: Date | string | null | undefined)
 
 /**
  * True when the order belongs on /dashboard/viewLinux.
- * Paid + delivered — even if still provisioning or password not fetched yet.
+ * Paid orders show here while provisioning too — not only after IP is assigned.
  */
 export function isServerListOrder(order: OrderLike): boolean {
   const currentStatus = (order.provisioningStatus || order.status || '').toLowerCase();
@@ -88,7 +88,11 @@ export function isServerListOrder(order: OrderLike): boolean {
     return false;
   }
 
-  return isOrderPaid(order) && hasOrderBeenDelivered(order);
+  if (!isOrderPaid(order)) {
+    return false;
+  }
+
+  return hasOrderBeenDelivered(order) || isOrderAwaitingDelivery(order);
 }
 
 export type ServerStatus = 'active' | 'expired' | 'pending' | 'failed';

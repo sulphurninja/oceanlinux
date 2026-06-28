@@ -385,6 +385,37 @@ class ResellerApi {
     return pwd || null;
   }
 
+  /** Best-effort OS / template label from VM details (Hostheaven panel). */
+  static extractVmOs(details) {
+    if (!details || typeof details !== 'object') return '';
+    const candidate =
+      details.os ||
+      details.osName ||
+      details.operatingSystem ||
+      details.operating_system ||
+      details.template ||
+      details.templateName ||
+      details.isoName ||
+      details.imageName ||
+      details?.vm?.os ||
+      '';
+    return typeof candidate === 'string' ? candidate.trim() : '';
+  }
+
+  /** Login username when the panel exposes it; otherwise callers default by OS. */
+  static extractVmUsername(details) {
+    if (!details || typeof details !== 'object') return '';
+    const candidate =
+      details.username ||
+      details.login ||
+      details.loginUser ||
+      details.rootUser ||
+      details.root_user ||
+      details?.credentials?.username ||
+      '';
+    return typeof candidate === 'string' ? candidate.trim() : '';
+  }
+
   /**
    * Fetch the VM's current password from the details endpoint. Hostheaven
    * auto-rotates this on every rebuild/reinstall, so callers use this after a

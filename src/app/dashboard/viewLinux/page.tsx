@@ -613,7 +613,7 @@ const ViewLinux = () => {
                         </div>
                         <h3 className="text-lg sm:text-xl font-semibold mb-2">No active servers yet</h3>
                         <p className="text-muted-foreground mb-4 sm:mb-6 max-w-md mx-auto text-sm sm:text-base">
-                            Delivered servers appear here as soon as your service is assigned — even while credentials are still syncing. Orders still awaiting delivery are on the Orders page.
+                            Paid servers appear here right away — even while provisioning. Active servers show IP and credentials once ready.
                         </p>
                         <div className="flex flex-col sm:flex-row gap-2 justify-center">
                         <Button onClick={() => router.push('/dashboard/ipStock')} className="gap-2 mx-auto premium-btn-primary border-0" size="sm">

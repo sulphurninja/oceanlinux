@@ -8,6 +8,14 @@ import {
   probeGatewayPayment,
 } from '@/lib/confirmPendingOrderPayment';
 import { enforceOrderAccess } from '@/lib/apiSecurity';
+import {
+  findDispatchTarget,
+  recoverPendingCheckoutSession,
+  recoverPendingWalletRecharge,
+} from '@/lib/paymentDispatch';
+import CheckoutSession from '@/models/checkoutSessionModel';
+import WalletRecharge from '@/models/walletRechargeModel';
+import { getDataFromToken } from '@/helper/getDataFromToken';
 
 // Initialize Cashfree
 Cashfree.XClientId = process.env.CASHFREE_APP_ID;
@@ -195,6 +203,118 @@ export async function POST(request) {
     }
 
     // Handle NEW ORDER transactions (existing logic)
+    const returnedFromPayment = !!reqBody.returnedFromPayment;
+
+    // Wallet recharge: parent txn id is WALLET_* on WalletRecharge, not Order.
+    if (clientTxnId?.startsWith('WALLET_')) {
+      const dispatch = await findDispatchTarget(clientTxnId);
+      if (dispatch?.kind === 'recharge') {
+        const recharge = dispatch.doc;
+        console.log(`[PAYMENT-STATUS] Wallet recharge: ${recharge._id}, status=${recharge.status}`);
+
+        try {
+          const userId = await getDataFromToken(request);
+          if (userId && String(recharge.user) !== String(userId)) {
+            return NextResponse.json({ message: 'Forbidden' }, { status: 403 });
+          }
+        } catch {
+          if (recharge.status !== 'confirmed') {
+            return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
+          }
+        }
+
+        if (recharge.status === 'confirmed') {
+          const userWalletService = require('@/services/userWalletService').default;
+          const newBalance = await userWalletService.getBalance(recharge.user);
+          return NextResponse.json({
+            paymentStatus: 'SUCCESS',
+            isWalletRecharge: true,
+            rechargeId: recharge._id.toString(),
+            amount: recharge.amount,
+            newBalance,
+            message: 'Wallet recharge already confirmed',
+          });
+        }
+
+        const recovery = await recoverPendingWalletRecharge(recharge, {
+          maxAttempts: returnedFromPayment ? 5 : 2,
+          delayMs: returnedFromPayment ? 1500 : 0,
+        });
+
+        if (recovery.success) {
+          return NextResponse.json({
+            paymentStatus: 'SUCCESS',
+            isWalletRecharge: true,
+            rechargeId: recharge._id.toString(),
+            amount: recharge.amount,
+            newBalance: recovery.newBalance,
+            message: recovery.alreadyProcessed ? 'Wallet recharge already confirmed' : 'Wallet recharge confirmed',
+          });
+        }
+
+        return NextResponse.json({
+          paymentStatus: 'PENDING',
+          isWalletRecharge: true,
+          rechargeId: recharge._id.toString(),
+          message: recovery.reason || 'Wallet recharge payment is still processing',
+        });
+      }
+    }
+
+    // Cart checkout: parent txn id is CART_* on CheckoutSession, not a single Order.
+    if (clientTxnId?.startsWith('CART_')) {
+      const dispatch = await findDispatchTarget(clientTxnId);
+      if (dispatch?.kind === 'checkout') {
+        const session = dispatch.doc;
+        console.log(`[PAYMENT-STATUS] Cart checkout session: ${session._id}, status=${session.status}`);
+
+        try {
+          const userId = await getDataFromToken(request);
+          if (userId && String(session.user) !== String(userId)) {
+            return NextResponse.json({ message: 'Forbidden' }, { status: 403 });
+          }
+        } catch {
+          // Cron / unauthenticated recovery — allow only if session already confirmed.
+          if (session.status !== 'confirmed') {
+            return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
+          }
+        }
+
+        if (session.status === 'confirmed') {
+          return NextResponse.json({
+            paymentStatus: 'SUCCESS',
+            isCartCheckout: true,
+            sessionId: session._id.toString(),
+            orderIds: session.orderIds.map((id) => id.toString()),
+            message: 'Cart checkout already confirmed',
+          });
+        }
+
+        const recovery = await recoverPendingCheckoutSession(session, {
+          maxAttempts: returnedFromPayment ? 5 : 2,
+          delayMs: returnedFromPayment ? 1500 : 0,
+        });
+
+        if (recovery.success) {
+          const confirmed = await CheckoutSession.findById(session._id);
+          return NextResponse.json({
+            paymentStatus: 'SUCCESS',
+            isCartCheckout: true,
+            sessionId: session._id.toString(),
+            orderIds: (confirmed?.orderIds || session.orderIds).map((id) => id.toString()),
+            message: recovery.alreadyProcessed ? 'Cart checkout already confirmed' : 'Cart checkout confirmed',
+          });
+        }
+
+        return NextResponse.json({
+          paymentStatus: 'PENDING',
+          isCartCheckout: true,
+          sessionId: session._id.toString(),
+          message: recovery.reason || 'Cart payment is still processing',
+        });
+      }
+    }
+
     const order = await Order.findOne({ clientTxnId: txnId });
     
     if (!order) {
@@ -250,7 +370,6 @@ export async function POST(request) {
     }
 
     // Recover: probe Cashfree / Razorpay / UPI and confirm when gateway says paid
-    const returnedFromPayment = !!reqBody.returnedFromPayment;
     const recovery = await recoverPendingOrderPayment(order, {
       maxAttempts: returnedFromPayment ? 5 : 2,
       delayMs: returnedFromPayment ? 1500 : 0,

@@ -5,6 +5,8 @@ import Cart from '@/models/cartModel';
 import userWalletService from '@/services/userWalletService';
 import NotificationService from '@/services/notificationService';
 import { fulfillOrderInventory } from '@/lib/fulfillOrderInventory';
+import { verifyCashfreePayment, verifyUPIPayment } from '@/lib/paymentGateways';
+import { getRazorpayClient } from '@/lib/razorpayClient';
 const { resolveOrderExpiryOnPayment } = require('@/lib/advpsOrderExpiry');
 
 const AutoProvisioningService = require('@/services/autoProvisioningService');
@@ -36,6 +38,308 @@ export async function findDispatchTarget(clientTxnId) {
 }
 
 /**
+ * Probe gateway for a pending cart checkout session (no client signature).
+ * Used by /api/payment/status and recovery paths when confirm raced webhook.
+ */
+export async function probeCheckoutSessionPayment(session) {
+  if (!session) return { verified: false, reason: 'session missing' };
+
+  const gateway = String(session.paymentMethod || '').replace(/^wallet\+/, '');
+
+  if (gateway === 'wallet') {
+    return {
+      verified: true,
+      gateway: 'wallet',
+      transactionId: session.walletTxnId || '',
+      paymentDetails: { walletOnly: true, confirmedAt: new Date() },
+    };
+  }
+
+  if (gateway === 'cashfree') {
+    const result = await verifyCashfreePayment(session.clientTxnId);
+    if (!result.verified) {
+      return { verified: false, gateway: 'cashfree', reason: result.error || 'not paid' };
+    }
+    return {
+      verified: true,
+      gateway: 'cashfree',
+      transactionId: result.payment.cf_payment_id,
+      paymentDetails: {
+        cf_payment_id: result.payment.cf_payment_id,
+        cf_order_id: session.clientTxnId,
+        payment_amount: result.payment.payment_amount,
+        payment_method: result.payment.payment_method,
+        confirmedAt: new Date(),
+      },
+    };
+  }
+
+  if (gateway === 'upi') {
+    const result = await verifyUPIPayment(session.clientTxnId);
+    if (!result.verified) {
+      return { verified: false, gateway: 'upi', reason: result.error || 'not paid' };
+    }
+    if (result.amount && session.gatewayAmount && Math.abs(result.amount - session.gatewayAmount) > 1) {
+      return { verified: false, gateway: 'upi', reason: 'amount mismatch' };
+    }
+    return {
+      verified: true,
+      gateway: 'upi',
+      transactionId: result.upi_txn_id || '',
+      paymentDetails: {
+        upi_txn_id: result.upi_txn_id,
+        verifiedAmount: result.amount,
+        confirmedAt: new Date(),
+      },
+    };
+  }
+
+  if (gateway === 'razorpay') {
+    const razorpay = getRazorpayClient();
+    if (!razorpay) {
+      return { verified: false, gateway: 'razorpay', reason: 'Razorpay not configured' };
+    }
+
+    const razorpayOrderId = session.gatewayOrderId;
+    if (!razorpayOrderId) {
+      return { verified: false, gateway: 'razorpay', reason: 'missing gateway order id' };
+    }
+
+    try {
+      const razorpayOrder = await razorpay.orders.fetch(razorpayOrderId);
+      if (razorpayOrder.status === 'paid') {
+        const payments = await razorpay.orders.fetchPayments(razorpayOrderId);
+        const captured = payments.items?.find((p) => p.status === 'captured');
+        return {
+          verified: true,
+          gateway: 'razorpay',
+          transactionId: captured?.id || razorpayOrderId,
+          paymentDetails: {
+            razorpay_payment_id: captured?.id,
+            razorpay_order_id: razorpayOrderId,
+            confirmedAt: new Date(),
+          },
+        };
+      }
+
+      if (razorpayOrder.status === 'attempted') {
+        const payments = await razorpay.orders.fetchPayments(razorpayOrderId);
+        const captured = payments.items?.find((p) => p.status === 'captured');
+        if (captured) {
+          return {
+            verified: true,
+            gateway: 'razorpay',
+            transactionId: captured.id,
+            paymentDetails: {
+              razorpay_payment_id: captured.id,
+              razorpay_order_id: razorpayOrderId,
+              confirmedAt: new Date(),
+            },
+          };
+        }
+      }
+
+      return {
+        verified: false,
+        gateway: 'razorpay',
+        reason: razorpayOrder.status === 'created' ? 'pending' : razorpayOrder.status,
+      };
+    } catch (err) {
+      return { verified: false, gateway: 'razorpay', reason: err.message };
+    }
+  }
+
+  return { verified: false, reason: `unsupported gateway ${gateway}` };
+}
+
+/**
+ * Probe gateway for a pending wallet recharge (no client signature).
+ */
+export async function probeWalletRechargePayment(recharge) {
+  if (!recharge) return { verified: false, reason: 'recharge missing' };
+
+  const gateway = recharge.paymentMethod;
+
+  if (gateway === 'cashfree') {
+    const result = await verifyCashfreePayment(recharge.clientTxnId);
+    if (!result.verified) {
+      return { verified: false, gateway: 'cashfree', reason: result.error || 'not paid' };
+    }
+    return {
+      verified: true,
+      gateway: 'cashfree',
+      transactionId: result.payment.cf_payment_id,
+      paymentDetails: {
+        cf_payment_id: result.payment.cf_payment_id,
+        cf_order_id: recharge.clientTxnId,
+        payment_amount: result.payment.payment_amount,
+        payment_method: result.payment.payment_method,
+        confirmedAt: new Date(),
+      },
+    };
+  }
+
+  if (gateway === 'upi') {
+    const result = await verifyUPIPayment(recharge.clientTxnId);
+    if (!result.verified) {
+      return { verified: false, gateway: 'upi', reason: result.error || 'not paid' };
+    }
+    if (result.amount && Math.abs(result.amount - recharge.amount) > 1) {
+      return { verified: false, gateway: 'upi', reason: 'amount mismatch' };
+    }
+    return {
+      verified: true,
+      gateway: 'upi',
+      transactionId: result.upi_txn_id || '',
+      paymentDetails: {
+        upi_txn_id: result.upi_txn_id,
+        verifiedAmount: result.amount,
+        confirmedAt: new Date(),
+      },
+    };
+  }
+
+  if (gateway === 'razorpay') {
+    const razorpay = getRazorpayClient();
+    if (!razorpay) {
+      return { verified: false, gateway: 'razorpay', reason: 'Razorpay not configured' };
+    }
+
+    const razorpayOrderId = recharge.gatewayOrderId;
+    if (!razorpayOrderId) {
+      return { verified: false, gateway: 'razorpay', reason: 'missing gateway order id' };
+    }
+
+    try {
+      const razorpayOrder = await razorpay.orders.fetch(razorpayOrderId);
+      if (razorpayOrder.status === 'paid') {
+        const payments = await razorpay.orders.fetchPayments(razorpayOrderId);
+        const captured = payments.items?.find((p) => p.status === 'captured');
+        return {
+          verified: true,
+          gateway: 'razorpay',
+          transactionId: captured?.id || razorpayOrderId,
+          paymentDetails: {
+            razorpay_payment_id: captured?.id,
+            razorpay_order_id: razorpayOrderId,
+            confirmedAt: new Date(),
+          },
+        };
+      }
+
+      if (razorpayOrder.status === 'attempted') {
+        const payments = await razorpay.orders.fetchPayments(razorpayOrderId);
+        const captured = payments.items?.find((p) => p.status === 'captured');
+        if (captured) {
+          return {
+            verified: true,
+            gateway: 'razorpay',
+            transactionId: captured.id,
+            paymentDetails: {
+              razorpay_payment_id: captured.id,
+              razorpay_order_id: razorpayOrderId,
+              confirmedAt: new Date(),
+            },
+          };
+        }
+      }
+
+      return {
+        verified: false,
+        gateway: 'razorpay',
+        reason: razorpayOrder.status === 'created' ? 'pending' : razorpayOrder.status,
+      };
+    } catch (err) {
+      return { verified: false, gateway: 'razorpay', reason: err.message };
+    }
+  }
+
+  return { verified: false, reason: `unsupported gateway ${gateway}` };
+}
+
+/**
+ * Confirm a pending wallet recharge when gateway reports paid (status poll / recovery).
+ */
+export async function recoverPendingWalletRecharge(recharge, { maxAttempts = 1, delayMs = 0 } = {}) {
+  if (!recharge) return { success: false, reason: 'recharge missing' };
+
+  if (recharge.status === 'confirmed') {
+    const balance = await userWalletService.getBalance(recharge.user);
+    return {
+      success: true,
+      alreadyProcessed: true,
+      rechargeId: recharge._id,
+      newBalance: balance,
+    };
+  }
+
+  let lastProbe = null;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (attempt > 0 && delayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+
+    const fresh = await WalletRecharge.findById(recharge._id);
+    if (!fresh) return { success: false, reason: 'recharge not found' };
+    if (fresh.status === 'confirmed') {
+      const balance = await userWalletService.getBalance(fresh.user);
+      return {
+        success: true,
+        alreadyProcessed: true,
+        rechargeId: fresh._id,
+        newBalance: balance,
+      };
+    }
+
+    lastProbe = await probeWalletRechargePayment(fresh);
+    if (lastProbe.verified) {
+      return confirmRechargeFromWebhook(fresh, {
+        paymentMethod: lastProbe.gateway,
+        transactionId: lastProbe.transactionId,
+        paymentDetails: lastProbe.paymentDetails,
+      });
+    }
+  }
+
+  return { success: false, reason: lastProbe?.reason || 'payment not verified' };
+}
+
+/**
+ * Confirm a pending cart checkout when gateway reports paid (status poll / recovery).
+ */
+export async function recoverPendingCheckoutSession(session, { maxAttempts = 1, delayMs = 0 } = {}) {
+  if (!session) return { success: false, reason: 'session missing' };
+
+  if (session.status === 'confirmed') {
+    return { success: true, alreadyProcessed: true, sessionId: session._id, orderIds: session.orderIds };
+  }
+
+  let lastProbe = null;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (attempt > 0 && delayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+
+    const fresh = await CheckoutSession.findById(session._id);
+    if (!fresh) return { success: false, reason: 'session not found' };
+    if (fresh.status === 'confirmed') {
+      return { success: true, alreadyProcessed: true, sessionId: fresh._id, orderIds: fresh.orderIds };
+    }
+
+    lastProbe = await probeCheckoutSessionPayment(fresh);
+    if (lastProbe.verified) {
+      return confirmCheckoutFromWebhook(fresh, {
+        paymentMethod: lastProbe.gateway,
+        transactionId: lastProbe.transactionId,
+        paymentDetails: lastProbe.paymentDetails,
+      });
+    }
+  }
+
+  return { success: false, reason: lastProbe?.reason || 'payment not verified' };
+}
+
+/**
  * Confirm a wallet recharge from a verified webhook/poll. Idempotent —
  * if already confirmed, returns success without double-crediting.
  *
@@ -49,7 +353,8 @@ export async function confirmRechargeFromWebhook(recharge, { paymentMethod, tran
   if (!recharge) return { success: false, reason: 'recharge missing' };
 
   if (recharge.status === 'confirmed') {
-    return { success: true, alreadyProcessed: true, rechargeId: recharge._id };
+    const newBalance = await userWalletService.getBalance(recharge.user);
+    return { success: true, alreadyProcessed: true, rechargeId: recharge._id, newBalance };
   }
 
   if (paymentMethod) recharge.paymentMethod = paymentMethod;

@@ -165,6 +165,54 @@ export default function WalletPage() {
     }
   };
 
+  const finishRechargeSuccess = async (cd: { newBalance?: number; amount?: number; alreadyProcessed?: boolean }) => {
+    triggerWalletSuccessBird();
+    setRechargeOpen(false);
+    await fetchWallet();
+    const credited = cd.amount ?? Number(rechargeAmount);
+    toast.success(
+      cd.alreadyProcessed
+        ? `Wallet already updated — balance ₹${(cd.newBalance ?? wallet?.balance ?? 0).toLocaleString('en-IN')}`
+        : `₹${credited.toLocaleString('en-IN')} added to wallet!`,
+    );
+  };
+
+  const confirmWalletRecharge = async (clientTxnId: string, razorpay?: {
+    razorpay_payment_id: string;
+    razorpay_order_id: string;
+    razorpay_signature: string;
+  }) => {
+    const confirmRes = await fetch('/api/wallet/recharge/confirm', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clientTxnId, ...razorpay }),
+    });
+    const cd = await confirmRes.json();
+    if (confirmRes.ok && cd.success) {
+      await finishRechargeSuccess(cd);
+      return true;
+    }
+
+    const pollRes = await fetch('/api/payment/status', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clientTxnId, returnedFromPayment: true }),
+    });
+    const pollData = pollRes.ok ? await pollRes.json() : null;
+    if (pollData?.paymentStatus === 'SUCCESS') {
+      await finishRechargeSuccess({
+        newBalance: pollData.newBalance,
+        amount: pollData.amount,
+        alreadyProcessed: pollData.message?.includes('already'),
+      });
+      return true;
+    }
+
+    throw new Error(cd.message || pollData?.message || 'Recharge confirmation failed');
+  };
+
   const openRazorpay = async (data: any) => {
     await openRazorpayModal({
       data,
@@ -172,27 +220,9 @@ export default function WalletPage() {
       themeColor: '#10b981',
       onSuccess: async (response) => {
         try {
-          const confirmRes = await fetch('/api/wallet/recharge/confirm', {
-            method: 'POST',
-            credentials: 'include',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              clientTxnId: data.clientTxnId,
-              razorpay_payment_id: response.razorpay_payment_id,
-              razorpay_order_id: response.razorpay_order_id,
-              razorpay_signature: response.razorpay_signature,
-            }),
-          });
-          const cd = await confirmRes.json();
-          if (confirmRes.ok && cd.success) {
-            triggerWalletSuccessBird();
-            setRechargeOpen(false);
-            await fetchWallet();
-          } else {
-            throw new Error(cd.message || 'Recharge confirmation failed');
-          }
+          await confirmWalletRecharge(data.clientTxnId, response);
         } catch (e: any) {
-          toast.error(e.message || 'Recharge confirmation failed');
+          toast.error(e.message || 'Recharge confirmation failed — check wallet in a minute');
         } finally {
           setSubmitting(false);
         }
@@ -220,24 +250,8 @@ export default function WalletPage() {
       throw new Error(result.error.message || 'Cashfree checkout failed');
     }
     if (result?.paymentDetails) {
-      // Fall back: poll confirm endpoint (Cashfree confirm-by-clientTxnId)
       try {
-        const confirmRes = await fetch('/api/wallet/recharge/confirm', {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ clientTxnId: data.clientTxnId }),
-        });
-        const cd = await confirmRes.json();
-        if (cd.success) {
-          toast.success(`Wallet recharged with ₹${data.cashfree.amount}`);
-          setRechargeOpen(false);
-          await fetchWallet();
-        } else {
-          // Webhook will catch up — let user know
-          toast.info('Payment received — wallet will reflect shortly');
-          setRechargeOpen(false);
-        }
+        await confirmWalletRecharge(data.clientTxnId);
       } catch {
         toast.info('Payment received — wallet will reflect shortly');
         setRechargeOpen(false);

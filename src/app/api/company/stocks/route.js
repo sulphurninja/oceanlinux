@@ -2,18 +2,19 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import connectDB from '@/lib/db';
 import IPStock from '@/models/ipStockModel';
+import Company from '@/models/companyModel';
 import { getIpStockRemaining, setIpStockCount, usesStockCount } from '@/lib/ipStockAvailability';
 import {
   usesPreconfiguredInventory,
   countUnallocatedInventory,
   parseInventoryBulkLines,
   syncStockCountFromInventory,
-  normalizeOs,
   normalizeOsForServerType,
   resolveUsernameForOs,
-  VALID_OS,
 } from '@/lib/companyInventory';
 import { COMPANY_FILTER_VERSION } from '@/lib/companyOrders';
+const { hasCompanyResellerApi, getCompanyResellerApiConfig } = require('@/lib/companyResellerApi');
+const { fetchResellerCredentialsByIp } = require('@/lib/companyResellerInventorySync');
 
 async function getCompanySession() {
   const cookieStore = await cookies();
@@ -63,8 +64,19 @@ export async function GET() {
   }
 
   await connectDB();
-  const stocks = await IPStock.find({ company: company.id }).sort({ name: 1 }).lean();
-  return NextResponse.json(stocks.map(serializeStock), {
+  const [stocks, companyDoc] = await Promise.all([
+    IPStock.find({ company: company.id }).sort({ name: 1 }).lean(),
+    Company.findById(company.id).select('resellerApi name').lean(),
+  ]);
+
+  const resellerCfg = getCompanyResellerApiConfig(companyDoc);
+  const hasResellerSync = !!resellerCfg;
+
+  return NextResponse.json({
+    stocks: stocks.map(serializeStock),
+    hasResellerSync,
+    resellerLabel: resellerCfg?.label || 'Hostheaven',
+  }, {
     headers: { 'X-Deploy-Version': COMPANY_FILTER_VERSION },
   });
 }
@@ -75,7 +87,7 @@ export async function PUT(request) {
 
   await connectDB();
   const body = await request.json();
-  const { stockId, stockCount, action, items, bulkLines, removeItemId } = body;
+  const { stockId, stockCount, action, items, bulkLines, removeItemId, ipAddress, addToInventory } = body;
 
   if (!stockId) {
     return NextResponse.json({ error: 'stockId is required' }, { status: 400 });
@@ -94,6 +106,66 @@ export async function PUT(request) {
     }
     const updated = await setIpStockCount(stockId, stockCount);
     return NextResponse.json({ success: true, stock: serializeStock(updated.toObject?.() || updated) });
+  }
+
+  if (action === 'syncResellerCredentials') {
+    const companyDoc = await Company.findById(company.id).select('resellerApi name').lean();
+    if (!hasCompanyResellerApi(companyDoc)) {
+      return NextResponse.json(
+        { error: 'Hostheaven sync is not enabled. Ask admin to enable Reseller API on your company.' },
+        { status: 403 }
+      );
+    }
+
+    let credentials;
+    try {
+      credentials = await fetchResellerCredentialsByIp(companyDoc, ipAddress, stock.serverType);
+    } catch (err) {
+      return NextResponse.json({ error: err.message || 'Sync failed' }, { status: 400 });
+    }
+
+    if (addToInventory) {
+      const duplicate = (stock.inventoryItems || []).some(
+        (item) => String(item.ipAddress).split(':')[0].trim() === credentials.ipAddress
+      );
+      if (duplicate) {
+        return NextResponse.json(
+          { error: `IP ${credentials.ipAddress} is already in this stock` },
+          { status: 400 }
+        );
+      }
+
+      stock.inventoryItems = [
+        ...(stock.inventoryItems || []),
+        {
+          ipAddress: credentials.ipAddress,
+          username: credentials.username,
+          password: credentials.password,
+          os: credentials.os,
+          allocated: false,
+          orderId: null,
+          allocatedAt: null,
+        },
+      ];
+      await stock.save();
+      const synced = await syncStockCountFromInventory(stockId);
+      return NextResponse.json({
+        success: true,
+        added: true,
+        credentials: {
+          ipAddress: credentials.ipAddress,
+          username: credentials.username,
+          os: credentials.os,
+          serverName: credentials.serverName,
+        },
+        stock: serializeStock(synced.toObject?.() || synced),
+      });
+    }
+
+    return NextResponse.json({
+      success: true,
+      credentials,
+    });
   }
 
   if (action === 'addInventory') {
@@ -158,7 +230,7 @@ export async function PUT(request) {
   }
 
   return NextResponse.json(
-    { error: 'Unknown action. Use setStockCount, addInventory, or removeInventory' },
+    { error: 'Unknown action. Use setStockCount, addInventory, removeInventory, or syncResellerCredentials' },
     { status: 400 }
   );
 }
