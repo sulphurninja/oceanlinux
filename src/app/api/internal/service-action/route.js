@@ -27,7 +27,10 @@ export async function POST(request) {
     const body = await request.json();
     const internalRequest = new Request('http://internal/api/orders/service-action', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-internal-bypass': process.env.INTERNAL_API_KEY || '',
+      },
       body: JSON.stringify(body),
     });
     return await serviceActionPost(internalRequest);
@@ -50,6 +53,9 @@ export async function GET(request) {
     }
     const internalRequest = new Request(`http://internal/api/orders/service-action?orderId=${encodeURIComponent(orderId)}`, {
       method: 'GET',
+      headers: {
+        'x-internal-bypass': process.env.INTERNAL_API_KEY || '',
+      },
     });
     return await serviceActionGet(internalRequest);
   } catch (error) {

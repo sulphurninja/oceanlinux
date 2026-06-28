@@ -26,6 +26,16 @@ const { getCompanyNetbayApiConfig } = require('@/lib/companyNetbayApi');
 const NetbayApi = require('@/services/netbayApi');
 
 async function resolveOrderForAction(request, orderId) {
+  // Internal bypass: trusted services (Hosthell) call via internal proxy with this header
+  const bypassKey = request.headers.get('x-internal-bypass');
+  if (bypassKey && bypassKey === process.env.INTERNAL_API_KEY) {
+    const order = await Order.findById(orderId);
+    if (!order) {
+      return { error: NextResponse.json({ success: false, error: 'Order not found' }, { status: 404 }) };
+    }
+    return { order, userId: null };
+  }
+
   let userId;
   try {
     userId = await getDataFromToken(request);
@@ -1243,42 +1253,25 @@ export async function POST(request) {
             const apiRes = await smartvpsApi.status(ipAddress);
             console.log('[STATUS] SmartVPS response:', JSON.stringify(apiRes, null, 2));
 
-            // Parse SmartVPS status response
+            // SmartVPS returns: { PowerStatus: "Online", MachineStatus: "active", Password: "...", Usernane: "...", OS: "...", ... }
             let powerState = 'unknown';
-            let rawStatus = apiRes?.status || apiRes?.state || apiRes?.power || apiRes;
+            const statusVal = apiRes?.PowerStatus || apiRes?.powerStatus || apiRes?.MachineStatus ||
+              apiRes?.status || apiRes?.state || apiRes?.power;
 
-            if (typeof rawStatus === 'string') {
-              const statusLower = rawStatus.toLowerCase();
-              if (['online', 'running', 'active', 'started', 'on', '1'].includes(statusLower)) {
-                powerState = 'running';
-              } else if (['offline', 'stopped', 'inactive', 'off', '0', 'shutdown'].includes(statusLower)) {
-                powerState = 'stopped';
-              } else if (['suspended', 'paused'].includes(statusLower)) {
-                powerState = 'suspended';
-              } else {
-                powerState = statusLower;
-              }
-            } else if (typeof rawStatus === 'object' && rawStatus !== null) {
-              // Handle object response
-              const state = rawStatus.status || rawStatus.state || rawStatus.power;
-              if (state) {
-                const stateLower = String(state).toLowerCase();
-                if (['online', 'running', 'active', 'started', 'on', '1'].includes(stateLower)) {
-                  powerState = 'running';
-                } else if (['offline', 'stopped', 'inactive', 'off', '0', 'shutdown'].includes(stateLower)) {
-                  powerState = 'stopped';
-                } else {
-                  powerState = stateLower;
-                }
-              }
+            if (statusVal) {
+              const sl = String(statusVal).toLowerCase().trim();
+              if (['online', 'running', 'active', 'started', 'on', '1'].includes(sl)) powerState = 'running';
+              else if (['offline', 'stopped', 'inactive', 'off', '0', 'shutdown'].includes(sl)) powerState = 'stopped';
+              else if (['suspended', 'paused'].includes(sl)) powerState = 'suspended';
+              else powerState = sl;
             }
 
             console.log('[STATUS] SmartVPS power state:', powerState);
             
             return NextResponse.json({
               success: true,
-              powerState: powerState,
-              rawStatus: rawStatus,
+              powerState,
+              rawStatus: apiRes,
               provider: 'smartvps',
               lastSync: new Date().toISOString()
             });
@@ -1399,10 +1392,18 @@ export async function POST(request) {
         if (smartvpsApi) {
           console.log('[FORMAT] Using SmartVPS API with IP:', ipAddress);
           const apiRes = await smartvpsApi.format(ipAddress);
+
+          // Save new password from format response
+          const formatUpdate = { lastAction: 'format', lastActionTime: new Date() };
+          const formatPass = apiRes?.Password || apiRes?.password || apiRes?.rootPassword || apiRes?.root_password || apiRes?.pass;
+          if (formatPass) formatUpdate.password = formatPass;
+          await Order.findByIdAndUpdate(orderId, { $set: formatUpdate });
+
           result = {
             success: true,
             message: 'SmartVPS format command sent successfully',
-            apiResponse: apiRes
+            apiResponse: apiRes,
+            ...(formatPass ? { newPassword: formatPass } : {}),
           };
         } else {
           throw new Error('Format action is only available for SmartVPS orders');
@@ -1436,23 +1437,44 @@ export async function POST(request) {
             const apiRes = await smartvpsApi.status(ipAddress);
             console.log('[SYNC] SmartVPS status response:', JSON.stringify(apiRes, null, 2));
             
-            // Update order with synced data
-            await Order.findByIdAndUpdate(orderId, {
-              lastSyncTime: new Date(),
-              $push: {
-                logs: {
-                  action: 'sync',
-                  timestamp: new Date(),
-                  details: 'SmartVPS status synced',
-                  success: true
-                }
-              }
-            });
+            // Extract credentials and status from SmartVPS response
+            // SmartVPS returns: { Password: "...", Usernane: "..." (typo), OS: "...", PowerStatus: "Online", ... }
+            const updateFields = { lastSyncTime: new Date() };
+            let credentialsUpdated = false;
+
+            const newPass = apiRes?.Password || apiRes?.password || apiRes?.rootPassword;
+            const newUser = apiRes?.Usernane || apiRes?.Username || apiRes?.username;
+            const newOs = apiRes?.OS || apiRes?.os;
+            const newIp = apiRes?.IP || apiRes?.ip;
+
+            if (newPass) { updateFields.password = newPass; credentialsUpdated = true; }
+            if (newUser) { updateFields.username = newUser; credentialsUpdated = true; }
+            if (newOs) updateFields.os = newOs;
+            if (newIp && !order.ipAddress) updateFields.ipAddress = newIp;
+
+            console.log('[SYNC] SmartVPS credentials update:', { password: newPass ? '***' : '(none)', username: newUser || '(none)', os: newOs || '(none)', credentialsUpdated });
+
+            await Order.findByIdAndUpdate(orderId, { $set: updateFields });
+
+            // Parse power state
+            const statusVal = apiRes?.PowerStatus || apiRes?.MachineStatus || apiRes?.status;
+            let powerState = 'unknown';
+            if (statusVal) {
+              const sl = String(statusVal).toLowerCase().trim();
+              if (['online', 'running', 'active'].includes(sl)) powerState = 'running';
+              else if (['offline', 'stopped', 'inactive'].includes(sl)) powerState = 'stopped';
+              else powerState = sl;
+            }
+
+            const freshOrder = await Order.findById(orderId).select('ipAddress username password os provisioningStatus status lastSyncTime').lean();
 
             result = {
               success: true,
               message: 'SmartVPS status synced successfully',
-              apiResponse: apiRes
+              credentialsUpdated,
+              powerState,
+              provider: 'smartvps',
+              order: freshOrder,
             };
           } catch (syncError) {
             console.error('[SYNC] SmartVPS sync error:', syncError);
@@ -1716,7 +1738,8 @@ export async function POST(request) {
       }
     });
 
-    return NextResponse.json({ success: true, result });
+    const finalOrder = await Order.findById(orderId).select('ipAddress username password os provisioningStatus lastSyncTime status').lean();
+    return NextResponse.json({ success: true, result, order: finalOrder });
 
   } catch (error) {
     console.error('[SERVICE-ACTION][POST] ===========================================');

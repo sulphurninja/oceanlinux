@@ -72,6 +72,11 @@ async function httpFetch(path, { method = 'POST', jsonBody, query, timeoutMs = 6
     let data;
     try { data = text ? JSON.parse(text) : {}; } catch { data = text; }
 
+    // SmartVPS API returns double-encoded JSON (a JSON string containing another JSON string)
+    if (typeof data === 'string') {
+      try { data = JSON.parse(data); } catch { /* keep as string */ }
+    }
+
     if (!res.ok) {
       const detail = typeof data === 'string' ? data : (data?.message || data?.error || `HTTP ${res.status}`);
       throw new Error(`SmartVPS ${method} ${url.pathname} failed: ${detail}`);
