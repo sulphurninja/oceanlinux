@@ -5,7 +5,7 @@ import RenewalRequest from '@/models/renewalRequestModel';
 import User from '@/models/userModel';
 import { Cashfree } from 'cashfree-pg';
 import crypto from 'crypto';
-import { calculateRenewalExpiryDate } from '@/lib/expiryHelper';
+import { calculateRenewalExpiryDate, calculateCompanyRenewalExpiryDate } from '@/lib/expiryHelper';
 import { assignPanelCredentials } from '@/lib/panelCredentials';
 import { detectCompanyManagedRenewal, resolveRenewalProvider } from '@/lib/companyRenewal';
 import { isSlotIpOrder, SLOT_IP_NO_RENEWAL_MESSAGE } from '@/lib/slotIpOrder';
@@ -338,16 +338,19 @@ export async function POST(request) {
     console.log(`[RENEWAL-CONFIRM] Final determined provider: ${provider} for order ${orderId}`);
     logger.logInfo('Provider determined', { provider });
 
-    // Calculate new expiry based on the number of days in the base month
     const currentExpiry = order.expiryDate;
-    let newExpiryDate = calculateRenewalExpiryDate(currentExpiry);
+    const companyCheck = await detectCompanyManagedRenewal(order);
+
+    // Company stocks: 30d (28/29 in Feb). Other orders: calendar month length.
+    let newExpiryDate = companyCheck.isCompany
+      ? calculateCompanyRenewalExpiryDate(currentExpiry)
+      : calculateRenewalExpiryDate(currentExpiry);
 
     // ─── Company-managed renewal branch ───────────────────────────────────
     // For orders whose IPStock is linked to a Company AND that have no
     // upstream automation, payment alone must NOT extend the expiry. The
     // company has to approve the renewal from /company/[slug] → Renewals.
     // We capture the verified payment in a RenewalRequest and return early.
-    const companyCheck = await detectCompanyManagedRenewal(order);
     if (companyCheck.isCompany) {
       console.log(`[RENEWAL-CONFIRM] 🏢 Company-managed renewal — queuing for approval (companyId=${companyCheck.companyId})`);
       logger.logInfo('Company-managed renewal — awaiting company approval', {

@@ -68,6 +68,16 @@ async function resolveOrderExpiryOnPayment(order, options = {}) {
   if (await orderUsesAdvpsUpstreamExpiry(order, options)) {
     return null;
   }
+
+  if (order?.ipStockId) {
+    const Stock = options.IPStock || require('@/models/ipStockModel');
+    const ipStock = await Stock.findById(order.ipStockId).select('company').lean();
+    if (ipStock?.company) {
+      const { calculateCompanyExpiryDate } = await import('@/lib/expiryHelper');
+      return calculateCompanyExpiryDate();
+    }
+  }
+
   return calculateExpiryDate();
 }
 

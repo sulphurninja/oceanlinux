@@ -5,7 +5,7 @@ import IPStock from '@/models/ipStockModel';
 import RenewalRequest from '@/models/renewalRequestModel';
 import User from '@/models/userModel';
 import crypto from 'crypto';
-import { calculateRenewalExpiryDate } from '@/lib/expiryHelper';
+import { calculateRenewalExpiryDate, calculateCompanyRenewalExpiryDate } from '@/lib/expiryHelper';
 import { assignPanelCredentials } from '@/lib/panelCredentials';
 const { resolveOrderExpiryOnPayment, pickAdvpsExpiryDate } = require('@/lib/advpsOrderExpiry');
 const { extractAdvpsStatusCredentials } = require('@/lib/advpsStatusNormalize');
@@ -439,13 +439,16 @@ async function handleRenewalWebhook(renewalTxnId, payment, webhookStartTime) {
       );
     }
 
-    // Calculate new expiry based on the number of days in the base month
-    let newExpiryDate = calculateRenewalExpiryDate(order.expiryDate);
+    const companyCheck = await detectCompanyManagedRenewal(order);
+
+    // Calculate new expiry — company stocks use 30d (28/29 in February); others use calendar month length
+    let newExpiryDate = companyCheck.isCompany
+      ? calculateCompanyRenewalExpiryDate(order.expiryDate)
+      : calculateRenewalExpiryDate(order.expiryDate);
 
     console.log(`[WEBHOOK-RENEWAL] New expiry date: ${newExpiryDate}`);
 
     // ─── Company-managed renewal — queue for company approval ────────────
-    const companyCheck = await detectCompanyManagedRenewal(order);
     if (companyCheck.isCompany) {
       console.log(`[WEBHOOK-RENEWAL] 🏢 Company-managed renewal — queuing for approval (companyId=${companyCheck.companyId})`);
       logger.logInfo('Company-managed renewal — awaiting company approval', {

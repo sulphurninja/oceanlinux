@@ -2880,6 +2880,15 @@ html {
     @apply text-white/50 hover:text-white hover:bg-white/5;
   }
 
+  /* Keep Google Sign-In button white on dark auth pages (system dark mode override) */
+  .google-signin-light {
+    color-scheme: light;
+  }
+
+  .google-signin-light iframe {
+    color-scheme: light;
+  }
+
   .premium-landing main:has(.premium-auth-shell) {
     @apply flex flex-col flex-1 min-h-0 min-w-0 overflow-hidden w-full max-w-full;
   }

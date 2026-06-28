@@ -3,7 +3,7 @@ import { cookies } from 'next/headers';
 import connectDB from '@/lib/db';
 import RenewalRequest from '@/models/renewalRequestModel';
 import Order from '@/models/orderModel';
-import { calculateRenewalExpiryDate } from '@/lib/expiryHelper';
+import { calculateCompanyRenewalExpiryDate } from '@/lib/expiryHelper';
 import { isSlotIpOrder, SLOT_IP_NO_RENEWAL_MESSAGE } from '@/lib/slotIpOrder';
 const { getAdvpsRebuildResetFields, isAdvpsOrder } = require('@/lib/advpsRebuildLimit');
 const { notifyRenewalCompleted } = require('@/lib/renewalNotifications');
@@ -93,7 +93,7 @@ export async function POST(request) {
     // renewal in between, we always extend from `order.expiryDate` (or now,
     // whichever is later). This matches the standard renewal semantics.
     const previousExpiry = order.expiryDate;
-    const newExpiry = calculateRenewalExpiryDate(previousExpiry);
+    const newExpiry = calculateCompanyRenewalExpiryDate(previousExpiry);
 
     const renewalPayment = {
       paymentId: renewalReq.paymentId,

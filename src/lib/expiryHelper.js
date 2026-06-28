@@ -36,6 +36,36 @@ export function calculateRenewalExpiryDate(currentExpiry) {
   return calculateExpiryDate(base);
 }
 
+/**
+ * Validity for VPS sold via `/admin/companies` (IP stock linked to a Company).
+ *
+ * - February → actual days in that February (28, or 29 in a leap year)
+ * - All other months → 30 days (even when the calendar month has 31 days)
+ */
+export function getCompanyValidityDays(fromDate) {
+  const base = fromDate ? new Date(fromDate) : new Date();
+  if (base.getMonth() === 1) {
+    return new Date(base.getFullYear(), 2, 0).getDate();
+  }
+  return 30;
+}
+
+/** @param {Date} [fromDate] */
+export function calculateCompanyExpiryDate(fromDate) {
+  const base = fromDate ? new Date(fromDate) : new Date();
+  const expiry = new Date(base);
+  expiry.setDate(expiry.getDate() + getCompanyValidityDays(base));
+  return expiry;
+}
+
+/** @param {Date|string} currentExpiry */
+export function calculateCompanyRenewalExpiryDate(currentExpiry) {
+  const current = new Date(currentExpiry);
+  const now = new Date();
+  const base = current > now ? current : now;
+  return calculateCompanyExpiryDate(base);
+}
+
 /** Renew button opens when this many days or fewer remain (inclusive). */
 export const RENEWAL_DAYS_BEFORE_EXPIRY = 2;
 

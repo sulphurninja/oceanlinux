@@ -121,11 +121,14 @@ export function GoogleSignInButton({
   if (!GOOGLE_CLIENT_ID) return null;
 
   return (
-    <div ref={containerRef} className="w-full flex justify-center [&>div]:!w-full">
+    <div
+      ref={containerRef}
+      className="google-signin-light w-full flex justify-center [&>div]:!w-full [&>div]:!max-w-full"
+    >
       <GoogleLogin
         onSuccess={handleSuccess}
         onError={() => onError?.('Google Sign-In was cancelled or failed.')}
-        theme="filled_black"
+        theme="outline"
         size="large"
         shape="rectangular"
         text={mode === 'signup' ? 'signup_with' : 'continue_with'}

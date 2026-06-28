@@ -1348,7 +1348,7 @@ class AutoProvisioningService {
     let ipAddress = '';
     let username = isWindowsProduct ? 'Administrator' : 'root';
     let password = '';
-    let expiryDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    let expiryDate = null;
     try {
       const detailRes = await api.getService(netbayServiceId);
       const svc = detailRes?.data || detailRes || {};
@@ -1364,6 +1364,11 @@ class AutoProvisioningService {
       L.kv('[NETBAY] Password', password ? `${password.slice(0, 4)}****` : '(pending)');
     } catch (err) {
       L.line(`[NETBAY] getService failed: ${err.message} — leaving IP/creds blank for cron retry`);
+    }
+
+    if (!expiryDate) {
+      const { calculateCompanyExpiryDate } = await import('@/lib/expiryHelper');
+      expiryDate = calculateCompanyExpiryDate();
     }
 
     // 7) Update order. We treat "service id assigned" as the provisioning
