@@ -103,26 +103,55 @@ async function fetchResellerCredentialsByIp(company, ipAddress, serverType = 'Li
 
 /**
  * Refresh panel expiry on every inventory row (old + new) from Hostheaven by IP.
+ * Fetches the full Hostheaven overview once, then matches inventory IPs locally.
  */
 async function syncAllInventoryExpiriesFromReseller(company, stockDocs) {
   const updated = [];
   const failed = [];
+
+  const api = createResellerApiClient(company);
+  let ipIndex;
+  try {
+    ipIndex = await api.buildVmIpIndex();
+  } catch (err) {
+    throw new Error(`Hostheaven overview fetch failed: ${err.message || 'unknown error'}`);
+  }
 
   for (const stock of stockDocs) {
     if (!Array.isArray(stock.inventoryItems) || stock.inventoryItems.length === 0) continue;
 
     let dirty = false;
     for (const item of stock.inventoryItems) {
-      if (!item.ipAddress) continue;
+      const cleanIp = cleanIpAddress(item.ipAddress);
+      if (!cleanIp) continue;
+
       try {
-        const result = await fetchResellerExpiryByIp(company, item.ipAddress);
-        item.expiryDate = result.expiryDate;
+        const found = ipIndex.get(cleanIp);
+        if (!found) {
+          throw new Error(`No VM found on Hostheaven for IP ${cleanIp}`);
+        }
+
+        let expiryDate = found.expiryDate;
+        if (!expiryDate) {
+          try {
+            const details = await api.getVmDetails(found.vmId);
+            expiryDate = ResellerApi.extractVmExpiryDate(found.raw, details);
+          } catch {
+            // details optional when overview lacks expiry
+          }
+        }
+
+        if (!expiryDate) {
+          throw new Error(`Hostheaven did not return expiry for IP ${cleanIp}`);
+        }
+
+        item.expiryDate = expiryDate;
         dirty = true;
         updated.push({
           stockId: String(stock._id),
           itemId: String(item._id),
           ipAddress: item.ipAddress,
-          expiryDate: result.expiryDate,
+          expiryDate,
         });
       } catch (err) {
         failed.push({

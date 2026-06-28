@@ -298,6 +298,56 @@ class ResellerApi {
     return this._request(`/api/users/orders/overview?${qs.toString()}`);
   }
 
+  /** Extract primary IP from an overview row (port stripped). */
+  static extractOverviewRowIp(row) {
+    const candidates = [
+      row?.ip,
+      row?.ipAddress,
+      row?.primaryIp,
+      row?.mainIp,
+      ...(Array.isArray(row?.ips) ? row.ips : []),
+    ]
+      .filter(Boolean)
+      .map((v) => String(v).split(':')[0].trim());
+    return candidates[0] || null;
+  }
+
+  /**
+   * Fetch every overview page once and index VMs by IP.
+   * Bulk expiry sync uses this instead of findVmByIp per inventory row (~14s each).
+   */
+  async buildVmIpIndex({ maxPages = 50, pageSize = 50 } = {}) {
+    const byIp = new Map();
+    let page = 0;
+    let totalPages = 1;
+
+    while (page < Math.min(totalPages, maxPages)) {
+      const data = await this.getOrderOverviewPage(page, pageSize);
+      const orders = data?.orders || data?.content || data?.items || [];
+      totalPages = Number(data?.totalPages || data?.totalPage || 1) || 1;
+
+      for (const row of orders) {
+        const ip = ResellerApi.extractOverviewRowIp(row);
+        if (!ip) continue;
+        const vmId = row?.virtualMachineId || row?.vmId || row?.id || row?.vmid;
+        if (vmId == null) continue;
+
+        byIp.set(ip, {
+          vmId: String(vmId),
+          ip,
+          serverName: row?.serverName || row?.vmName || row?.hostname || '',
+          raw: row,
+          expiryDate: ResellerApi.extractVmExpiryDate(row),
+        });
+      }
+
+      page++;
+      if (totalPages <= page) break;
+    }
+
+    return byIp;
+  }
+
   /**
    * Walk paginated overview pages searching for a VM whose IP equals `ip`
    * (port stripped). Returns { vmId, ip, raw } or null.
