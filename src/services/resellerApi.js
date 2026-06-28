@@ -298,9 +298,9 @@ class ResellerApi {
     return this._request(`/api/users/orders/overview?${qs.toString()}`);
   }
 
-  /** Extract primary IP from an overview row (port stripped). */
-  static extractOverviewRowIp(row) {
-    const candidates = [
+  /** All IPs on an overview row (port stripped). */
+  static extractOverviewRowIps(row) {
+    return [
       row?.ip,
       row?.ipAddress,
       row?.primaryIp,
@@ -308,8 +308,13 @@ class ResellerApi {
       ...(Array.isArray(row?.ips) ? row.ips : []),
     ]
       .filter(Boolean)
-      .map((v) => String(v).split(':')[0].trim());
-    return candidates[0] || null;
+      .map((v) => String(v).split(':')[0].trim())
+      .filter(Boolean);
+  }
+
+  /** Extract primary IP from an overview row (port stripped). */
+  static extractOverviewRowIp(row) {
+    return ResellerApi.extractOverviewRowIps(row)[0] || null;
   }
 
   /**
@@ -327,18 +332,22 @@ class ResellerApi {
       totalPages = Number(data?.totalPages || data?.totalPage || 1) || 1;
 
       for (const row of orders) {
-        const ip = ResellerApi.extractOverviewRowIp(row);
-        if (!ip) continue;
+        const ips = ResellerApi.extractOverviewRowIps(row);
+        if (ips.length === 0) continue;
         const vmId = row?.virtualMachineId || row?.vmId || row?.id || row?.vmid;
         if (vmId == null) continue;
 
-        byIp.set(ip, {
+        const entry = {
           vmId: String(vmId),
-          ip,
+          ip: ips[0],
           serverName: row?.serverName || row?.vmName || row?.hostname || '',
           raw: row,
           expiryDate: ResellerApi.extractVmExpiryDate(row),
-        });
+        };
+
+        for (const ip of ips) {
+          if (!byIp.has(ip)) byIp.set(ip, { ...entry, ip });
+        }
       }
 
       page++;

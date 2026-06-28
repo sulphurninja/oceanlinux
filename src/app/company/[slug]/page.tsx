@@ -19,7 +19,7 @@ import {
   Globe, KeyRound, Search, ArrowUpDown, CalendarDays, ClipboardList,
   Play, Square, RotateCcw, HardDriveIcon, CheckCircle, XCircle, Clock,
   MessageSquare, RefreshCw, IndianRupee, Terminal, MemoryStick, AlertTriangle, User,
-  ChevronDown, ChevronUp,
+  ChevronDown, ChevronUp, Copy,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { COMPANY_FILTER_VERSION, isCompanyVisibleOrder } from '@/lib/companyOrders';
@@ -169,6 +169,11 @@ function formatInventoryExpiry(value?: string | Date | null) {
   return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
+function formatExtendLine(ipAddress: string, gapDays: number) {
+  const unit = gapDays === 1 ? 'day' : 'days';
+  return `${ipAddress} extend ${gapDays} ${unit}`;
+}
+
 function toDateInputValue(value?: string | Date | null) {
   if (!value) return '';
   const d = new Date(value);
@@ -292,6 +297,7 @@ export default function CompanyDashboard() {
   const [syncingStockId, setSyncingStockId] = useState<string | null>(null);
   const [syncingAllExpiries, setSyncingAllExpiries] = useState(false);
   const [lastSyncFailed, setLastSyncFailed] = useState<Array<{ ipAddress: string; error: string }>>([]);
+  const [panelExpiryByIp, setPanelExpiryByIp] = useState<Record<string, string>>({});
 
   // Order filters
   const [searchTerm, setSearchTerm] = useState('');
@@ -470,6 +476,14 @@ export default function CompanyDashboard() {
             }))
           : []
       );
+
+      if (data.panelExpiriesByIp && typeof data.panelExpiriesByIp === 'object') {
+        const normalized: Record<string, string> = {};
+        for (const [ip, exp] of Object.entries(data.panelExpiriesByIp)) {
+          if (exp) normalized[String(ip).split(':')[0].trim()] = String(exp);
+        }
+        setPanelExpiryByIp((prev) => ({ ...prev, ...normalized }));
+      }
 
       const mismatchIps: string[] = data.mismatchIps || [];
       if (data.failedCount > 0) {
@@ -794,9 +808,23 @@ export default function CompanyDashboard() {
   }, [actionRequests, requestStatusFilter]);
 
   const validityMismatches = useMemo(
-    () => buildCompanyValidityMismatchReport(stocks, visibleOrders),
-    [stocks, visibleOrders]
+    () => buildCompanyValidityMismatchReport(stocks, visibleOrders, new Date(), panelExpiryByIp),
+    [stocks, visibleOrders, panelExpiryByIp]
   );
+
+  const extendLinesText = useMemo(
+    () => validityMismatches.map((row) => formatExtendLine(row.ipAddress, row.gapDays)).join('\n'),
+    [validityMismatches]
+  );
+
+  const copyText = async (text: string, label = 'Copied') => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success(label);
+    } catch {
+      toast.error('Copy failed');
+    }
+  };
 
   const inventoryActivity = useMemo(
     () => buildCompanyInventoryActivity(stocks, validityMismatches.length),
@@ -1276,8 +1304,7 @@ export default function CompanyDashboard() {
                         Panel vs customer validity
                       </CardTitle>
                       <CardDescription className="text-xs mt-1">
-                        Website par customer ko <strong>buy date + {customerValidityDays} din</strong> dikhta hai.
-                        Neeche woh VPS jahan <strong>panel ki original expiry</strong> usse pehle khatam ho rahi hai.
+                        Hostheaven par kitne din extend karna hai — copy karke bhejo.
                       </CardDescription>
                     </div>
                     {hasResellerSync && (
@@ -1310,73 +1337,61 @@ export default function CompanyDashboard() {
                   {validityMismatches.length === 0 ? (
                     <p className="text-xs text-muted-foreground py-2">
                       {hasResellerSync
-                        ? 'Koi mismatch nahi — ya abhi tak expiry sync nahi hui. Purane VPS ke liye upar Sync all expiry dabao.'
+                        ? 'Koi panel vs customer mismatch nahi. Purane sold orders ke liye Sync all expiry dabao — sold order IP bhi check hoti hai.'
                         : 'Hostheaven sync enable karo, phir expiry sync kar sakte ho.'}
                     </p>
                   ) : (
                     <>
-                      <p className="text-xs font-medium text-amber-800 dark:text-amber-200">
-                        {validityMismatches.length} VPS — panel pehle khatam, customer baad mein. Hostheaven par expiry extend karo.
-                      </p>
-                      <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
-                        {validityMismatches.map((row) => (
-                          <div
-                            key={row.id}
-                            className="rounded-lg border border-amber-500/30 bg-background/80 p-2.5 text-xs space-y-1.5"
-                          >
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="min-w-0">
-                                <p className="font-mono font-medium truncate">{row.ipAddress}</p>
-                                <p className="text-[10px] text-muted-foreground truncate">{row.stockName}</p>
-                                {row.status === 'sold' && row.soldAt && (
-                                  <p className="text-[10px] text-muted-foreground mt-0.5">
-                                    Sold: {formatInventoryExpiry(row.soldAt)}
-                                  </p>
-                                )}
-                                {row.status === 'ready' && (
-                                  <p className="text-[10px] text-blue-600 dark:text-blue-400 mt-0.5">
-                                    Abhi sell karo to customer ko {row.customerDaysOnSale} din milenge
-                                  </p>
-                                )}
-                              </div>
-                              <Badge
-                                variant="outline"
-                                className={cn(
-                                  'text-[10px] shrink-0',
-                                  row.status === 'ready'
-                                    ? 'border-blue-300 text-blue-700'
-                                    : 'border-muted-foreground/30'
-                                )}
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-xs font-medium text-amber-800 dark:text-amber-200">
+                          {validityMismatches.length} VPS
+                        </p>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-7 text-xs shrink-0"
+                          onClick={() => copyText(extendLinesText, 'Saari list copy ho gayi')}
+                        >
+                          <Copy className="h-3 w-3 mr-1" />
+                          Copy all
+                        </Button>
+                      </div>
+                      <div className="rounded-md border border-amber-500/30 bg-background/80 max-h-[420px] overflow-y-auto">
+                        {validityMismatches.map((row) => {
+                          const line = formatExtendLine(row.ipAddress, row.gapDays);
+                          return (
+                            <div
+                              key={row.id}
+                              className="flex items-center justify-between gap-2 px-2.5 py-1.5 border-b border-amber-500/10 last:border-0 hover:bg-amber-500/5"
+                            >
+                              <button
+                                type="button"
+                                className="font-mono text-xs text-left truncate flex-1"
+                                onClick={() => copyText(line, 'Copied')}
+                                title="Click to copy"
                               >
-                                {row.status === 'ready' ? 'In stock' : 'Sold'}
-                              </Badge>
+                                {line}
+                              </button>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 w-6 p-0 shrink-0"
+                                onClick={() => copyText(line, 'Copied')}
+                              >
+                                <Copy className="h-3 w-3" />
+                              </Button>
                             </div>
-                            <div className="grid grid-cols-2 gap-1.5">
-                              <div className="rounded bg-red-500/10 px-2 py-1">
-                                <p className="text-[10px] text-muted-foreground">Panel VPS (Hostheaven)</p>
-                                <p className="font-semibold text-red-700 dark:text-red-300">{row.panelDaysLeft}d left</p>
-                                <p className="text-[10px] text-muted-foreground">Original: {formatInventoryExpiry(row.panelExpiry)}</p>
-                              </div>
-                              <div className="rounded bg-emerald-500/10 px-2 py-1">
-                                <p className="text-[10px] text-muted-foreground">Website (customer)</p>
-                                <p className="font-semibold text-emerald-700 dark:text-emerald-300">
-                                  {row.customerDaysOnSale}d from buy
-                                </p>
-                                <p className="text-[10px] text-muted-foreground">Until: {formatInventoryExpiry(row.customerExpiry)}</p>
-                              </div>
-                            </div>
-                            <p className="text-[10px] text-amber-800 dark:text-amber-200 font-medium">
-                              Hostheaven par <strong>{row.gapDays} din</strong> extend karo — panel {formatInventoryExpiry(row.panelExpiry)} pe khatam, customer {formatInventoryExpiry(row.customerExpiry)} tak
-                            </p>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </>
                   )}
                   {lastSyncFailed.length > 0 && (
                     <div className="space-y-1.5 pt-1 border-t border-dashed">
-                      <p className="text-xs font-medium text-red-700 dark:text-red-300">
-                        {lastSyncFailed.length} IP — Hostheaven se expiry nahi mili
+                      <p className="text-xs font-medium text-muted-foreground">
+                        Alag issue — ye IP Hostheaven list mein nahi mili (validity compare nahi ho sakta):
                       </p>
                       <div className="space-y-1 max-h-32 overflow-y-auto">
                         {lastSyncFailed.map((row) => (

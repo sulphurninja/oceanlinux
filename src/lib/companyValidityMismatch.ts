@@ -29,6 +29,9 @@ export type CompanyOrderLike = {
   _id: string;
   expiryDate?: string | Date | null;
   createdAt?: string | Date | null;
+  ipAddress?: string | null;
+  stockName?: string;
+  ipStockId?: string;
 };
 
 export type ValidityMismatchRow = {
@@ -47,6 +50,10 @@ export type ValidityMismatchRow = {
   addedAt?: string | null;
 };
 
+function cleanIp(ip?: string | null) {
+  return String(ip || '').split(':')[0].trim();
+}
+
 function dayKey(d: Date) {
   return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
 }
@@ -55,30 +62,84 @@ function calendarGapDays(later: Date, earlier: Date) {
   return Math.ceil((later.getTime() - earlier.getTime()) / (1000 * 60 * 60 * 24));
 }
 
-export function buildCompanyValidityMismatchReport(
+function parsePanelExpiry(value: string | Date | null | undefined): Date | null {
+  if (!value) return null;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/** IP → panel expiry from inventory rows + optional Hostheaven sync map. */
+export function buildPanelExpiryByIp(
   stocks: CompanyStockLike[],
-  orders: CompanyOrderLike[],
-  referenceDate = new Date()
-): ValidityMismatchRow[] {
-  const rows: ValidityMismatchRow[] = [];
-  const orderById = new Map(orders.map((o) => [String(o._id), o]));
+  panelExpiryByIp?: Record<string, string | Date | null>
+): Map<string, Date> {
+  const map = new Map<string, Date>();
 
   for (const stock of stocks) {
     for (const item of stock.inventoryItems || []) {
-      if (!item.expiryDate) continue;
+      const ip = cleanIp(item.ipAddress);
+      const expiry = parsePanelExpiry(item.expiryDate);
+      if (ip && expiry) map.set(ip, expiry);
+    }
+  }
 
-      const panelExpiry = new Date(item.expiryDate);
-      if (Number.isNaN(panelExpiry.getTime())) continue;
+  if (panelExpiryByIp) {
+    for (const [rawIp, rawExpiry] of Object.entries(panelExpiryByIp)) {
+      const ip = cleanIp(rawIp);
+      const expiry = parsePanelExpiry(rawExpiry);
+      if (ip && expiry && !map.has(ip)) map.set(ip, expiry);
+    }
+  }
+
+  return map;
+}
+
+function pushMismatchRow(
+  rows: ValidityMismatchRow[],
+  seenIps: Set<string>,
+  row: ValidityMismatchRow
+) {
+  const ip = cleanIp(row.ipAddress);
+  if (!ip || seenIps.has(ip)) return;
+  seenIps.add(ip);
+  rows.push(row);
+}
+
+export function buildCompanyValidityMismatchReport(
+  stocks: CompanyStockLike[],
+  orders: CompanyOrderLike[],
+  referenceDate = new Date(),
+  panelExpiryByIp?: Record<string, string | Date | null>
+): ValidityMismatchRow[] {
+  const rows: ValidityMismatchRow[] = [];
+  const seenIps = new Set<string>();
+  const orderById = new Map(orders.map((o) => [String(o._id), o]));
+  const panelByIp = buildPanelExpiryByIp(stocks, panelExpiryByIp);
+
+  const stockById = new Map(stocks.map((s) => [String(s._id), s]));
+
+  for (const stock of stocks) {
+    for (const item of stock.inventoryItems || []) {
+      const ip = cleanIp(item.ipAddress);
+      if (!ip) continue;
+
+      const panelExpiry = panelByIp.get(ip) || parsePanelExpiry(item.expiryDate);
+      if (!panelExpiry) continue;
 
       const panelDaysLeft = getDaysUntilExpiry(panelExpiry);
 
-      if (!item.allocated) {
+      const linkedOrder = item.orderId ? orderById.get(String(item.orderId)) : null;
+      const orderByIp = orders.find((o) => cleanIp(o.ipAddress) === ip) || null;
+      const soldOrder = linkedOrder || orderByIp;
+      const isSold = !!item.allocated || !!soldOrder;
+
+      if (!isSold) {
         const customerExpiry = calculateCompanyExpiryDate(referenceDate);
         const customerDaysOnSale = getCompanyValidityDays(referenceDate);
 
         if (panelExpiry.getTime() >= customerExpiry.getTime()) continue;
 
-        rows.push({
+        pushMismatchRow(rows, seenIps, {
           id: `ready-${item._id}`,
           ipAddress: item.ipAddress,
           stockName: stock.name,
@@ -95,16 +156,17 @@ export function buildCompanyValidityMismatchReport(
         continue;
       }
 
-      const order = item.orderId ? orderById.get(String(item.orderId)) : null;
-      const saleBase = item.allocatedAt || order?.createdAt || referenceDate;
+      const saleBase =
+        item.allocatedAt ||
+        soldOrder?.createdAt ||
+        referenceDate;
       const saleDate = new Date(saleBase);
       if (Number.isNaN(saleDate.getTime())) continue;
 
-      // Website: customer always gets 30 days from buy date — not panel expiry.
       const customerExpiry = calculateCompanyExpiryDate(saleDate);
       if (panelExpiry.getTime() >= customerExpiry.getTime()) continue;
 
-      rows.push({
+      pushMismatchRow(rows, seenIps, {
         id: `sold-${item._id}`,
         ipAddress: item.ipAddress,
         stockName: stock.name,
@@ -120,6 +182,38 @@ export function buildCompanyValidityMismatchReport(
         addedAt: item.addedAt ? String(item.addedAt) : null,
       });
     }
+  }
+
+  // Sold orders with IP — even if not linked in inventory (manual assign / old VPS).
+  for (const order of orders) {
+    const ip = cleanIp(order.ipAddress);
+    if (!ip) continue;
+
+    const panelExpiry = panelByIp.get(ip);
+    if (!panelExpiry) continue;
+
+    const saleDate = new Date(order.createdAt || referenceDate);
+    if (Number.isNaN(saleDate.getTime())) continue;
+
+    const customerExpiry = calculateCompanyExpiryDate(saleDate);
+    if (panelExpiry.getTime() >= customerExpiry.getTime()) continue;
+
+    const stock = order.ipStockId ? stockById.get(String(order.ipStockId)) : null;
+
+    pushMismatchRow(rows, seenIps, {
+      id: `order-${order._id}`,
+      ipAddress: ip,
+      stockName: order.stockName || stock?.name || 'Order',
+      stockId: stock?._id || String(order.ipStockId || ''),
+      status: 'sold',
+      panelExpiry: panelExpiry.toISOString(),
+      customerExpiry: customerExpiry.toISOString(),
+      panelDaysLeft: getDaysUntilExpiry(panelExpiry),
+      customerDaysLeft: getDaysUntilExpiry(customerExpiry),
+      customerDaysOnSale: getCompanyValidityDays(saleDate),
+      gapDays: calendarGapDays(customerExpiry, panelExpiry),
+      soldAt: saleDate.toISOString(),
+    });
   }
 
   return rows.sort((a, b) => a.panelDaysLeft - b.panelDaysLeft);

@@ -106,7 +106,7 @@ export async function PUT(request) {
     }
 
     const stocks = await IPStock.find({ company: company.id });
-    const { updated, failed } = await syncAllInventoryExpiriesFromReseller(companyDoc, stocks);
+    const { updated, failed, panelExpiriesByIp } = await syncAllInventoryExpiriesFromReseller(companyDoc, stocks);
 
     const stockIds = stocks.map((s) => s._id);
     const orders = stockIds.length
@@ -114,12 +114,17 @@ export async function PUT(request) {
           ipStockId: { $in: stockIds },
           status: { $nin: ['cancelled', 'failed'] },
         })
-          .select('_id expiryDate createdAt ipStockId')
+          .select('_id expiryDate createdAt ipStockId ipAddress')
           .lean()
       : [];
 
     const serializedStocks = stocks.map((s) => serializeStock(s.toObject?.() || s));
-    const mismatches = buildCompanyValidityMismatchReport(serializedStocks, orders);
+    const mismatches = buildCompanyValidityMismatchReport(
+      serializedStocks,
+      orders,
+      new Date(),
+      panelExpiriesByIp
+    );
 
     return NextResponse.json({
       success: true,
@@ -131,6 +136,7 @@ export async function PUT(request) {
       mismatches,
       mismatchCount: mismatches.length,
       mismatchIps: mismatches.map((m) => m.ipAddress),
+      panelExpiriesByIp,
       stocks: serializedStocks,
     });
   }

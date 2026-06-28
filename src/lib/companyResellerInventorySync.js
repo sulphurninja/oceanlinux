@@ -168,7 +168,11 @@ async function syncAllInventoryExpiriesFromReseller(company, stockDocs) {
     }
   }
 
-  return { updated, failed };
+  return { updated, failed, panelExpiriesByIp: Object.fromEntries(
+    [...ipIndex.entries()]
+      .filter(([, entry]) => entry.expiryDate)
+      .map(([ip, entry]) => [ip, entry.expiryDate])
+  ) };
 }
 
 module.exports = {
