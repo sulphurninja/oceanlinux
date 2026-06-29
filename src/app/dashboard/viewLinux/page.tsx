@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
     ArrowLeft,
@@ -60,6 +60,9 @@ import {
     isServerListOrder,
     getServerDeliveryStatus,
     isOrderAwaitingDelivery,
+    hasOrderBeenDelivered,
+    isOrderPaid,
+    shouldPollOrderForDelivery,
 } from '@/lib/orderDeliveryStatus';
 import { isWithinRenewalWindow } from '@/lib/expiryHelper';
 
@@ -159,6 +162,25 @@ const ViewLinux = () => {
         fetchOrders();
     }, []);
 
+    const needsDeliveryPoll = useMemo(
+        () => orders.some(shouldPollOrderForDelivery),
+        [orders]
+    );
+
+    useEffect(() => {
+        if (!needsDeliveryPoll) return;
+
+        const interval = setInterval(() => {
+            fetchOrders(true);
+        }, 4000);
+
+        const timeout = setTimeout(() => clearInterval(interval), 3 * 60 * 1000);
+        return () => {
+            clearInterval(interval);
+            clearTimeout(timeout);
+        };
+    }, [needsDeliveryPoll]);
+
     const fetchOrders = async (isRefresh = false) => {
         if (isRefresh) {
             setRefreshing(true);
@@ -167,7 +189,7 @@ const ViewLinux = () => {
         }
 
         try {
-            const response = await fetch('/api/orders/me');
+            const response = await fetch('/api/orders/me', { cache: 'no-store', credentials: 'include' });
             if (!response.ok) throw new Error('Failed to fetch orders');
             const data = await response.json();
             setOrders(data);
@@ -339,6 +361,16 @@ const ViewLinux = () => {
 
     const currentStatus = provisioningStatus || status;
 
+    // IP assigned — show Active even if status is still "confirmed" (post-payment lag).
+    if (order && isOrderPaid(order) && hasOrderBeenDelivered(order)) {
+        return (
+            <Badge variant="outline" className={premiumBadge.success}>
+                <div className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></div>
+                Active
+            </Badge>
+        );
+    }
+
     // Paid, waiting for admin/company delivery — never show Failed
     if (order && isOrderAwaitingDelivery(order)) {
         return (
@@ -502,7 +534,10 @@ const ViewLinux = () => {
         default:
             // Enhanced default case for auto-provisioned services
             const isManualOrder = !lastAction || lastAction.includes('manual');
-            if (isManualOrder || currentStatus.toLowerCase() === 'confirmed') {
+            if (
+              (isManualOrder || currentStatus.toLowerCase() === 'confirmed') &&
+              !(order && isOrderPaid(order) && hasOrderBeenDelivered(order))
+            ) {
                 return (
                     <Badge variant="outline" className={premiumBadge.warning}>
                         <Clock className="w-3 h-3 mr-1" />

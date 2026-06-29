@@ -109,7 +109,7 @@ type SlotIpConnection = {
 };
 
 import { isSlotIpOrder } from '@/lib/slotIpOrder';
-import { isOrderAwaitingDelivery, isOrderPaid, hasOrderBeenDelivered } from '@/lib/orderDeliveryStatus';
+import { isOrderAwaitingDelivery, isOrderPaid, hasOrderBeenDelivered, shouldPollOrderForDelivery } from '@/lib/orderDeliveryStatus';
 import { openRazorpayModal } from '@/lib/razorpayCheckout';
 import { triggerRenewalSuccessBird } from '@/lib/oceanBirdFly';
 
@@ -435,6 +435,35 @@ const OrderDetails = () => {
 
     return () => clearInterval(interval);
   }, [order?.provisioningStatus, order?._id, orderId, ipStock]);
+
+  // After payment: poll until IP/credentials appear (no logout needed).
+  useEffect(() => {
+    if (!order || loading) return;
+    if (!shouldPollOrderForDelivery(order)) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/orders/${orderId}`, { cache: 'no-store', credentials: 'include' });
+        if (!res.ok) return;
+        const updated = await res.json();
+        setOrder(updated);
+        if (!shouldPollOrderForDelivery(updated)) {
+          clearInterval(interval);
+          if (hasOrderBeenDelivered(updated)) {
+            toast.success('Your server is ready!');
+          }
+        }
+      } catch (e) {
+        console.error('[ORDER-DETAILS] Post-payment poll failed:', e);
+      }
+    }, 4000);
+
+    const timeout = setTimeout(() => clearInterval(interval), 3 * 60 * 1000);
+    return () => {
+      clearInterval(interval);
+      clearTimeout(timeout);
+    };
+  }, [order?._id, order?.status, order?.provisioningStatus, order?.ipAddress, order?.password, loading, orderId]);
 
   const fetchOrderAndIPStock = async () => {
     setLoading(true);
@@ -1879,6 +1908,15 @@ const OrderDetails = () => {
     const companyAutomated = isOrderCompanyAutomated(order, ipStock);
     const hasAssignedIp = !!(order?.ipAddress?.trim());
 
+    if (order && isOrderPaid(order) && hasOrderBeenDelivered(order)) {
+      return (
+        <Badge className="bg-primary/10 text-green-500 border-primary/20">
+          <div className="w-2 h-2 bg-primary rounded-full mr-2 animate-pulse"></div>
+          Active
+        </Badge>
+      );
+    }
+
     // Paid but admin/company has not delivered yet — always show Processing
     if (order && isOrderAwaitingDelivery(order)) {
       return (
@@ -2004,7 +2042,10 @@ const OrderDetails = () => {
       default:
         // Enhanced default case
         const isManualOrder = !lastAction || lastAction.includes('manual');
-        if (isManualOrder || currentStatus.toLowerCase() === 'confirmed') {
+        if (
+          (isManualOrder || currentStatus.toLowerCase() === 'confirmed') &&
+          !(order && isOrderPaid(order) && hasOrderBeenDelivered(order))
+        ) {
           return (
             <Badge className="bg-muted text-muted-foreground border-border">
               <Clock className="w-3 h-3 mr-1" />

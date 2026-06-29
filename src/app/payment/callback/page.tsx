@@ -9,6 +9,41 @@ import { fetchWalletSummary } from "@/lib/walletClient";
 import { triggerPaymentSuccessBird } from "@/lib/oceanBirdFly";
 import { redirectToLogin } from "@/lib/redirectToLogin";
 
+async function waitForOrderDelivery(orderId: string, maxAttempts = 12, delayMs = 2000): Promise<void> {
+  for (let i = 0; i < maxAttempts; i++) {
+    try {
+      const res = await fetch(`/api/orders/${orderId}`, {
+        cache: "no-store",
+        credentials: "include",
+      });
+      if (res.ok) {
+        const order = await res.json();
+        const ip = String(order.ipAddress || "").trim();
+        const st = String(order.status || "").toLowerCase();
+        if (ip && (st === "active" || order.password)) return;
+        if (ip && st === "confirmed") return;
+      }
+    } catch {
+      // keep polling
+    }
+    if (i < maxAttempts - 1) {
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+}
+
+async function goToOrderAfterPayment(
+  router: ReturnType<typeof useRouter>,
+  orderId?: string | null
+) {
+  if (orderId) {
+    await waitForOrderDelivery(orderId);
+    router.push(`/dashboard/order/${orderId}`);
+    return;
+  }
+  router.push("/dashboard/viewLinux");
+}
+
 // Create a client component that uses useSearchParams
 function PaymentCallbackContent() {
   const [status, setStatus] = useState<"loading" | "success" | "failed" | "processing">("loading");
@@ -204,7 +239,7 @@ function PaymentCallbackContent() {
           setMessage('Order paid using wallet balance! Your server is being provisioned.');
           toast.success('Payment confirmed');
           fetchWalletSummary().catch(() => { });
-          setTimeout(() => router.push('/dashboard/viewLinux'), 2500);
+          void goToOrderAfterPayment(router, orderId || searchParams.get('order_id'));
           return;
         }
 
@@ -343,9 +378,9 @@ function PaymentCallbackContent() {
 
           if (isConfirmed) {
             setStatus("success");
-            setMessage("Payment successful! Your server is being provisioned and will be ready shortly.");
-            toast.success("Payment confirmed! Check your orders for server details.");
-            setTimeout(() => router.push("/dashboard/viewLinux"), 3000);
+            setMessage("Payment successful! Setting up your server…");
+            toast.success("Payment confirmed! Your server details will appear shortly.");
+            void goToOrderAfterPayment(router, data.order?.id || orderId);
             return;
           }
 

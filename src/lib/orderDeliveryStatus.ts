@@ -174,3 +174,25 @@ export function getPipelineOrderStatus(order: OrderLike): OrdersPageStatus {
 export function isOrdersPageOrder(_order: OrderLike): boolean {
   return true;
 }
+
+/** Poll after payment until IP/credentials land — avoids stale "Awaiting" until logout. */
+export function shouldPollOrderForDelivery(order: OrderLike): boolean {
+  if (!isOrderPaid(order)) return false;
+
+  const status = (order.status || '').toLowerCase();
+  const prov = (order.provisioningStatus || '').toLowerCase();
+  if (['cancelled', 'canceled', 'terminated'].includes(status)) return false;
+  if (['cancelled', 'canceled', 'terminated'].includes(prov)) return false;
+
+  if (hasOrderBeenDelivered(order) && hasDeliveredCredentials(order)) {
+    return false;
+  }
+
+  return (
+    isOrderAwaitingDelivery(order) ||
+    status === 'confirmed' ||
+    prov === 'provisioning' ||
+    prov === 'pending' ||
+    prov === 'in_progress'
+  );
+}
