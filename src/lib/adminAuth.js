@@ -1,6 +1,11 @@
 import connectDB from '@/lib/db';
 import User from '@/models/userModel';
 import { getDataFromTokenSafe } from '@/helper/getDataFromToken';
+import {
+  getAdminPanelPassword,
+  isAdminGateSessionValid,
+} from '@/lib/adminGate';
+import { isCronAuthorizedRequest } from '@/lib/adminGatePaths';
 
 export function isAdminUser(user) {
   if (!user) return false;
@@ -13,11 +18,20 @@ export function isAdminUser(user) {
 }
 
 /**
- * Resolves the logged-in admin from the session cookie.
- * Uses `.lean()` so fields like `role` that exist in MongoDB but
- * are not declared on the User schema are still readable.
+ * Admin panel password gate — required for all admin API access unless cron.
+ * Returns false when gate password missing/invalid (fail closed).
  */
-export async function requireAdmin(request) {
+export async function requireAdminGate(request) {
+  if (isCronAuthorizedRequest(request)) return true;
+
+  if (!getAdminPanelPassword()) return false;
+  return isAdminGateSessionValid(request);
+}
+
+/**
+ * Logged-in user with Admin role only (no panel password gate).
+ */
+export async function requireAdminUser(request) {
   const adminId = getDataFromTokenSafe(request);
   if (!adminId) return null;
 
@@ -25,4 +39,13 @@ export async function requireAdmin(request) {
   const admin = await User.findById(adminId).lean();
   if (!isAdminUser(admin)) return null;
   return admin;
+}
+
+/**
+ * Admin role + valid admin panel password session (or cron bypass).
+ */
+export async function requireAdmin(request) {
+  const gateOk = await requireAdminGate(request);
+  if (!gateOk) return null;
+  return requireAdminUser(request);
 }

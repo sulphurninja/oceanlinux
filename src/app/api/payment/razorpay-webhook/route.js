@@ -63,6 +63,29 @@ export async function POST(request) {
 
   const txnRef = receipt || razorpayOrderId;
 
+  // Guard: never confirm/credit anything (order, cart checkout, or wallet
+  // recharge) without a real captured payment id. `order.paid` can arrive
+  // without a payment entity; acting on it would deliver a server / credit a
+  // wallet without an actual payment.
+  if (!paymentId) {
+    const logger = PaymentOrderLogger.forTxn(txnRef, 'webhook');
+    logger.warning('Razorpay webhook received without captured paymentId — ignoring', {
+      event: eventType,
+      razorpayOrderId,
+      receipt,
+    });
+    logger.setPaymentInfo({
+      method: 'razorpay',
+      gatewayStatus: 'PENDING',
+      gatewayOrderId: razorpayOrderId,
+    });
+    await logger.save({ success: false, anomaly: true, errorMessage: 'razorpay_webhook_missing_payment_id' });
+    return NextResponse.json(
+      { success: false, message: 'Webhook missing captured payment id — ignored' },
+      { status: 202 }
+    );
+  }
+
   // Cart checkout + wallet recharge use parent docs keyed by clientTxnId.
   const dispatch = await findDispatchTarget(txnRef);
   if (dispatch?.kind === 'checkout') {

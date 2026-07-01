@@ -1,29 +1,14 @@
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import jwt from 'jsonwebtoken';
 import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
-import User from '@/models/userModel';
 import { assignPanelCredentials } from '@/lib/panelCredentials';
+import { requireAdmin } from '@/lib/adminAuth';
 
-async function verifyAdmin() {
-  const cookieStore = cookies();
-  const token = cookieStore.get('token')?.value;
-  if (!token) return null;
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    await connectDB();
-    const user = await User.findById(decoded.userId);
-    if (!user || user.role !== 'admin') return null;
-    return user;
-  } catch {
-    return null;
+export async function POST(request) {
+  const admin = await requireAdmin(request);
+  if (!admin) {
+    return NextResponse.json({ success: false, message: 'Admin access required' }, { status: 403 });
   }
-}
-
-export async function POST() {
-  const admin = await verifyAdmin();
-
 
   await connectDB();
 

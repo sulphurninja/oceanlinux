@@ -1,24 +1,7 @@
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import jwt from 'jsonwebtoken';
 import connectDB from '@/lib/db';
 import Company from '@/models/companyModel';
-import User from '@/models/userModel';
-
-async function verifyAdmin() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get('token')?.value;
-  if (!token) return null;
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    await connectDB();
-    const user = await User.findById(decoded.id);
-    if (!user || user.role !== 'Admin') return null;
-    return user;
-  } catch {
-    return null;
-  }
-}
+import { requireAdmin } from '@/lib/adminAuth';
 
 function slugify(name) {
   return name
@@ -27,9 +10,11 @@ function slugify(name) {
     .replace(/(^-|-$)/g, '');
 }
 
-export async function GET() {
-  const admin = await verifyAdmin();
-  // if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+export async function GET(request) {
+  const admin = await requireAdmin(request);
+  if (!admin) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+  }
 
   await connectDB();
   const companies = await Company.find({}).sort({ createdAt: -1 }).lean();
@@ -37,8 +22,10 @@ export async function GET() {
 }
 
 export async function POST(request) {
-  const admin = await verifyAdmin();
-  // if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const admin = await requireAdmin(request);
+  if (!admin) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+  }
 
   await connectDB();
   const { name, password } = await request.json();

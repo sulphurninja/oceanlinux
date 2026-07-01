@@ -3,15 +3,7 @@ import connectDB from '@/lib/db';
 import User from '@/models/userModel';
 import { getDataFromTokenSafe } from '@/helper/getDataFromToken';
 import userWalletService from '@/services/userWalletService';
-
-async function requireAdmin(request) {
-  const adminId = getDataFromTokenSafe(request);
-  if (!adminId) return null;
-  await connectDB();
-  const admin = await User.findById(adminId).select('role name email').lean();
-  if (!admin || admin.role !== 'Admin') return null;
-  return admin;
-}
+import { requireAdmin } from '@/lib/adminAuth';
 
 export async function GET(request, { params }) {
   try {

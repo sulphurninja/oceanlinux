@@ -1,26 +1,9 @@
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import jwt from 'jsonwebtoken';
 import connectDB from '@/lib/db';
 import Company from '@/models/companyModel';
-import User from '@/models/userModel';
 const NetbayApi = require('@/services/netbayApi');
 const { NETBAY_API_DEFAULTS, getEnvFallback } = require('@/lib/companyNetbayApi');
-
-async function verifyAdmin() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get('token')?.value;
-  if (!token) return null;
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    await connectDB();
-    const user = await User.findById(decoded.id);
-    if (!user || user.role !== 'Admin') return null;
-    return user;
-  } catch {
-    return null;
-  }
-}
+import { enforceAdmin } from '@/lib/apiSecurity';
 
 /**
  * Validate a Netbay reseller-API config for a company by performing a real
@@ -30,9 +13,8 @@ async function verifyAdmin() {
  *   - no body — falls back to the persisted `netbayApi` on the company.
  */
 export async function POST(request, { params }) {
-  // Match parity with /api/admin/companies/* — admin verification kept open
-  // so this can be wired up in environments without full session cookies.
-  await verifyAdmin();
+  const denied = await enforceAdmin(request);
+  if (denied) return denied;
 
   await connectDB();
   const { id } = await params;

@@ -1,26 +1,9 @@
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import jwt from 'jsonwebtoken';
 import connectDB from '@/lib/db';
 import Company from '@/models/companyModel';
-import User from '@/models/userModel';
 const NetbayApi = require('@/services/netbayApi');
 const { getCompanyNetbayApiConfig } = require('@/lib/companyNetbayApi');
-
-async function verifyAdmin() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get('token')?.value;
-  if (!token) return null;
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    await connectDB();
-    const user = await User.findById(decoded.id);
-    if (!user || user.role !== 'Admin') return null;
-    return user;
-  } catch {
-    return null;
-  }
-}
+import { enforceAdmin } from '@/lib/apiSecurity';
 
 /**
  * Combined catalog endpoint — returns Netbay's Plans + OS Templates for the
@@ -30,7 +13,9 @@ async function verifyAdmin() {
  * Response: { plans: [...], os: [...], baseUrl }
  */
 export async function GET(request, { params }) {
-  await verifyAdmin();
+  const denied = await enforceAdmin(request);
+  if (denied) return denied;
+
   await connectDB();
   const { id } = await params;
 

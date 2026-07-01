@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getDataFromTokenSafe } from '@/helper/getDataFromToken';
-import { requireAdmin, isAdminUser } from '@/lib/adminAuth';
+import { requireAdmin, isAdminUser, requireAdminGate, requireAdminUser } from '@/lib/adminAuth';
+import { getAdminPanelPassword } from '@/lib/adminGate';
 import User from '@/models/userModel';
 import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
@@ -71,9 +72,29 @@ export async function enforceOrderAccess(request, order) {
   return null;
 }
 
+/** Admin panel password gate — returns NextResponse on failure, null on success. */
+export async function enforceAdminGate(request) {
+  if (await requireAdminGate(request)) return null;
+
+  if (!getAdminPanelPassword()) {
+    return NextResponse.json(
+      { success: false, message: 'Admin panel password is not configured' },
+      { status: 503 }
+    );
+  }
+
+  return NextResponse.json(
+    { success: false, message: 'Admin panel password required', code: 'ADMIN_GATE_REQUIRED' },
+    { status: 401 }
+  );
+}
+
 /** Admin-only routes — returns NextResponse on failure, null on success. */
 export async function enforceAdmin(request) {
-  const admin = await requireAdmin(request);
+  const gateDenied = await enforceAdminGate(request);
+  if (gateDenied) return gateDenied;
+
+  const admin = await requireAdminUser(request);
   if (!admin) {
     return NextResponse.json({ success: false, message: 'Admin access required' }, { status: 403 });
   }

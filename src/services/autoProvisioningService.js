@@ -10,6 +10,7 @@ const IPStock = require('@/models/ipStockModel');
 const Company = require('@/models/companyModel').default;
 const { getCompanyNetbayApiConfig } = require('@/lib/companyNetbayApi');
 const { pickNetbayExpiryDate } = require('@/lib/netbayOrderSync');
+const { orderHasConfirmedPayment } = require('@/lib/orderPaymentStatus');
 
 const L = {
   head: (label) => {
@@ -720,8 +721,9 @@ class AutoProvisioningService {
 
   // --- MAIN PROVISION METHOD ----------------------------------------------
 
-  async provisionServer(orderId) {
+  async provisionServer(orderId, options = {}) {
     const startTime = Date.now();
+    const allowUnpaid = options?.allowUnpaid === true;
     console.log("\n" + "🚀".repeat(80));
     console.log(`[AUTO-PROVISION] 🚀 STARTING AUTO-PROVISIONING for order: ${orderId}`);
     console.log(`[AUTO-PROVISION] ⏰ Start time: ${new Date().toISOString()}`);
@@ -731,6 +733,59 @@ class AutoProvisioningService {
     L.line('✅ Database connected');
 
     try {
+      // =====================================================================
+      // STEP 0: PAYMENT GUARD — refuse to provision unpaid orders.
+      // This is the single choke-point that blocks delivery without a real
+      // payment, regardless of which caller triggered provisioning.
+      // =====================================================================
+      const paymentCheckOrder = await Order.findById(orderId).select(
+        'transactionId walletDeduction paymentDetails status provisioningStatus ipAddress clientTxnId gatewayOrderId user productName'
+      );
+
+      if (!paymentCheckOrder) {
+        throw new Error(`Order ${orderId} not found in database`);
+      }
+
+      // Never re-block an order that was already delivered.
+      const alreadyDelivered =
+        paymentCheckOrder.provisioningStatus === 'active' && !!paymentCheckOrder.ipAddress;
+
+      if (!alreadyDelivered && !allowUnpaid && !orderHasConfirmedPayment(paymentCheckOrder)) {
+        L.head('STEP 0: PAYMENT GUARD BLOCKED PROVISIONING');
+        L.kv('  → Order ID', String(orderId));
+        L.kv('  → clientTxnId', paymentCheckOrder.clientTxnId || 'none');
+        L.kv('  → gatewayOrderId', paymentCheckOrder.gatewayOrderId || 'none');
+        L.kv('  → status', paymentCheckOrder.status || 'none');
+        L.kv('  → transactionId', paymentCheckOrder.transactionId || 'MISSING');
+        L.line('⛔ No confirmed payment found — provisioning refused.');
+
+        try {
+          const PaymentOrderLogger = require('@/services/paymentOrderLogger');
+          const logger = PaymentOrderLogger.forOrder(paymentCheckOrder, 'provision-guard');
+          logger.warning('Provisioning blocked: order has no confirmed payment', {
+            orderId: String(orderId),
+            status: paymentCheckOrder.status,
+            transactionId: paymentCheckOrder.transactionId || null,
+            walletDeducted: paymentCheckOrder.walletDeduction?.deducted === true,
+          });
+          await logger.save({
+            success: false,
+            anomaly: true,
+            errorMessage: 'provisioning_blocked_unpaid_order',
+          });
+        } catch (logErr) {
+          console.error('[AUTO-PROVISION] Failed to log payment-guard block:', logErr.message);
+        }
+
+        return {
+          success: false,
+          paymentRequired: true,
+          message:
+            'Provisioning refused: no confirmed payment for this order. ' +
+            'Confirm the payment first, or force with allowUnpaid for a complimentary order.',
+          totalTime: Date.now() - startTime,
+        };
+      }
       // =====================================================================
       // STEP 1: ATOMIC DATABASE LOCK - Prevents duplicate provisioning
       // This is CRITICAL for serverless environments where in-memory locks don't work

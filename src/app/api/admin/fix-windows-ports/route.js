@@ -2,12 +2,16 @@ import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 import { formatIpAddress } from '@/lib/ipAddressHelper.js';
+import { enforceAdmin } from '@/lib/apiSecurity';
 
 /**
  * Admin endpoint to fix Windows Hostycare orders that need port 49965
  * This will update existing orders to add the port if missing
  */
 export async function POST(request) {
+  const denied = await enforceAdmin(request);
+  if (denied) return denied;
+
   try {
     await connectDB();
 

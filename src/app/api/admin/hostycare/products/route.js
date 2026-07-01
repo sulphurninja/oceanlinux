@@ -1,7 +1,11 @@
 import { NextResponse } from 'next/server';
 const HostycareAPI = require('@/services/hostycareApi');
+import { enforceAdmin } from '@/lib/apiSecurity';
 
 export async function GET(request) {
+  const denied = await enforceAdmin(request);
+  if (denied) return denied;
+
   try {
     console.log('[PRODUCTS-API] Fetching Hostycare products...');
 

@@ -1,17 +1,16 @@
 import connectDB from "@/lib/db";
 import User from "@/models/userModel";
 import Order from "@/models/orderModel";
-import { getDataFromToken } from "@/helper/getDataFromToken";
 import { NextResponse } from 'next/server';
+import { requireAdmin } from '@/lib/adminAuth';
 
 export async function GET(request) {
     try {
         await connectDB();
 
-        // Check if user is admin
-        const userId = getDataFromToken(request);
-        if (!userId) {
-            return NextResponse.json({ message: 'Authentication required' }, { status: 401 });
+        const admin = await requireAdmin(request);
+        if (!admin) {
+            return NextResponse.json({ message: 'Admin access required' }, { status: 403 });
         }
 
         const { searchParams } = new URL(request.url);

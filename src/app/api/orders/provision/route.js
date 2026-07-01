@@ -5,7 +5,8 @@ import { enforceAdmin, enforceOrderAccess, isCronAuthorized } from '@/lib/apiSec
 const AutoProvisioningService = require('@/services/autoProvisioningService');
 
 export async function POST(request) {
-  if (!isCronAuthorized(request)) {
+  const isCron = isCronAuthorized(request);
+  if (!isCron) {
     const denied = await enforceAdmin(request);
     if (denied) return denied;
   }
@@ -17,7 +18,10 @@ export async function POST(request) {
   console.log('='.repeat(80));
   
   try {
-    const { orderId, orderIds } = await request.json();
+    const { orderId, orderIds, force } = await request.json();
+    // Only an authenticated admin (never cron) may override the payment guard
+    // to deliver a complimentary / manually-settled order.
+    const allowUnpaid = force === true && !isCron;
     const provisioningService = new AutoProvisioningService();
 
     if (orderId) {
@@ -83,12 +87,24 @@ export async function POST(request) {
       // The provisioning service will set the status after acquiring locks
 
       // Provision single order
-      const result = await provisioningService.provisionServer(orderId);
+      const result = await provisioningService.provisionServer(orderId, { allowUnpaid });
 
       console.log(`[PROVISION API] Provisioning result:`, {
         success: result.success,
         error: result.error || 'none'
       });
+
+      // Payment guard blocked an unpaid order — surface a clear, actionable error.
+      if (!result.success && result.paymentRequired) {
+        return NextResponse.json({
+          success: false,
+          paymentRequired: true,
+          message:
+            'This order has no confirmed payment. It will NOT be provisioned. ' +
+            'Verify the payment first, or re-submit with force:true to deliver a complimentary order.',
+          details: result
+        }, { status: 402 }); // 402 Payment Required
+      }
 
       return NextResponse.json({
         success: result.success,

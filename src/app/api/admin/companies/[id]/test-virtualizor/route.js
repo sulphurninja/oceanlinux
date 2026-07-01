@@ -1,25 +1,8 @@
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import jwt from 'jsonwebtoken';
 import connectDB from '@/lib/db';
 import Company from '@/models/companyModel';
-import User from '@/models/userModel';
 import { VirtualizorAPI } from '@/services/virtualizorApi';
-
-async function verifyAdmin() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get('token')?.value;
-  if (!token) return null;
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    await connectDB();
-    const user = await User.findById(decoded.id);
-    if (!user || user.role !== 'Admin') return null;
-    return user;
-  } catch {
-    return null;
-  }
-}
+import { enforceAdmin } from '@/lib/apiSecurity';
 
 /**
  * Test ONE Virtualizor panel for a company by calling `act=listvs` against it
@@ -31,8 +14,8 @@ async function verifyAdmin() {
  * Falls back to the legacy single-config field when nothing else is provided.
  */
 export async function POST(request, { params }) {
-  // Admin verification kept open for parity with the rest of /api/admin/companies/*
-  await verifyAdmin();
+  const denied = await enforceAdmin(request);
+  if (denied) return denied;
 
   await connectDB();
   const { id } = await params;

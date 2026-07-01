@@ -237,6 +237,7 @@ interface FilterState {
     autoProvisioned: string;
     provider: string;
     os: string;
+    paymentStatus: string;
     dateFrom: Date | undefined;
     dateTo: Date | undefined;
 }
@@ -265,6 +266,7 @@ const ManageOrders = () => {
         autoProvisioned: '',
         provider: '',
         os: '',
+        paymentStatus: '',
         dateFrom: undefined,
         dateTo: undefined,
     });
@@ -352,6 +354,7 @@ const ManageOrders = () => {
             if (filters.autoProvisioned) params.set('autoProvisioned', filters.autoProvisioned);
             if (filters.provider) params.set('provider', filters.provider);
             if (filters.os) params.set('os', filters.os);
+            if (filters.paymentStatus) params.set('paymentStatus', filters.paymentStatus);
             if (filters.dateFrom) params.set('dateFrom', format(filters.dateFrom, 'yyyy-MM-dd'));
             if (filters.dateTo) params.set('dateTo', format(filters.dateTo, 'yyyy-MM-dd'));
 
@@ -387,6 +390,7 @@ const ManageOrders = () => {
         filters.autoProvisioned,
         filters.provider,
         filters.os,
+        filters.paymentStatus,
         filters.dateFrom,
         filters.dateTo,
     ]);
@@ -876,6 +880,7 @@ const ManageOrders = () => {
             autoProvisioned: '',
             provider: '',
             os: '',
+            paymentStatus: '',
             dateFrom: undefined,
             dateTo: undefined,
         });
@@ -1274,6 +1279,24 @@ const ManageOrders = () => {
                                                     <SelectItem value="windows">Windows</SelectItem>
                                                     <SelectItem value="ubuntu">Ubuntu</SelectItem>
                                                     <SelectItem value="centos">CentOS</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+
+                                        <div className="space-y-2">
+                                            <Label>Payment</Label>
+                                            <Select
+                                                value={filters.paymentStatus}
+                                                onValueChange={(value) => setFilters(prev => ({ ...prev, paymentStatus: value === 'All' ? '' : value }))}
+                                            >
+                                                <SelectTrigger>
+                                                    <SelectValue placeholder="All payments" />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="All">All payments</SelectItem>
+                                                    <SelectItem value="no_txn">No Transaction ID (unpaid)</SelectItem>
+                                                    <SelectItem value="no_txn_delivered">No Txn but Delivered ⚠️</SelectItem>
+                                                    <SelectItem value="has_txn">Has Transaction ID</SelectItem>
                                                 </SelectContent>
                                             </Select>
                                         </div>

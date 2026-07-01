@@ -1,26 +1,9 @@
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import jwt from 'jsonwebtoken';
 import connectDB from '@/lib/db';
 import Company from '@/models/companyModel';
-import User from '@/models/userModel';
 const ResellerApi = require('@/services/resellerApi');
 const { RESELLER_API_DEFAULTS } = require('@/lib/companyResellerApi');
-
-async function verifyAdmin() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get('token')?.value;
-  if (!token) return null;
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    await connectDB();
-    const user = await User.findById(decoded.id);
-    if (!user || user.role !== 'Admin') return null;
-    return user;
-  } catch {
-    return null;
-  }
-}
+import { enforceAdmin } from '@/lib/apiSecurity';
 
 /**
  * Validate a reseller-API config for a company by performing a real login
@@ -30,9 +13,8 @@ async function verifyAdmin() {
  *   - no body — falls back to the persisted `resellerApi` on the company
  */
 export async function POST(request, { params }) {
-  // Match parity with /api/admin/companies/* — admin verification kept open
-  // so this can be wired up in environments without full session cookies.
-  await verifyAdmin();
+  const denied = await enforceAdmin(request);
+  if (denied) return denied;
 
   await connectDB();
   const { id } = await params;

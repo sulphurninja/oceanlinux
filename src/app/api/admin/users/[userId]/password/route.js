@@ -1,16 +1,16 @@
 import connectDB from '@/lib/db';
 import User from '@/models/userModel';
-import { getDataFromToken } from '@/helper/getDataFromToken';
 import { hashUserPassword, isBcryptHash } from '@/lib/userPassword';
+import { requireAdmin } from '@/lib/adminAuth';
 
 export async function GET(request, { params }) {
   try {
     await connectDB();
 
-    const adminId = getDataFromToken(request);
-    if (!adminId) {
-      return new Response(JSON.stringify({ message: 'Authentication required' }), {
-        status: 401,
+    const admin = await requireAdmin(request);
+    if (!admin) {
+      return new Response(JSON.stringify({ message: 'Admin access required' }), {
+        status: 403,
         headers: { 'Content-Type': 'application/json' },
       });
     }
@@ -47,10 +47,10 @@ export async function PATCH(request, { params }) {
   try {
     await connectDB();
 
-    const adminId = getDataFromToken(request);
-    if (!adminId) {
-      return new Response(JSON.stringify({ message: 'Authentication required' }), {
-        status: 401,
+    const admin = await requireAdmin(request);
+    if (!admin) {
+      return new Response(JSON.stringify({ message: 'Admin access required' }), {
+        status: 403,
         headers: { 'Content-Type': 'application/json' },
       });
     }

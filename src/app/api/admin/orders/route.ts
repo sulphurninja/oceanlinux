@@ -74,6 +74,42 @@ function statusFilterClause(status: string | null) {
   return null;
 }
 
+/** Orders with no captured gateway payment (empty/missing transactionId). */
+const NO_TXN_CLAUSE = {
+  $or: [
+    { transactionId: { $exists: false } },
+    { transactionId: null },
+    { transactionId: '' },
+  ],
+};
+
+function paymentFilterClause(value: string | null) {
+  if (!value) return null;
+  if (value === 'no_txn') {
+    // Unpaid via gateway: no transactionId saved.
+    return NO_TXN_CLAUSE;
+  }
+  if (value === 'no_txn_delivered') {
+    // Anomaly: server delivered/active but no gateway payment recorded.
+    return {
+      ...NO_TXN_CLAUSE,
+      $and: [
+        {
+          $or: [
+            { status: 'active' },
+            { provisioningStatus: 'active' },
+            { ipAddress: { $nin: [null, ''] } },
+          ],
+        },
+      ],
+    };
+  }
+  if (value === 'has_txn') {
+    return { transactionId: { $nin: [null, ''] } };
+  }
+  return null;
+}
+
 function provisioningFilterClause(value: string | null) {
   if (!value) return null;
   if (value === 'not_provisioned') {
@@ -152,6 +188,9 @@ async function buildFilter(searchParams: URLSearchParams) {
 
   const provClause = provisioningFilterClause(searchParams.get('provisioningStatus'));
   if (provClause) and.push(provClause);
+
+  const payClause = paymentFilterClause(searchParams.get('paymentStatus'));
+  if (payClause) and.push(payClause);
 
   const autoProvisioned = searchParams.get('autoProvisioned');
   if (autoProvisioned === 'auto') and.push({ autoProvisioned: true });
