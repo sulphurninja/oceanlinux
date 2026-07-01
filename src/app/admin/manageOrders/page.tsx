@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -279,6 +279,17 @@ const ManageOrders = () => {
     const [transferOrder, setTransferOrder] = useState<Order | null>(null);
     const [transferEmail, setTransferEmail] = useState('');
     const [transferring, setTransferring] = useState(false);
+    const [debouncedSearch, setDebouncedSearch] = useState('');
+    const [walletLoaded, setWalletLoaded] = useState(false);
+    const filterKeyRef = useRef('');
+    const [stats, setStats] = useState({
+        total: 0,
+        pending: 0,
+        confirmed: 0,
+        active: 0,
+        failed: 0,
+        totalRevenue: 0,
+    });
     
     // Pagination state
     const [pagination, setPagination] = useState<PaginationState>({
@@ -288,11 +299,26 @@ const ManageOrders = () => {
     });
 
     useEffect(() => {
-        fetchOrders();
-        fetchWalletRecharges();
-    }, []);
+        const timer = setTimeout(() => setDebouncedSearch(searchTerm.trim()), 350);
+        return () => clearTimeout(timer);
+    }, [searchTerm]);
 
-    const fetchWalletRecharges = async () => {
+    useEffect(() => {
+        const filterKey = JSON.stringify({
+            debouncedSearch,
+            filters: {
+                ...filters,
+                dateFrom: filters.dateFrom?.toISOString() ?? null,
+                dateTo: filters.dateTo?.toISOString() ?? null,
+            },
+        });
+        if (filterKeyRef.current && filterKeyRef.current !== filterKey) {
+            setPagination((prev) => (prev.page === 1 ? prev : { ...prev, page: 1 }));
+        }
+        filterKeyRef.current = filterKey;
+    }, [debouncedSearch, filters]);
+
+    const fetchWalletRecharges = useCallback(async () => {
         setWalletLoading(true);
         try {
             const response = await fetch(`/api/admin/wallet-recharges?t=${Date.now()}`, {
@@ -311,86 +337,76 @@ const ManageOrders = () => {
         } finally {
             setWalletLoading(false);
         }
-    };
+    }, []);
 
-    const refreshAll = async () => {
-        await Promise.all([fetchOrders(), fetchWalletRecharges()]);
-    };
-
-    const fetchOrders = async () => {
+    const fetchOrders = useCallback(async () => {
         setLoading(true);
         try {
-            const response = await fetch(`/api/admin/orders?t=${Date.now()}`, {
+            const params = new URLSearchParams();
+            params.set('page', String(pagination.page));
+            params.set('limit', String(pagination.limit));
+            params.set('t', String(Date.now()));
+            if (debouncedSearch) params.set('search', debouncedSearch);
+            if (filters.status) params.set('status', filters.status);
+            if (filters.provisioningStatus) params.set('provisioningStatus', filters.provisioningStatus);
+            if (filters.autoProvisioned) params.set('autoProvisioned', filters.autoProvisioned);
+            if (filters.provider) params.set('provider', filters.provider);
+            if (filters.os) params.set('os', filters.os);
+            if (filters.dateFrom) params.set('dateFrom', format(filters.dateFrom, 'yyyy-MM-dd'));
+            if (filters.dateTo) params.set('dateTo', format(filters.dateTo, 'yyyy-MM-dd'));
+
+            const response = await fetch(`/api/admin/orders?${params.toString()}`, {
                 cache: 'no-store',
+                credentials: 'include',
                 headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
             });
+            if (!response.ok) {
+                const err = await response.json().catch(() => ({}));
+                throw new Error(err?.message || 'Failed to fetch orders');
+            }
             const data = await response.json();
-            setOrders(data);
-            setPagination(prev => ({ ...prev, total: data.length }));
+            setOrders(Array.isArray(data.orders) ? data.orders : []);
+            if (data.stats) setStats(data.stats);
+            if (data.pagination) {
+                setPagination((prev) => ({
+                    ...prev,
+                    total: data.pagination.total ?? prev.total,
+                }));
+            }
         } catch {
             toast.error('Failed to fetch orders');
         } finally {
             setLoading(false);
         }
+    }, [
+        pagination.page,
+        pagination.limit,
+        debouncedSearch,
+        filters.status,
+        filters.provisioningStatus,
+        filters.autoProvisioned,
+        filters.provider,
+        filters.os,
+        filters.dateFrom,
+        filters.dateTo,
+    ]);
+
+    useEffect(() => {
+        fetchOrders();
+    }, [fetchOrders]);
+
+    useEffect(() => {
+        if (activeTab === 'wallet' && !walletLoaded) {
+            fetchWalletRecharges().then(() => setWalletLoaded(true));
+        }
+    }, [activeTab, walletLoaded, fetchWalletRecharges]);
+
+    const refreshAll = async () => {
+        await fetchOrders();
+        if (activeTab === 'wallet' || walletLoaded) {
+            await fetchWalletRecharges();
+        }
     };
-
-    // Memoized filtered orders for performance
-    const filteredOrders = useMemo(() => {
-        return orders.filter(order => {
-            // Text search
-            const displayStatus = normalizeAdminOrderStatus(order.status);
-            const matchesSearch = !searchTerm ||
-                order.user?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                order.user?.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                order.productName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                displayStatus.includes(searchTerm.toLowerCase()) ||
-                order.status.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                order.transactionId?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                order._id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                (order.ipAddress && order.ipAddress.toLowerCase().includes(searchTerm.toLowerCase()));
-
-            // Status filter (cancelled/failed legacy rows count as pending)
-            const matchesStatus = !filters.status || displayStatus === filters.status;
-
-            // Provider filter
-            const matchesProvider = !filters.provider || 
-                (order.provider || 'hostycare') === filters.provider;
-
-            // OS filter
-            const matchesOS = !filters.os || 
-                order.os?.toLowerCase().includes(filters.os.toLowerCase());
-
-            // Provisioning status filter
-            let matchesProvisioningStatus = true;
-            if (filters.provisioningStatus) {
-                if (filters.provisioningStatus === 'not_provisioned') {
-                    matchesProvisioningStatus = !order.autoProvisioned && (!order.ipAddress || !order.username);
-                } else if (filters.provisioningStatus === 'manual_setup') {
-                    matchesProvisioningStatus = !order.autoProvisioned && Boolean(order.ipAddress) && Boolean(order.username);
-                } else {
-                    matchesProvisioningStatus = order.provisioningStatus === filters.provisioningStatus;
-                }
-            }
-
-            // Auto-provisioned filter
-            let matchesAutoProvisioned = true;
-            if (filters.autoProvisioned) {
-                if (filters.autoProvisioned === 'auto') {
-                    matchesAutoProvisioned = order.autoProvisioned === true;
-                } else if (filters.autoProvisioned === 'manual') {
-                    matchesAutoProvisioned = !order.autoProvisioned;
-                }
-            }
-
-            // Date filters
-            const orderDate = new Date(order.createdAt);
-            const matchesDateFrom = !filters.dateFrom || orderDate >= filters.dateFrom;
-            const matchesDateTo = !filters.dateTo || orderDate <= new Date(filters.dateTo.getTime() + 24 * 60 * 60 * 1000);
-
-            return matchesSearch && matchesStatus && matchesProvider && matchesOS && 
-                   matchesProvisioningStatus && matchesAutoProvisioned && matchesDateFrom && matchesDateTo;
-        });
-    }, [orders, searchTerm, filters]);
 
     const filteredWalletRecharges = useMemo(() => {
         return walletRecharges.filter((recharge) => {
@@ -410,19 +426,7 @@ const ManageOrders = () => {
         });
     }, [walletRecharges, searchTerm]);
 
-    // Paginated orders
-    const paginatedOrders = useMemo(() => {
-        const startIndex = (pagination.page - 1) * pagination.limit;
-        const endIndex = startIndex + pagination.limit;
-        return filteredOrders.slice(startIndex, endIndex);
-    }, [filteredOrders, pagination.page, pagination.limit]);
-
-    const totalPages = Math.ceil(filteredOrders.length / pagination.limit);
-
-    // Update total when filtered orders change
-    useEffect(() => {
-        setPagination(prev => ({ ...prev, total: filteredOrders.length, page: 1 }));
-    }, [filteredOrders.length]);
+    const totalPages = Math.max(1, Math.ceil(pagination.total / pagination.limit));
 
     const handleEdit = useCallback((order: Order) => {
         const normalized = { ...order, status: normalizeAdminOrderStatus(order.status) };
@@ -840,16 +844,6 @@ const ManageOrders = () => {
         </div>
     );
 
-    // Stats calculations
-    const stats = useMemo(() => ({
-        total: orders.length,
-        pending: orders.filter(o => normalizeAdminOrderStatus(o.status) === 'pending').length,
-        confirmed: orders.filter(o => normalizeAdminOrderStatus(o.status) === 'confirmed').length,
-        active: orders.filter(o => normalizeAdminOrderStatus(o.status) === 'active').length,
-        failed: orders.filter(o => o.provisioningStatus === 'failed').length,
-        totalRevenue: orders.filter(o => ['active', 'confirmed'].includes(normalizeAdminOrderStatus(o.status))).reduce((sum, o) => sum + o.price, 0),
-    }), [orders]);
-
     const walletStats = useMemo(() => ({
         total: walletRecharges.length,
         confirmed: walletRecharges.filter((r) => r.status === 'confirmed').length,
@@ -921,22 +915,34 @@ const ManageOrders = () => {
         }
     };
 
-    const exportGstReport = () => {
+    const exportGstReport = async () => {
         const range = resolveExportRange();
         if (!range) {
             toast.error('Please select a valid date range');
             return;
         }
 
+        try {
+            const params = new URLSearchParams({
+                export: 'gst',
+                from: format(range.from, 'yyyy-MM-dd'),
+                to: format(range.to, 'yyyy-MM-dd'),
+            });
+            const response = await fetch(`/api/admin/orders?${params.toString()}`, {
+                credentials: 'include',
+                cache: 'no-store',
+            });
+            if (!response.ok) {
+                const err = await response.json().catch(() => ({}));
+                throw new Error(err?.message || 'Export failed');
+            }
+            const data = await response.json();
+            const exportOrders: Order[] = Array.isArray(data.orders) ? data.orders : [];
+
         const r2 = (n: number) => Math.round(n * 100) / 100;
         const div = 1 + GST_RATE / 100; // prices are GST-inclusive
 
-        const rows = filteredOrders
-            .filter((order) => {
-                const created = new Date(order.createdAt).getTime();
-                return isOrderPaid(order) && created >= range.from.getTime() && created <= range.to.getTime();
-            })
-            .map((order) => {
+        const rows = exportOrders.map((order) => {
                 const price = Number(order.price || 0);
                 const orig = Number(order.originalPrice ?? price);
                 const grossTaxable = r2(orig / div);
@@ -1008,6 +1014,9 @@ const ManageOrders = () => {
 
         setExportOpen(false);
         toast.success(`Exported ${rows.length} invoice${rows.length > 1 ? 's' : ''} to GST report`);
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : 'Failed to export GST report');
+        }
     };
 
     return (
@@ -1332,8 +1341,8 @@ const ManageOrders = () => {
                         {/* Results summary and Pagination Controls */}
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between text-sm">
                             <span className="text-muted-foreground">
-                                Showing {Math.min((pagination.page - 1) * pagination.limit + 1, filteredOrders.length)}-
-                                {Math.min(pagination.page * pagination.limit, filteredOrders.length)} of {filteredOrders.length} orders
+                                Showing {pagination.total === 0 ? 0 : (pagination.page - 1) * pagination.limit + 1}-
+                                {Math.min(pagination.page * pagination.limit, pagination.total)} of {pagination.total} orders
                                 {hasActiveFilters && " (filtered)"}
                             </span>
                             
@@ -1350,7 +1359,6 @@ const ManageOrders = () => {
                                             <SelectItem value="25">25</SelectItem>
                                             <SelectItem value="50">50</SelectItem>
                                             <SelectItem value="100">100</SelectItem>
-                                            <SelectItem value="200">200</SelectItem>
                                         </SelectContent>
                                     </Select>
                                     <span className="text-muted-foreground">per page</span>
@@ -1412,14 +1420,14 @@ const ManageOrders = () => {
                                         <span>Loading orders...</span>
                                     </CardContent>
                                 </Card>
-                            ) : paginatedOrders.length === 0 ? (
+                            ) : orders.length === 0 ? (
                                 <Card>
                                     <CardContent className="flex h-32 items-center justify-center py-8 text-muted-foreground">
                                         {hasActiveFilters ? 'No orders match your search criteria.' : 'No orders found.'}
                                     </CardContent>
                                 </Card>
                             ) : (
-                                paginatedOrders.map((order) => (
+                                orders.map((order) => (
                                     <Card key={order._id} className="overflow-hidden border-border/60 shadow-sm">
                                         <CardContent className="space-y-3 p-4">
                                             <div className="flex items-start justify-between gap-3">
@@ -1530,14 +1538,14 @@ const ManageOrders = () => {
                                                 </div>
                                             </TableCell>
                                         </TableRow>
-                                    ) : paginatedOrders.length === 0 ? (
+                                    ) : orders.length === 0 ? (
                                         <TableRow>
                                             <TableCell colSpan={12} className="h-32 text-center text-muted-foreground">
                                                 {hasActiveFilters ? 'No orders match your search criteria.' : 'No orders found.'}
                                             </TableCell>
                                         </TableRow>
                                     ) : (
-                                        paginatedOrders.map(order => (
+                                        orders.map(order => (
                                             <TableRow key={order._id} className="transition-colors hover:bg-muted/30">
                                                 <TableCell>
                                                     <div className="space-y-0.5">

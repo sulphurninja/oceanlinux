@@ -123,6 +123,8 @@ class AutoProvisioningService {
       groupTag: cfg.groupTag || '',
       planByMemory,
       defaultOs,
+      variantStock: cfg.variantStock || {},
+      lastStockSync: cfg.lastStockSync || null,
     };
   }
 
@@ -1316,22 +1318,35 @@ class AutoProvisioningService {
       const useLiveStockApi = companyDoc?.netbayApi?.enabled && companyDoc?.netbayApi?.useLiveStockApi === true;
 
       if (useLiveStockApi) {
-        const stockProbe = await api.isServiceStockAvailable({
-          planId,
-          os: osName,
-          groupTag: groupTag || undefined,
-        });
-        if (stockProbe.available === false && !stockProbe.skipped) {
-          throw new Error(
-            `No VM capacity available at this location right now. Please try another plan or check back later.`,
-          );
+        const variant = stockCfg.variantStock?.[order.memory];
+        const lastSync = stockCfg.lastStockSync;
+        const fresh =
+          lastSync && Date.now() - new Date(lastSync).getTime() < 10 * 60 * 1000;
+
+        if (fresh && variant?.available === true) {
+          L.line('[NETBAY] Stock OK from recent sync cache (skipping live stock GET)');
+        } else {
+          const stockProbe = await api.isServiceStockAvailable({
+            planId,
+            os: osName,
+            groupTag: groupTag || undefined,
+          });
+          if (stockProbe.available === false && !stockProbe.skipped) {
+            throw new Error(
+              `No VM capacity available at this location right now. Please try another plan or check back later.`,
+            );
+          }
+          if (stockProbe.skipped || stockProbe.available === null) {
+            if (fresh && variant?.available === true) {
+              L.line('[NETBAY] Stock rate-limited — trusting fresh checkout cache');
+            } else {
+              throw new Error(
+                'Stock could not be verified right now. Please try again in a few minutes.'
+              );
+            }
+          }
+          L.kv('[NETBAY] Stock check OK', { planId, os: osName, groupTag: groupTag || '(any)' });
         }
-        if (stockProbe.skipped || stockProbe.available === null) {
-          throw new Error(
-            'Stock could not be verified right now. Please try again in a few minutes.'
-          );
-        }
-        L.kv('[NETBAY] Stock check OK', { planId, os: osName, groupTag: groupTag || '(any)' });
       } else {
         L.line('[NETBAY] Manual stock mode — skipping live stock API check');
       }

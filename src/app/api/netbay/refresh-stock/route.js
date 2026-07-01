@@ -1,21 +1,27 @@
 import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import { refreshNetbayStockForCustomer } from '@/lib/netbayLiveStock';
+import { enforceCronSecret } from '@/lib/apiSecurity';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
 
 /**
- * Customer-facing Netbay stock refresh — called when users open IP Stock.
- * Checks GET /api/v1/services/stock for each configured plan + OS.
+ * Netbay stock refresh — throttled globally (5 min). Used by cron and optional manual force.
  *
- * Query: ?force=1 — bypass throttle
+ * Query: ?force=1 — bypass throttle (cron / admin)
  */
 export async function GET(request) {
   try {
-    await connectDB();
     const { searchParams } = new URL(request.url);
     const force = searchParams.get('force') === '1';
+
+    if (force) {
+      const cronDenied = enforceCronSecret(request);
+      if (cronDenied) return cronDenied;
+    }
+
+    await connectDB();
     const result = await refreshNetbayStockForCustomer({ force });
     return NextResponse.json(result, {
       headers: { 'Cache-Control': 'no-store' },

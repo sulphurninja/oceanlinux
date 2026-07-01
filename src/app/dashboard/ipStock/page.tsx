@@ -133,16 +133,25 @@ function getStockUnitsRemaining(stock: IPStock) {
 }
 
 function isNetbayMemoryInStock(stock: IPStock, memory: string) {
-  const variant = stock.defaultConfigurations?.netbay?.variantStock?.[memory];
+  if (stock.available) return true;
+  const netbay = stock.defaultConfigurations?.netbay;
+  const variant = netbay?.variantStock?.[memory];
+  if (variant?.available === true) return true;
   if (!variant) return stock.available !== false;
-  if (variant.skipped || variant.available === null) return false;
+  if (variant.skipped || variant.available === null) {
+    const primary = netbay?.variantStock?.['2GB'];
+    if (primary?.available === true) return true;
+    return false;
+  }
   return variant.available === true;
 }
 
 function isStockPurchasable(stock: IPStock, memory?: string) {
   if (isNetbayLiveStock(stock)) {
     if (memory) return isNetbayMemoryInStock(stock, memory);
-    return stock.available !== false;
+    if (stock.available) return true;
+    const variants = Object.values(stock.defaultConfigurations?.netbay?.variantStock || {});
+    return variants.some((v) => v?.available === true);
   }
   if (isCompanyStock(stock)) return getStockUnitsRemaining(stock) > 0;
   return stock.available !== false;
@@ -252,20 +261,9 @@ function IPStockContent() {
         console.warn("[IP Stock] ADVPS refresh error", e);
       }
 
-      console.log("[IP Stock] Netbay refresh-stock (live capacity check)…");
-      try {
-        const netbayRefreshRes = await fetch("/api/netbay/refresh-stock", { cache: "no-store" });
-        const netbayRefreshBody = await netbayRefreshRes.json().catch(() => ({}));
-        if (netbayRefreshRes.ok) {
-          console.log("[IP Stock] Netbay refresh OK", netbayRefreshBody);
-        } else {
-          console.warn("[IP Stock] Netbay refresh failed", netbayRefreshRes.status, netbayRefreshBody);
-        }
-      } catch (e) {
-        console.warn("[IP Stock] Netbay refresh error", e);
-      } finally {
-        setIsRefreshingStock(false);
-      }
+      // Netbay stock is synced on a schedule (cron) and at checkout — not on every page load
+      // to avoid hitting NetBay's 120 stock-checks / 10 min rate limit.
+      setIsRefreshingStock(false);
 
       const [ipRes, slotRes] = await Promise.all([
         fetch("/api/ipstock", { cache: "no-store" }),

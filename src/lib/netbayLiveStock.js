@@ -1,6 +1,12 @@
 /**
  * Live Netbay VM stock checks via GET /api/v1/services/stock.
- * Used before customer purchase and when refreshing IP Stock listings.
+ *
+ * NetBay rate limits (10 min windows):
+ *   Stock: 120 GET /services/stock  |  Read: 600 GET /plans,/os,/services…
+ *   Action: 100 POST  |  Global: 1000 total
+ *
+ * We keep stock usage low: cron sync every 8 min (~6–12 checks), checkout
+ * syncs one plan only, no refresh on every customer page load, OS list cached 30 min.
  */
 
 const Company = require('@/models/companyModel').default;
@@ -11,6 +17,59 @@ const { toPlainConfigurations } = require('@/lib/advpsLiveStock');
 const { usesNetbayLiveStock } = require('@/lib/ipStockAvailability');
 
 const LOG = '[NETBAY-LIVE-STOCK]';
+
+/** Per-row DB cache — skip upstream poll if synced recently. */
+const STOCK_ROW_TTL_MS = 5 * 60 * 1000;
+/** Global refresh throttle for cron / admin force sync. */
+const GLOBAL_REFRESH_INTERVAL_MS = 8 * 60 * 1000;
+/** Max stock GETs per refresh batch — leave headroom for checkout (120 / 10 min). */
+const STOCK_REFRESH_BUDGET = 100;
+/** Trust cached variant results for checkout when upstream is rate-limited. */
+const STOCK_CACHE_TRUST_MS = 10 * 60 * 1000;
+
+function isRecentStockSync(iso, ttlMs = STOCK_CACHE_TRUST_MS) {
+  if (!iso) return false;
+  const t = new Date(iso).getTime();
+  return !Number.isNaN(t) && Date.now() - t < ttlMs;
+}
+
+function stockCheckKey({ planId, os, groupTag }) {
+  return `${planId}|${os}|${groupTag || ''}`;
+}
+
+/** One representative RAM tier for listing sync (saves stock API quota). */
+function pickPrimaryMemory(memories, planByMemory) {
+  const preferred = ['2GB', '4GB', '8GB', '1GB', '16GB'];
+  for (const m of preferred) {
+    if (memories.includes(m) && planByMemory[m]) return m;
+  }
+  return memories.find((m) => planByMemory[m]) || memories[0] || '';
+}
+
+function applyUpstreamResultToVariantResults({ result, memory, variantResults, prevNetbay, counters }) {
+  const prevVariant = prevNetbay.variantStock?.[memory];
+  if ((result.skipped || result.available === null) && prevVariant?.available === true) {
+    variantResults[memory] = {
+      ...prevVariant,
+      rateLimited: !!result.rateLimited,
+      skipped: !!result.skipped,
+      reason: result.reason || prevVariant.reason,
+      message: result.message || prevVariant.message,
+      checkedAt: new Date().toISOString(),
+    };
+    counters.upstreamYes += 1;
+    return;
+  }
+
+  variantResults[memory] = result;
+  if (result.skipped || result.available === null) {
+    counters.upstreamSkipped += 1;
+  } else if (result.available) {
+    counters.upstreamYes += 1;
+  } else {
+    counters.upstreamNo += 1;
+  }
+}
 
 function readNetbayStockConfig(ipStock) {
   const cfg = toPlainConfigurations(ipStock?.defaultConfigurations)?.netbay || {};
@@ -127,7 +186,7 @@ async function checkNetbayVariantStock(api, { stockCfg, memory, ipStock, isWindo
  * Sync one IPStock row from Netbay stock API. Marks `available` false when
  * upstream has no capacity (unless availabilityManual is set).
  */
-async function syncNetbayIpStockRow(stock) {
+async function syncNetbayIpStockRow(stock, { force = false, sharedCheckCache = null, sharedOsListCache = null, stockBudget = null, memoryOnly = null } = {}) {
   const ctx = await getNetbayApiForStock(stock);
   if (!ctx) return stock;
 
@@ -136,58 +195,164 @@ async function syncNetbayIpStockRow(stock) {
     return stock;
   }
 
+  const defaults = toPlainConfigurations(stock.defaultConfigurations);
+  const prevNetbay = defaults?.netbay || {};
+  if (!force && isRecentStockSync(prevNetbay.lastStockSync, STOCK_ROW_TTL_MS)) {
+    return stock;
+  }
+
   const stockCfg = readNetbayStockConfig(stock);
   const isWindows = isWindowsStock(stock);
-  const osListCache = {};
+  const osListCache = sharedOsListCache || {};
+  const checkCache = sharedCheckCache || new Map();
   const variantResults = {};
-  let upstreamYes = 0;
-  let upstreamNo = 0;
-  let upstreamSkipped = 0;
 
   const memories = Object.keys(stockCfg.planByMemory || {}).filter(
     (m) => stockCfg.planByMemory[m]
   );
 
-  for (const memory of memories) {
+  const memoriesToCheck = memoryOnly
+    ? memories.filter((m) => m === memoryOnly)
+    : [pickPrimaryMemory(memories, stockCfg.planByMemory)].filter(Boolean);
+
+  const counters = { upstreamYes: 0, upstreamNo: 0, upstreamSkipped: 0 };
+
+  for (const memory of memoriesToCheck) {
     try {
-      const result = await checkNetbayVariantStock(
+      const planId = resolveNetbayPlanId({ planByMemory: stockCfg.planByMemory, ram: memory });
+      const osName = await resolveNetbayOsName(
         ctx.api,
-        { stockCfg, memory, ipStock: stock, isWindows },
+        { stockCfg, isWindows },
         osListCache
       );
-      variantResults[memory] = result;
-      if (result.skipped || result.available === null) {
-        upstreamSkipped += 1;
-      } else if (result.available) {
-        upstreamYes += 1;
+      const cacheKey = stockCheckKey({ planId, os: osName, groupTag: stockCfg.groupTag });
+
+      let result;
+      if (planId && osName && checkCache.has(cacheKey)) {
+        result = { ...checkCache.get(cacheKey), memory };
+      } else if (stockBudget && stockBudget.used >= stockBudget.max) {
+        result = {
+          available: null,
+          skipped: true,
+          rateLimited: true,
+          reason: 'Refresh budget exhausted for this cycle',
+          memory,
+        };
+      } else if (!NetbayApi.isStockCheckAllowed()) {
+        result = {
+          available: null,
+          skipped: true,
+          rateLimited: true,
+          reason: 'Stock API rate limit — using cached availability',
+          memory,
+        };
       } else {
-        upstreamNo += 1;
+        result = await checkNetbayVariantStock(
+          ctx.api,
+          { stockCfg, memory, ipStock: stock, isWindows },
+          osListCache
+        );
+        if (stockBudget) stockBudget.used += 1;
+        if (planId && osName) checkCache.set(cacheKey, result);
       }
+
+      applyUpstreamResultToVariantResults({
+        result,
+        memory,
+        variantResults,
+        prevNetbay,
+        counters,
+      });
     } catch (err) {
       console.warn(`${LOG} stock check failed for ${stock.name} ${memory}:`, err.message);
-      upstreamSkipped += 1;
-      variantResults[memory] = { available: null, skipped: true, reason: err.message };
+      const prevVariant = prevNetbay.variantStock?.[memory];
+      if (prevVariant?.available === true && isRecentStockSync(prevNetbay.lastStockSync)) {
+        variantResults[memory] = { ...prevVariant, checkedAt: new Date().toISOString() };
+        counters.upstreamYes += 1;
+      } else {
+        counters.upstreamSkipped += 1;
+        variantResults[memory] = { available: null, skipped: true, reason: err.message };
+      }
     }
   }
 
-  // Live mode: availability follows NetBay API only (no manual stockCount).
+  // Listing sync: one location check → apply to all RAM tiers on the card
+  if (!memoryOnly && memoriesToCheck.length === 1) {
+    const primary = memoriesToCheck[0];
+    const primaryResult = variantResults[primary];
+    if (primaryResult) {
+      for (const memory of memories) {
+        if (memory === primary) continue;
+        variantResults[memory] = {
+          ...primaryResult,
+          memory,
+          planId: resolveNetbayPlanId({ planByMemory: stockCfg.planByMemory, ram: memory }),
+          mirroredFrom: primary,
+        };
+      }
+    }
+  } else if (memoryOnly) {
+    // Keep other tiers aligned with row availability after checkout sync
+    const single = variantResults[memoryOnly];
+    if (single && !single.skipped && single.available !== null) {
+      for (const memory of memories) {
+        if (memory === memoryOnly) continue;
+        variantResults[memory] = {
+          ...single,
+          memory,
+          planId: resolveNetbayPlanId({ planByMemory: stockCfg.planByMemory, ram: memory }),
+          mirroredFrom: memoryOnly,
+        };
+      }
+    }
+  }
+
+  let { upstreamYes, upstreamNo, upstreamSkipped } = counters;
   let shouldAvailable = false;
   if (upstreamYes > 0) {
     shouldAvailable = true;
   } else if (upstreamNo > 0) {
     shouldAvailable = false;
+  } else if (upstreamSkipped > 0) {
+    shouldAvailable = stock.availabilityManual ? !!stock.available : !!stock.available;
   } else {
     shouldAvailable = false;
   }
 
-  const defaults = toPlainConfigurations(stock.defaultConfigurations);
+  const hadRealUpstreamResult = upstreamYes > 0 || upstreamNo > 0;
+  if (!hadRealUpstreamResult && upstreamSkipped > 0) {
+    console.warn(
+      `${LOG} All stock checks skipped for "${stock.name}" (rate limit?) — DB left unchanged`
+    );
+    return stock;
+  }
+
+  // Never persist rate-limit placeholder over good variant data
+  for (const memory of Object.keys(variantResults)) {
+    const result = variantResults[memory];
+    const prev = prevNetbay.variantStock?.[memory];
+    if (
+      (result.skipped || result.available === null) &&
+      prev?.available === true
+    ) {
+      variantResults[memory] = {
+        ...prev,
+        rateLimited: !!result.rateLimited,
+        checkedAt: new Date().toISOString(),
+      };
+    }
+  }
+
   const updatePayload = {
     defaultConfigurations: {
       ...defaults,
       netbay: {
         ...stockCfg,
         lastStockSync: new Date().toISOString(),
-        variantStock: variantResults,
+        variantStock: {
+          ...(prevNetbay.variantStock || {}),
+          ...variantResults,
+        },
       },
     },
   };
@@ -205,7 +370,7 @@ async function syncNetbayIpStockRow(stock) {
 }
 
 /** Verify a specific memory tier is in stock upstream before checkout. */
-async function verifyNetbayMemoryInStock(stock, memory) {
+async function verifyNetbayMemoryInStock(stock, memory, { preferCache = false } = {}) {
   if (!isNetbayIpStock(stock)) {
     return { ok: true, skipped: true };
   }
@@ -224,6 +389,14 @@ async function verifyNetbayMemoryInStock(stock, memory) {
   }
 
   const stockCfg = readNetbayStockConfig(stock);
+  const defaults = toPlainConfigurations(stock.defaultConfigurations)?.netbay || {};
+  const cached = defaults.variantStock?.[memory];
+  const cacheFresh = isRecentStockSync(defaults.lastStockSync);
+
+  if (preferCache && cacheFresh && cached?.available === true) {
+    return { ok: true, result: cached, fromCache: true };
+  }
+
   const isWindows = isWindowsStock(stock);
 
   try {
@@ -245,6 +418,12 @@ async function verifyNetbayMemoryInStock(stock, memory) {
     }
 
     if (result.skipped || result.available === null) {
+      if (cacheFresh && cached?.available === true) {
+        return { ok: true, result: cached, fromCache: true };
+      }
+      if (result.rateLimited && cacheFresh && stock.available) {
+        return { ok: true, result: cached || result, fromCache: true };
+      }
       return {
         ok: false,
         message:
@@ -256,6 +435,9 @@ async function verifyNetbayMemoryInStock(stock, memory) {
     return { ok: true, result };
   } catch (err) {
     console.warn(`${LOG} verify failed:`, err.message);
+    if (cacheFresh && cached?.available === true) {
+      return { ok: true, result: cached, fromCache: true };
+    }
     return {
       ok: false,
       message: err.message || 'Unable to verify stock right now',
@@ -269,7 +451,7 @@ async function refreshNetbayStockForCustomer({ force = false } = {}) {
     global.netbayCustomerRefresh = { lastAt: 0, lastResult: null };
   }
   const cache = global.netbayCustomerRefresh;
-  const INTERVAL_MS = 60_000;
+  const INTERVAL_MS = GLOBAL_REFRESH_INTERVAL_MS;
   const now = Date.now();
 
   if (!force && cache.lastAt && now - cache.lastAt < INTERVAL_MS) {
@@ -301,10 +483,18 @@ async function refreshNetbayStockForCustomer({ force = false } = {}) {
   let updated = 0;
   let inStock = 0;
   const errors = [];
+  const sharedCheckCache = new Map();
+  const sharedOsListCache = {};
+  const stockBudget = { used: 0, max: STOCK_REFRESH_BUDGET };
 
   for (const row of netbayRows) {
     try {
-      const synced = await syncNetbayIpStockRow(row);
+      const synced = await syncNetbayIpStockRow(row, {
+        force,
+        sharedCheckCache,
+        sharedOsListCache,
+        stockBudget,
+      });
       updated += 1;
       if (synced?.available) inStock += 1;
     } catch (err) {
@@ -320,6 +510,7 @@ async function refreshNetbayStockForCustomer({ force = false } = {}) {
     total: netbayRows.length,
     updated,
     inStock,
+    stockChecksUsed: stockBudget.used,
     errors,
   };
 

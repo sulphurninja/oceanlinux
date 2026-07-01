@@ -27,10 +27,50 @@
  * Errors thrown from this client preserve the upstream `status` and `body`
  * fields on the Error instance so callers can return useful HTTP responses
  * to the admin / customer.
+ *
+ * Upstream rate limits (10 min windows):
+ *   Global 1000 | Read 600 (GET /plans, /os, /services…) | Action 100 (POST)
+ *   Stock 120 (GET /services/stock only)
  */
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+const LIST_OS_CACHE_TTL_MS = 30 * 60 * 1000;
 const { extractNetbayApiMessage } = require('@/lib/netbayApiErrors');
+
+/** @type {Map<string, { expires: number, payload: unknown }>} */
+const listOsCache = new Map();
+
+/** Last seen RateLimit-* headers + stock backoff after 429. */
+const rateLimitState = {
+  limit: null,
+  remaining: null,
+  resetAt: null,
+  stockLimitedUntil: 0,
+};
+
+function parseRateLimitHeaders(res) {
+  const limit = res.headers.get('ratelimit-limit') ?? res.headers.get('RateLimit-Limit');
+  const remaining = res.headers.get('ratelimit-remaining') ?? res.headers.get('RateLimit-Remaining');
+  const reset = res.headers.get('ratelimit-reset') ?? res.headers.get('RateLimit-Reset');
+  if (limit != null && limit !== '') rateLimitState.limit = Number(limit);
+  if (remaining != null && remaining !== '') rateLimitState.remaining = Number(remaining);
+  if (reset != null && reset !== '') rateLimitState.resetAt = Number(reset) * 1000;
+}
+
+function markStockRateLimited(resetEpochSec) {
+  const resetMs = resetEpochSec ? Number(resetEpochSec) * 1000 : Date.now() + 10 * 60 * 1000;
+  rateLimitState.stockLimitedUntil = Math.max(rateLimitState.stockLimitedUntil, resetMs);
+}
+
+function isStockCheckAllowed() {
+  if (Date.now() < rateLimitState.stockLimitedUntil) return false;
+  if (rateLimitState.remaining != null && rateLimitState.remaining <= 3) return false;
+  return true;
+}
+
+function getRateLimitSnapshot() {
+  return { ...rateLimitState };
+}
 
 function trimSlash(s) {
   return (s || '').replace(/\/+$/, '');
@@ -116,6 +156,8 @@ class NetbayApi {
     }
     clearTimeout(timer);
 
+    parseRateLimitHeaders(res);
+
     const text = await res.text();
     console.log('[NetbayApi/HTTP] ←', { status: res.status, bodyPreview: text?.slice(0, 600) });
 
@@ -127,6 +169,9 @@ class NetbayApi {
     if (!res.ok || (parsed && typeof parsed === 'object' && parsed.success === false)) {
       const apiMsg = extractNetbayApiMessage(parsed) || (typeof parsed === 'string' ? parsed.slice(0, 200) : null);
       const msg = apiMsg || `HTTP ${res.status}`;
+      if (res.status === 429 && String(path).includes('/services/stock')) {
+        markStockRateLimited(rateLimitState.resetAt ? rateLimitState.resetAt / 1000 : null);
+      }
       throw new NetbayApiError(msg, {
         status: res.status,
         body: parsed,
@@ -162,9 +207,15 @@ class NetbayApi {
     return this._request('/api/v1/plans', { query: { category } });
   }
 
-  /** Catalog: list available OS templates. */
+  /** Catalog: list available OS templates (cached 30 min — Read quota). */
   async listOs({ category } = {}) {
-    return this._request('/api/v1/os', { query: { category } });
+    const cacheKey = `${this.apiKey}|${category || 'all'}`;
+    const hit = listOsCache.get(cacheKey);
+    if (hit && hit.expires > Date.now()) return hit.payload;
+
+    const res = await this._request('/api/v1/os', { query: { category } });
+    listOsCache.set(cacheKey, { expires: Date.now() + LIST_OS_CACHE_TTL_MS, payload: res });
+    return res;
   }
 
   /** Account: list services owned by the authenticated reseller. */
@@ -214,6 +265,17 @@ class NetbayApi {
    * on upstream "no capacity" (503) responses.
    */
   async isServiceStockAvailable({ planId, os, groupTag }) {
+    if (!isStockCheckAllowed()) {
+      return {
+        available: null,
+        skipped: true,
+        rateLimited: true,
+        reason: 'Stock API rate limit — using cached availability',
+        details: null,
+        message: 'Stock check deferred (rate limit)',
+      };
+    }
+
     try {
       const res = await this.checkServiceStock({ planId, os, groupTag });
       const data = res?.data || {};
@@ -232,6 +294,17 @@ class NetbayApi {
           reason: body.reason || err.body?.message || 'No capacity or IP available',
           details: body.details || null,
           message: err.body?.message || err.message,
+        };
+      }
+      if (err.status === 429) {
+        markStockRateLimited(rateLimitState.resetAt ? rateLimitState.resetAt / 1000 : null);
+        return {
+          available: null,
+          skipped: true,
+          rateLimited: true,
+          reason: err.message || 'Rate limit exceeded',
+          details: null,
+          message: err.message,
         };
       }
       // Netbay stock route sometimes 500s (e.g. /services/stock parsed as :id) — don't block sales
@@ -446,8 +519,18 @@ class NetbayApi {
     if (candidates.length === 0) return '';
     return String(candidates[0]).split(':')[0].trim();
   }
+
+  /** Whether a GET /services/stock call is safe right now (120 / 10 min bucket). */
+  static isStockCheckAllowed() {
+    return isStockCheckAllowed();
+  }
+
+  static getRateLimitSnapshot() {
+    return getRateLimitSnapshot();
+  }
 }
 
 module.exports = NetbayApi;
 module.exports.NetbayApi = NetbayApi;
 module.exports.NetbayApiError = NetbayApiError;
+module.exports.getNetbayRateLimitSnapshot = getRateLimitSnapshot;

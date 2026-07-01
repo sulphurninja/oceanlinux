@@ -125,11 +125,17 @@ function isAdvpsVariantInStock(stock, memory) {
 function isNetbayVariantInStock(stock, memory, company) {
   if (!memory || !isNetbayIpStock(stock)) return true;
   if (!usesNetbayLiveStock(stock, company)) return isIpStockPurchasable(stock, 1, company);
+  if (stock.available) return true;
   const cfg = toPlainConfigurations(stock.defaultConfigurations)?.netbay;
   const variant = cfg?.variantStock?.[memory];
   if (!variant) return isIpStockPurchasable(stock, 1, company);
-  if (variant.skipped || variant.available === null) return false;
-  return variant.available === true;
+  if (variant.available === true) return true;
+  if (variant.skipped || variant.available === null) {
+    const primary = cfg?.variantStock?.['2GB'];
+    if (primary?.available === true) return true;
+    return false;
+  }
+  return false;
 }
 
 async function loadCompanyForStock(stock) {
@@ -161,7 +167,7 @@ export async function refreshAndVerifyIpStockPurchase(ipStockId, memory) {
     } else if (isSmartVpsPlan(stock)) {
       stock = await syncSmartVpsIpStockRow(stock);
     } else if (netbayLive) {
-      stock = await syncNetbayIpStockRow(stock);
+      stock = await syncNetbayIpStockRow(stock, { force: true, memoryOnly: memory || null });
     } else {
       stock = await IPStock.findById(ipStockId);
     }
@@ -215,28 +221,20 @@ export async function refreshAndVerifyIpStockPurchase(ipStockId, memory) {
   }
 
   if (netbayLive && memory && !isNetbayVariantInStock(stock, memory, company)) {
-    return {
-      ok: false,
-      message: customerStockUnavailableMessage(
-        `${memory} is currently out of stock at this location. Please refresh and pick another plan.`
-      ),
-      stock: stock.toObject?.() || stock,
-      synced: true,
-    };
-  }
-
-  if (netbayLive && memory) {
-    const netbayCheck = await verifyNetbayMemoryInStock(stock, memory);
-    if (!netbayCheck.ok) {
+    const liveVerify = await verifyNetbayMemoryInStock(stock, memory);
+    if (!liveVerify.ok) {
       return {
         ok: false,
         message: customerStockUnavailableMessage(
-          netbayCheck.message || 'This plan is currently out of stock at the provider.'
+          liveVerify.message ||
+            `${memory} is currently out of stock at this location. Please refresh and pick another plan.`
         ),
         stock: stock.toObject?.() || stock,
         synced: true,
-        netbayStock: netbayCheck.result || null,
       };
+    }
+    if (liveVerify.result?.available === true) {
+      company = company || (await loadCompanyForStock(stock));
     }
   }
 
