@@ -24,6 +24,9 @@ const { getCompanyResellerApiConfig } = require('@/lib/companyResellerApi');
 const ResellerApi = require('@/services/resellerApi');
 const { getCompanyNetbayApiConfig } = require('@/lib/companyNetbayApi');
 const NetbayApi = require('@/services/netbayApi');
+const { runNetbayPostRebuildFlow } = require('@/lib/netbayPostRebuildFlow');
+const { applyNetbayServiceToOrderUpdates, resolveNetbayPowerState } = require('@/lib/netbayOrderSync');
+const { toUserFacingNetbayError } = require('@/lib/netbayApiErrors');
 
 async function resolveOrderForAction(request, orderId) {
   // Internal bypass: trusted services (Hosthell) call via internal proxy with this header
@@ -542,7 +545,7 @@ export async function POST(request) {
       if (!supportedActions.has(action)) {
         return NextResponse.json({
           success: false,
-          error: `Action '${action}' is not supported for Netbay orders.`,
+          error: `Action '${action}' is not supported for this server.`,
         }, { status: 400 });
       }
 
@@ -550,7 +553,7 @@ export async function POST(request) {
       if (!netbayCfg) {
         return NextResponse.json({
           success: false,
-          error: 'Netbay API config is missing or disabled for this order\'s company. Configure it in /admin/companies.',
+          error: 'Server management is not available for this plan. Please contact support.',
         }, { status: 503 });
       }
       // `templates` is a catalog lookup that doesn't require a service id —
@@ -558,7 +561,7 @@ export async function POST(request) {
       if (!order.netbayServiceId && action !== 'templates') {
         return NextResponse.json({
           success: false,
-          error: 'This Netbay order has no serviceId yet — auto-provisioning may still be running. Try again in a minute.',
+          error: 'This server is still being set up. Please try again in a minute.',
         }, { status: 409 });
       }
 
@@ -570,7 +573,7 @@ export async function POST(request) {
       } catch (apiErr) {
         return NextResponse.json({
           success: false,
-          error: `Netbay API configuration is invalid: ${apiErr.message}`,
+          error: `Server management is temporarily unavailable: ${apiErr.message}`,
         }, { status: 500 });
       }
 
@@ -584,7 +587,7 @@ export async function POST(request) {
             });
             return NextResponse.json({
               success: true,
-              result: { success: true, message: 'Start command sent (Netbay)', apiResponse: apiRes, serviceId: order.netbayServiceId },
+              result: { success: true, message: 'Start command sent', apiResponse: apiRes, serviceId: order.netbayServiceId },
             });
           }
           case 'stop': {
@@ -595,7 +598,7 @@ export async function POST(request) {
             });
             return NextResponse.json({
               success: true,
-              result: { success: true, message: 'Stop command sent (Netbay)', apiResponse: apiRes, serviceId: order.netbayServiceId },
+              result: { success: true, message: 'Stop command sent', apiResponse: apiRes, serviceId: order.netbayServiceId },
             });
           }
           case 'restart':
@@ -607,53 +610,80 @@ export async function POST(request) {
             });
             return NextResponse.json({
               success: true,
-              result: { success: true, message: 'Reboot command sent (Netbay)', apiResponse: apiRes, serviceId: order.netbayServiceId },
+              result: { success: true, message: 'Reboot command sent', apiResponse: apiRes, serviceId: order.netbayServiceId },
             });
           }
           case 'status':
           case 'sync': {
-            // Netbay docs don't expose a dedicated power-state endpoint, but
-            // /services/:id returns the latest service object which usually
-            // includes status/state fields. Best-effort normalize, otherwise
-            // ping the IP for a coarse running/stopped signal.
             let powerState = 'unknown';
+            let rawStatus = null;
             let svc = null;
+            let dbUpdates = { lastSyncTime: new Date() };
+            let syncChanges = [];
             try {
               const detailRes = await netbayApi.getService(order.netbayServiceId);
-              svc = detailRes?.data || detailRes || {};
-              const raw = String(svc?.status || svc?.state || svc?.powerState || '').toLowerCase();
-              if (['running', 'on', 'active', 'started', 'online'].includes(raw)) powerState = 'running';
-              else if (['stopped', 'off', 'shutdown', 'offline'].includes(raw)) powerState = 'stopped';
-              else if (['suspended', 'paused'].includes(raw)) powerState = 'suspended';
-              else powerState = raw || 'unknown';
+              svc = NetbayApi.unwrapServiceResponse(detailRes);
+              const resolved = resolveNetbayPowerState(svc, {
+                ipAddress: ipAddress || NetbayApi.extractServiceIp(svc),
+                checkReachable: isServerReachable,
+              });
+              powerState = resolved.powerState;
+              rawStatus = resolved.rawStatus;
+
+              const applied = applyNetbayServiceToOrderUpdates(svc, order);
+              dbUpdates = applied.dbUpdates;
+              syncChanges = applied.changes;
             } catch (statusErr) {
               console.warn('[SERVICE-ACTION][POST] Netbay getService failed; falling back to ping:', statusErr.message);
+              if (ipAddress) {
+                const resolved = resolveNetbayPowerState(null, {
+                  ipAddress,
+                  checkReachable: isServerReachable,
+                });
+                powerState = resolved.powerState;
+                rawStatus = resolved.rawStatus;
+              }
             }
-            if (powerState === 'unknown' && ipAddress) {
-              powerState = isServerReachable(ipAddress) ? 'running' : 'stopped';
-            }
-            await Order.findByIdAndUpdate(orderId, { lastSyncTime: new Date() });
+            await Order.findByIdAndUpdate(orderId, dbUpdates);
+            const passwordChanged = syncChanges.includes('password');
+            const usernameChanged = syncChanges.includes('username');
+            const ipChanged = syncChanges.includes('ipAddress');
+            const expiryChanged = syncChanges.includes('expiryDate');
+            const credentialsUpdated = passwordChanged || usernameChanged || ipChanged;
             return NextResponse.json({
               success: true,
               powerState,
+              rawStatus,
               provider: 'netbay',
               serviceId: order.netbayServiceId,
               service: svc || null,
-              lastSync: new Date().toISOString(),
+              credentialsUpdated,
+              expiryDate: dbUpdates.expiryDate || order.expiryDate || null,
+              syncResult: {
+                credentialsUpdated,
+                expiryUpdated: expiryChanged,
+                changes: syncChanges,
+                lastSyncTime: dbUpdates.lastSyncTime.toISOString(),
+              },
+              lastSync: dbUpdates.lastSyncTime.toISOString(),
             });
           }
           case 'templates': {
-            // Catalog lookup — fetch all available OS templates for the
-            // dashboard's OS-picker dialog. Netbay uses the OS *name* as
-            // the identifier in /rebuild, so we key the response map by
-            // name instead of a numeric id.
-            const osRes = await netbayApi.listOs();
+            const osCategory = payload?.category || body?.category || undefined;
+            const osRes = await netbayApi.listOs(osCategory ? { category: osCategory } : {});
             const osList = osRes?.data?.os || osRes?.data || [];
             const flat = {};
             for (const os of (Array.isArray(osList) ? osList : [])) {
-              const label = os?.name || os?.id;
-              if (!label) continue;
-              flat[String(label)] = `${os.name}${os.category ? ` (${os.category})` : ''}`;
+              const id = String(os?.id || os?.name || '').trim();
+              const name = String(os?.name || id).trim();
+              if (!id) continue;
+              flat[id] = {
+                id,
+                name,
+                category: os?.category || '',
+                storageGb: os?.storageGb,
+                label: name,
+              };
             }
             return NextResponse.json({
               success: true,
@@ -664,19 +694,17 @@ export async function POST(request) {
           }
           case 'reinstall':
           case 'rebuild': {
-            // Optional `os` param — defaults upstream to current OS if blank.
-            // Accept either templateId (legacy from UI) or osName.
-            const osPayload = payload?.os || payload?.osName || body?.os || body?.osName ||
+            const osPayload = payload?.osName || payload?.os || body?.osName || body?.os ||
               templateId || payload?.templateId || null;
             const apiRes = await netbayApi.rebuild(order.netbayServiceId, osPayload ? { os: String(osPayload) } : {});
             const taskId = apiRes?.data?.taskId || null;
 
-            // Sync the order's `os` / `username` to whatever Netbay just
-            // installed — keeps the dashboard in step with the VM.
             const update = {
               $set: {
                 lastAction: 'reinstall',
                 lastActionTime: new Date(),
+                provisioningStatus: 'provisioning',
+                provisioningError: 'Reinstall in progress — fetching new password…',
               },
             };
             if (osPayload) {
@@ -688,6 +716,19 @@ export async function POST(request) {
             if (taskId) update.$set.netbayTaskId = taskId;
             await Order.findByIdAndUpdate(orderId, update);
 
+            // Background: poll task + pull auto-generated password from Netbay
+            const rebuildOrderId = orderId;
+            const rebuildServiceId = order.netbayServiceId;
+            void runNetbayPostRebuildFlow({
+              api: netbayApi,
+              Order,
+              orderId: rebuildOrderId,
+              serviceId: rebuildServiceId,
+              taskId,
+            }).catch((bgErr) => {
+              console.error('[SERVICE-ACTION][POST] Netbay post-rebuild flow failed:', bgErr.message);
+            });
+
             return NextResponse.json({
               success: true,
               result: {
@@ -695,7 +736,7 @@ export async function POST(request) {
                 serviceId: order.netbayServiceId,
                 taskId,
                 os: osPayload || null,
-                message: 'Rebuild submitted via Netbay API',
+                message: 'Rebuild submitted — new password will appear automatically when ready',
                 raw: apiRes,
               },
             });
@@ -703,11 +744,14 @@ export async function POST(request) {
         }
       } catch (netbayErr) {
         console.error(`[SERVICE-ACTION][POST] Netbay action '${action}' failed:`, netbayErr.message);
-        const status = typeof netbayErr.status === 'number' ? netbayErr.status : 500;
+        const facing = toUserFacingNetbayError(netbayErr);
         return NextResponse.json({
           success: false,
-          error: netbayErr.message || 'Netbay action failed',
-        }, { status });
+          error: facing.message,
+          message: facing.message,
+          code: facing.code,
+          nextAvailableAt: facing.nextAvailableAt || undefined,
+        }, { status: facing.status || 500 });
       }
     }
 
@@ -1806,26 +1850,24 @@ export async function GET(request) {
         try {
           const api = new NetbayApi(netbayCfg);
           const detailRes = await api.getService(order.netbayServiceId);
-          const svc = detailRes?.data || detailRes || {};
+          const svc = NetbayApi.unwrapServiceResponse(detailRes);
 
-          const raw = String(svc?.status || svc?.state || svc?.powerState || '').toLowerCase();
-          let powerState = 'unknown';
-          if (['running', 'on', 'active', 'started', 'online'].includes(raw)) powerState = 'running';
-          else if (['stopped', 'off', 'shutdown', 'offline'].includes(raw)) powerState = 'stopped';
-          else if (['suspended', 'paused'].includes(raw)) powerState = 'suspended';
-          else powerState = raw || 'unknown';
-          if (powerState === 'unknown' && ipAddress) {
-            powerState = isServerReachable(ipAddress) ? 'running' : 'stopped';
-          }
+          const resolved = resolveNetbayPowerState(svc, {
+            ipAddress: ipAddress || NetbayApi.extractServiceIp(svc),
+            checkReachable: isServerReachable,
+          });
+          const powerState = resolved.powerState;
 
-          // Sync IP / credentials onto the order if Netbay now has them and we
-          // didn't yet — Netbay sometimes assigns these a polling cycle late.
-          const dbUpdates = { lastSyncTime: new Date() };
-          const freshIp = NetbayApi.extractServiceIp(svc);
-          if (freshIp && freshIp !== order.ipAddress) dbUpdates.ipAddress = freshIp;
-          if (svc.username && svc.username !== order.username) dbUpdates.username = svc.username;
-          if (svc.password && svc.password !== order.password) dbUpdates.password = svc.password;
+          // Sync IP / credentials / expiry from Netbay (expiryDate is source of truth)
+          const applied = applyNetbayServiceToOrderUpdates(svc, order);
+          const dbUpdates = applied.dbUpdates;
           await Order.findByIdAndUpdate(orderId, dbUpdates);
+
+          const passwordChanged = applied.changes.includes('password');
+          const usernameChanged = applied.changes.includes('username');
+          const ipChanged = applied.changes.includes('ipAddress');
+          const expiryChanged = applied.changes.includes('expiryDate');
+          const credentialsUpdated = passwordChanged || usernameChanged || ipChanged;
 
           return NextResponse.json({
             success: true,
@@ -1835,19 +1877,23 @@ export async function GET(request) {
             ip: dbUpdates.ipAddress || ipAddress || svc.ip || null,
             status: powerState,
             powerState,
-            rawStatus: svc?.status || null,
+            rawStatus: resolved.rawStatus,
             details: svc,
+            credentialsUpdated,
+            expiryDate: dbUpdates.expiryDate || order.expiryDate || null,
             syncResult: {
-              credentialsUpdated: !!(dbUpdates.username || dbUpdates.password || dbUpdates.ipAddress),
-              lastSyncTime: new Date().toISOString(),
+              credentialsUpdated,
+              expiryUpdated: expiryChanged,
+              changes: applied.changes,
+              lastSyncTime: dbUpdates.lastSyncTime.toISOString(),
             },
-            lastSync: new Date().toISOString(),
+            lastSync: dbUpdates.lastSyncTime.toISOString(),
           });
         } catch (err) {
           console.error('[SERVICE-ACTION][GET] Netbay lookup failed:', err.message);
           return NextResponse.json({
             success: false,
-            error: err.message || 'Netbay lookup failed',
+            error: err.message || 'Could not load server status',
           }, { status: typeof err.status === 'number' ? err.status : 500 });
         }
       }

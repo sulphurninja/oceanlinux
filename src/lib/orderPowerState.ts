@@ -5,7 +5,7 @@ export type PowerState = 'running' | 'stopped' | 'suspended' | 'busy' | 'unknown
 export type IPStockLike = {
   tags?: string[];
   companyAutomation?: {
-    provider: 'virtualizor' | 'reseller-api';
+    provider: 'virtualizor' | 'reseller-api' | 'netbay';
     enabled: boolean;
   } | null;
 };
@@ -63,7 +63,8 @@ export function hasCompanyAnyAutomation(stock: IPStockLike | null): boolean {
   return !!(
     stock?.companyAutomation?.enabled &&
     (stock.companyAutomation.provider === 'virtualizor' ||
-      stock.companyAutomation.provider === 'reseller-api')
+      stock.companyAutomation.provider === 'reseller-api' ||
+      stock.companyAutomation.provider === 'netbay')
   );
 }
 
@@ -79,7 +80,8 @@ export function isOrderCompanyAutomated(
   const hasNativeServiceId =
     (prov === 'hostycare' && !!order.hostycareServiceId) ||
     (prov === 'smartvps' && !!(order.smartvpsServiceId || order.ipAddress)) ||
-    (prov === 'advps' && !!order.advpsServiceId);
+    (prov === 'advps' && !!order.advpsServiceId) ||
+    (prov === 'netbay' && !!order.netbayServiceId);
 
   return !hasNativeServiceId;
 }
@@ -106,6 +108,7 @@ export function canShowLivePowerState(
     (provider === 'hostycare' && !!order.hostycareServiceId) ||
     (provider === 'smartvps' && !!(order.smartvpsServiceId || order.ipAddress)) ||
     (provider === 'advps' && !!order.advpsServiceId) ||
+    (provider === 'netbay' && !!order.netbayServiceId) ||
     (companyAutomated && hasAssignedIp);
 
   return hasPowerApi && isActiveStatus;
@@ -114,7 +117,7 @@ export function canShowLivePowerState(
 /** Only oceanlinux / company-automation orders need an ipStock lookup. */
 export function orderNeedsIpStockForPowerState(order: OrderPowerLike): boolean {
   if (!order.ipStockId || isSlotIpOrder(order)) return false;
-  if (order.hostycareServiceId || order.smartvpsServiceId || order.advpsServiceId) {
+  if (order.hostycareServiceId || order.smartvpsServiceId || order.advpsServiceId || order.netbayServiceId) {
     return false;
   }
   return true;

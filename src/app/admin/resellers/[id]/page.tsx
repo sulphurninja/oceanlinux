@@ -92,7 +92,7 @@ export default function ResellerDetailsPage() {
 
     const fetchIpStocks = async () => {
         try {
-            const res = await fetch('/api/ipstock');
+            const res = await fetch('/api/ipstock?includeHidden=1');
             const data = await res.json();
             // API can return array or object wrapped array, handle safely
             if (Array.isArray(data)) {

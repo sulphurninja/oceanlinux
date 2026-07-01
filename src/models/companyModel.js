@@ -61,6 +61,8 @@ const companyNetbayApiSchema = new mongoose.Schema({
   baseUrl: { type: String, default: '' }, // e.g. https://api.netbayhosts.in
   apiKey: { type: String, default: '' },     // X-API-Key   — public key id
   apiSecret: { type: String, default: '' },  // X-API-Secret — private secret
+  /** When true, IP stock availability follows GET /services/stock. When false, use stockCount per plan. */
+  useLiveStockApi: { type: Boolean, default: false },
 }, { _id: false });
 
 const companySchema = new mongoose.Schema({
@@ -75,5 +77,10 @@ const companySchema = new mongoose.Schema({
 }, { timestamps: true });
 
 companySchema.index({ slug: 1 });
+
+// Next.js hot-reload can cache an old schema — re-register when new paths were added.
+if (mongoose.models.Company && !mongoose.models.Company.schema.paths['netbayApi.useLiveStockApi']) {
+  delete mongoose.models.Company;
+}
 
 export default mongoose.models.Company || mongoose.model('Company', companySchema);

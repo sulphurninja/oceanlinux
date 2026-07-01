@@ -53,6 +53,7 @@ import {
 } from "@/components/ui/select";
 import { toast } from 'sonner';
 import { premiumBadge, premiumBtnCredentials, premiumBtnOutline, premiumSelectContent } from '@/lib/premium-badges';
+import { getCustomerProviderDisplayNameFromOrder } from '@/lib/customerProviderDisplay';
 import { cn } from '@/lib/utils';
 import {
     hasDeliveredCredentials,
@@ -207,42 +208,8 @@ const ViewLinux = () => {
 
     const getDaysUntilExpiryLocal = getDaysUntilExpiry;
 
-    const getProviderDisplayName = (order: Order): string => {
-        if (order.slotIpPackageId || order.provider === 'slotip') {
-            return 'OceanLinux';
-        }
-
-        if (order.provider) {
-            switch (order.provider) {
-                case 'smartvps':
-                    return 'SmartVPS';
-                case 'hostycare':
-                    return 'Hostycare';
-                case 'oceanlinux':
-                    return 'OceanLinux';
-                case 'advps':
-                    return 'ADVPS';
-                default:
-                    return order.provider.charAt(0).toUpperCase() + order.provider.slice(1);
-            }
-        }
-
-        // Fallback logic based on service IDs or patterns
-        if (order.advpsServiceId) {
-            return 'ADVPS';
-        }
-        if (order.hostycareServiceId) {
-            return 'Hostycare';
-        }
-        if (order.smartvpsServiceId) {
-            return 'SmartVPS';
-        }
-        if (order.productName.includes('103.195') || order.ipAddress?.startsWith('103.195') || order.productName.includes('🏅')) {
-            return 'SmartVPS';
-        }
-
-        return 'OceanLinux';
-    };
+    const getProviderDisplayName = (order: Order): string =>
+        getCustomerProviderDisplayNameFromOrder(order);
 
 
 
@@ -407,7 +374,13 @@ const ViewLinux = () => {
 
     const provider = order ? getProviderDisplayName(order) : 'Unknown';
     const isSlotIp = !!(order?.slotIpPackageId || order?.provider === 'slotip');
-    const isAutoProvisionedProvider = isSlotIp || provider === 'Hostycare' || provider === 'SmartVPS' || provider === 'ADVPS';
+    const isAutoProvisionedProvider =
+        isSlotIp ||
+        provider === 'Hostycare' ||
+        provider === 'SmartVPS' ||
+        provider === 'ADVPS' ||
+        order?.provider === 'netbay' ||
+        !!order?.netbayServiceId;
 
     // If the order has delivered credentials and isn't explicitly in a bad
     // state, render Active regardless of the underlying provisioningStatus.

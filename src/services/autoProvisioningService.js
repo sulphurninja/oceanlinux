@@ -9,6 +9,7 @@ const Order = require('@/models/orderModel').default;
 const IPStock = require('@/models/ipStockModel');
 const Company = require('@/models/companyModel').default;
 const { getCompanyNetbayApiConfig } = require('@/lib/companyNetbayApi');
+const { pickNetbayExpiryDate } = require('@/lib/netbayOrderSync');
 
 const L = {
   head: (label) => {
@@ -149,17 +150,34 @@ class AutoProvisioningService {
   }
 
   /**
-   * Pick the OS template name to send to Netbay. Order:
-   *   1) Per-stock defaultOs[Linux|Windows] override
-   *   2) Hardcoded sensible defaults that match the Netbay docs
-   *      ("Ubuntu 22.04" / "Windows Server 2022")
+   * Linux vs Windows for provisioning. Prefer order.os and IP stock serverType
+   * over product name — "vps" in a name must not flip a Linux order to Windows.
    */
-  resolveNetbayOsName({ defaultOs, isWindows }) {
+  isWindowsOrder(order, ipStock) {
+    const os = String(order?.os || '').toLowerCase();
+    if (os.includes('windows')) return true;
+    if (os.includes('ubuntu') || os.includes('centos')) return false;
+
+    const serverType = String(ipStock?.serverType || '').toUpperCase();
+    if (serverType === 'VPS') return true;
+    if (serverType === 'LINUX') return false;
+
+    const productNameLower = String(order?.productName || '').toLowerCase();
+    return productNameLower.includes('windows') || productNameLower.includes('rdp');
+  }
+
+  /**
+   * Hints for Netbay OS template resolution (stock override + order enum).
+   * Actual catalog name is resolved via NetbayApi.resolveOsTemplateName().
+   */
+  netbayOsHints({ defaultOs, isWindows, orderOs }) {
+    const hints = [];
     if (defaultOs) {
-      if (isWindows && defaultOs.Windows) return defaultOs.Windows;
-      if (!isWindows && defaultOs.Linux) return defaultOs.Linux;
+      if (isWindows && defaultOs.Windows) hints.push(defaultOs.Windows);
+      if (!isWindows && defaultOs.Linux) hints.push(defaultOs.Linux);
     }
-    return isWindows ? 'Windows Server 2022' : 'Ubuntu 22.04';
+    if (orderOs) hints.push(orderOs);
+    return hints;
   }
 
   // Acquire a lock for a specific SmartVPS package
@@ -1219,11 +1237,7 @@ class AutoProvisioningService {
   async provisionViaNetbay(order, ipStock, startTime) {
     L.head(`NETBAY PATH — order ${order._id}`);
 
-    const productNameLower = String(order.productName || '').toLowerCase();
-    const isWindowsProduct =
-      productNameLower.includes('windows') ||
-      productNameLower.includes('rdp') ||
-      productNameLower.includes('vps');
+    const isWindowsProduct = this.isWindowsOrder(order, ipStock);
     L.kv('[NETBAY] isWindowsProduct', isWindowsProduct);
 
     await Order.findByIdAndUpdate(order._id, {
@@ -1253,17 +1267,36 @@ class AutoProvisioningService {
     let planId = order.netbayPlanId || '';
     let groupTag = order.netbayGroupTag || stockCfg.groupTag || '';
 
-    // 3) Resolve OS template name
-    const osName = this.resolveNetbayOsName({
-      defaultOs: stockCfg.defaultOs,
-      isWindows: isWindowsProduct,
-    });
-    L.kv('[NETBAY] Target OS', osName);
-
     // Map OS into the order's enum values for downstream UI
     const orderOs = isWindowsProduct ? 'Windows 2022 64' : 'Ubuntu 22';
 
     const api = new NetbayApi(cfg);
+
+    // 3) Resolve OS template name from Netbay catalog (exact template name required)
+    let osName = '';
+    try {
+      const osRes = await api.listOs({});
+      const osList = osRes?.data?.os || [];
+      osName = NetbayApi.resolveOsTemplateName(osList, {
+        preferred: this.netbayOsHints({
+          defaultOs: stockCfg.defaultOs,
+          isWindows: isWindowsProduct,
+          orderOs: order.os || orderOs,
+        }),
+        isWindows: isWindowsProduct,
+      });
+      L.kv('[NETBAY] Resolved OS from catalog', osName);
+    } catch (osErr) {
+      L.line('[NETBAY] OS catalog fetch failed:', osErr.message);
+    }
+
+    if (!osName) {
+      throw new Error(
+        `No matching Netbay OS template for ${isWindowsProduct ? 'Windows' : 'Linux'}. ` +
+        `Open the company Netbay catalog, copy an OS template Name, and set Default OS on the IP Stock — ` +
+        `or ensure Linux/Windows templates exist on Netbay.`
+      );
+    }
 
     // 4) Purchase (skip if we already have a serviceId from a previous attempt)
     if (!netbayServiceId) {
@@ -1279,6 +1312,30 @@ class AutoProvisioningService {
       }
       L.kv('[NETBAY] Resolved planId', planId);
 
+      const companyDoc = await Company.findById(ipStock.company).select('netbayApi').lean();
+      const useLiveStockApi = companyDoc?.netbayApi?.enabled && companyDoc?.netbayApi?.useLiveStockApi === true;
+
+      if (useLiveStockApi) {
+        const stockProbe = await api.isServiceStockAvailable({
+          planId,
+          os: osName,
+          groupTag: groupTag || undefined,
+        });
+        if (stockProbe.available === false && !stockProbe.skipped) {
+          throw new Error(
+            `No VM capacity available at this location right now. Please try another plan or check back later.`,
+          );
+        }
+        if (stockProbe.skipped || stockProbe.available === null) {
+          throw new Error(
+            'Stock could not be verified right now. Please try again in a few minutes.'
+          );
+        }
+        L.kv('[NETBAY] Stock check OK', { planId, os: osName, groupTag: groupTag || '(any)' });
+      } else {
+        L.line('[NETBAY] Manual stock mode — skipping live stock API check');
+      }
+
       const purchaseBody = {
         planId,
         os: osName,
@@ -1293,7 +1350,7 @@ class AutoProvisioningService {
       } catch (err) {
         // Surface upstream error verbatim — the message usually says exactly
         // what's wrong (insufficient balance, OS not supported, etc).
-        throw new Error(`Netbay purchase failed: ${err.message}`);
+        throw new Error(`Purchase failed: ${err.message}`);
       }
       const data = purchaseRes?.data || {};
       netbayServiceId = NetbayApi.extractServiceId(data) || data?.serviceId || '';
@@ -1338,9 +1395,9 @@ class AutoProvisioningService {
         const errMsg = taskTerminal?.error || taskTerminal?.message || 'Netbay task FAILED';
         await Order.findByIdAndUpdate(order._id, {
           provisioningStatus: 'failed',
-          provisioningError: `Netbay provision failed: ${errMsg}`,
+          provisioningError: `Provisioning failed: ${errMsg}`,
         });
-        throw new Error(`Netbay provisioning task failed: ${errMsg}`);
+        throw new Error(`Provisioning failed: ${errMsg}`);
       }
     }
 
@@ -1351,13 +1408,12 @@ class AutoProvisioningService {
     let expiryDate = null;
     try {
       const detailRes = await api.getService(netbayServiceId);
-      const svc = detailRes?.data || detailRes || {};
+      const svc = NetbayApi.unwrapServiceResponse(detailRes);
       ipAddress = NetbayApi.extractServiceIp(svc) || '';
       if (svc.username) username = svc.username;
       if (svc.password) password = svc.password;
       if (svc.expiresAt || svc.expiryDate) {
-        const candidate = new Date(svc.expiresAt || svc.expiryDate);
-        if (!Number.isNaN(candidate.getTime())) expiryDate = candidate;
+        expiryDate = pickNetbayExpiryDate(svc);
       }
       L.kv('[NETBAY] Service IP', ipAddress || '(pending)');
       L.kv('[NETBAY] Username', username);
@@ -1378,7 +1434,7 @@ class AutoProvisioningService {
     const updateData = {
       status: fullyProvisioned ? 'active' : 'confirmed',
       provisioningStatus: fullyProvisioned ? 'active' : 'provisioning',
-      provisioningError: fullyProvisioned ? '' : `NETBAY_PENDING: serviceId=${netbayServiceId} placed, awaiting ${!ipAddress ? 'IP assignment' : 'credentials'}. Cron will check.`,
+      provisioningError: fullyProvisioned ? '' : `PENDING: service placed, awaiting ${!ipAddress ? 'IP assignment' : 'credentials'}. Will retry automatically.`,
       provider: 'netbay',
       netbayServiceId,
       netbayTaskId: netbayTaskId || undefined,

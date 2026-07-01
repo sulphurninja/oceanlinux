@@ -9,7 +9,7 @@ import { isSlotIpOrder } from '@/lib/slotIpOrder';
  * smartvps / advps service id) AND its IPStock is linked to a Company,
  * the renewal needs that company's approval before expiry is extended.
  *
- * Hostycare / SmartVPS / ADVPS orders with real service IDs keep the
+ * Hostycare / SmartVPS / ADVPS / Netbay orders with real service IDs keep the
  * existing automated path even if their stock happens to belong to a
  * company — the upstream system handles the actual extension.
  *
@@ -23,6 +23,7 @@ export async function detectCompanyManagedRenewal(order) {
   if (order.hostycareServiceId) return { isCompany: false };
   if (order.smartvpsServiceId) return { isCompany: false };
   if (order.advpsServiceId) return { isCompany: false };
+  if (order.netbayServiceId) return { isCompany: false };
   if (!order.ipStockId) return { isCompany: false };
 
   const ipStock = await IPStock.findById(order.ipStockId)
@@ -40,7 +41,12 @@ export async function detectCompanyManagedRenewal(order) {
 /** True when the order is fulfilled via a native upstream API (not company-manual). */
 export function orderHasUpstreamAutomation(order) {
   if (!order) return false;
-  return !!(order.hostycareServiceId || order.smartvpsServiceId || order.advpsServiceId);
+  return !!(
+    order.hostycareServiceId ||
+    order.smartvpsServiceId ||
+    order.advpsServiceId ||
+    order.netbayServiceId
+  );
 }
 
 /**
@@ -52,6 +58,7 @@ export async function resolveRenewalProvider(order) {
   if (!order) return 'oceanlinux';
 
   if (order.provider === 'advps' || order.advpsServiceId) return 'advps';
+  if (order.provider === 'netbay' || order.netbayServiceId) return 'netbay';
   if (order.hostycareServiceId) return 'hostycare';
   if (order.smartvpsServiceId || order.provider === 'smartvps') return 'smartvps';
 

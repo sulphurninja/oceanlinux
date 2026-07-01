@@ -117,6 +117,19 @@ export async function POST(request) {
       });
     }
 
+    // 7b. Netbay — require service id from auto-provision.
+    if (provider === 'netbay') {
+      if (!order.netbayServiceId) {
+        return NextResponse.json({
+          message: 'This server is still being set up. Please wait a few minutes and try again.',
+        }, { status: 400 });
+      }
+      console.log('[RENEWAL-INIT] Netbay renewal eligible:', {
+        netbayServiceId: order.netbayServiceId,
+        diffDays,
+      });
+    }
+
     // 8. Generate a unique renewal transaction ID
     renewalTxnId = `RENEWAL_${Date.now()}_${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
 

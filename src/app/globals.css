@@ -1927,20 +1927,26 @@ html {
 
   html.premium-dashboard-active:not(.dark) .premium-dashboard .text-white\/90,
   html.premium-dashboard-active:not(.dark) .premium-dashboard-dialog .text-white\/90,
-  html.premium-dashboard-active:not(.dark) [role="dialog"] .text-white\/90 {
+  html.premium-dashboard-active:not(.dark) .premium-dashboard-alert .text-white\/90,
+  html.premium-dashboard-active:not(.dark) [role="dialog"] .text-white\/90,
+  html.premium-dashboard-active:not(.dark) [role="alertdialog"] .text-white\/90 {
     color: hsl(160 24% 16%);
   }
 
   html.premium-dashboard-active:not(.dark) .premium-dashboard .text-white\/80,
   html.premium-dashboard-active:not(.dark) .premium-dashboard-dialog .text-white\/80,
-  html.premium-dashboard-active:not(.dark) [role="dialog"] .text-white\/80 {
+  html.premium-dashboard-active:not(.dark) .premium-dashboard-alert .text-white\/80,
+  html.premium-dashboard-active:not(.dark) [role="dialog"] .text-white\/80,
+  html.premium-dashboard-active:not(.dark) [role="alertdialog"] .text-white\/80 {
     color: hsl(160 18% 22%);
   }
 
   html.premium-dashboard-active:not(.dark) .premium-dashboard .text-white\/70,
   html.premium-dashboard-active:not(.dark) .premium-dashboard .text-white\/65,
   html.premium-dashboard-active:not(.dark) .premium-dashboard-dialog .text-white\/70,
-  html.premium-dashboard-active:not(.dark) [role="dialog"] .text-white\/70 {
+  html.premium-dashboard-active:not(.dark) .premium-dashboard-alert .text-white\/70,
+  html.premium-dashboard-active:not(.dark) [role="dialog"] .text-white\/70,
+  html.premium-dashboard-active:not(.dark) [role="alertdialog"] .text-white\/70 {
     color: hsl(160 14% 28%);
   }
 
@@ -1952,10 +1958,18 @@ html {
   html.premium-dashboard-active:not(.dark) .premium-dashboard-dialog .text-white\/55,
   html.premium-dashboard-active:not(.dark) .premium-dashboard-dialog .text-white\/50,
   html.premium-dashboard-active:not(.dark) .premium-dashboard-dialog .text-white\/45,
+  html.premium-dashboard-active:not(.dark) .premium-dashboard-alert .text-white\/60,
+  html.premium-dashboard-active:not(.dark) .premium-dashboard-alert .text-white\/55,
+  html.premium-dashboard-active:not(.dark) .premium-dashboard-alert .text-white\/50,
+  html.premium-dashboard-active:not(.dark) .premium-dashboard-alert .text-white\/45,
   html.premium-dashboard-active:not(.dark) [role="dialog"] .text-white\/60,
   html.premium-dashboard-active:not(.dark) [role="dialog"] .text-white\/55,
   html.premium-dashboard-active:not(.dark) [role="dialog"] .text-white\/50,
-  html.premium-dashboard-active:not(.dark) [role="dialog"] .text-white\/45 {
+  html.premium-dashboard-active:not(.dark) [role="dialog"] .text-white\/45,
+  html.premium-dashboard-active:not(.dark) [role="alertdialog"] .text-white\/60,
+  html.premium-dashboard-active:not(.dark) [role="alertdialog"] .text-white\/55,
+  html.premium-dashboard-active:not(.dark) [role="alertdialog"] .text-white\/50,
+  html.premium-dashboard-active:not(.dark) [role="alertdialog"] .text-white\/45 {
     color: var(--pd-fg-muted);
   }
 
@@ -1963,7 +1977,9 @@ html {
   html.premium-dashboard-active:not(.dark) .premium-dashboard .text-white\/35,
   html.premium-dashboard-active:not(.dark) .premium-dashboard .text-white\/30,
   html.premium-dashboard-active:not(.dark) .premium-dashboard-dialog .text-white\/40,
-  html.premium-dashboard-active:not(.dark) [role="dialog"] .text-white\/40 {
+  html.premium-dashboard-active:not(.dark) .premium-dashboard-alert .text-white\/40,
+  html.premium-dashboard-active:not(.dark) [role="dialog"] .text-white\/40,
+  html.premium-dashboard-active:not(.dark) [role="alertdialog"] .text-white\/40 {
     color: hsl(160 10% 50%);
   }
 

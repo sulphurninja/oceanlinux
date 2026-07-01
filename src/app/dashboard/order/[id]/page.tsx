@@ -55,6 +55,7 @@ import { premiumBtnOutline, premiumBadge } from '@/lib/premium-badges';
 import { ADVPS_REBUILD_LIMIT, getAdvpsRebuildUsage } from '@/lib/advpsRebuildLimit';
 import { isWithinRenewalWindow } from '@/lib/expiryHelper';
 import { getOrderRenewalPrice, getOrderRenewalPriceNote, getCurrentListPriceFromStock } from '@/lib/orderRenewalPricing';
+import { getCustomerProviderDisplayName } from '@/lib/customerProviderDisplay';
 import { useSessionAlert } from '@/components/session-alert';
 import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -91,7 +92,7 @@ interface IPStock {
    *                      (Hostheaven / SomaniOne pattern)
    */
   companyAutomation?: {
-    provider: 'virtualizor' | 'reseller-api';
+    provider: 'virtualizor' | 'reseller-api' | 'netbay';
     enabled: boolean;
     companyName?: string;
     label?: string;
@@ -256,10 +257,21 @@ function styleText(content: string) {
 function getOsTemplateLabel(name: unknown, id: string): string {
   if (typeof name === 'string') return name;
   if (name && typeof name === 'object') {
-    const template = name as { name?: string; os?: string; distro?: string };
-    return template.name || template.os || template.distro || `Template ${id}`;
+    const template = name as { name?: string; label?: string; os?: string; distro?: string; category?: string };
+    return template.label || template.name || template.os || template.distro || `Template ${id}`;
   }
   return `Template ${id}`;
+}
+
+/** Netbay rebuild expects the catalog template name, not the internal id. */
+function getOsTemplateRebuildName(entry: unknown, id: string): string {
+  if (entry && typeof entry === 'object') {
+    const t = entry as { name?: string; label?: string };
+    if (t.name) return t.name;
+    if (t.label) return t.label;
+  }
+  if (typeof entry === 'string') return entry;
+  return id;
 }
 
 function orderOsMatchesTemplate(orderOs: string | undefined, templateId: string): boolean {
@@ -380,7 +392,8 @@ const OrderDetails = () => {
       const provider = getProviderFromOrder(order, ipStock);
       const hasNativeServiceId = (provider === 'hostycare' && order.hostycareServiceId) ||
         (provider === 'smartvps' && (order.smartvpsServiceId || order.ipAddress)) ||
-        (provider === 'advps' && order.advpsServiceId);
+        (provider === 'advps' && order.advpsServiceId) ||
+        (provider === 'netbay' && order.netbayServiceId);
       const isCompanyAutomated = hasCompanyAnyAutomation(ipStock) &&
         (provider === 'oceanlinux' || !hasNativeServiceId);
 
@@ -393,7 +406,7 @@ const OrderDetails = () => {
         fetchPendingRequest();
       }
     }
-  }, [order?.hostycareServiceId, order?.smartvpsServiceId, order?.advpsServiceId, order?.ipAddress, ipStock, loading]);
+  }, [order?.hostycareServiceId, order?.smartvpsServiceId, order?.advpsServiceId, order?.netbayServiceId, order?.ipAddress, ipStock, loading]);
 
   // Auto-refresh while ADVPS or SmartVPS is provisioning (poll every 15s)
   useEffect(() => {
@@ -573,23 +586,9 @@ const OrderDetails = () => {
     return 'oceanlinux';
   };
 
-  // Get provider display name
-  const getProviderDisplayName = (provider: string): string => {
-    switch (provider) {
-      case 'smartvps':
-        return 'SmartVPS';
-      case 'hostycare':
-        return 'Hostycare';
-      case 'oceanlinux':
-        return 'OceanLinux';
-      case 'advps':
-        return 'ADVPS';
-      case 'netbay':
-        return 'Netbay';
-      default:
-        return provider.charAt(0).toUpperCase() + provider.slice(1);
-    }
-  };
+  // Get provider display name (customer-facing — Netbay-backed orders show as OceanLinux)
+  const getProviderDisplayName = (provider: string): string =>
+    getCustomerProviderDisplayName(provider);
 
   const OS_DIALOG_AUTO_CLOSE_MS = 600_000; // 10 minutes — cross-OS SmartVPS changes are slow
   const osAutoCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -642,11 +641,22 @@ const OrderDetails = () => {
     setSelectedOs('');
 
     try {
+      const isWindowsStock =
+        order!.os?.includes('Windows') ||
+        ipStock?.serverType === 'VPS';
+      const osCategory = provider === 'netbay'
+        ? (isWindowsStock ? 'Windows' : 'Linux')
+        : undefined;
+
       const endpoint = provider === 'smartvps' ? 'smartvps-action' : provider === 'advps' ? 'advps-action' : 'service-action';
       const templatesRes = await fetch(`/api/orders/${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderId: order!._id, action: 'templates' })
+        body: JSON.stringify({
+          orderId: order!._id,
+          action: 'templates',
+          ...(osCategory ? { payload: { category: osCategory } } : {}),
+        })
       });
       const templatesData = await templatesRes.json();
 
@@ -684,12 +694,23 @@ const OrderDetails = () => {
         body: JSON.stringify({
           orderId: order!._id,
           action,
-          payload: { templateId: selectedOs } // server reads payload.templateId
+          payload: {
+            templateId: selectedOs,
+            osName: getOsTemplateRebuildName(osTemplates[selectedOs], selectedOs),
+          },
         })
       });
       const data = await res.json();
 
-      if (!data.success) throw new Error(data.error || 'Failed');
+      if (!data.success) {
+        const msg = data.message || data.error || 'Reinstall failed. Please try again.';
+        toast.error(msg, { duration: 10000 });
+        setOsProgress(msg);
+        setActionBusy(null);
+        setOsLoading(false);
+        return;
+      }
+
       startOsAutoCloseTimer();
       setOsProgress(osMode === 'format'
         ? 'OS change started. This can take 5–10 minutes — please keep this dialog open.'
@@ -784,6 +805,7 @@ const OrderDetails = () => {
     if (provider === 'hostycare' && order.hostycareServiceId) return true;
     if (provider === 'smartvps' && (order.smartvpsServiceId || order.ipAddress)) return true;
     if (provider === 'advps' && order.advpsServiceId) return true;
+    if (provider === 'netbay' && order.netbayServiceId) return true;
 
     // Fall back to per-company automation (Virtualizor or reseller HTTP API).
     // This kicks in for:
@@ -819,13 +841,21 @@ const OrderDetails = () => {
     return !!(stock?.companyAutomation?.enabled && stock?.companyAutomation?.provider === 'reseller-api');
   };
 
+  const hasCompanyNetbayAutomation = (stock: IPStock | null): boolean => {
+    return !!(stock?.companyAutomation?.enabled && stock?.companyAutomation?.provider === 'netbay');
+  };
+
   /**
-   * True when the order's company has ANY automation configured (Virtualizor
-   * or reseller API). Use this anywhere the difference between the two
-   * doesn't matter — the actual automation type is selected on the server.
+   * True when the order's company has ANY automation configured (Virtualizor,
+   * reseller API, or Netbay). Use this anywhere the difference between the
+   * three doesn't matter — the actual automation type is selected on the server.
    */
   const hasCompanyAnyAutomation = (stock: IPStock | null): boolean => {
-    return hasCompanyVirtualizorAutomation(stock) || hasCompanyResellerApiAutomation(stock);
+    return (
+      hasCompanyVirtualizorAutomation(stock) ||
+      hasCompanyResellerApiAutomation(stock) ||
+      hasCompanyNetbayAutomation(stock)
+    );
   };
 
   /**
@@ -844,7 +874,8 @@ const OrderDetails = () => {
     if (prov === 'oceanlinux') return true;
     const hasNativeServiceId = (prov === 'hostycare' && !!orderArg.hostycareServiceId) ||
       (prov === 'smartvps' && !!(orderArg.smartvpsServiceId || orderArg.ipAddress)) ||
-      (prov === 'advps' && !!orderArg.advpsServiceId);
+      (prov === 'advps' && !!orderArg.advpsServiceId) ||
+      (prov === 'netbay' && !!orderArg.netbayServiceId);
     return !hasNativeServiceId;
   };
 
@@ -872,7 +903,8 @@ const OrderDetails = () => {
     powerState?: string;
     powerStatus?: string;
     rawStatus?: string;
-    details?: { PowerStatus?: string; ActionStatus?: string };
+    status?: string;
+    details?: { PowerStatus?: string; ActionStatus?: string; status?: string };
   }): typeof serverPowerState | null => {
     const powerStatus = String(
       data.powerStatus || data.details?.PowerStatus || ''
@@ -880,8 +912,10 @@ const OrderDetails = () => {
     if (powerStatus === 'online' || powerStatus === 'on') return 'running';
     if (powerStatus === 'offline' || powerStatus === 'off') return 'stopped';
 
-    const raw = String(data.rawStatus || '').toLowerCase().trim();
-    if (['online', 'running', 'active', 'started', 'on'].includes(raw)) return 'running';
+    const raw = String(
+      data.rawStatus || data.status || data.details?.status || ''
+    ).toLowerCase().trim();
+    if (['online', 'running', 'active', 'started', 'on', 'up'].includes(raw)) return 'running';
     if (['offline', 'stopped', 'inactive', 'off', 'shutdown', 'down'].includes(raw)) return 'stopped';
     if (['suspended', 'paused'].includes(raw)) return 'suspended';
 
@@ -901,10 +935,11 @@ const OrderDetails = () => {
     const isHostycare = provider === 'hostycare' && order.hostycareServiceId;
     const isSmartVPS = provider === 'smartvps' && (order.smartvpsServiceId || order.ipAddress);
     const isAdvps = provider === 'advps' && order.advpsServiceId;
+    const isNetbay = provider === 'netbay' && !!order.netbayServiceId;
     const isCompanyAuto = hasCompanyAnyAutomation(ipStock) &&
-      (provider === 'oceanlinux' || (!isHostycare && !isSmartVPS && !isAdvps));
+      (provider === 'oceanlinux' || (!isHostycare && !isSmartVPS && !isAdvps && !isNetbay));
 
-    if (!isHostycare && !isSmartVPS && !isAdvps && !isCompanyAuto) {
+    if (!isHostycare && !isSmartVPS && !isAdvps && !isNetbay && !isCompanyAuto) {
       return null;
     }
 
@@ -940,6 +975,9 @@ const OrderDetails = () => {
       // syncResult.credentialsUpdated; ADVPS reports it top-level.
       if (data.credentialsUpdated || data.syncResult?.credentialsUpdated) {
         await fetchOrder();
+        if (provider === 'netbay' && (data.credentialsUpdated || data.syncResult?.credentialsUpdated)) {
+          setShowPassword(true);
+        }
       }
 
       return nextState;
@@ -1051,16 +1089,23 @@ const OrderDetails = () => {
             'The password shown may be outdated. Use Generate New Password below to get the current login password automatically.',
             { duration: 10000 }
           );
-        } else if (data.syncResult?.credentialsUpdated) {
+        } else if (data.syncResult?.credentialsUpdated || data.syncResult?.expiryUpdated) {
           if (data.syncResult.changes?.includes('password')) {
             setAdvpsPasswordIssue(false);
           }
           const changed = data.syncResult.changes?.length
             ? data.syncResult.changes.join(', ')
             : 'IP/credentials';
-          toast.success(`Synced from ADVPS: ${changed}`);
+          if (provider === 'netbay') {
+            if (data.syncResult.changes?.includes('password')) setShowPassword(true);
+            toast.success(`Synced: ${changed} updated`, { duration: 6000 });
+          } else {
+            toast.success(`Synced from ADVPS: ${changed}`);
+          }
         } else if (provider === 'advps') {
           toast.success('Synced with ADVPS — credentials already up to date');
+        } else if (provider === 'netbay') {
+          toast.success('Already up to date with your server');
         }
       } else {
         toast.error(data.error || data.message || 'Failed to load service details');
@@ -1160,8 +1205,12 @@ const OrderDetails = () => {
             data.error || 'ADVPS blocked this request. Whitelist your OceanLinux server IP in ADVPS API settings.',
             { duration: 10000 }
           );
+        } else if (data.code === 'NETBAY_REBUILD_LIMIT') {
+          toast.error(data.message || data.error || 'Rebuild limit reached (3 per 24 hours).', {
+            duration: 12000,
+          });
         } else {
-          toast.error(data.error || data.message || `Failed to execute "${action}"`);
+          toast.error(data.message || data.error || `Failed to execute "${action}"`);
         }
         // Refresh power state on error too
         if (['start', 'stop', 'restart', 'resetmac'].includes(action)) {
@@ -1263,6 +1312,7 @@ const OrderDetails = () => {
     if ((provider === 'smartvps' && action === 'format') ||
       (provider === 'advps' && action === 'format') ||
       (provider === 'hostycare' && action === 'reinstall' && order.hostycareServiceId) ||
+      (provider === 'netbay' && action === 'reinstall' && order.netbayServiceId) ||
       (action === 'reinstall' && isOrderCompanyAutomated(order, ipStock))) {
       await openOsDialog(provider);
       return;
@@ -1452,24 +1502,39 @@ const OrderDetails = () => {
         if (!orderRes.ok) throw new Error('Failed to fetch order');
         const latestOrder = await orderRes.json();
 
+        const pollProvider = getProviderFromOrder(order!, ipStock);
+        const expectedOsName = expectedTemplateId
+          ? getOsTemplateRebuildName(osTemplates[expectedTemplateId], expectedTemplateId).toLowerCase()
+          : '';
         const targetOsReached = expectedTemplateId
-          ? orderOsMatchesTemplate(latestOrder.os, expectedTemplateId)
+          ? orderOsMatchesTemplate(latestOrder.os, expectedTemplateId) ||
+            (pollProvider === 'netbay' && expectedOsName && (
+              String(latestOrder.os || '').toLowerCase().includes('ubuntu') && expectedOsName.includes('ubuntu') ||
+              String(latestOrder.os || '').toLowerCase().includes('windows') && expectedOsName.includes('windows')
+            ))
           : false;
         const credentialsUpdated =
           latestOrder.username !== originalOrder.username ||
           latestOrder.password !== originalOrder.password ||
           latestOrder.os !== originalOrder.os;
+        const netbayPasswordReady =
+          pollProvider === 'netbay' &&
+          !!latestOrder.password &&
+          latestOrder.password !== originalOrder.password;
         const statusImproved =
           latestOrder.provisioningStatus === 'active' &&
           originalOrder.provisioningStatus !== 'active';
         const stillProvisioning = latestOrder.provisioningStatus === 'provisioning';
 
         const formatComplete = expectedTemplateId
-          ? (targetOsReached || credentialsUpdated) && !stillProvisioning
+          ? netbayPasswordReady || ((targetOsReached || credentialsUpdated) && !stillProvisioning)
           : credentialsUpdated || statusImproved;
 
         if (formatComplete) {
           setOrder(latestOrder);
+          if (netbayPasswordReady || credentialsUpdated) {
+            setShowPassword(true);
+          }
           setProgress(
             targetOsReached
               ? `Installed ${getOsTemplateLabel(osTemplates[expectedTemplateId!] || expectedTemplateId, expectedTemplateId!)} successfully!`
@@ -1936,6 +2001,7 @@ const OrderDetails = () => {
         provider === 'hostycare' ||
         provider === 'smartvps' ||
         (provider === 'advps' && !!order?.advpsServiceId) ||
+        (provider === 'netbay' && !!order?.netbayServiceId) ||
         (companyAutomated && hasAssignedIp)
       ) &&
       isActiveStatus;
@@ -2122,6 +2188,7 @@ const OrderDetails = () => {
     (provider === 'hostycare' ||
     provider === 'smartvps' ||
     (provider === 'advps' && !!order.advpsServiceId) ||
+    (provider === 'netbay' && !!order.netbayServiceId) ||
     isOrderCompanyAutomated(order, ipStock));
   const currentListPrice = getCurrentListPriceFromStock(ipStock, order.memory);
   const renewalPrice = renewalPaymentTotals.total;
@@ -3179,6 +3246,13 @@ const OrderDetails = () => {
                             <strong>Warning:</strong> This will permanently delete all data on your server and install the selected operating system.
                           </AlertDescription>
                         </Alert>
+
+                        {order && provider === 'netbay' && (
+                          <p className="text-xs text-muted-foreground text-center">
+                            A new login password is generated automatically after reinstall — no need to enter one.
+                            {' '}Limit: <strong>3 reinstalls every 24 hours</strong>.
+                          </p>
+                        )}
 
                         {order && provider === 'advps' && (() => {
                           const { remaining: rebuildsRemaining } = getAdvpsRebuildUsage(order);

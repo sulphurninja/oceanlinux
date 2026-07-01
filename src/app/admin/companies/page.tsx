@@ -64,6 +64,7 @@ interface CompanyNetbayApi {
   baseUrl: string;
   apiKey: string;
   apiSecret: string;
+  useLiveStockApi?: boolean;
 }
 
 interface Company {
@@ -113,23 +114,29 @@ const RESELLER_API_DIALOG_DEFAULTS: CompanyResellerApi = {
 };
 
 const EMPTY_NETBAY_API = (): CompanyNetbayApi => ({
-  enabled: true,
+  enabled: false,
   label: '',
   baseUrl: '',
   apiKey: '',
   apiSecret: '',
+  useLiveStockApi: false,
 });
 
 // Defaults pre-filled when a company has no Netbay config saved yet — only
 // the documented base URL is filled; apiKey/apiSecret must come from the
 // company's own Netbay dashboard.
 const NETBAY_API_DIALOG_DEFAULTS: CompanyNetbayApi = {
-  enabled: true,
+  enabled: false,
   label: 'Netbay',
   baseUrl: 'https://api.netbayhosts.in',
   apiKey: '',
   apiSecret: '',
+  useLiveStockApi: false,
 };
+
+function companyHasNetbayEnabled(company: Pick<Company, 'netbayApi'> | null | undefined) {
+  return company?.netbayApi?.enabled === true;
+}
 
 interface VirtTestState {
   loading: boolean;
@@ -142,6 +149,7 @@ interface CompanyStock {
   available: boolean;
   stockCount: number;
   usesStockCount?: boolean;
+  netbayLiveStock?: boolean;
   serverType: string;
   tags: string[];
   memorySizes: string[];
@@ -183,8 +191,9 @@ export default function CompaniesPage() {
   const [stocksCompany, setStocksCompany] = useState<Company | null>(null);
   const [companyStocks, setCompanyStocks] = useState<CompanyStock[]>([]);
   const [stocksLoading, setStocksLoading] = useState(false);
-  const [savingStockId, setSavingStockId] = useState<string | null>(null);
-  const [stockCountDrafts, setStockCountDrafts] = useState<Record<string, string>>({});
+  const [savingBulkStock, setSavingBulkStock] = useState(false);
+  const [bulkStockCount, setBulkStockCount] = useState('');
+  const [stocksNetbayLiveApi, setStocksNetbayLiveApi] = useState(false);
 
   const fetchCompanies = async () => {
     try {
@@ -281,7 +290,7 @@ export default function CompaniesPage() {
     setCompanyStocks([]);
     setStocksLoading(true);
     try {
-      const res = await fetch(`/api/admin/companies/${company._id}/stocks`);
+      const res = await fetch(`/api/admin/companies/${company._id}/stocks`, { credentials: 'include' });
       const data = await res.json();
       if (!res.ok) {
         toast.error(data.error || 'Failed to load stocks');
@@ -289,7 +298,10 @@ export default function CompaniesPage() {
         return;
       }
       setCompanyStocks(data.stocks || []);
-      setStockCountDrafts(Object.fromEntries((data.stocks || []).map((s: CompanyStock) => [s._id, String(s.stockCount ?? 0)])));
+      setStocksNetbayLiveApi(!!data.netbayUseLiveStockApi);
+      const counts = (data.stocks || []).map((s: CompanyStock) => s.stockCount ?? 0);
+      const allSame = counts.length > 0 && counts.every((c: number) => c === counts[0]);
+      setBulkStockCount(allSame ? String(counts[0]) : '');
     } catch {
       toast.error('Failed to load stocks');
       setStocksCompany(null);
@@ -301,34 +313,38 @@ export default function CompaniesPage() {
   const closeStocksDialog = () => {
     setStocksCompany(null);
     setCompanyStocks([]);
-    setSavingStockId(null);
-    setStockCountDrafts({});
+    setStocksNetbayLiveApi(false);
+    setSavingBulkStock(false);
+    setBulkStockCount('');
   };
 
-  const updateCompanyStockCount = async (stockId: string) => {
+  const updateAllCompanyStockCounts = async () => {
     if (!stocksCompany) return;
-    const stockCount = Math.max(0, Math.floor(Number(stockCountDrafts[stockId]) || 0));
-    setSavingStockId(stockId);
+    const stockCount = Math.max(0, Math.floor(Number(bulkStockCount) || 0));
+    setSavingBulkStock(true);
     try {
       const res = await fetch(`/api/admin/companies/${stocksCompany._id}/stocks`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ stockId, stockCount }),
+        credentials: 'include',
+        body: JSON.stringify({ stockCount, applyToAll: true }),
       });
       const data = await res.json();
       if (!res.ok) {
         toast.error(data.error || 'Failed to update stock');
         return;
       }
-      setCompanyStocks(prev =>
-        prev.map(s => (s._id === stockId ? { ...s, ...data.stock } : s))
+      setCompanyStocks(data.stocks || []);
+      setBulkStockCount(String(data.stockCount ?? stockCount));
+      toast.success(
+        stockCount > 0
+          ? `All ${data.updated ?? data.stocks?.length ?? 0} plans set to ${stockCount} units`
+          : 'All plans marked out of stock'
       );
-      setStockCountDrafts(prev => ({ ...prev, [stockId]: String(data.stock.stockCount) }));
-      toast.success(stockCount > 0 ? `Stock set to ${stockCount}` : 'Marked out of stock');
     } catch {
       toast.error('Failed to update stock');
     } finally {
-      setSavingStockId(null);
+      setSavingBulkStock(false);
     }
   };
 
@@ -579,18 +595,14 @@ export default function CompaniesPage() {
   // -------------------- Netbay API handlers --------------------
   const openNetbayDialog = (c: Company) => {
     const r = c.netbayApi || null;
-    const hasAny = !!(r && (r.baseUrl || r.apiKey || r.apiSecret));
-    if (!hasAny) {
-      setNetbayForm({ ...NETBAY_API_DIALOG_DEFAULTS });
-    } else {
-      setNetbayForm({
-        enabled: typeof r?.enabled === 'boolean' ? r.enabled : !!r,
-        label: r?.label || '',
-        baseUrl: r?.baseUrl || '',
-        apiKey: r?.apiKey || '',
-        apiSecret: r?.apiSecret || '',
-      });
-    }
+    setNetbayForm({
+      enabled: r?.enabled === true,
+      label: r?.label || 'Netbay',
+      baseUrl: r?.baseUrl || NETBAY_API_DIALOG_DEFAULTS.baseUrl,
+      apiKey: r?.apiKey || '',
+      apiSecret: r?.apiSecret || '',
+      useLiveStockApi: r?.useLiveStockApi === true,
+    });
     setNetbayTestResult(null);
     setShowNetbaySecret(false);
     setNetbayCompany(c);
@@ -602,6 +614,13 @@ export default function CompaniesPage() {
     setNetbayForm(EMPTY_NETBAY_API());
     setNetbayTestResult(null);
     setShowNetbaySecret(false);
+  };
+
+  const openStocksFromNetbay = () => {
+    if (!netbayCompany || netbaySaving || netbayTesting) return;
+    const company = netbayCompany;
+    closeNetbayDialog();
+    void openStocksDialog(company);
   };
 
   const updateNetbayField = <K extends keyof CompanyNetbayApi>(key: K, value: CompanyNetbayApi[K]) => {
@@ -651,20 +670,32 @@ export default function CompaniesPage() {
     }
     setNetbaySaving(true);
     try {
+      const payload = {
+        ...netbayForm,
+        enabled: netbayForm.enabled === true || netbayForm.useLiveStockApi === true,
+        useLiveStockApi:
+          (netbayForm.enabled === true || netbayForm.useLiveStockApi === true) &&
+          netbayForm.useLiveStockApi === true,
+      };
       const res = await fetch(`/api/admin/companies/${netbayCompany._id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ netbayApi: netbayForm }),
+        body: JSON.stringify({ netbayApi: payload }),
       });
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        toast.success('Netbay API configuration saved');
-        setNetbayCompany(null);
-        setNetbayForm(EMPTY_NETBAY_API());
-        setNetbayTestResult(null);
-        setShowNetbaySecret(false);
-        fetchCompanies();
+        const saved = data as Company;
+        const liveOn = saved.netbayApi?.useLiveStockApi === true;
+        setCompanies((prev) =>
+          prev.map((c) => (String(c._id) === String(saved._id) ? saved : c))
+        );
+        openNetbayDialog(saved);
+        toast.success(
+          liveOn
+            ? 'Netbay saved — Live API stock ON (availability follows NetBay stock API)'
+            : 'Netbay saved — Manual stock (set units in Stocks button)'
+        );
       } else {
-        const data = await res.json().catch(() => ({}));
         toast.error(data.error || 'Failed to save');
       }
     } catch (err: any) {
@@ -859,10 +890,11 @@ export default function CompaniesPage() {
                       if (n?.enabled) {
                         let host = n.baseUrl || 'api.netbayhosts.in';
                         try { if (n.baseUrl) host = new URL(n.baseUrl).host; } catch { /* keep as-is */ }
+                        const stockMode = n.useLiveStockApi ? 'API stock' : 'Manual stock';
                         return (
                           <Badge variant="outline" className="gap-1 text-amber-600 border-amber-200">
                             <Zap className="h-3 w-3" />
-                            Netbay: {host}
+                            Netbay: {host} · {stockMode}
                           </Badge>
                         );
                       }
@@ -1352,6 +1384,19 @@ export default function CompaniesPage() {
                   /admin/manageIpStock.
                 </p>
                 <p className="text-xs text-muted-foreground mt-2">
+                  <span className="font-medium text-foreground">API docs:</span>{' '}
+                  <a
+                    href="https://netbayhosts.in/api-docs"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 hover:underline"
+                  >
+                    netbayhosts.in/api-docs
+                  </a>
+                  {' '}— generate key/secret from NetBay dashboard. Base URL:{' '}
+                  <code>https://api.netbayhosts.in</code>
+                </p>
+                <p className="text-xs text-muted-foreground mt-2">
                   <span className="font-medium text-foreground">Env fallback:</span>{' '}
                   leave the API Key / Secret fields blank to use the global{' '}
                   <code>NETBAY_API_KEY</code> / <code>NETBAY_API_SECRET</code>{' '}
@@ -1378,11 +1423,92 @@ export default function CompaniesPage() {
                     Disable to stop using Netbay API without losing the saved config.
                   </p>
                 </div>
-                <Switch
-                  checked={netbayForm.enabled}
-                  onCheckedChange={(c) => updateNetbayField('enabled', c)}
-                />
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className={`text-xs font-bold uppercase tracking-wide min-w-[2rem] text-right ${
+                    netbayForm.enabled ? 'text-emerald-600' : 'text-muted-foreground'
+                  }`}>
+                    {netbayForm.enabled ? 'ON' : 'OFF'}
+                  </span>
+                  <Switch
+                    checked={!!netbayForm.enabled}
+                    onCheckedChange={(c) => {
+                      setNetbayForm((prev) => ({
+                        ...prev,
+                        enabled: c,
+                        ...(c ? {} : { useLiveStockApi: false }),
+                      }));
+                      setNetbayTestResult(null);
+                    }}
+                  />
+                </div>
               </div>
+
+              <div className={`flex items-center justify-between rounded-md border p-2.5 ${
+                netbayForm.enabled
+                  ? 'border-emerald-200/60 bg-emerald-50/40 dark:bg-emerald-950/20 dark:border-emerald-800/40'
+                  : 'border-dashed opacity-80'
+              }`}>
+                <div className="text-sm pr-3">
+                  <p className="font-medium">Live stock from NetBay API</p>
+                  {!netbayForm.enabled && !netbayForm.useLiveStockApi && (
+                    <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">
+                      Pehle upar <strong>Enabled</strong> ON karo, ya seedha yeh switch ON karo (Enabled auto ON ho jayega).
+                    </p>
+                  )}
+                  {netbayForm.enabled && (
+                    <>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        <strong>ON</strong> — stock NetBay API se auto sync (ADVPS jaisa). NetBay ke stock API fix
+                        hone ke baad hi ON karna.
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        <strong>OFF (abhi)</strong> — manual units <strong>Stocks</strong> button se (e.g. 10).
+                        Buy &amp; VM provision phir bhi NetBay se chalega.
+                      </p>
+                    </>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className={`text-xs font-bold uppercase tracking-wide min-w-[2rem] text-right ${
+                    netbayForm.useLiveStockApi ? 'text-emerald-600' : 'text-muted-foreground'
+                  }`}>
+                    {netbayForm.useLiveStockApi ? 'ON' : 'OFF'}
+                  </span>
+                  <Switch
+                    checked={!!netbayForm.useLiveStockApi}
+                    onCheckedChange={(c) => {
+                      setNetbayForm((prev) => ({
+                        ...prev,
+                        ...(c ? { enabled: true } : {}),
+                        useLiveStockApi: c,
+                      }));
+                      setNetbayTestResult(null);
+                    }}
+                  />
+                </div>
+              </div>
+
+              {netbayForm.enabled && !netbayForm.useLiveStockApi && (
+                <div className="rounded-md border border-emerald-300/70 bg-emerald-50/60 dark:bg-emerald-950/30 dark:border-emerald-800/50 p-3 space-y-2">
+                  <p className="text-sm font-medium text-emerald-900 dark:text-emerald-100">
+                    Manual stock units
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Ek hi number daalo (e.g. <strong>5</strong>) — saare linked plans par wahi stock dikhega.
+                  </p>
+                  <Button type="button" variant="outline" size="sm" className="gap-2" onClick={openStocksFromNetbay}>
+                    <Package className="h-4 w-4" />
+                    Set units &amp; Save
+                  </Button>
+                </div>
+              )}
+
+              {netbayForm.enabled && netbayForm.useLiveStockApi && (
+                <div className="rounded-md border border-amber-300/70 bg-amber-50/50 dark:bg-amber-950/20 p-3 text-xs text-muted-foreground">
+                  Live API stock ON — customer ko stock sirf NetBay API se dikhega (manual units use nahi honge).
+                  NetBay stock API abhi error de rahi hai, isliye plan Out of Stock dikh sakta hai jab tak NetBay fix na kare.
+                </div>
+              )}
 
               <div>
                 <Label className="text-xs">Label (optional)</Label>
@@ -1504,10 +1630,34 @@ export default function CompaniesPage() {
             <div className="space-y-4">
               <div className="rounded-md border p-3 text-sm">
                 <p className="font-medium">{stocksCompany.name}</p>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Set how many units customers can order for each IP stock linked to this company.
-                  When the count reaches 0, the plan shows as out of stock and purchases are blocked.
-                  Link stocks in{' '}
+                {stocksNetbayLiveApi ? (
+                  <p className="text-xs text-amber-700 dark:text-amber-400 mt-2 rounded-md border border-amber-200/80 bg-amber-50/80 dark:bg-amber-950/30 p-2">
+                    <strong>Live API ON</strong> — units yahan save nahi hote. Manual units ke liye Netbay dialog me Live stock{' '}
+                    <strong>OFF</strong> karo aur Save karo.
+                  </p>
+                ) : (
+                  <p className="text-xs text-emerald-700 dark:text-emerald-400 mt-2 rounded-md border border-emerald-200/80 bg-emerald-50/80 dark:bg-emerald-950/30 p-2">
+                    <strong>Manual stock</strong> — ek hi units number daalo; sab plans par wahi apply hoga.
+                  </p>
+                )}
+                <p className="text-xs text-muted-foreground mt-2">
+                  {companyHasNetbayEnabled(stocksCompany) ? (
+                    stocksNetbayLiveApi ? (
+                      <>
+                        NetBay live API mode — stock NetBay se aata hai.
+                      </>
+                    ) : (
+                      <>
+                        NetBay manual mode — neeche units set karo.
+                      </>
+                    )
+                  ) : (
+                    <>
+                      Set how many units customers can order for each IP stock linked to this company.
+                      When the count reaches 0, the plan shows as out of stock and purchases are blocked.
+                    </>
+                  )}
+                  {' '}Link stocks in{' '}
                   <Link href="/admin/manageIpStock" className="text-blue-600 hover:underline">
                     /admin/manageIpStock
                   </Link>.
@@ -1526,7 +1676,37 @@ export default function CompaniesPage() {
                   <span className="text-xs">Assign a company when creating or editing stock in manageIpStock.</span>
                 </div>
               ) : (
-                <div className="space-y-2">
+                <div className="space-y-4">
+                  {!stocksNetbayLiveApi && (
+                    <div className="flex flex-col sm:flex-row sm:items-end gap-3 rounded-lg border border-emerald-200/80 bg-emerald-50/40 dark:bg-emerald-950/20 p-4">
+                      <div className="flex-1 space-y-1.5">
+                        <Label htmlFor="admin-bulk-stock">Units (sab plans ke liye)</Label>
+                        <Input
+                          id="admin-bulk-stock"
+                          type="number"
+                          min={0}
+                          step={1}
+                          placeholder="e.g. 5"
+                          value={bulkStockCount}
+                          onChange={(e) => setBulkStockCount(e.target.value)}
+                          className="h-10"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          {companyStocks.length} plan{companyStocks.length === 1 ? '' : 's'} — sab par same units set honge.
+                        </p>
+                      </div>
+                      <Button
+                        onClick={updateAllCompanyStockCounts}
+                        disabled={savingBulkStock || bulkStockCount === ''}
+                        className="sm:mb-0.5"
+                      >
+                        {savingBulkStock ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                        Save all
+                      </Button>
+                    </div>
+                  )}
+
+                  <div className="space-y-2">
                   {companyStocks.map((stock) => {
                     const count = stock.stockCount ?? 0;
                     const inStock = count > 0;
@@ -1539,6 +1719,11 @@ export default function CompaniesPage() {
                         <div className="flex items-center gap-2 flex-wrap">
                           <p className="font-medium text-sm truncate">{stock.name}</p>
                           <Badge variant="outline" className="text-[10px] h-4">{stock.serverType}</Badge>
+                          {stock.netbayLiveStock && (
+                            <Badge variant="outline" className="text-[10px] h-4 text-amber-700 border-amber-200">
+                              NetBay API stock
+                            </Badge>
+                          )}
                           {inStock ? (
                             <Badge className="text-[10px] h-4 bg-emerald-500/10 text-emerald-700 border-emerald-200">
                               {count} in stock
@@ -1555,27 +1740,9 @@ export default function CompaniesPage() {
                             : 'No memory options configured'}
                         </p>
                       </div>
-                      <div className="flex items-center gap-2 flex-shrink-0">
-                        <Label htmlFor={`admin-stock-${stock._id}`} className="text-xs whitespace-nowrap">Units</Label>
-                        <Input
-                          id={`admin-stock-${stock._id}`}
-                          type="number"
-                          min={0}
-                          step={1}
-                          value={stockCountDrafts[stock._id] ?? String(count)}
-                          onChange={(e) => setStockCountDrafts(prev => ({ ...prev, [stock._id]: e.target.value }))}
-                          className="w-24 h-9"
-                        />
-                        <Button
-                          size="sm"
-                          onClick={() => updateCompanyStockCount(stock._id)}
-                          disabled={savingStockId === stock._id}
-                        >
-                          {savingStockId === stock._id ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save'}
-                        </Button>
-                      </div>
                     </div>
                   );})}
+                  </div>
                 </div>
               )}
             </div>

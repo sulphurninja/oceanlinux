@@ -16,7 +16,7 @@ export async function GET(request) {
     const minRam = searchParams.get('min_ram') || searchParams.get('minRam') || undefined;
     const maxPrice = searchParams.get('max_price') || searchParams.get('maxPrice') || undefined;
 
-    const stocks = await IPStock.find({ available: true }).sort({ name: 1 });
+    const stocks = await IPStock.find({ available: true, hiddenFromStore: { $ne: true } }).sort({ name: 1 });
     const products = stocks.map(formatServerProduct);
     const servers = filterServerProducts(products, { location, minRam, maxPrice });
 

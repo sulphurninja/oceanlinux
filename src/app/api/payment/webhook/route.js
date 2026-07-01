@@ -29,6 +29,7 @@ const AdvpsAPI = require('@/services/advpsApi');
 const RenewalLogger = require('@/services/renewalLogger');
 const { getAdvpsRebuildResetFields, isAdvpsOrder } = require('@/lib/advpsRebuildLimit');
 const { executeAdvpsUpstreamRenewal } = require('@/lib/advpsRenewal');
+const { executeNetbayUpstreamRenewal } = require('@/lib/netbayRenewal');
 
 export async function POST(request) {
   const webhookStartTime = Date.now();
@@ -603,6 +604,39 @@ async function handleRenewalWebhook(renewalTxnId, payment, webhookStartTime) {
         console.error(`[WEBHOOK-RENEWAL] ADVPS renewal threw:`, advpsErr.message);
         logger.setProviderApiResult('advps', false, null, advpsErr);
         providerRenewalResult = { error: advpsErr.message };
+        providerRenewalSuccess = false;
+      }
+    } else if (provider === 'netbay') {
+      console.log(`[WEBHOOK-RENEWAL] Processing Netbay renewal:`, {
+        netbayServiceId: order.netbayServiceId,
+      });
+
+      try {
+        const apiStart = Date.now();
+        const netbayRenew = await executeNetbayUpstreamRenewal(order, { months: 1 });
+        const apiDuration = Date.now() - apiStart;
+
+        providerRenewalResult = netbayRenew.result || {
+          error: netbayRenew.error,
+          serviceId: netbayRenew.serviceId,
+        };
+        providerRenewalSuccess = netbayRenew.success;
+
+        if (netbayRenew.success) {
+          console.log(`[WEBHOOK-RENEWAL] ✅ Netbay renewal API success`);
+          logger.setProviderApiResult('netbay', true, netbayRenew.result, null, apiDuration);
+          if (netbayRenew.newExpiryDate) {
+            newExpiryDate = netbayRenew.newExpiryDate;
+            console.log(`[WEBHOOK-RENEWAL] Netbay expiry after renew: ${newExpiryDate.toISOString()}`);
+          }
+        } else {
+          console.error(`[WEBHOOK-RENEWAL] Netbay renewal API failed:`, netbayRenew.error);
+          logger.setProviderApiResult('netbay', false, netbayRenew.result, { message: netbayRenew.error }, apiDuration);
+        }
+      } catch (netbayErr) {
+        console.error(`[WEBHOOK-RENEWAL] Netbay renewal threw:`, netbayErr.message);
+        logger.setProviderApiResult('netbay', false, null, netbayErr);
+        providerRenewalResult = { error: netbayErr.message };
         providerRenewalSuccess = false;
       }
     } else {

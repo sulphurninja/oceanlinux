@@ -38,6 +38,7 @@ const {
   resolveAdvpsServiceIdForPower,
   configureAdvpsServiceIp,
 } = require('@/lib/advpsOrderSync');
+const { toUserFacingNetbayError } = require('@/lib/netbayApiErrors');
 
 export const UNIVERSAL_ACTIONS = ['start', 'stop', 'restart', 'status', 'sync', 'reinstall', 'changeos'];
 
@@ -403,10 +404,10 @@ async function runHostycare(order, orderId, action) {
 }
 
 async function runNetbay(order, orderId, action, osType, ipStock) {
-  if (!order.netbayServiceId) return { success: false, message: 'No Netbay service ID on order' };
+  if (!order.netbayServiceId) return { success: false, message: 'Server is not provisioned yet. Please try again shortly.' };
   const cfg = ipStock?.company?.netbayApi;
   if (!cfg?.baseUrl || !cfg?.apiKey) {
-    return { success: false, message: 'Netbay API not configured for this product company' };
+    return { success: false, message: 'Server management is not available for this product.' };
   }
 
   const api = new NetbayApi(cfg);
@@ -431,7 +432,7 @@ async function runNetbay(order, orderId, action, osType, ipStock) {
       let svc = null;
       try {
         const detailRes = await api.getService(sid);
-        svc = detailRes?.data || detailRes || {};
+        svc = NetbayApi.unwrapServiceResponse(detailRes);
         const raw = String(svc?.status || svc?.state || svc?.powerState || '').toLowerCase();
         if (['running', 'on', 'active', 'started', 'online'].includes(raw)) powerState = 'running';
         else if (['stopped', 'off', 'shutdown', 'offline'].includes(raw)) powerState = 'stopped';
@@ -443,11 +444,32 @@ async function runNetbay(order, orderId, action, osType, ipStock) {
     case 'changeos': {
       const osPayload = osType ? String(osType) : null;
       const apiRes = await api.rebuild(sid, osPayload ? { os: osPayload } : {});
-      await Order.findByIdAndUpdate(orderId, { lastAction: 'reinstall', lastActionTime: new Date() });
+      const taskId = apiRes?.data?.taskId || null;
+      await Order.findByIdAndUpdate(orderId, {
+        lastAction: 'reinstall',
+        lastActionTime: new Date(),
+        provisioningStatus: 'provisioning',
+        ...(taskId ? { netbayTaskId: taskId } : {}),
+      });
+
+      if (taskId) {
+        const { runNetbayPostRebuildFlow } = require('@/lib/netbayPostRebuildFlow');
+        void runNetbayPostRebuildFlow({
+          api,
+          Order,
+          orderId,
+          serviceId: sid,
+          taskId,
+          logPrefix: '[RESELLER-MANAGE-NETBAY]',
+        }).catch((err) => {
+          console.error('[RESELLER-MANAGE-NETBAY] Post-rebuild sync failed:', err.message);
+        });
+      }
+
       return {
         success: true,
-        message: 'Reinstall submitted',
-        data: { taskId: apiRes?.data?.taskId || null, os: osPayload },
+        message: 'Reinstall submitted — new password will sync automatically',
+        data: { taskId, os: osPayload },
       };
     }
     default:
@@ -518,11 +540,26 @@ export async function executeResellerServerAction({ order, orderId, action, osTy
 
   const provider = resolveResellerManageProvider(order, ipStock);
   const runner = PROVIDER_RUNNERS[provider] || PROVIDER_RUNNERS.oceanlinux;
-  const result = await runner(order, orderId, normalized, osType, ipStock);
 
-  return {
-    ...result,
-    action: normalized,
-    supportedActions: capabilities.supportedActions,
-  };
+  try {
+    const result = await runner(order, orderId, normalized, osType, ipStock);
+    return {
+      ...result,
+      action: normalized,
+      supportedActions: capabilities.supportedActions,
+    };
+  } catch (err) {
+    if (provider === 'netbay') {
+      const facing = toUserFacingNetbayError(err);
+      return {
+        success: false,
+        message: facing.message,
+        code: facing.code,
+        nextAvailableAt: facing.nextAvailableAt || undefined,
+        action: normalized,
+        supportedActions: capabilities.supportedActions,
+      };
+    }
+    throw err;
+  }
 }

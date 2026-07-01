@@ -1,6 +1,7 @@
 'use client'
 
 import { premiumBadge } from '@/lib/premium-badges';
+import { getCustomerProviderDisplayNameFromOrder } from '@/lib/customerProviderDisplay';
 
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -213,36 +214,8 @@ const OrderHistory = () => {
     };
 
     // Get provider display name
-    const getProviderDisplayName = (order: Order): string => {
-        if (order.slotIpPackageId || order.provider === 'slotip') {
-            return 'OceanLinux';
-        }
-
-        if (order.provider) {
-            switch (order.provider) {
-                case 'smartvps':
-                    return 'SmartVPS';
-                case 'hostycare':
-                    return 'Hostycare';
-                case 'oceanlinux':
-                    return 'OceanLinux';
-                default:
-                    return order.provider.charAt(0).toUpperCase() + order.provider.slice(1);
-            }
-        }
-
-        if (order.hostycareServiceId) {
-            return 'Hostycare';
-        }
-        if (order.smartvpsServiceId) {
-            return 'SmartVPS';
-        }
-        if (order.productName.includes('103.195') || order.ipAddress?.startsWith('103.195') || order.productName.includes('🏅')) {
-            return 'SmartVPS';
-        }
-
-        return 'OceanLinux';
-    };
+    const getProviderDisplayName = (order: Order): string =>
+        getCustomerProviderDisplayNameFromOrder(order);
 
     const getOrderStatus = (order: Order) => getOrdersPageStatus(order);
 

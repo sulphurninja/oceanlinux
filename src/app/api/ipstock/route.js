@@ -1,7 +1,27 @@
 // pages/api/ipstock.js
 import connectDB from '@/lib/db';
 import IPStock from '@/models/ipStockModel';
+import Company from '@/models/companyModel';
 import { enforceAdmin } from '@/lib/apiSecurity';
+import { requireAdmin } from '@/lib/adminAuth';
+const { companyUsesNetbayLiveStock } = require('@/lib/companyNetbayApi');
+
+async function enrichIpStocksWithNetbayMode(ipStocks) {
+    const companyIds = [...new Set(
+        ipStocks.filter((s) => s.company).map((s) => String(s.company))
+    )];
+    if (!companyIds.length) return ipStocks;
+
+    const companies = await Company.find({ _id: { $in: companyIds } }).select('netbayApi').lean();
+    const companyMap = Object.fromEntries(companies.map((c) => [String(c._id), c]));
+
+    return ipStocks.map((stock) => ({
+        ...stock,
+        netbayUseLiveStockApi: stock.company
+            ? companyUsesNetbayLiveStock(companyMap[String(stock.company)])
+            : null,
+    }));
+}
 
 export async function POST(request) {
     const denied = await enforceAdmin(request);
@@ -11,7 +31,7 @@ export async function POST(request) {
 
     try {
         const reqBody = await request.json();
-        const { name, available, serverType, tags, memoryOptions, promoCodes, defaultConfigurations, company, stockCount } = reqBody;
+        const { name, available, serverType, tags, memoryOptions, promoCodes, defaultConfigurations, company, stockCount, hiddenFromStore } = reqBody;
 
         const linkedCompany = company && company !== 'none' ? company : null;
         const count = linkedCompany ? Math.max(0, Math.floor(Number(stockCount) || 0)) : undefined;
@@ -20,6 +40,7 @@ export async function POST(request) {
             name,
             available: linkedCompany ? (count > 0) : available,
             stockCount: linkedCompany ? count : 0,
+            hiddenFromStore: !!hiddenFromStore,
             serverType,
             tags: tags || [],
             memoryOptions,
@@ -50,8 +71,20 @@ export async function GET(request) {
         await connectDB();
         console.log('[IPSTOCK-API] Database connected');
 
-        // Use lean() for faster query - returns plain JS objects instead of Mongoose documents
-        const ipStocks = await IPStock.find({}).lean().maxTimeMS(10000);
+        const { searchParams } = new URL(request.url);
+        const includeHidden =
+            searchParams.get('includeHidden') === '1' ||
+            searchParams.get('includeHidden') === 'true';
+
+        let query = { hiddenFromStore: { $ne: true } };
+        if (includeHidden) {
+            const admin = await requireAdmin(request);
+            if (admin) {
+                query = {};
+            }
+        }
+
+        const ipStocks = await IPStock.find(query).lean().maxTimeMS(10000);
         console.log(`[IPSTOCK-API] Found ${ipStocks?.length || 0} IP stocks`);
 
         if (!ipStocks) {
@@ -62,7 +95,8 @@ export async function GET(request) {
             });
         }
 
-        const jsonResponse = JSON.stringify(ipStocks);
+        const enriched = await enrichIpStocksWithNetbayMode(ipStocks);
+        const jsonResponse = JSON.stringify(enriched);
         console.log(`[IPSTOCK-API] Response size: ${jsonResponse.length} bytes`);
 
         return new Response(jsonResponse, {

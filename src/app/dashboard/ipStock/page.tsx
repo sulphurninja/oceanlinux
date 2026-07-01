@@ -102,24 +102,48 @@ interface IPStock {
   name: string;
   description?: string;
   available: boolean;
+  hiddenFromStore?: boolean;
+  defaultConfigurations?: Record<string, any>;
   stockCount?: number;
   company?: string | null;
+  netbayUseLiveStockApi?: boolean | null;
   serverType: string;
   tags: string[];
   memoryOptions: Record<string, MemoryOptionDetails>;
   promoCodes?: PromoCode[];
 }
 
+function isNetbayLiveStock(stock: IPStock) {
+  const cfg = stock.defaultConfigurations?.netbay;
+  if (!cfg?.planByMemory) return false;
+  if (!Object.values(cfg.planByMemory).some(Boolean)) return false;
+  return stock.netbayUseLiveStockApi === true;
+}
+
 function isCompanyStock(stock: IPStock) {
-  return !!stock.company;
+  return !!stock.company && !isNetbayLiveStock(stock);
 }
 
 function getStockUnitsRemaining(stock: IPStock) {
+  if (isNetbayLiveStock(stock)) {
+    return stock.available ? Number.POSITIVE_INFINITY : 0;
+  }
   if (isCompanyStock(stock)) return Math.max(0, stock.stockCount ?? 0);
   return stock.available ? Number.POSITIVE_INFINITY : 0;
 }
 
-function isStockPurchasable(stock: IPStock) {
+function isNetbayMemoryInStock(stock: IPStock, memory: string) {
+  const variant = stock.defaultConfigurations?.netbay?.variantStock?.[memory];
+  if (!variant) return stock.available !== false;
+  if (variant.skipped || variant.available === null) return false;
+  return variant.available === true;
+}
+
+function isStockPurchasable(stock: IPStock, memory?: string) {
+  if (isNetbayLiveStock(stock)) {
+    if (memory) return isNetbayMemoryInStock(stock, memory);
+    return stock.available !== false;
+  }
   if (isCompanyStock(stock)) return getStockUnitsRemaining(stock) > 0;
   return stock.available !== false;
 }
@@ -226,6 +250,19 @@ function IPStockContent() {
         }
       } catch (e) {
         console.warn("[IP Stock] ADVPS refresh error", e);
+      }
+
+      console.log("[IP Stock] Netbay refresh-stock (live capacity check)…");
+      try {
+        const netbayRefreshRes = await fetch("/api/netbay/refresh-stock", { cache: "no-store" });
+        const netbayRefreshBody = await netbayRefreshRes.json().catch(() => ({}));
+        if (netbayRefreshRes.ok) {
+          console.log("[IP Stock] Netbay refresh OK", netbayRefreshBody);
+        } else {
+          console.warn("[IP Stock] Netbay refresh failed", netbayRefreshRes.status, netbayRefreshBody);
+        }
+      } catch (e) {
+        console.warn("[IP Stock] Netbay refresh error", e);
       } finally {
         setIsRefreshingStock(false);
       }
@@ -237,7 +274,9 @@ function IPStockContent() {
 
       const ipData = await ipRes.json();
       const slotData = await slotRes.json();
-      const ipRows: IPStock[] = Array.isArray(ipData) ? ipData : [];
+      const ipRows: IPStock[] = (Array.isArray(ipData) ? ipData : []).filter(
+        (s) => !s.hiddenFromStore
+      );
 
       if (!ipRes.ok) {
         console.warn("[IP Stock] /api/ipstock HTTP", ipRes.status, ipData);
@@ -276,7 +315,7 @@ function IPStockContent() {
 
   // NEW: Filter and sort logic
   const getFilteredAndSortedStocks = () => {
-    let filtered = ipStocks;
+    let filtered = ipStocks.filter((stock) => !stock.hiddenFromStore);
 
     // Filter by tab
     if (activeTab && activeTab !== 'all') {
@@ -1458,17 +1497,17 @@ function IPStockContent() {
             <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-red-500/15 border border-red-400/25">
               <AlertCircle className="h-6 w-6 text-red-400" />
             </div>
-            <AlertDialogTitle className="text-center text-white">Out of Stock</AlertDialogTitle>
+            <AlertDialogTitle className="text-center text-foreground">Out of Stock</AlertDialogTitle>
             <AlertDialogDescription asChild>
-              <div className="space-y-3 text-center text-sm text-white/55 px-2 pb-2">
+              <div className="space-y-3 text-center text-sm text-muted-foreground px-2 pb-2">
                 {outOfStockPopup.productName && (
-                  <p className="font-medium text-white/90">
+                  <p className="font-medium text-foreground">
                     {outOfStockPopup.productName}
                     {outOfStockPopup.memory ? ` · ${outOfStockPopup.memory}` : ''}
                   </p>
                 )}
                 <p>{outOfStockPopup.message}</p>
-                <p className="text-xs">
+                <p className="text-xs text-muted-foreground">
                   Stock is checked live when you buy. The plan list has been refreshed with the latest availability.
                 </p>
               </div>
@@ -1497,6 +1536,7 @@ function CompactServerPlanRow({
   const inStock = isStockPurchasable(stock);
   const unitsLeft = getStockUnitsRemaining(stock);
   const showUnits = isCompanyStock(stock) && Number.isFinite(unitsLeft);
+  const isNetbay = isNetbayLiveStock(stock);
 
   const memoryOptions = Object.entries(stock.memoryOptions || {})
     .filter(([_, details]) => details.price !== null)
@@ -1551,7 +1591,7 @@ function CompactServerPlanRow({
             {inStock ? (
               <Badge variant="outline" className={cn(premiumBadge.success, "text-[10px] gap-1 px-2 py-0 h-5 font-semibold")}>
                 <CheckCircle2 className="h-3 w-3" />
-                {showUnits ? `${unitsLeft} in stock` : 'Available'}
+                {showUnits ? `${unitsLeft} in stock` : isNetbay ? 'In stock' : 'Available'}
               </Badge>
             ) : (
               <Badge variant="outline" className="text-[10px] gap-1 px-2 py-0 h-5 font-semibold bg-red-500/20 text-red-300 border-red-400/40">
@@ -1623,26 +1663,28 @@ function CompactServerPlanRow({
                   Select Configuration
                 </p>
                 <div className="space-y-2">
-                  {memoryOptions.map(([memory, details]) => (
+                  {memoryOptions.map(([memory, details]) => {
+                    const memoryInStock = isStockPurchasable(stock, memory);
+                    return (
                     <div
                       key={memory}
                       className={cn(
                         "flex items-center justify-between gap-3 p-2.5 rounded-md border transition-colors",
-                        inStock
+                        memoryInStock
                           ? "bg-white/[0.04] border-white/10 hover:border-emerald-400/35"
                           : "bg-white/[0.02] border-red-400/10 opacity-80"
                       )}
                     >
                       <span className={cn(
                         "text-sm font-medium flex-1",
-                        inStock ? "text-white/90" : "text-white/45"
+                        memoryInStock ? "text-white/90" : "text-white/45"
                       )}>
                         {memory}
                       </span>
                       <div className="flex items-center gap-2">
                         <span className={cn(
                           "font-bold text-base",
-                          inStock ? "text-emerald-300" : "text-white/35"
+                          memoryInStock ? "text-emerald-300" : "text-white/35"
                         )}>
                           ₹{details.price}
                         </span>
@@ -1654,38 +1696,39 @@ function CompactServerPlanRow({
                           variant="outline"
                           className="h-8 px-2.5"
                           label="Cart"
-                          disabled={!inStock}
+                          disabled={!memoryInStock}
                         />
                         <Button
                           size="sm"
                           onClick={(e) => {
                             e.stopPropagation();
-                            onBuyNow(stock.name, memory, details.price!, stock._id, undefined, inStock);
+                            onBuyNow(stock.name, memory, details.price!, stock._id, undefined, memoryInStock);
                           }}
-                          disabled={!inStock || verifyingPurchaseKey === `${stock._id}:${memory}`}
+                          disabled={!memoryInStock || verifyingPurchaseKey === `${stock._id}:${memory}`}
                           className={cn(
                             "h-8 px-3 gap-1.5 border-0",
-                            inStock
+                            memoryInStock
                               ? "premium-btn-primary"
                               : "bg-red-500/15 text-red-300 hover:bg-red-500/20 cursor-not-allowed"
                           )}
                         >
                           {verifyingPurchaseKey === `${stock._id}:${memory}` ? (
                             <Loader2 className="h-3 w-3 animate-spin" />
-                          ) : inStock ? (
+                          ) : memoryInStock ? (
                             <Zap className="h-3 w-3" />
                           ) : (
                             <XCircle className="h-3 w-3" />
                           )}
                           {verifyingPurchaseKey === `${stock._id}:${memory}`
                             ? 'Checking…'
-                            : inStock
+                            : memoryInStock
                               ? 'Buy Now'
                               : 'Sold out'}
                         </Button>
                       </div>
                     </div>
-                  ))}
+                  );
+                  })}
                 </div>
                 {hasPromoCodes && (
                   <div className="mt-3 p-2 rounded-md bg-emerald-500/10 border border-emerald-400/25">

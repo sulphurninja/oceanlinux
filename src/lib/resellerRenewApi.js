@@ -17,6 +17,7 @@ const HostycareAPI = require('@/services/hostycareApi');
 const SmartVpsAPI = require('@/services/smartvpsApi');
 const AdvpsAPI = require('@/services/advpsApi');
 const { executeAdvpsUpstreamRenewal } = require('@/lib/advpsRenewal');
+const { executeNetbayUpstreamRenewal } = require('@/lib/netbayRenewal');
 const { pickAdvpsExpiryDate } = require('@/lib/advpsOrderExpiry');
 const { extractAdvpsStatusCredentials } = require('@/lib/advpsStatusNormalize');
 
@@ -75,6 +76,14 @@ async function runProviderRenewal(order, orderId, provider) {
         await Order.findByIdAndUpdate(orderId, { advpsServiceId: advpsRenew.correctedServiceId });
         order.advpsServiceId = advpsRenew.correctedServiceId;
       }
+    } catch (err) {
+      providerRenewalResult = { error: err.message };
+    }
+  } else if (provider === 'netbay') {
+    try {
+      const netbayRenew = await executeNetbayUpstreamRenewal(order, { months: 1 });
+      providerRenewalResult = netbayRenew.result || { error: netbayRenew.error };
+      providerRenewalSuccess = netbayRenew.success;
     } catch (err) {
       providerRenewalResult = { error: err.message };
     }
@@ -162,6 +171,11 @@ export async function renewResellerOrder(reseller, order, orderId) {
       const advpsExpiry = pickAdvpsExpiryDate(statusCreds.expiryDate);
       if (advpsExpiry) newExpiryDate = advpsExpiry;
     } catch (_) { /* use calculated expiry */ }
+  }
+
+  if (provider === 'netbay' && providerRenewalSuccess && providerRenewalResult?.data?.newExpiryDate) {
+    const netbayExpiry = new Date(providerRenewalResult.data.newExpiryDate);
+    if (!Number.isNaN(netbayExpiry.getTime())) newExpiryDate = netbayExpiry;
   }
 
   const renewalPayment = {

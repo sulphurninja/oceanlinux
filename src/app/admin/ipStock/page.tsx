@@ -14,21 +14,17 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { X } from 'lucide-react';
+import { X, Zap, BookOpen } from 'lucide-react';
+import Link from 'next/link';
 import axios from 'axios';
 import { toast } from 'sonner';
 
-type MemoryOptions = {
-    '4GB': string;
-    '8GB': string;
-    '16GB': string;
-};
+const ALL_RAM_OPTIONS = ['1GB', '2GB', '4GB', '6GB', '8GB', '12GB', '16GB', '32GB'] as const;
+const DEFAULT_MEMORY_SIZES = ['2GB', '4GB', '8GB', '16GB'];
 
-type HostycareProductMapping = {
-    '4GB': string;
-    '8GB': string;
-    '16GB': string;
-};
+function memoryRecord(sizes: string[]): Record<string, string> {
+    return Object.fromEntries(sizes.map((s) => [s, '']));
+}
 
 type PromoCode = {
     code: string;
@@ -41,7 +37,11 @@ type SmartVpsIPs = { '4GB': string; '8GB': string; '16GB': string }
 type SmartVpsDefaultOS = { '4GB': string; '8GB': string; '16GB': string }
 type SmartVpsPIDs = { '4GB': string; '8GB': string; '16GB': string }
 
-type CompanyOption = { _id: string; name: string };
+type CompanyOption = {
+    _id: string;
+    name: string;
+    netbayApi?: { enabled?: boolean } | null;
+};
 
 const IPStockFormWithParams = () => {
     const searchParams = useSearchParams();
@@ -50,20 +50,23 @@ const IPStockFormWithParams = () => {
     const [description, setDescription] = useState('');
     const [available, setAvailable] = useState('true');
     const [serverType, setServerType] = useState('Linux');
-    const [companyId, setCompanyId] = useState('');
+    const [companyId, setCompanyId] = useState('none');
+    const [stockCount, setStockCount] = useState('50');
     const [companies, setCompanies] = useState<CompanyOption[]>([]);
-    const [prices, setPrices] = useState<MemoryOptions>({
-        '4GB': '',
-        '8GB': '',
-        '16GB': '',
-    });
-
-    // New state for Hostycare product mapping
-    const [hostycareProductIds, setHostycareProductIds] = useState<HostycareProductMapping>({
-        '4GB': '',
-        '8GB': '',
-        '16GB': '',
-    });
+    const [netbayGroupTag, setNetbayGroupTag] = useState('');
+    const [netbayPlanIds, setNetbayPlanIds] = useState<Record<string, string>>(() =>
+        memoryRecord(DEFAULT_MEMORY_SIZES)
+    );
+    const [netbayDefaultOsLinux, setNetbayDefaultOsLinux] = useState('');
+    const [netbayDefaultOsWindows, setNetbayDefaultOsWindows] = useState('');
+    const [memorySizes, setMemorySizes] = useState<string[]>(DEFAULT_MEMORY_SIZES);
+    const [newMemorySize, setNewMemorySize] = useState('');
+    const [prices, setPrices] = useState<Record<string, string>>(() =>
+        memoryRecord(DEFAULT_MEMORY_SIZES)
+    );
+    const [hostycareProductIds, setHostycareProductIds] = useState<Record<string, string>>(() =>
+        memoryRecord(DEFAULT_MEMORY_SIZES)
+    );
 
     const [promoCodes, setPromoCodes] = useState<PromoCode[]>([]);
     const [newPromoCode, setNewPromoCode] = useState('');
@@ -114,29 +117,64 @@ const IPStockFormWithParams = () => {
 
     useEffect(() => {
         if (prefilledProductId) {
-            // Pre-fill all memory options with the same product ID
-            setHostycareProductIds({
-                '4GB': prefilledProductId,
-                '8GB': prefilledProductId,
-                '16GB': prefilledProductId
+            setHostycareProductIds((prev) => {
+                const next = { ...prev };
+                for (const size of memorySizes) {
+                    next[size] = prefilledProductId;
+                }
+                return next;
             });
-
             toast.info(`Pre-filled with Hostycare Product ID: ${prefilledProductId}`);
         }
-    }, [prefilledProductId]);
+    }, [prefilledProductId, memorySizes]);
 
-    const handlePriceChange = (size: keyof MemoryOptions, value: string) => {
-        setPrices(prev => ({
-            ...prev,
-            [size]: value
-        }));
+    const handlePriceChange = (size: string, value: string) => {
+        setPrices((prev) => ({ ...prev, [size]: value }));
     };
 
-    const handleHostycareProductIdChange = (size: keyof HostycareProductMapping, value: string) => {
-        setHostycareProductIds(prev => ({
-            ...prev,
-            [size]: value
+    const handleHostycareProductIdChange = (size: string, value: string) => {
+        setHostycareProductIds((prev) => ({ ...prev, [size]: value }));
+    };
+
+    const addMemoryOption = () => {
+        if (!newMemorySize.trim()) return;
+        const size = newMemorySize.trim().toUpperCase();
+        if (memorySizes.includes(size)) {
+            toast.error(`${size} already exists`);
+            return;
+        }
+        setMemorySizes((prev) => [...prev, size].sort((a, b) => {
+            const na = parseInt(a, 10) || 0;
+            const nb = parseInt(b, 10) || 0;
+            return na - nb;
         }));
+        setPrices((prev) => ({ ...prev, [size]: '' }));
+        setHostycareProductIds((prev) => ({ ...prev, [size]: '' }));
+        setNetbayPlanIds((prev) => ({ ...prev, [size]: '' }));
+        setNewMemorySize('');
+    };
+
+    const removeMemoryOption = (size: string) => {
+        if (memorySizes.length <= 1) {
+            toast.error('At least one RAM size is required');
+            return;
+        }
+        setMemorySizes((prev) => prev.filter((s) => s !== size));
+        setPrices((prev) => {
+            const next = { ...prev };
+            delete next[size];
+            return next;
+        });
+        setHostycareProductIds((prev) => {
+            const next = { ...prev };
+            delete next[size];
+            return next;
+        });
+        setNetbayPlanIds((prev) => {
+            const next = { ...prev };
+            delete next[size];
+            return next;
+        });
     };
     // helper to encode/decode pid+ip in Select valuef
     const joinPidIp = (pid: string | number, ip: string) => `${pid}||${ip}`;
@@ -183,27 +221,40 @@ const IPStockFormWithParams = () => {
         setTags(prev => prev.filter(tag => tag !== tagToRemove));
     };
 
+    const selectedCompanyHasNetbay = (() => {
+        if (!companyId || companyId === 'none') return false;
+        const c = companies.find((co) => co._id === companyId);
+        return !!(c?.netbayApi?.enabled);
+    })();
+
+    const handleNetbayPlanIdChange = (size: string, value: string) => {
+        setNetbayPlanIds((prev) => {
+            const next = { ...prev };
+            if (value.trim()) next[size] = value.trim();
+            else delete next[size];
+            return next;
+        });
+    };
+
     const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
         event.preventDefault();
 
-        // 1) Keep existing pricing + Hostycare mapping untouched
-        const memoryOptions = {
-            '4GB': {
-                price: parseFloat(prices['4GB']),
-                hostycareProductId: hostycareProductIds['4GB'] || null,
-                hostycareProductName: hostycareProductIds['4GB'] ? `${name} 4GB` : null
-            },
-            '8GB': {
-                price: parseFloat(prices['8GB']),
-                hostycareProductId: hostycareProductIds['8GB'] || null,
-                hostycareProductName: hostycareProductIds['8GB'] ? `${name} 8GB` : null
-            },
-            '16GB': {
-                price: parseFloat(prices['16GB']),
-                hostycareProductId: hostycareProductIds['16GB'] || null,
-                hostycareProductName: hostycareProductIds['16GB'] ? `${name} 16GB` : null
-            },
-        };
+        // Build memory options from configured RAM sizes (2GB, 4GB, etc.)
+        const memoryOptions: Record<string, { price: number; hostycareProductId: string | null; hostycareProductName: string | null }> = {};
+        for (const size of memorySizes) {
+            const price = parseFloat(prices[size] || '0');
+            if (!price && !netbayPlanIds[size]?.trim()) continue;
+            memoryOptions[size] = {
+                price: Number.isFinite(price) ? price : 0,
+                hostycareProductId: hostycareProductIds[size] || null,
+                hostycareProductName: hostycareProductIds[size] ? `${name} ${size}` : null,
+            };
+        }
+
+        if (Object.keys(memoryOptions).length === 0) {
+            toast.error('Add at least one RAM size with a price (or Netbay Plan ID)');
+            return;
+        }
 
         // 2) Build SmartVPS byMemory only if values exist (so other providers remain unaffected)
         const makeSmartVpsEntry = (mem: '4GB' | '8GB' | '16GB') => {
@@ -225,23 +276,45 @@ const IPStockFormWithParams = () => {
             Object.entries(smartvpsByMemory).filter(([, v]) => v !== undefined)
         );
 
-        // If nothing selected for SmartVPS, omit the provider block entirely
-        const defaultConfigurations: any = {};
+        const defaultConfigurations: Record<string, unknown> = {};
         if (Object.keys(cleanedSmartvpsByMemory).length > 0) {
             defaultConfigurations.smartvps = { byMemory: cleanedSmartvpsByMemory };
         }
+
+        const planByMemory = Object.fromEntries(
+            Object.entries(netbayPlanIds).filter(([, id]) => id.trim())
+        );
+        const hasNetbayConfig =
+            netbayGroupTag.trim() ||
+            Object.keys(planByMemory).length > 0 ||
+            netbayDefaultOsLinux.trim() ||
+            netbayDefaultOsWindows.trim();
+
+        if (hasNetbayConfig) {
+            defaultConfigurations.netbay = {
+                ...(netbayGroupTag.trim() ? { groupTag: netbayGroupTag.trim() } : {}),
+                ...(Object.keys(planByMemory).length > 0 ? { planByMemory } : {}),
+                defaultOs: {
+                    ...(netbayDefaultOsLinux.trim() ? { Linux: netbayDefaultOsLinux.trim() } : {}),
+                    ...(netbayDefaultOsWindows.trim() ? { Windows: netbayDefaultOsWindows.trim() } : {}),
+                },
+            };
+        }
+
+        const linkedCompany = companyId && companyId !== 'none' ? companyId : null;
 
         try {
             const response = await axios.post('/api/ipstock', {
                 name,
                 description,
-                available: available === 'true',
+                available: linkedCompany ? Number(stockCount) > 0 : available === 'true',
+                stockCount: linkedCompany ? Math.max(0, Math.floor(Number(stockCount) || 0)) : undefined,
                 serverType,
                 tags,
                 memoryOptions,
                 promoCodes,
                 defaultConfigurations,
-                company: companyId || null,
+                company: linkedCompany,
             });
 
             console.log('Submission Successful:', response.data);
@@ -251,13 +324,19 @@ const IPStockFormWithParams = () => {
             setDescription('');
             setServerType('Linux');
             setTags([]);
-            setPrices({ '4GB': '', '8GB': '', '16GB': '' });
-            setHostycareProductIds({ '4GB': '', '8GB': '', '16GB': '' });
+            setMemorySizes(DEFAULT_MEMORY_SIZES);
+            setPrices(memoryRecord(DEFAULT_MEMORY_SIZES));
+            setHostycareProductIds(memoryRecord(DEFAULT_MEMORY_SIZES));
             setPromoCodes([]);
-            // also reset SmartVPS picks if you want
             setSmartvpsIPs({ '4GB': '', '8GB': '', '16GB': '' });
-            setSmartvpsPIDs?.({ '4GB': '', '8GB': '', '16GB': '' }); // if you exposed this setter
-            setSmartVpsOS?.({ '4GB': 'ubuntu', '8GB': 'ubuntu', '16GB': 'ubuntu' });
+            setSmartvpsPIDs?.({ '4GB': '', '8GB': '', '16GB': '' });
+            setSmartvpsDefaultOS({ '4GB': 'ubuntu', '8GB': 'ubuntu', '16GB': 'ubuntu' });
+            setCompanyId('none');
+            setStockCount('50');
+            setNetbayGroupTag('');
+            setNetbayPlanIds(memoryRecord(DEFAULT_MEMORY_SIZES));
+            setNetbayDefaultOsLinux('');
+            setNetbayDefaultOsWindows('');
 
             toast.success('IP Stock created successfully!');
         } catch (error: any) {
@@ -327,9 +406,103 @@ const IPStockFormWithParams = () => {
                                     </SelectContent>
                                 </Select>
                                 <p className="text-xs text-gray-500 mt-1">
-                                    Assign to a company to let them manage availability and order credentials.
+                                    Netbay / company stocks: select company, set stock count, and fill Netbay config below.
                                 </p>
                             </div>
+
+                            {companyId && companyId !== 'none' && (
+                                <div className="mb-4">
+                                    <Label className="block text-sm font-medium mb-1">Stock Count (orderable units):</Label>
+                                    <Input
+                                        type="number"
+                                        min={0}
+                                        step={1}
+                                        value={stockCount}
+                                        onChange={(e) => setStockCount(e.target.value)}
+                                        placeholder="e.g. 50"
+                                    />
+                                    <p className="text-xs text-gray-500 mt-1">
+                                        Kitni baar sell kar sakte ho. Har sale par Netbay se naya VM banega.
+                                    </p>
+                                </div>
+                            )}
+
+                            {selectedCompanyHasNetbay && (
+                                <div className="mb-6 border rounded-lg p-4 bg-amber-50/40 dark:bg-amber-950/10 border-amber-200/60 dark:border-amber-900/40 space-y-3">
+                                    <div className="flex items-center justify-between gap-3 flex-wrap">
+                                        <div>
+                                            <Label className="text-base font-semibold flex items-center gap-2">
+                                                <Zap className="h-4 w-4 text-amber-600" />
+                                                Netbay Configuration
+                                            </Label>
+                                            <p className="text-xs text-muted-foreground mt-0.5">
+                                                Plan IDs + OS from the company Netbay catalog. Required for auto VM on payment.
+                                            </p>
+                                        </div>
+                                        <Button asChild variant="outline" size="sm" className="gap-1.5 h-8">
+                                            <Link href={`/admin/companies/${companyId}/netbay-catalog`} target="_blank">
+                                                <BookOpen className="h-3.5 w-3.5" />
+                                                Browse Catalog
+                                            </Link>
+                                        </Button>
+                                    </div>
+
+                                    <div>
+                                        <Label className="text-sm">Group Tag (IP series, optional):</Label>
+                                        <Input
+                                            type="text"
+                                            placeholder="e.g. 103.157"
+                                            value={netbayGroupTag}
+                                            onChange={(e) => setNetbayGroupTag(e.target.value)}
+                                        />
+                                        <p className="text-xs text-gray-500 mt-1">
+                                            Customer ko is series ki IP milegi (e.g. 103.157.x.x). Blank = any available IP.
+                                        </p>
+                                    </div>
+
+                                    <div className="space-y-2">
+                                        <Label className="text-sm">Per-RAM Plan IDs (catalog → Plans):</Label>
+                                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                            {memorySizes.map((size) => (
+                                                <div key={size}>
+                                                    <Label className="text-xs">{size} → Plan ID</Label>
+                                                    <Input
+                                                        type="text"
+                                                        placeholder="e.g. 60d5f…"
+                                                        className="mt-1 font-mono text-xs"
+                                                        value={netbayPlanIds[size] || ''}
+                                                        onChange={(e) => handleNetbayPlanIdChange(size, e.target.value)}
+                                                    />
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                        <div>
+                                            <Label className="text-xs">Default Linux OS (catalog OS Name):</Label>
+                                            <Input
+                                                type="text"
+                                                placeholder="Auto from catalog"
+                                                value={netbayDefaultOsLinux}
+                                                onChange={(e) => setNetbayDefaultOsLinux(e.target.value)}
+                                            />
+                                        </div>
+                                        <div>
+                                            <Label className="text-xs">Default Windows OS (catalog OS Name):</Label>
+                                            <Input
+                                                type="text"
+                                                placeholder="Auto from catalog"
+                                                value={netbayDefaultOsWindows}
+                                                onChange={(e) => setNetbayDefaultOsWindows(e.target.value)}
+                                            />
+                                        </div>
+                                    </div>
+                                    <p className="text-[11px] text-muted-foreground">
+                                        OS = template <strong>Name</strong> or <strong>OS ID</strong> from catalog (purchase API needs the name — ID is resolved automatically). Hostycare Product ID above chhod sakte ho Netbay stock ke liye.
+                                    </p>
+                                </div>
+                            )}
 
                             <div className="mb-4">
                                 <Label className="block text-sm font-medium mb-2">Tags:</Label>
@@ -365,53 +538,82 @@ const IPStockFormWithParams = () => {
                             </div>
 
                             <div className="mb-4">
-                                <label className="block text-sm font-medium mb-1">Available:</label>
-                                <Select value={available} onValueChange={setAvailable}>
-                                    <SelectTrigger className="select-none">
-                                        <SelectValue placeholder="Select Availability" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value='true'>Yes</SelectItem>
-                                        <SelectItem value='false'>No</SelectItem>
-                                    </SelectContent>
-                                </Select>
+                                {!selectedCompanyHasNetbay && (
+                                    <>
+                                        <label className="block text-sm font-medium mb-1">Available:</label>
+                                        <Select value={available} onValueChange={setAvailable}>
+                                            <SelectTrigger className="select-none">
+                                                <SelectValue placeholder="Select Availability" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value='true'>Yes</SelectItem>
+                                                <SelectItem value='false'>No</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </>
+                                )}
                             </div>
 
                             {/* Memory Options with Price and Hostycare Product ID */}
                             <div className="mb-6">
-                                <Label className="block text-sm font-medium mb-3 text-base">Memory Configuration & Hostycare Mapping</Label>
-                                <div className="bg-ay-50 p-4 rounded-lg border dark:border-none">
-                                    {Object.keys(prices).map(size => (
-                                        <div key={size} className="mb-4 last:mb-0">
-                                            <h4 className="font-medium text-sm mb-2">{size} Configuration</h4>
+                                <Label className="block text-sm font-medium mb-3 text-base">Memory Configuration</Label>
+                                <div className="flex flex-wrap items-end gap-2 mb-3">
+                                    <div className="flex-1 min-w-[140px]">
+                                        <Label className="text-xs">Add RAM size</Label>
+                                        <Select value={newMemorySize} onValueChange={setNewMemorySize}>
+                                            <SelectTrigger className="h-9 mt-1">
+                                                <SelectValue placeholder="Select RAM" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {ALL_RAM_OPTIONS.filter((s) => !memorySizes.includes(s)).map((s) => (
+                                                    <SelectItem key={s} value={s}>{s}</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    <Button type="button" size="sm" className="h-9" onClick={addMemoryOption} disabled={!newMemorySize}>
+                                        Add size
+                                    </Button>
+                                </div>
+                                <div className="bg-ay-50 p-4 rounded-lg border dark:border-none space-y-4">
+                                    {memorySizes.map((size) => (
+                                        <div key={size} className="border-b border-border/50 pb-4 last:border-0 last:pb-0">
+                                            <div className="flex items-center justify-between mb-2">
+                                                <h4 className="font-medium text-sm">{size}</h4>
+                                                {memorySizes.length > 1 && (
+                                                    <Button type="button" variant="ghost" size="sm" className="h-7 text-xs text-destructive" onClick={() => removeMemoryOption(size)}>
+                                                        Remove
+                                                    </Button>
+                                                )}
+                                            </div>
                                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                                 <div>
                                                     <Label className="block text-xs font-medium mb-1">Price (₹):</Label>
                                                     <Input
                                                         type="number"
                                                         placeholder={`Price for ${size}`}
-                                                        value={prices[size as keyof MemoryOptions]}
-                                                        onChange={(e) => handlePriceChange(size as keyof MemoryOptions, e.target.value)}
+                                                        value={prices[size] || ''}
+                                                        onChange={(e) => handlePriceChange(size, e.target.value)}
                                                         className="text-sm"
                                                     />
                                                 </div>
                                                 <div>
-                                                    <Label className="block text-xs font-medium mb-1">Hostycare Product ID:</Label>
+                                                    <Label className="block text-xs font-medium mb-1">Hostycare Product ID (optional):</Label>
                                                     <Input
                                                         type="text"
-                                                        placeholder={`Product ID for ${size}`}
-                                                        value={hostycareProductIds[size as keyof HostycareProductMapping]}
-                                                        onChange={(e) => handleHostycareProductIdChange(size as keyof HostycareProductMapping, e.target.value)}
+                                                        placeholder="Netbay stock — leave blank"
+                                                        value={hostycareProductIds[size] || ''}
+                                                        onChange={(e) => handleHostycareProductIdChange(size, e.target.value)}
                                                         className="text-sm"
                                                     />
-                                                    <p className="text-xs text-gray-500 mt-1">
-                                                        Leave empty to disable auto-provisioning for this memory size
-                                                    </p>
                                                 </div>
                                             </div>
                                         </div>
                                     ))}
                                 </div>
+                                <p className="text-xs text-muted-foreground mt-2">
+                                    Default sizes include <strong>2GB</strong>. Use &quot;Add size&quot; for 1GB, 6GB, etc.
+                                </p>
                             </div>
 
                             {/* Promo Codes Section */}

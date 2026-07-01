@@ -258,7 +258,7 @@ export default function NetbayCatalogPage() {
                         <TableCell>
                           <code className="text-xs bg-muted px-1.5 py-0.5 rounded">{o.id}</code>
                         </TableCell>
-                        <TableCell className="text-right">
+                        <TableCell className="text-right space-x-1">
                           <Button
                             size="sm"
                             variant="ghost"
@@ -267,6 +267,15 @@ export default function NetbayCatalogPage() {
                           >
                             <Copy className="h-3.5 w-3.5" />
                             Name
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 gap-1.5"
+                            onClick={() => copyToClipboard(String(o.id), 'OS ID')}
+                          >
+                            <Copy className="h-3.5 w-3.5" />
+                            ID
                           </Button>
                         </TableCell>
                       </TableRow>
@@ -287,9 +296,8 @@ export default function NetbayCatalogPage() {
               </li>
               <li>
                 The OS template <strong>Name</strong> is what Netbay's purchase / rebuild endpoints expect
-                (e.g. <code>Ubuntu 22.04</code>). The auto-provisioner picks Ubuntu for Linux products and
-                Windows Server 2022 for Windows products by default — use the Default OS overrides on the
-                IP Stock if you need different defaults.
+                (copy the exact Name or OS ID from this table). Purchase API needs the template name —
+                if you paste an OS ID on IP Stock, we resolve it from this catalog automatically.
               </li>
               <li>
                 <strong>Group Tag</strong> (location filter, e.g. <code>103.157</code>) goes on the IP Stock

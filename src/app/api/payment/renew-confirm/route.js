@@ -17,6 +17,7 @@ const AdvpsAPI = require('@/services/advpsApi');
 const RenewalLogger = require('@/services/renewalLogger');
 const { getAdvpsRebuildResetFields, isAdvpsOrder } = require('@/lib/advpsRebuildLimit');
 const { executeAdvpsUpstreamRenewal } = require('@/lib/advpsRenewal');
+const { executeNetbayUpstreamRenewal } = require('@/lib/netbayRenewal');
 const { pickAdvpsExpiryDate } = require('@/lib/advpsOrderExpiry');
 const { extractAdvpsStatusCredentials } = require('@/lib/advpsStatusNormalize');
 const HostycareAPI = require('@/services/hostycareApi');
@@ -633,6 +634,41 @@ export async function POST(request) {
       }
 
       console.log('[RENEWAL-CONFIRM] === ADVPS RENEWAL PROCESS END ===');
+    } else if (provider === 'netbay') {
+      console.log('[RENEWAL-CONFIRM] === NETBAY RENEWAL PROCESS START ===');
+      console.log('[RENEWAL-CONFIRM] Netbay serviceId:', order.netbayServiceId);
+
+      try {
+        const apiStart = Date.now();
+        const netbayRenew = await executeNetbayUpstreamRenewal(order, { months: 1 });
+        const apiDuration = Date.now() - apiStart;
+
+        providerRenewalResult = netbayRenew.result || {
+          error: netbayRenew.error,
+          serviceId: netbayRenew.serviceId,
+        };
+        providerRenewalSuccess = netbayRenew.success;
+
+        if (netbayRenew.success) {
+          console.log('[RENEWAL-CONFIRM] ✅ Netbay renewal API success:', JSON.stringify(netbayRenew.result, null, 2));
+          logger.setProviderApiResult('netbay', true, netbayRenew.result, null, apiDuration);
+          if (netbayRenew.newExpiryDate) {
+            newExpiryDate = netbayRenew.newExpiryDate;
+            console.log(`[RENEWAL-CONFIRM] Netbay expiry after renew: ${newExpiryDate.toISOString()}`);
+          }
+        } else {
+          console.error('[RENEWAL-CONFIRM] ❌ Netbay renewal API failed:', netbayRenew.error);
+          logger.setProviderApiResult('netbay', false, netbayRenew.result, { message: netbayRenew.error }, apiDuration);
+        }
+      } catch (netbayErr) {
+        console.error('[RENEWAL-CONFIRM] ❌ Netbay renewal threw:', netbayErr.message);
+        logger.setProviderApiResult('netbay', false, null, netbayErr);
+        providerRenewalResult = { error: netbayErr.message };
+        providerRenewalSuccess = false;
+        console.log('[RENEWAL-CONFIRM] Continuing — customer payment succeeded; expiry will still be extended');
+      }
+
+      console.log('[RENEWAL-CONFIRM] === NETBAY RENEWAL PROCESS END ===');
     } else {
       console.log(`[RENEWAL-CONFIRM] ${provider} renewal - no additional API call needed`);
       providerRenewalSuccess = true; // OceanLinux renewals are handled internally
@@ -735,6 +771,10 @@ export async function POST(request) {
         : providerRenewalResult?.testMode
           ? 'Payment received but ADVPS ran in TEST mode — the VM was NOT renewed upstream. Replace ADVPS_API_KEY with your production key on the server, then contact support to retry the upstream renewal.'
           : 'Payment received and your service period has been extended. Note: the upstream renewal API hit a snag — our team will retry it shortly.';
+    } else if (provider === 'netbay') {
+      response.message = providerRenewalSuccess
+        ? 'Service renewed successfully! Your service period has been extended.'
+        : 'Payment received and your service period has been extended. Our team will complete the extension shortly if needed.';
     }
 
     console.log('[RENEWAL-CONFIRM] === RENEWAL PROCESS COMPLETE ===');
@@ -742,7 +782,7 @@ export async function POST(request) {
       ...response,
       renewalDetails: {
         ...response.renewalDetails,
-        providerApiCallMade: provider === 'smartvps' || provider === 'hostycare',
+        providerApiCallMade: provider === 'smartvps' || provider === 'hostycare' || provider === 'netbay',
         providerApiSuccess: providerRenewalSuccess
       }
     });

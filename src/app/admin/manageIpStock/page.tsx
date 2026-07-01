@@ -16,9 +16,10 @@ import {
     DialogHeader,
 } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import Link from 'next/link';
-import { X, ExternalLink, Zap, BookOpen } from 'lucide-react';
+import { X, ExternalLink, Zap, BookOpen, Copy } from 'lucide-react';
 
 interface MemoryOptionDetails {
     price: number;
@@ -40,6 +41,7 @@ interface IPStock {
     description?: string;
     memoryOptions: Record<string, MemoryOptionDetails>;
     available: boolean;
+    hiddenFromStore?: boolean;
     availabilityManual?: boolean;
     stockCount?: number;
     serverType: string;
@@ -52,7 +54,7 @@ interface IPStock {
 interface CompanyOption {
     _id: string;
     name: string;
-    netbayApi?: { enabled?: boolean; apiKey?: string; apiSecret?: string } | null;
+    netbayApi?: { enabled?: boolean; useLiveStockApi?: boolean; apiKey?: string; apiSecret?: string } | null;
     resellerApi?: { enabled?: boolean } | null;
 }
 
@@ -67,6 +69,17 @@ interface CompanyOption {
  *     defaultOs?: { Linux?: 'Ubuntu 22.04', Windows?: 'Windows Server 2022' },
  *   }
  */
+function stockHasNetbayConfig(stock: IPStock | null) {
+    const cfg = stock?.defaultConfigurations?.netbay;
+    return !!(cfg?.planByMemory && Object.values(cfg.planByMemory).some(Boolean));
+}
+
+function companyUsesNetbayLiveForStock(stock: IPStock, companies: CompanyOption[]) {
+    if (!stock.company || !stockHasNetbayConfig(stock)) return false;
+    const c = companies.find((co) => co._id === stock.company);
+    return !!(c?.netbayApi?.enabled && c?.netbayApi?.useLiveStockApi);
+}
+
 function readNetbayConfig(stock: IPStock | null): {
     groupTag: string;
     planByMemory: Record<string, string>;
@@ -93,10 +106,14 @@ const ManageIpStock = () => {
     const [newMemorySize, setNewMemorySize] = useState('');
     const [newMemoryPrice, setNewMemoryPrice] = useState('');
     const [companies, setCompanies] = useState<CompanyOption[]>([]);
+    const [cloneSource, setCloneSource] = useState<IPStock | null>(null);
+    const [cloneName, setCloneName] = useState('');
+    const [isCloneDialogOpen, setIsCloneDialogOpen] = useState(false);
+    const [cloning, setCloning] = useState(false);
 
     useEffect(() => {
         const fetchIPStocks = async () => {
-            const response = await fetch('/api/ipstock');
+            const response = await fetch('/api/ipstock?includeHidden=1');
             const data = await response.json();
             setIpStocks(data);
         };
@@ -152,7 +169,10 @@ const ManageIpStock = () => {
     };
 
     const handleEdit = (stock: IPStock) => {
-        setCurrentStock({ ...stock });
+        setCurrentStock({
+            ...stock,
+            hiddenFromStore: stock.hiddenFromStore === true,
+        });
         setIsDialogOpen(true);
     };
 
@@ -170,24 +190,113 @@ const ManageIpStock = () => {
         }
     };
 
-    const handleUpdate = async () => {
-        if (currentStock) {
-            try {
-                const response = await fetch(`/api/ipstock/update`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(currentStock)
-                });
-                if (response.ok) {
-                    setIpStocks(prev => prev.map(stock => stock._id === currentStock._id ? currentStock : stock));
-                    toast.success('IP Stock updated successfully!');
-                    setIsDialogOpen(false);
-                } else {
-                    throw new Error('Failed to update IP stock');
-                }
-            } catch (error) {
-                toast.error('Failed to update IP stock');
+    const openCloneDialog = (stock: IPStock) => {
+        setCloneSource(stock);
+        setCloneName(`${stock.name} (Copy)`);
+        setIsCloneDialogOpen(true);
+    };
+
+    const handleClone = async () => {
+        if (!cloneSource || !cloneName.trim()) {
+            toast.error('Enter a name for the clone');
+            return;
+        }
+        setCloning(true);
+        try {
+            const response = await fetch('/api/ipstock/clone', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({
+                    sourceId: cloneSource._id,
+                    name: cloneName.trim(),
+                }),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(data.message || 'Failed to clone IP stock');
             }
+
+            const listRes = await fetch('/api/ipstock?includeHidden=1', { credentials: 'include' });
+            const list = await listRes.json();
+            if (Array.isArray(list)) {
+                setIpStocks(list);
+            } else {
+                setIpStocks(prev => [...prev, data]);
+            }
+
+            toast.success('IP Stock cloned — update group tag / name if needed');
+            setIsCloneDialogOpen(false);
+            setCloneSource(null);
+            setCloneName('');
+
+            if (data?._id) {
+                handleEdit({
+                    ...data,
+                    hiddenFromStore: data.hiddenFromStore === true,
+                });
+            }
+        } catch (error: any) {
+            toast.error(error?.message || 'Failed to clone IP stock');
+        } finally {
+            setCloning(false);
+        }
+    };
+
+    const handleUpdate = async () => {
+        if (!currentStock) return;
+        try {
+            const payload = {
+                _id: currentStock._id,
+                name: currentStock.name,
+                description: currentStock.description,
+                available: currentStock.available,
+                availabilityManual: currentStock.availabilityManual,
+                serverType: currentStock.serverType,
+                tags: currentStock.tags,
+                memoryOptions: currentStock.memoryOptions,
+                promoCodes: currentStock.promoCodes,
+                defaultConfigurations: currentStock.defaultConfigurations,
+                company: currentStock.company ?? null,
+                stockCount: currentStock.stockCount,
+                hiddenFromStore: currentStock.hiddenFromStore === true,
+            };
+
+            const response = await fetch(`/api/ipstock/update`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify(payload),
+            });
+
+            if (!response.ok) {
+                const err = await response.json().catch(() => ({}));
+                throw new Error(err.message || 'Failed to update IP stock');
+            }
+
+            const updated = await response.json();
+            if ('hiddenFromStore' in payload && updated?.hiddenFromStore !== payload.hiddenFromStore) {
+                throw new Error('Hide setting did not save — please try again');
+            }
+
+            const listRes = await fetch('/api/ipstock?includeHidden=1', { credentials: 'include' });
+            const list = await listRes.json();
+            if (Array.isArray(list)) {
+                setIpStocks(list);
+            } else {
+                setIpStocks(prev =>
+                    prev.map(stock => stock._id === currentStock._id ? { ...currentStock, ...updated } : stock)
+                );
+            }
+
+            toast.success(
+                payload.hiddenFromStore
+                    ? 'Plan hidden from customer store'
+                    : 'Plan visible on customer store'
+            );
+            setIsDialogOpen(false);
+        } catch (error: any) {
+            toast.error(error?.message || 'Failed to update IP stock');
         }
     };
 
@@ -246,6 +355,12 @@ const ManageIpStock = () => {
         const n: any = c?.netbayApi;
         // apiKey/apiSecret can live in env vars, so just check `enabled`.
         return !!(n && n.enabled);
+    })();
+
+    const selectedCompanyUsesNetbayLiveStock = (() => {
+        if (!currentStock?.company) return false;
+        const c = companies.find(c => c._id === currentStock.company);
+        return !!(c?.netbayApi?.enabled && c?.netbayApi?.useLiveStockApi);
     })();
 
     const handleHostycareProductIdChange = (size: string, value: string) => {
@@ -349,12 +464,14 @@ const ManageIpStock = () => {
                             <TableHead>Name</TableHead>
                             <TableHead>Type</TableHead>
                             <TableHead>Available</TableHead>
+                            <TableHead>Store</TableHead>
                             <TableHead>4 GB</TableHead>
                             <TableHead>8 GB</TableHead>
                             <TableHead>16 GB</TableHead>
                             <TableHead>Auto-Provision</TableHead>
                             <TableHead>Promo Codes</TableHead>
                             <TableHead>Edit</TableHead>
+                            <TableHead>Clone</TableHead>
                             <TableHead>Delete</TableHead>
                         </TableRow>
                     </TableHeader>
@@ -378,7 +495,9 @@ const ManageIpStock = () => {
                                     </Badge>
                                 </TableCell>
                                 <TableCell>
-                                    {stock.company
+                                    {companyUsesNetbayLiveForStock(stock, companies)
+                                        ? (stock.available ? 'Netbay API: Yes' : 'Netbay API: No')
+                                        : stock.company
                                         ? `${stock.stockCount ?? 0} units`
                                         : (
                                             <span className="inline-flex items-center gap-1">
@@ -388,6 +507,13 @@ const ManageIpStock = () => {
                                               )}
                                             </span>
                                           )}
+                                </TableCell>
+                                <TableCell>
+                                    {stock.hiddenFromStore ? (
+                                        <Badge variant="secondary">Hidden</Badge>
+                                    ) : (
+                                        <Badge variant="outline" className="text-green-700 border-green-200">Visible</Badge>
+                                    )}
                                 </TableCell>
                                 {Object.entries(stock.memoryOptions).map(([memory, details]) => (
                                     <TableCell key={memory}>
@@ -428,6 +554,12 @@ const ManageIpStock = () => {
                                     <Button onClick={() => handleEdit(stock)}>Edit</Button>
                                 </TableCell>
                                 <TableCell>
+                                    <Button variant="outline" onClick={() => openCloneDialog(stock)} className="gap-1.5">
+                                        <Copy className="h-3.5 w-3.5" />
+                                        Clone
+                                    </Button>
+                                </TableCell>
+                                <TableCell>
                                     <Button onClick={() => handleDelete(stock._id)}>Delete</Button>
                                 </TableCell>
                             </TableRow>
@@ -454,7 +586,18 @@ const ManageIpStock = () => {
                                         />
                                     </div>
                                     <div>
-                                        {currentStock.company ? (
+                                        {currentStock.company && stockHasNetbayConfig(currentStock) && selectedCompanyUsesNetbayLiveStock ? (
+                                            <div className="rounded-lg border dark:border-none p-3 bg-muted/30 space-y-1">
+                                                <Label>Availability</Label>
+                                                <p className="text-sm font-medium">
+                                                    {currentStock.available ? 'In stock (Netbay API)' : 'Out of stock (Netbay API)'}
+                                                </p>
+                                                <p className="text-xs text-muted-foreground">
+                                                    Auto-synced from Netbay GET /services/stock. Toggle live stock in{' '}
+                                                    <Link href="/admin/companies" className="text-blue-600 hover:underline">/admin/companies</Link>.
+                                                </p>
+                                            </div>
+                                        ) : currentStock.company ? (
                                             <>
                                                 <Label>Stock Count (orderable units):</Label>
                                                 <Input
@@ -471,6 +614,12 @@ const ManageIpStock = () => {
                                                         });
                                                     }}
                                                 />
+                                                {stockHasNetbayConfig(currentStock) && selectedCompanyHasNetbay && !selectedCompanyUsesNetbayLiveStock && (
+                                                    <p className="text-xs text-muted-foreground mt-1">
+                                                        NetBay manual stock mode — set units here or via company Stocks dialog.
+                                                        Enable live API stock in /admin/companies → Netbay when NetBay fixes their stock endpoint.
+                                                    </p>
+                                                )}
                                             </>
                                         ) : (
                                             <>
@@ -513,6 +662,21 @@ const ManageIpStock = () => {
                                         value={currentStock.description || ''}
                                         onChange={(e) => setCurrentStock({ ...currentStock, description: e.target.value })}
                                         placeholder="Server description..."
+                                    />
+                                </div>
+
+                                <div className="flex items-center justify-between rounded-lg border dark:border-none p-4">
+                                    <div className="space-y-1 pr-4">
+                                        <Label>Hide from customer store</Label>
+                                        <p className="text-sm text-muted-foreground">
+                                            Hidden plans won&apos;t appear on the user dashboard or store. Existing orders still work.
+                                        </p>
+                                    </div>
+                                    <Switch
+                                        checked={!!currentStock.hiddenFromStore}
+                                        onCheckedChange={(checked) =>
+                                            setCurrentStock({ ...currentStock, hiddenFromStore: checked })
+                                        }
                                     />
                                 </div>
 
@@ -693,7 +857,7 @@ const ManageIpStock = () => {
                                                 <Label className="text-xs">Default Linux OS (optional):</Label>
                                                 <Input
                                                     type="text"
-                                                    placeholder="Ubuntu 22.04"
+                                                    placeholder="Auto from catalog"
                                                     value={readNetbayConfig(currentStock).defaultOs.Linux || ''}
                                                     onChange={(e) => {
                                                         const cfg = readNetbayConfig(currentStock);
@@ -720,7 +884,8 @@ const ManageIpStock = () => {
                                         </div>
                                         <p className="text-[11px] text-muted-foreground">
                                             OS values must match the names exactly as they appear in Netbay&apos;s
-                                            <code> /api/v1/os </code> catalog. Defaults to <code>Ubuntu 22.04</code> /
+                                            Leave blank to auto-pick from catalog. You can paste the template{' '}
+                                            <strong>Name</strong> or <strong>OS ID</strong> — purchase sends the name; ID is resolved from catalog.
                                             <code> Windows Server 2022</code> when blank.
                                         </p>
                                     </div>
@@ -831,6 +996,43 @@ const ManageIpStock = () => {
                         </DialogContent>
                     </Dialog>
                 )}
+
+                <Dialog open={isCloneDialogOpen} onOpenChange={setIsCloneDialogOpen}>
+                    <DialogContent className="max-w-md">
+                        <DialogHeader>
+                            <DialogTitle>Clone IP Stock</DialogTitle>
+                            <DialogDescription>
+                                Copies memory prices, promo codes, Netbay config, company link, and tags.
+                                Change the name (and group tag for a new location) after cloning.
+                            </DialogDescription>
+                        </DialogHeader>
+                        {cloneSource && (
+                            <div className="space-y-3">
+                                <p className="text-sm text-muted-foreground">
+                                    Cloning: <span className="font-medium text-foreground">{cloneSource.name}</span>
+                                </p>
+                                <div>
+                                    <Label htmlFor="clone-name">New plan name</Label>
+                                    <Input
+                                        id="clone-name"
+                                        value={cloneName}
+                                        onChange={(e) => setCloneName(e.target.value)}
+                                        placeholder="e.g. 🐧 103.157.xx Linux IP – Xeon Gold | 4GB / 2vCPU NVMe"
+                                    />
+                                </div>
+                            </div>
+                        )}
+                        <DialogFooter>
+                            <Button variant="ghost" onClick={() => setIsCloneDialogOpen(false)} disabled={cloning}>
+                                Cancel
+                            </Button>
+                            <Button onClick={handleClone} disabled={cloning || !cloneName.trim()} className="gap-1.5">
+                                <Copy className="h-3.5 w-3.5" />
+                                {cloning ? 'Cloning…' : 'Create clone'}
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
             </div>
         </div>
     );

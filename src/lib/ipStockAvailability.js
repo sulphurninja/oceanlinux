@@ -5,33 +5,63 @@ import {
   countUnallocatedInventory,
 } from '@/lib/companyInventory';
 
-/** Company-linked IP stocks use numeric inventory; others use the legacy boolean. */
-export function usesStockCount(stock) {
+/** IP stock has Netbay plan IDs configured (automation), regardless of stock mode. */
+export function stockHasNetbayPlans(stock) {
+  if (!stock?.company) return false;
+  let cfg = stock?.defaultConfigurations?.netbay;
+  if (!cfg && typeof stock?.defaultConfigurations?.get === 'function') {
+    cfg = stock.defaultConfigurations.get('netbay');
+  }
+  const plans = cfg?.planByMemory;
+  if (!plans) return false;
+  const obj = plans instanceof Map ? Object.fromEntries(plans) : plans;
+  return Object.values(obj || {}).some(Boolean);
+}
+
+/**
+ * Netbay-linked plans with live API stock mode (company.netbayApi.useLiveStockApi).
+ * When company is omitted, defaults to manual stockCount mode.
+ */
+export function usesNetbayLiveStock(stock, company) {
+  if (!stockHasNetbayPlans(stock)) return false;
+  if (!company) return false;
+  if (!company?.netbayApi?.enabled) return false;
+  return company.netbayApi.useLiveStockApi === true;
+}
+
+/** Company-linked IP stocks use numeric inventory; Netbay live-stock plans do not. */
+export function usesStockCount(stock, company) {
+  if (usesNetbayLiveStock(stock, company)) return false;
   return !!(stock?.company);
 }
 
-export function getIpStockRemaining(stock) {
+export function getIpStockRemaining(stock, company) {
   if (!stock) return 0;
   if (usesPreconfiguredInventory(stock)) {
     return countUnallocatedInventory(stock);
   }
-  if (usesStockCount(stock)) {
+  if (usesStockCount(stock, company)) {
     return Math.max(0, Number(stock.stockCount) || 0);
   }
   return stock.available ? Number.POSITIVE_INFINITY : 0;
 }
 
-export function isIpStockPurchasable(stock, quantity = 1) {
+export function isIpStockHiddenFromStore(stock) {
+  return !!stock?.hiddenFromStore;
+}
+
+export function isIpStockPurchasable(stock, quantity = 1, company) {
   if (!stock) return false;
-  if (usesStockCount(stock)) {
-    return getIpStockRemaining(stock) >= quantity;
+  if (isIpStockHiddenFromStore(stock)) return false;
+  if (usesStockCount(stock, company)) {
+    return getIpStockRemaining(stock, company) >= quantity;
   }
   return !!stock.available;
 }
 
-export function syncAvailableFromStockCount(stock) {
-  if (usesStockCount(stock)) {
-    return getIpStockRemaining(stock) > 0;
+export function syncAvailableFromStockCount(stock, company) {
+  if (usesStockCount(stock, company)) {
+    return getIpStockRemaining(stock, company) > 0;
   }
   return !!stock.available;
 }
@@ -41,10 +71,15 @@ export async function assertIpStockPurchasable(ipStockId, quantity = 1) {
   if (!stock) {
     return { ok: false, message: 'Product not found' };
   }
-  if (!isIpStockPurchasable(stock, quantity)) {
+  let company = null;
+  if (stock.company) {
+    const Company = (await import('@/models/companyModel')).default;
+    company = await Company.findById(stock.company).select('netbayApi').lean();
+  }
+  if (!isIpStockPurchasable(stock, quantity, company)) {
     return {
       ok: false,
-      message: usesStockCount(stock) ? 'This product is out of stock' : 'This product is currently out of stock',
+      message: usesStockCount(stock, company) ? 'This product is out of stock' : 'This product is currently out of stock',
       stock,
     };
   }
@@ -60,7 +95,12 @@ export async function decrementIpStockForOrder(order) {
   if (order.inventoryDecremented) return { success: true, alreadyDone: true };
 
   const stock = await IPStock.findById(order.ipStockId).select('company stockCount').lean();
-  if (!stock || !usesStockCount(stock)) {
+  let company = null;
+  if (stock?.company) {
+    const Company = (await import('@/models/companyModel')).default;
+    company = await Company.findById(stock.company).select('netbayApi').lean();
+  }
+  if (!stock || !usesStockCount(stock, company)) {
     return { success: true, skipped: true };
   }
 
@@ -84,9 +124,23 @@ export async function decrementIpStockForOrder(order) {
 
 export async function setIpStockCount(stockId, stockCount) {
   const count = Math.max(0, Math.floor(Number(stockCount) || 0));
-  return IPStock.findByIdAndUpdate(
-    stockId,
-    { stockCount: count, available: count > 0 },
-    { new: true }
+  await IPStock.collection.updateOne(
+    { _id: stockId },
+    { $set: { stockCount: count, available: count > 0 } }
   );
+  return IPStock.findById(stockId);
+}
+
+/** Set the same manual stock count on every plan linked to a company. */
+export async function setAllCompanyIpStockCounts(companyId, stockCount, company) {
+  const count = Math.max(0, Math.floor(Number(stockCount) || 0));
+  const stocks = await IPStock.find({ company: companyId }).lean();
+  const ids = stocks.filter((s) => usesStockCount(s, company)).map((s) => s._id);
+  if (ids.length === 0) return [];
+
+  await IPStock.collection.updateMany(
+    { _id: { $in: ids } },
+    { $set: { stockCount: count, available: count > 0 } }
+  );
+  return IPStock.find({ _id: { $in: ids } }).sort({ name: 1 });
 }

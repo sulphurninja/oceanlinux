@@ -13,6 +13,10 @@
       "schedule": "*/10 * * * *"
     },
     {
+      "path": "/api/netbay/sync-orders",
+      "schedule": "0 */6 * * *"
+    },
+    {
       "path": "/api/orders/expiry-reminders",
       "schedule": "0 4 * * *"
     }

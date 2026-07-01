@@ -19,7 +19,7 @@ export async function GET(request) {
     const productId = searchParams.get('id') || searchParams.get('productId');
 
     if (productId) {
-      const stock = await IPStock.findOne({ _id: productId, available: true });
+      const stock = await IPStock.findOne({ _id: productId, available: true, hiddenFromStore: { $ne: true } });
       if (!stock) {
         return NextResponse.json(
           { success: false, message: 'Product not found or unavailable' },
@@ -33,7 +33,7 @@ export async function GET(request) {
       });
     }
 
-    const stocks = await IPStock.find({ available: true }).sort({ name: 1 });
+    const stocks = await IPStock.find({ available: true, hiddenFromStore: { $ne: true } }).sort({ name: 1 });
     const products = stocks.map((stock) => formatResellerProduct(stock, reseller));
 
     return NextResponse.json({

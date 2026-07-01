@@ -4,6 +4,8 @@ const IPStockSchema = new mongoose.Schema({
   name: { type: String, required: true },
   description: { type: String, default: "" },
   available: { type: Boolean, default: true },
+  /** When true, plan is hidden from customer dashboard / store listing (admin still sees it). */
+  hiddenFromStore: { type: Boolean, default: false },
   /** Units remaining for company-managed stock. Only enforced when `company` is set. */
   stockCount: { type: Number, default: 0, min: 0 },
   company: { type: mongoose.Schema.Types.ObjectId, ref: 'Company', default: null },
@@ -61,4 +63,8 @@ const IPStockSchema = new mongoose.Schema({
   }
 })
 
-module.exports = mongoose.models.IPStock || mongoose.model('IPStock', IPStockSchema)
+if (mongoose.models.IPStock) {
+  delete mongoose.models.IPStock
+}
+
+module.exports = mongoose.model('IPStock', IPStockSchema)

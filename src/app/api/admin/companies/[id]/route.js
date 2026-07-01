@@ -46,16 +46,23 @@ function normalizeResellerApiEntry(v) {
   };
 }
 
+function asBool(v) {
+  return v === true || v === 'true' || v === 1 || v === '1';
+}
+
 function normalizeNetbayApiEntry(v) {
   if (v === null) return null;
+  const enabled = asBool(v?.enabled);
+  const useLiveStockApi = enabled && asBool(v?.useLiveStockApi);
   return {
-    enabled: typeof v?.enabled === 'boolean' ? v.enabled : false,
+    enabled,
     label: typeof v?.label === 'string' ? v.label.trim() : '',
     baseUrl: typeof v?.baseUrl === 'string'
       ? v.baseUrl.trim().replace(/\/+$/, '')
       : '',
     apiKey: typeof v?.apiKey === 'string' ? v.apiKey.trim() : '',
     apiSecret: typeof v?.apiSecret === 'string' ? v.apiSecret : '',
+    useLiveStockApi,
   };
 }
 
@@ -105,10 +112,48 @@ export async function PUT(request, { params }) {
   const body = await request.json();
   const updates = pickAllowedUpdates(body);
 
-  const company = await Company.findByIdAndUpdate(id, updates, { new: true });
+  const company = await Company.findById(id);
   if (!company) return NextResponse.json({ error: 'Company not found' }, { status: 404 });
 
-  return NextResponse.json(company);
+  const prevNetbayLive = company.netbayApi?.useLiveStockApi === true;
+
+  if (Object.prototype.hasOwnProperty.call(updates, 'netbayApi')) {
+    // Write netbayApi directly — bypasses stale Mongoose model cache in dev HMR
+    // (useLiveStockApi was silently dropped when the cached schema lacked that path).
+    await Company.collection.updateOne(
+      { _id: company._id },
+      { $set: { netbayApi: updates.netbayApi } }
+    );
+    delete updates.netbayApi;
+  }
+
+  if (Object.keys(updates).length > 0) {
+    Object.assign(company, updates);
+    await company.save();
+  }
+
+  const saved = await Company.findById(id).lean();
+  if (!saved) return NextResponse.json({ error: 'Company not found' }, { status: 404 });
+
+  const nextNetbayLive = saved.netbayApi?.useLiveStockApi === true;
+  if (prevNetbayLive && !nextNetbayLive) {
+    try {
+      const { restoreNetbayManualStockAvailability } = require('@/lib/netbayLiveStock');
+      await restoreNetbayManualStockAvailability(saved._id);
+    } catch (err) {
+      console.warn('[admin/companies] restore manual Netbay stock failed:', err.message);
+    }
+  }
+  if (!prevNetbayLive && nextNetbayLive) {
+    try {
+      const { refreshNetbayStockForCustomer } = require('@/lib/netbayLiveStock');
+      await refreshNetbayStockForCustomer({ force: true });
+    } catch (err) {
+      console.warn('[admin/companies] Netbay live stock refresh failed:', err.message);
+    }
+  }
+
+  return NextResponse.json(saved);
 }
 
 export async function DELETE(request, { params }) {

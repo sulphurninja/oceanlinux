@@ -8,6 +8,7 @@ const {
 } = require('@/lib/advpsLiveStock');
 const { getCompanyVirtualizorAccounts } = require('@/lib/companyVirtualizor');
 const { getCompanyResellerApiConfig } = require('@/lib/companyResellerApi');
+const { getCompanyNetbayApiConfig } = require('@/lib/companyNetbayApi');
 
 export async function GET(request, { params }) {
     console.log('[IPSTOCK-ID][GET] === REQUEST START ===');
@@ -46,13 +47,14 @@ export async function GET(request, { params }) {
         // Two automation providers are supported, with priority:
         //   1. Virtualizor multi-panel  (legacy/preferred path)
         //   2. Reseller HTTP API        (Hostheaven / SomaniOne)
+        //   3. Netbay reseller API      (auto-provision + power/rebuild)
         // We never leak credentials/hosts here — only enough metadata for the
         // UI to render the right controls.
         let companyAutomation = null;
         if (ipStock.company) {
             try {
                 const company = await Company.findById(ipStock.company)
-                    .select('virtualizors virtualizor resellerApi name')
+                    .select('virtualizors virtualizor resellerApi netbayApi name')
                     .lean();
                 const accounts = getCompanyVirtualizorAccounts(company);
                 if (accounts.length > 0) {
@@ -71,6 +73,16 @@ export async function GET(request, { params }) {
                             companyName: company?.name,
                             label: reseller.label || null,
                         };
+                    } else {
+                        const netbay = getCompanyNetbayApiConfig(company);
+                        if (netbay) {
+                            companyAutomation = {
+                                provider: 'netbay',
+                                enabled: true,
+                                companyName: company?.name,
+                                label: netbay.label || null,
+                            };
+                        }
                     }
                 }
             } catch (lookupErr) {

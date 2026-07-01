@@ -56,9 +56,16 @@ function hasCompanyNetbayApi(company) {
   return !!getCompanyNetbayApiConfig(company);
 }
 
+/** True when Netbay plans should sync availability from GET /services/stock. */
+function companyUsesNetbayLiveStock(company) {
+  if (!company?.netbayApi?.enabled) return false;
+  return company.netbayApi.useLiveStockApi === true;
+}
+
 module.exports = {
   NETBAY_API_DEFAULTS,
   getEnvFallback,
   getCompanyNetbayApiConfig,
   hasCompanyNetbayApi,
+  companyUsesNetbayLiveStock,
 };

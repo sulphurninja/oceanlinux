@@ -47,14 +47,14 @@ function serializeInventoryItem(item) {
   };
 }
 
-function serializeStock(stock) {
+function serializeStock(stock, companyDoc) {
   const hasInventory = usesPreconfiguredInventory(stock);
   return {
     _id: String(stock._id),
     name: stock.name,
     available: !!stock.available,
     stockCount: getIpStockRemaining(stock),
-    usesStockCount: usesStockCount(stock),
+    usesStockCount: usesStockCount(stock, companyDoc),
     usesPreconfiguredInventory: hasInventory,
     inventoryTotal: stock.inventoryItems?.length || 0,
     inventoryAvailable: hasInventory ? countUnallocatedInventory(stock) : 0,
@@ -73,14 +73,14 @@ export async function GET() {
   await connectDB();
   const [stocks, companyDoc] = await Promise.all([
     IPStock.find({ company: company.id }).sort({ name: 1 }).lean(),
-    Company.findById(company.id).select('resellerApi name').lean(),
+    Company.findById(company.id).select('resellerApi netbayApi name').lean(),
   ]);
 
   const resellerCfg = getCompanyResellerApiConfig(companyDoc);
   const hasResellerSync = !!resellerCfg;
 
   return NextResponse.json({
-    stocks: stocks.map(serializeStock),
+    stocks: stocks.map((s) => serializeStock(s, companyDoc)),
     hasResellerSync,
     resellerLabel: resellerCfg?.label || 'Hostheaven',
   }, {
@@ -97,7 +97,7 @@ export async function PUT(request) {
   const { stockId, stockCount, action, items, bulkLines, removeItemId, ipAddress, addToInventory } = body;
 
   if (action === 'syncAllResellerExpiries') {
-    const companyDoc = await Company.findById(company.id).select('resellerApi name').lean();
+    const companyDoc = await Company.findById(company.id).select('resellerApi netbayApi name').lean();
     if (!hasCompanyResellerApi(companyDoc)) {
       return NextResponse.json(
         { error: 'Hostheaven sync is not enabled. Ask admin to enable Reseller API on your company.' },
@@ -118,7 +118,7 @@ export async function PUT(request) {
           .lean()
       : [];
 
-    const serializedStocks = stocks.map((s) => serializeStock(s.toObject?.() || s));
+    const serializedStocks = stocks.map((s) => serializeStock(s.toObject?.() || s, companyDoc));
     const mismatches = buildCompanyValidityMismatchReport(
       serializedStocks,
       orders,
@@ -148,6 +148,8 @@ export async function PUT(request) {
   const stock = await IPStock.findOne({ _id: stockId, company: company.id });
   if (!stock) return NextResponse.json({ error: 'Stock not found or not yours' }, { status: 404 });
 
+  const companyDoc = await Company.findById(company.id).select('netbayApi resellerApi name').lean();
+
   // Legacy: set numeric stock count only (no pre-config rows)
   if (action === 'setStockCount' || (stockCount !== undefined && !action)) {
     if (usesPreconfiguredInventory(stock)) {
@@ -157,11 +159,10 @@ export async function PUT(request) {
       );
     }
     const updated = await setIpStockCount(stockId, stockCount);
-    return NextResponse.json({ success: true, stock: serializeStock(updated.toObject?.() || updated) });
+    return NextResponse.json({ success: true, stock: serializeStock(updated.toObject?.() || updated, companyDoc) });
   }
 
   if (action === 'syncResellerCredentials') {
-    const companyDoc = await Company.findById(company.id).select('resellerApi name').lean();
     if (!hasCompanyResellerApi(companyDoc)) {
       return NextResponse.json(
         { error: 'Hostheaven sync is not enabled. Ask admin to enable Reseller API on your company.' },
@@ -213,7 +214,7 @@ export async function PUT(request) {
           serverName: credentials.serverName,
           expiryDate: credentials.expiryDate || null,
         },
-        stock: serializeStock(synced.toObject?.() || synced),
+        stock: serializeStock(synced.toObject?.() || synced, companyDoc),
       });
     }
 
@@ -265,7 +266,7 @@ export async function PUT(request) {
     return NextResponse.json({
       success: true,
       added: newItems.length,
-      stock: serializeStock(synced.toObject?.() || synced),
+      stock: serializeStock(synced.toObject?.() || synced, companyDoc),
     });
   }
 
@@ -283,7 +284,7 @@ export async function PUT(request) {
     }
     await stock.save();
     const synced = await syncStockCountFromInventory(stockId);
-    return NextResponse.json({ success: true, removed, stock: serializeStock(synced.toObject?.() || synced) });
+    return NextResponse.json({ success: true, removed, stock: serializeStock(synced.toObject?.() || synced, companyDoc) });
   }
 
   return NextResponse.json(

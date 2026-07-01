@@ -10,8 +10,20 @@ const {
   rowLooksInStock,
   invalidateAdvpsStockMapCache,
 } = require('@/lib/advpsLiveStock');
-import { isIpStockPurchasable, usesStockCount } from '@/lib/ipStockAvailability';
+import {
+  isIpStockPurchasable,
+  usesStockCount,
+  isIpStockHiddenFromStore,
+  usesNetbayLiveStock,
+} from '@/lib/ipStockAvailability';
 import { customerStockUnavailableMessage } from '@/lib/customerStockMessages';
+import Company from '@/models/companyModel';
+
+const {
+  isNetbayIpStock,
+  syncNetbayIpStockRow,
+  verifyNetbayMemoryInStock,
+} = require('@/lib/netbayLiveStock');
 
 function normalizeSmartVpsResponse(payload) {
   if (payload == null) return payload;
@@ -110,8 +122,23 @@ function isAdvpsVariantInStock(stock, memory) {
   return rowLooksInStock({ stock: variant.stock, stockStatus: variant.stockStatus });
 }
 
+function isNetbayVariantInStock(stock, memory, company) {
+  if (!memory || !isNetbayIpStock(stock)) return true;
+  if (!usesNetbayLiveStock(stock, company)) return isIpStockPurchasable(stock, 1, company);
+  const cfg = toPlainConfigurations(stock.defaultConfigurations)?.netbay;
+  const variant = cfg?.variantStock?.[memory];
+  if (!variant) return isIpStockPurchasable(stock, 1, company);
+  if (variant.skipped || variant.available === null) return false;
+  return variant.available === true;
+}
+
+async function loadCompanyForStock(stock) {
+  if (!stock?.company) return null;
+  return Company.findById(stock.company).select('netbayApi').lean();
+}
+
 /**
- * Live-sync one IPStock row from ADVPS/SmartVPS (if applicable) and verify purchasable.
+ * Live-sync one IPStock row from ADVPS/SmartVPS/Netbay (if applicable) and verify purchasable.
  */
 export async function refreshAndVerifyIpStockPurchase(ipStockId, memory) {
   await connectDB();
@@ -125,11 +152,16 @@ export async function refreshAndVerifyIpStockPurchase(ipStockId, memory) {
     };
   }
 
+  let company = await loadCompanyForStock(stock);
+  const netbayLive = isNetbayIpStock(stock) && usesNetbayLiveStock(stock, company);
+
   try {
     if (isAdvpsPlan(stock)) {
       stock = await syncAdvpsIpStockRow(stock);
     } else if (isSmartVpsPlan(stock)) {
       stock = await syncSmartVpsIpStockRow(stock);
+    } else if (netbayLive) {
+      stock = await syncNetbayIpStockRow(stock);
     } else {
       stock = await IPStock.findById(ipStockId);
     }
@@ -150,8 +182,17 @@ export async function refreshAndVerifyIpStockPurchase(ipStockId, memory) {
     };
   }
 
-  if (!isIpStockPurchasable(stock)) {
-    const msg = usesStockCount(stock)
+  if (isIpStockHiddenFromStore(stock)) {
+    return {
+      ok: false,
+      message: customerStockUnavailableMessage('This product is not available'),
+      stock: stock.toObject?.() || stock,
+      synced: true,
+    };
+  }
+
+  if (!isIpStockPurchasable(stock, 1, company)) {
+    const msg = usesStockCount(stock, company)
       ? 'This product is out of stock'
       : 'This product is currently out of stock';
     return {
@@ -173,11 +214,37 @@ export async function refreshAndVerifyIpStockPurchase(ipStockId, memory) {
     };
   }
 
+  if (netbayLive && memory && !isNetbayVariantInStock(stock, memory, company)) {
+    return {
+      ok: false,
+      message: customerStockUnavailableMessage(
+        `${memory} is currently out of stock at this location. Please refresh and pick another plan.`
+      ),
+      stock: stock.toObject?.() || stock,
+      synced: true,
+    };
+  }
+
+  if (netbayLive && memory) {
+    const netbayCheck = await verifyNetbayMemoryInStock(stock, memory);
+    if (!netbayCheck.ok) {
+      return {
+        ok: false,
+        message: customerStockUnavailableMessage(
+          netbayCheck.message || 'This plan is currently out of stock at the provider.'
+        ),
+        stock: stock.toObject?.() || stock,
+        synced: true,
+        netbayStock: netbayCheck.result || null,
+      };
+    }
+  }
+
   return {
     ok: true,
     message: 'In stock',
     stock: stock.toObject?.() || stock,
-    synced: isAdvpsPlan(stock) || isSmartVpsPlan(stock),
+    synced: isAdvpsPlan(stock) || isSmartVpsPlan(stock) || netbayLive,
   };
 }
 

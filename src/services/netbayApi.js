@@ -11,10 +11,13 @@
  *   - listServices(query?)            (paginated)
  *   - getService(serviceId)
  *   - purchaseService({...})          (returns { serviceId, taskId })
+ *   - checkServiceStock({...})        (read-only capacity check)
  *   - start(serviceId)
  *   - stop(serviceId)
  *   - reboot(serviceId)
  *   - rebuild(serviceId, { os })      (returns { taskId })
+ *   - getRenewalPricing(serviceId)    (unit price for renew)
+ *   - renewService(serviceId, { months }) (extend VM — deducts Netbay wallet)
  *   - taskStatus(taskId)              (poll until COMPLETED | FAILED)
  *   - test()                          (cheap auth probe — list plans)
  *
@@ -27,6 +30,7 @@
  */
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+const { extractNetbayApiMessage } = require('@/lib/netbayApiErrors');
 
 function trimSlash(s) {
   return (s || '').replace(/\/+$/, '');
@@ -121,9 +125,9 @@ class NetbayApi {
     }
 
     if (!res.ok || (parsed && typeof parsed === 'object' && parsed.success === false)) {
-      const msg = (parsed && typeof parsed === 'object' && (parsed.message || parsed.error))
-        || (typeof parsed === 'string' ? parsed.slice(0, 200) : `HTTP ${res.status}`);
-      throw new NetbayApiError(`Netbay ${method} ${path}: ${msg}`, {
+      const apiMsg = extractNetbayApiMessage(parsed) || (typeof parsed === 'string' ? parsed.slice(0, 200) : null);
+      const msg = apiMsg || `HTTP ${res.status}`;
+      throw new NetbayApiError(msg, {
         status: res.status,
         body: parsed,
       });
@@ -180,7 +184,7 @@ class NetbayApi {
    *   data.taskId     (poll via taskStatus until COMPLETED)
    *   data.status     (PENDING)
    *
-   * Required: planId, os
+   * Required: planId, os  (os = template *name* from GET /api/v1/os — not osId)
    * Optional: months (1-36, default 1), groupTag, callbackUrl
    */
   async purchaseService({ planId, os, months, groupTag, callbackUrl }) {
@@ -191,6 +195,73 @@ class NetbayApi {
     if (groupTag) body.groupTag = String(groupTag);
     if (callbackUrl) body.callbackUrl = String(callbackUrl);
     return this._request('/api/v1/services/purchase', { method: 'POST', body });
+  }
+
+  /**
+   * Read-only VM stock check for a plan + OS (+ optional location).
+   * GET /api/v1/services/stock — does not touch wallet balance.
+   */
+  async checkServiceStock({ planId, os, groupTag }) {
+    if (!planId) throw new Error('NetbayApi.checkServiceStock: planId is required');
+    if (!os) throw new Error('NetbayApi.checkServiceStock: os is required');
+    const query = { planId, os: String(os) };
+    if (groupTag) query.groupTag = String(groupTag);
+    return this._request('/api/v1/services/stock', { query });
+  }
+
+  /**
+   * Convenience wrapper — returns { available, reason, details } without throwing
+   * on upstream "no capacity" (503) responses.
+   */
+  async isServiceStockAvailable({ planId, os, groupTag }) {
+    try {
+      const res = await this.checkServiceStock({ planId, os, groupTag });
+      const data = res?.data || {};
+      return {
+        available: data.available === true,
+        reason: data.reason || null,
+        details: data.details || null,
+        message: res?.message || null,
+      };
+    } catch (err) {
+      if (err.status === 503) {
+        const body = err.body?.data || err.body || {};
+        return {
+          available: false,
+          skipped: false,
+          reason: body.reason || err.body?.message || 'No capacity or IP available',
+          details: body.details || null,
+          message: err.body?.message || err.message,
+        };
+      }
+      // Netbay stock route sometimes 500s (e.g. /services/stock parsed as :id) — don't block sales
+      if (err.status >= 500) {
+        return {
+          available: null,
+          skipped: true,
+          reason: err.message,
+          details: null,
+          message: err.message,
+        };
+      }
+      throw err;
+    }
+  }
+
+  /** GET renewal unit price for a service (ignores wallet balance). */
+  async getRenewalPricing(serviceId) {
+    if (!serviceId) throw new Error('NetbayApi.getRenewalPricing: serviceId is required');
+    return this._request(`/api/v1/services/${encodeURIComponent(serviceId)}/renewal-pricing`);
+  }
+
+  /** POST renew — extends service for `months` (min 1), deducts Netbay wallet. */
+  async renewService(serviceId, { months = 1 } = {}) {
+    if (!serviceId) throw new Error('NetbayApi.renewService: serviceId is required');
+    const m = Math.max(1, Math.floor(Number(months) || 1));
+    return this._request(`/api/v1/services/${encodeURIComponent(serviceId)}/renew`, {
+      method: 'POST',
+      body: { months: m },
+    });
   }
 
   /** Power: start a stopped service. */
@@ -268,6 +339,80 @@ class NetbayApi {
   }
 
   // ----------------------------- helpers -----------------------------
+
+  /**
+   * Resolve a Netbay OS template *name* from the upstream catalog.
+   * Purchase/rebuild endpoints require the exact template name — not our
+   * internal order enum values like "Ubuntu 22".
+   */
+  static resolveOsTemplateName(osList, { preferred, isWindows } = {}) {
+    const list = Array.isArray(osList) ? osList : [];
+    if (list.length === 0) return '';
+
+    const normalize = (s) => String(s || '').trim().toLowerCase();
+    const getName = (o) => String(o?.name || o?.title || '').trim();
+    const getId = (o) => String(o?.id || o?._id || o?.osId || '').trim();
+
+    const isWindowsEntry = (o) => {
+      const cat = normalize(o?.category);
+      const name = normalize(getName(o));
+      return cat.includes('win') || name.includes('windows');
+    };
+
+    const byPlatform = list.filter(o => (isWindows ? isWindowsEntry(o) : !isWindowsEntry(o)));
+    const pool = byPlatform.length ? byPlatform : list;
+
+    const hints = [];
+    if (Array.isArray(preferred)) hints.push(...preferred);
+    else if (preferred) hints.push(preferred);
+    if (isWindows) hints.push('Windows Server 2022', 'Windows 2022', 'Windows 2022 64');
+    else hints.push('Ubuntu 22', 'Ubuntu 22.04', 'ubuntu');
+
+    // Catalog OS ID (admin can paste id from /netbay-catalog instead of name)
+    for (const hint of hints) {
+      const h = String(hint || '').trim();
+      if (!h) continue;
+      const byId = pool.find(o => getId(o) === h);
+      if (byId) return getName(byId);
+    }
+
+    for (const hint of hints) {
+      const h = normalize(hint);
+      if (!h) continue;
+      const exact = pool.find(o => normalize(getName(o)) === h);
+      if (exact) return getName(exact);
+    }
+
+    for (const hint of hints) {
+      const h = normalize(hint);
+      if (!h) continue;
+      const partial = pool.find(o => {
+        const n = normalize(getName(o));
+        return n.includes(h) || h.includes(n);
+      });
+      if (partial) return getName(partial);
+    }
+
+    if (!isWindows) {
+      const ubuntu = pool.find(o => normalize(getName(o)).includes('ubuntu'));
+      if (ubuntu) return getName(ubuntu);
+    } else {
+      const win = pool.find(o => normalize(getName(o)).includes('windows'));
+      if (win) return getName(win);
+    }
+
+    return getName(pool[0]) || '';
+  }
+
+  /**
+   * Netbay GET /services/:id returns { data: { service: { ... } } } — unwrap
+   * to the inner service object for IP/credentials/power state.
+   */
+  static unwrapServiceResponse(res) {
+    const data = res?.data ?? res ?? {};
+    if (data?.service && typeof data.service === 'object') return data.service;
+    return data;
+  }
 
   /**
    * Best-effort: pick a service id out of an upstream payload. Netbay returns
