@@ -9,6 +9,7 @@ export const runtime = 'nodejs';
 import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import IPStock from '@/models/ipStockModel';
+import { enforceAdmin } from '@/lib/apiSecurity';
 
 function toPlainMap(maybeMap: any): Record<string, any> {
   if (!maybeMap) return {};
@@ -23,6 +24,9 @@ function toPlainMap(maybeMap: any): Record<string, any> {
 
 export async function POST(req: Request) {
   try {
+    const denied = await enforceAdmin(req as any);
+    if (denied) return denied;
+
     await connectDB();
     
     const results: any[] = [];
@@ -128,6 +132,9 @@ export async function POST(req: Request) {
 export async function GET(req: Request) {
   // GET just shows a preview without making changes
   try {
+    const denied = await enforceAdmin(req as any);
+    if (denied) return denied;
+
     await connectDB();
     
     const preview: any[] = [];

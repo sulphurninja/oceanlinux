@@ -6,10 +6,14 @@ export const runtime = 'nodejs';
 import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import IPStock from '@/models/ipStockModel';
+import { enforceAdmin } from '@/lib/apiSecurity';
 
 export async function GET(req: Request) {
   // GET = preview only
   try {
+    const denied = await enforceAdmin(req as any);
+    if (denied) return denied;
+
     await connectDB();
     
     const all = await IPStock.find({}).sort({ createdAt: 1 }); // oldest first
@@ -46,6 +50,9 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
+    const denied = await enforceAdmin(req as any);
+    if (denied) return denied;
+
     await connectDB();
     
     console.log('[DELETE-DUPLICATES] Starting...');

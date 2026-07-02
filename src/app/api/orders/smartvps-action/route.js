@@ -157,8 +157,21 @@ async function executeSmartVpsCrossOsChange(api, serviceIdentifier, osType) {
 
 function assertSmartVpsActionOk(response, actionLabel) {
   if (isSmartVpsErrorResponse(response)) {
-    const detail = typeof response === 'string' ? response : (response?.message || response?.error || 'unknown error');
-    throw new Error(`SmartVPS ${actionLabel} failed: ${detail}`);
+    const rawDetail = typeof response === 'string' ? response : (response?.message || response?.error || 'unknown error');
+    const generic = String(rawDetail).trim().toLowerCase();
+
+    // SmartVPS often replies with a bare "failed"/"error" and no reason.
+    // Turn that into an actionable message instead of a cryptic one.
+    if (generic === 'failed' || generic === 'error' || generic === 'false') {
+      throw new Error(
+        `SmartVPS rejected the ${actionLabel} request. This usually means the server is still ` +
+        `processing a previous action (buy / renew / format / OS change) — SmartVPS allows only ` +
+        `one action at a time. Please wait 5 minutes and try again. If it keeps failing, the ` +
+        `server may be stopped or this slot may not support the selected OS — contact support.`
+      );
+    }
+
+    throw new Error(`SmartVPS ${actionLabel} failed: ${rawDetail}`);
   }
 }
 
@@ -558,11 +571,13 @@ export async function POST(request) {
               }
             } else {
               console.log('[SMARTVPS-ACTION][POST] Same OS refresh via format only:', osType);
+              await ensureSmartVpsNotBusy(api, serviceIdentifier);
               formatResult = await api.format(serviceIdentifier);
               assertSmartVpsActionOk(formatResult, 'format');
               result = { format: formatResult, method: 'format', targetOsType: osType, targetOsLabel };
             }
           } else {
+            await ensureSmartVpsNotBusy(api, serviceIdentifier);
             formatResult = await api.format(serviceIdentifier);
             assertSmartVpsActionOk(formatResult, 'format');
             result = formatResult;

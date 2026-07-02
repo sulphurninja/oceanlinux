@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
+import { enforceAdmin } from '@/lib/apiSecurity';
 const IPStock = require('@/models/ipStockModel');
 import Company from '@/models/companyModel';
 const {
@@ -110,6 +111,9 @@ export async function PUT(request, { params }) {
     console.log('[IPSTOCK-ID][PUT] === REQUEST START ===');
     console.log('[IPSTOCK-ID][PUT] Params:', params);
 
+    const denied = await enforceAdmin(request);
+    if (denied) return denied;
+
     try {
         await connectDB();
         console.log('[IPSTOCK-ID][PUT] Database connected successfully');
@@ -188,6 +192,9 @@ export async function PUT(request, { params }) {
 export async function DELETE(request, { params }) {
     console.log('[IPSTOCK-ID][DELETE] === REQUEST START ===');
     console.log('[IPSTOCK-ID][DELETE] Params:', params);
+
+    const denied = await enforceAdmin(request);
+    if (denied) return denied;
 
     try {
         await connectDB();

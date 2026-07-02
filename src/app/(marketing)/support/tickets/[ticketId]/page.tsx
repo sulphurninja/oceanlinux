@@ -6,8 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, Send, Clock, User, Bot, Loader2, Settings } from "lucide-react";
+import { ArrowLeft, Send, Clock, User, Bot, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { toast } from 'sonner';
 import { useParams } from 'next/navigation';
@@ -29,10 +28,6 @@ interface TicketDetails {
     priority: string;
     status: string;
     messages: Message[];
-    userId: {
-        name: string;
-        email: string;
-    };
     createdAt: string;
     updatedAt: string;
 }
@@ -56,10 +51,8 @@ export default function AdminTicketDetailsPage() {
     const params = useParams();
     const [ticket, setTicket] = useState<TicketDetails | null>(null);
     const [loading, setLoading] = useState(true);
-    const [updating, setUpdating] = useState(false);
     const [sending, setSending] = useState(false);
     const [newMessage, setNewMessage] = useState('');
-    const [newStatus, setNewStatus] = useState('');
 
     useEffect(() => {
         fetchTicketDetails();
@@ -67,7 +60,7 @@ export default function AdminTicketDetailsPage() {
 
     const fetchTicketDetails = async () => {
         try {
-            const response = await fetch(`/api/admin/tickets/${params.ticketId}`, {
+            const response = await fetch(`/api/support/tickets/${params.ticketId}`, {
                 method: 'GET',
                 credentials: 'include',
                 headers: {
@@ -78,11 +71,10 @@ export default function AdminTicketDetailsPage() {
             if (response.ok) {
                 const data = await response.json();
                 setTicket(data);
-                setNewStatus(data.status);
             } else if (response.status === 404) {
                 toast.error('Ticket not found');
             } else if (response.status === 401) {
-                toast.error('Admin access required');
+                toast.error('Please login to view this ticket');
             } else {
                 toast.error('Failed to load ticket details');
             }
@@ -94,48 +86,19 @@ export default function AdminTicketDetailsPage() {
         }
     };
 
-    const handleUpdateStatus = async () => {
-        if (!newStatus || newStatus === ticket?.status) return;
-
-        setUpdating(true);
-        try {
-            const response = await fetch(`/api/admin/tickets/${params.ticketId}`, {
-                method: 'PATCH',
-                credentials: 'include',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ status: newStatus })
-            });
-
-            if (response.ok) {
-                toast.success('Ticket status updated successfully!');
-                fetchTicketDetails();
-            } else {
-                const error = await response.json();
-                toast.error(error.message || 'Failed to update status');
-            }
-        } catch (error) {
-            console.error('Error updating status:', error);
-            toast.error('Failed to update status');
-        } finally {
-            setUpdating(false);
-        }
-    };
-
     const handleSendMessage = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!newMessage.trim()) return;
 
         setSending(true);
         try {
-            const response = await fetch(`/api/admin/tickets/${params.ticketId}`, {
-                method: 'PATCH',
+            const response = await fetch(`/api/support/tickets/${params.ticketId}`, {
+                method: 'POST',
                 credentials: 'include',
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({ adminReply: newMessage })
+                body: JSON.stringify({ message: newMessage })
             });
 
             if (response.ok) {
@@ -173,7 +136,7 @@ export default function AdminTicketDetailsPage() {
                 <div className="text-center">
                     <h1 className="text-2xl font-bold mb-4">Ticket Not Found</h1>
                     <p className="text-muted-foreground mb-8">The ticket you're looking for doesn't exist.</p>
-                    <Link href="/admin/tickets">
+                    <Link href="/support/tickets">
                         <Button>
                             <ArrowLeft className="w-4 h-4 mr-2" />
                             Back to Tickets
@@ -188,7 +151,7 @@ export default function AdminTicketDetailsPage() {
         <div className="p-6 space-y-6">
             {/* Header */}
             <div className="flex items-center justify-between">
-                <Link href="/admin/tickets">
+                <Link href="/support/tickets">
                     <Button variant="ghost">
                         <ArrowLeft className="w-4 h-4 mr-2" />
                         Back to Tickets
@@ -210,42 +173,10 @@ export default function AdminTicketDetailsPage() {
                             </div>
 
                             <div>
-                                <p className="text-sm font-medium text-muted-foreground">Customer</p>
-                                <p className="text-sm font-medium">{ticket.userId.name}</p>
-                                <p className="text-xs text-muted-foreground">{ticket.userId.email}</p>
-                            </div>
-
-                            <div>
                                 <p className="text-sm font-medium text-muted-foreground mb-2">Status</p>
-                                <div className="space-y-2">
-                                    <Select value={newStatus} onValueChange={setNewStatus}>
-                                        <SelectTrigger>
-                                            <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="open">Open</SelectItem>
-                                            <SelectItem value="in-progress">In Progress</SelectItem>
-                                            <SelectItem value="waiting-response">Waiting Response</SelectItem>
-                                            <SelectItem value="resolved">Resolved</SelectItem>
-                                            <SelectItem value="closed">Closed</SelectItem>
-                                        </SelectContent>
-                                    </Select>
-                                    {newStatus !== ticket.status && (
-                                        <Button
-                                            size="sm"
-                                            onClick={handleUpdateStatus}
-                                            disabled={updating}
-                                            className="w-full"
-                                        >
-                                            {updating ? (
-                                                <Loader2 className="w-3 h-3 mr-1 animate-spin" />
-                                            ) : (
-                                                <Settings className="w-3 h-3 mr-1" />
-                                            )}
-                                            Update Status
-                                        </Button>
-                                    )}
-                                </div>
+                                <Badge className={statusConfig[ticket.status as keyof typeof statusConfig].color}>
+                                    {statusConfig[ticket.status as keyof typeof statusConfig].label}
+                                </Badge>
                             </div>
 
                             <div>
@@ -331,7 +262,7 @@ export default function AdminTicketDetailsPage() {
                                         <Textarea
                                             value={newMessage}
                                             onChange={(e) => setNewMessage(e.target.value)}
-                                            placeholder="Type your admin reply..."
+                                            placeholder="Type your reply..."
                                             rows={4}
                                             required
                                         />

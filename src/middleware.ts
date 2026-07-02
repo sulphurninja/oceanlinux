@@ -75,10 +75,6 @@ export const config = {
   matcher: [
     '/admin/:path*',
     '/api/admin/:path*',
-    '/api/ipstock',
-    '/api/ipstock/:path*',
-    '/api/slot-ips',
-    '/api/slot-ips/:path*',
     '/api/orders/provision',
     '/api/orders/update',
     '/api/orders/all',

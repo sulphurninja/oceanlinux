@@ -1,10 +1,11 @@
 /** Routes that require ADMIN_PANEL_PASSWORD session (pages + APIs). */
 export const ADMIN_GATE_PUBLIC_PATHS = new Set(['/admin/login', '/api/admin/gate']);
 
+// NOTE: user-facing endpoints (e.g. /api/ipstock, /api/slot-ips) are NOT gated
+// here — their GET is used by the public store. Their write operations are
+// protected individually at the route level via enforceAdmin/requireAdmin.
 const ADMIN_API_PREFIXES = [
   '/api/admin/',
-  '/api/ipstock',
-  '/api/slot-ips',
   '/api/hostycare/inspect',
 ];
 
