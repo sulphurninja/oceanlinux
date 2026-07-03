@@ -24,6 +24,9 @@ const { getCompanyResellerApiConfig } = require('@/lib/companyResellerApi');
 const ResellerApi = require('@/services/resellerApi');
 const { getCompanyNetbayApiConfig } = require('@/lib/companyNetbayApi');
 const NetbayApi = require('@/services/netbayApi');
+const { getCompanyJoyApiConfig } = require('@/lib/companyJoyApi');
+const JoyApi = require('@/services/joyApi');
+const { applyJoyMachineToOrderUpdates } = require('@/lib/joyOrderSync');
 const { runNetbayPostRebuildFlow } = require('@/lib/netbayPostRebuildFlow');
 const { applyNetbayServiceToOrderUpdates, resolveNetbayPowerState } = require('@/lib/netbayOrderSync');
 const { toUserFacingNetbayError } = require('@/lib/netbayApiErrors');
@@ -129,6 +132,40 @@ async function resolveCompanyNetbayApi(order) {
     console.error('[SERVICE-ACTION] Company-Netbay-API lookup failed:', err.message);
     return { config: null, companyName: null };
   }
+}
+
+/**
+ * Resolve the company-level Joy Services API config for an order. Joy is a
+ * manage-only provider (power actions + status) with NO per-order service id —
+ * machines are matched by IP via `machine_list`. Returns null config when the
+ * company has no Joy automation enabled.
+ */
+async function resolveCompanyJoyApi(order) {
+  if (!order?.ipStockId) return { config: null, companyName: null };
+  try {
+    const ipStock = await IPStock.findById(order.ipStockId).select('company').lean();
+    if (!ipStock?.company) return { config: null, companyName: null };
+    const company = await Company.findById(ipStock.company)
+      .select('joyApi name')
+      .lean();
+    if (!company) return { config: null, companyName: null };
+    const config = getCompanyJoyApiConfig(company);
+    return { config, companyName: company.name };
+  } catch (err) {
+    console.error('[SERVICE-ACTION] Company-Joy-API lookup failed:', err.message);
+    return { config: null, companyName: null };
+  }
+}
+
+/**
+ * Normalize a Joy `machine_info` payload into a simple power state string.
+ */
+function resolveJoyPowerState(machineInfo) {
+  const raw = String(machineInfo?.Current?.status || machineInfo?.status || '').toLowerCase().trim();
+  if (['running', 'online', 'active', 'started', 'on'].includes(raw)) return 'running';
+  if (['stopped', 'offline', 'off', 'shutdown', 'down'].includes(raw)) return 'stopped';
+  if (['paused', 'suspended', 'hibernated'].includes(raw)) return 'suspended';
+  return raw || 'unknown';
 }
 
 /**
@@ -752,6 +789,110 @@ export async function POST(request) {
           code: facing.code,
           nextAvailableAt: facing.nextAvailableAt || undefined,
         }, { status: facing.status || 500 });
+      }
+    }
+
+    // -------------------- Joy Services branch --------------------
+    // Manage-only provider: no per-order service id — we match the order's IP
+    // against Joy's machine_list to get the `ihash`, then drive power actions
+    // via change_machine_state. Only reachable when the linked company has Joy
+    // automation configured. Reinstall/OS is not offered by the Joy connect API.
+    if (!isSmartVps && !isNetbay && !order.hostycareServiceId) {
+      const { config: joyCfg, companyName: joyCompanyName } = await resolveCompanyJoyApi(order);
+      if (joyCfg) {
+        const supportedActions = new Set(['start', 'stop', 'restart', 'reboot', 'status', 'sync']);
+        if (!supportedActions.has(action)) {
+          return NextResponse.json({
+            success: false,
+            error: `Action '${action}' is not available for this server.`,
+          }, { status: 400 });
+        }
+        if (!ipAddress) {
+          return NextResponse.json({
+            success: false,
+            error: 'This server is still being set up. Please try again shortly.',
+          }, { status: 409 });
+        }
+
+        console.log(`[SERVICE-ACTION][POST] Routing via Joy API (${joyCfg.baseUrl}) for action=${action} (company=${joyCompanyName || 'unknown'}, ip=${ipAddress})`);
+
+        let joyApi;
+        try {
+          joyApi = new JoyApi(joyCfg);
+        } catch (apiErr) {
+          return NextResponse.json({
+            success: false,
+            error: `Server management is temporarily unavailable: ${apiErr.message}`,
+          }, { status: 500 });
+        }
+
+        try {
+          const machine = await joyApi.findMachineByIp(ipAddress);
+          if (!machine?.ihash) {
+            return NextResponse.json({
+              success: false,
+              error: `No machine found for IP ${ipAddress} on the Joy panel.`,
+            }, { status: 404 });
+          }
+          const ihash = machine.ihash;
+
+          switch (action) {
+            case 'start': {
+              const apiRes = await joyApi.changeMachineState(ihash, 'start');
+              await Order.findByIdAndUpdate(orderId, { lastAction: 'start', lastActionTime: new Date() });
+              return NextResponse.json({ success: true, powerState: 'running', result: { success: true, message: 'Start command sent', apiResponse: apiRes } });
+            }
+            case 'stop': {
+              const apiRes = await joyApi.changeMachineState(ihash, 'shutdown');
+              await Order.findByIdAndUpdate(orderId, { lastAction: 'stop', lastActionTime: new Date() });
+              return NextResponse.json({ success: true, powerState: 'stopped', result: { success: true, message: 'Stop command sent', apiResponse: apiRes } });
+            }
+            case 'restart':
+            case 'reboot': {
+              const apiRes = await joyApi.changeMachineState(ihash, 'reboot');
+              await Order.findByIdAndUpdate(orderId, { lastAction: 'restart', lastActionTime: new Date() });
+              return NextResponse.json({ success: true, result: { success: true, message: 'Reboot command sent', apiResponse: apiRes } });
+            }
+            case 'status':
+            case 'sync': {
+              let powerState = 'unknown';
+              let info = null;
+              try {
+                info = await joyApi.machineInfo(ihash);
+                powerState = resolveJoyPowerState(info);
+              } catch (infoErr) {
+                console.warn('[SERVICE-ACTION][POST] Joy machine_info failed; falling back to ping:', infoErr.message);
+                if (ipAddress) powerState = isServerReachable(ipAddress) ? 'running' : 'stopped';
+              }
+              const applied = applyJoyMachineToOrderUpdates(machine, info, order);
+              const dbUpdates = applied.dbUpdates;
+              await Order.findByIdAndUpdate(orderId, dbUpdates);
+              const expiryUpdated = applied.changes.includes('expiryDate');
+              return NextResponse.json({
+                success: true,
+                powerState,
+                provider: 'joy',
+                serviceId: ihash,
+                details: info || null,
+                expiryDate: dbUpdates.expiryDate || order.expiryDate || null,
+                syncResult: {
+                  credentialsUpdated: false,
+                  expiryUpdated,
+                  changes: applied.changes,
+                  lastSyncTime: dbUpdates.lastSyncTime.toISOString(),
+                },
+                lastSync: dbUpdates.lastSyncTime.toISOString(),
+              });
+            }
+          }
+        } catch (joyErr) {
+          console.error(`[SERVICE-ACTION][POST] Joy action '${action}' failed:`, joyErr.message);
+          return NextResponse.json({
+            success: false,
+            error: joyErr.message || 'Joy action failed',
+            code: joyErr.code || undefined,
+          }, { status: typeof joyErr.status === 'number' ? joyErr.status : 500 });
+        }
       }
     }
 
@@ -1894,6 +2035,67 @@ export async function GET(request) {
           return NextResponse.json({
             success: false,
             error: err.message || 'Could not load server status',
+          }, { status: typeof err.status === 'number' ? err.status : 500 });
+        }
+      }
+    }
+
+    // 1a-joy) Joy Services path — manage-only, IP-matched via machine_list.
+    if (!order.hostycareServiceId && !order.netbayServiceId && order.provider !== 'netbay') {
+      const { config: joyCfg, companyName: joyCompanyName } = await resolveCompanyJoyApi(order);
+      if (joyCfg) {
+        if (!ipAddress) {
+          return NextResponse.json({
+            success: false,
+            error: 'No IP address on this order — cannot look up the machine on the Joy panel.',
+          }, { status: 400 });
+        }
+        console.log(`[SERVICE-ACTION][GET] Using Joy API for ${joyCompanyName || 'company'} (${joyCfg.baseUrl}, ip=${ipAddress})`);
+        try {
+          const joyApi = new JoyApi(joyCfg);
+          const machine = await joyApi.findMachineByIp(ipAddress);
+          if (!machine?.ihash) {
+            return NextResponse.json({
+              success: false,
+              error: `No machine found for IP ${ipAddress} on the Joy panel.`,
+            }, { status: 404 });
+          }
+          let powerState = 'unknown';
+          let info = null;
+          try {
+            info = await joyApi.machineInfo(machine.ihash);
+            powerState = resolveJoyPowerState(info);
+          } catch (infoErr) {
+            console.warn('[SERVICE-ACTION][GET] Joy machine_info failed; falling back to ping:', infoErr.message);
+            powerState = isServerReachable(ipAddress) ? 'running' : 'stopped';
+          }
+          const applied = applyJoyMachineToOrderUpdates(machine, info, order);
+          const dbUpdates = applied.dbUpdates;
+          await Order.findByIdAndUpdate(orderId, dbUpdates);
+          const expiryUpdated = applied.changes.includes('expiryDate');
+          return NextResponse.json({
+            success: true,
+            provider: 'joy',
+            companyName: joyCompanyName || null,
+            serviceId: machine.ihash,
+            ip: dbUpdates.ipAddress || ipAddress,
+            status: powerState,
+            powerState,
+            details: info || null,
+            expiryDate: dbUpdates.expiryDate || order.expiryDate || null,
+            syncResult: {
+              credentialsUpdated: false,
+              expiryUpdated,
+              changes: applied.changes,
+              lastSyncTime: dbUpdates.lastSyncTime.toISOString(),
+            },
+            lastSync: dbUpdates.lastSyncTime.toISOString(),
+          });
+        } catch (err) {
+          console.error('[SERVICE-ACTION][GET] Joy lookup failed:', err.message);
+          return NextResponse.json({
+            success: false,
+            error: err.message || 'Joy lookup failed',
           }, { status: typeof err.status === 'number' ? err.status : 500 });
         }
       }

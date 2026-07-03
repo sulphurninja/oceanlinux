@@ -92,7 +92,7 @@ interface IPStock {
    *                      (Hostheaven / SomaniOne pattern)
    */
   companyAutomation?: {
-    provider: 'virtualizor' | 'reseller-api' | 'netbay';
+    provider: 'virtualizor' | 'reseller-api' | 'netbay' | 'joy';
     enabled: boolean;
     companyName?: string;
     label?: string;
@@ -846,6 +846,14 @@ const OrderDetails = () => {
   };
 
   /**
+   * True when the order's company is wired to Joy Services (manage-only:
+   * power actions + status; no reinstall/OS change via the connect API).
+   */
+  const hasCompanyJoyAutomation = (stock: IPStock | null): boolean => {
+    return !!(stock?.companyAutomation?.enabled && stock?.companyAutomation?.provider === 'joy');
+  };
+
+  /**
    * True when the order's company has ANY automation configured (Virtualizor,
    * reseller API, or Netbay). Use this anywhere the difference between the
    * three doesn't matter — the actual automation type is selected on the server.
@@ -854,7 +862,8 @@ const OrderDetails = () => {
     return (
       hasCompanyVirtualizorAutomation(stock) ||
       hasCompanyResellerApiAutomation(stock) ||
-      hasCompanyNetbayAutomation(stock)
+      hasCompanyNetbayAutomation(stock) ||
+      hasCompanyJoyAutomation(stock)
     );
   };
 
@@ -978,6 +987,8 @@ const OrderDetails = () => {
         if (provider === 'netbay' && (data.credentialsUpdated || data.syncResult?.credentialsUpdated)) {
           setShowPassword(true);
         }
+      } else if (data.syncResult?.expiryUpdated) {
+        await fetchOrder();
       }
 
       return nextState;
@@ -1099,6 +1110,13 @@ const OrderDetails = () => {
           if (provider === 'netbay') {
             if (data.syncResult.changes?.includes('password')) setShowPassword(true);
             toast.success(`Synced: ${changed} updated`, { duration: 6000 });
+          } else if (hasCompanyJoyAutomation(ipStock) && isOrderCompanyAutomated(order, ipStock)) {
+            toast.success(
+              data.syncResult.expiryUpdated
+                ? `Synced from Joy: expiry updated (${changed})`
+                : `Synced from Joy: ${changed}`,
+              { duration: 6000 }
+            );
           } else {
             toast.success(`Synced from ADVPS: ${changed}`);
           }
@@ -1106,6 +1124,8 @@ const OrderDetails = () => {
           toast.success('Synced with ADVPS — credentials already up to date');
         } else if (provider === 'netbay') {
           toast.success('Already up to date with your server');
+        } else if (hasCompanyJoyAutomation(ipStock) && isOrderCompanyAutomated(order, ipStock)) {
+          toast.success('Already up to date with Joy');
         }
       } else {
         toast.error(data.error || data.message || 'Failed to load service details');
@@ -3443,6 +3463,11 @@ const OrderDetails = () => {
                           const isAdvps = provider === 'advps';
                           const isCompanyResellerApi = hasCompanyResellerApiAutomation(ipStock) &&
                             isOrderCompanyAutomated(order, ipStock);
+                          // Joy Services is manage-only (power actions + status). Its
+                          // connect API has no reinstall/OS-change endpoint, so we hide
+                          // the destructive reinstall control for Joy-backed orders.
+                          const isCompanyJoy = hasCompanyJoyAutomation(ipStock) &&
+                            isOrderCompanyAutomated(order, ipStock);
                           const { count: rebuildCount, remaining: rebuildsRemaining, limitReached } = getAdvpsRebuildUsage(order);
                           const rebuildLimitReached = isAdvps && limitReached;
 
@@ -3513,19 +3538,25 @@ const OrderDetails = () => {
                                 </>
                               )}
 
-                              <Button
-                                variant="destructive"
-                                onClick={() => promptReinstallAction((provider === 'smartvps' || provider === 'advps') ? 'format' : 'reinstall')}
-                                disabled={!!actionBusy || rebuildLimitReached}
-                                className="w-full h-10 gap-2 text-sm"
-                              >
-                                {(actionBusy === 'reinstall' || actionBusy === 'format') ? (
-                                  <Loader2 className="h-4 w-4 animate-spin" />
-                                ) : (
-                                  <HardDriveIcon className="h-4 w-4" />
-                                )}
-                                {provider === 'smartvps' ? 'Format Server' : provider === 'advps' ? `Rebuild/Format Server${isAdvps && !rebuildLimitReached ? ` (${rebuildsRemaining} left)` : ''}` : 'Reinstall OS'}
-                              </Button>
+                              {isCompanyJoy ? (
+                                <p className="text-xs text-muted-foreground px-1">
+                                  OS reinstall isn&apos;t available for this server from the panel. Please contact support if you need a fresh OS.
+                                </p>
+                              ) : (
+                                <Button
+                                  variant="destructive"
+                                  onClick={() => promptReinstallAction((provider === 'smartvps' || provider === 'advps') ? 'format' : 'reinstall')}
+                                  disabled={!!actionBusy || rebuildLimitReached}
+                                  className="w-full h-10 gap-2 text-sm"
+                                >
+                                  {(actionBusy === 'reinstall' || actionBusy === 'format') ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <HardDriveIcon className="h-4 w-4" />
+                                  )}
+                                  {provider === 'smartvps' ? 'Format Server' : provider === 'advps' ? `Rebuild/Format Server${isAdvps && !rebuildLimitReached ? ` (${rebuildsRemaining} left)` : ''}` : 'Reinstall OS'}
+                                </Button>
+                              )}
                             </>
                           );
                         })()}

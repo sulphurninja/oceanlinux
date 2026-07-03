@@ -49,6 +49,19 @@ function normalizeNetbayApiEntry(v) {
   };
 }
 
+function normalizeJoyApiEntry(v) {
+  if (v === null) return null;
+  return {
+    enabled: asBool(v?.enabled),
+    label: typeof v?.label === 'string' ? v.label.trim() : '',
+    baseUrl: typeof v?.baseUrl === 'string'
+      ? v.baseUrl.trim().replace(/\/+$/, '')
+      : '',
+    apiToken: typeof v?.apiToken === 'string' ? v.apiToken.trim() : '',
+    apiKey: typeof v?.apiKey === 'string' ? v.apiKey.trim() : '',
+  };
+}
+
 function pickAllowedUpdates(body) {
   const out = {};
   if (typeof body?.name === 'string') out.name = body.name;
@@ -83,6 +96,13 @@ function pickAllowedUpdates(body) {
       : normalizeNetbayApiEntry(body.netbayApi);
   }
 
+  // Joy Services instances API (manage-only). Same null/object/omit semantics.
+  if (Object.prototype.hasOwnProperty.call(body || {}, 'joyApi')) {
+    out.joyApi = body.joyApi === null
+      ? null
+      : normalizeJoyApiEntry(body.joyApi);
+  }
+
   return out;
 }
 
@@ -108,6 +128,15 @@ export async function PUT(request, { params }) {
       { $set: { netbayApi: updates.netbayApi } }
     );
     delete updates.netbayApi;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(updates, 'joyApi')) {
+    // Direct write — same stale-schema-cache safety net as netbayApi above.
+    await Company.collection.updateOne(
+      { _id: company._id },
+      { $set: { joyApi: updates.joyApi } }
+    );
+    delete updates.joyApi;
   }
 
   if (Object.keys(updates).length > 0) {

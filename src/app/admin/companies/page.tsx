@@ -35,7 +35,7 @@ import Link from 'next/link';
 import {
   Building2, Plus, Trash2, Copy, ExternalLink, Loader2, Eye, EyeOff,
   Server, ShieldCheck, ShieldAlert, CheckCircle2, XCircle,
-  ChevronDown, ChevronUp, Cloud, Zap, BookOpen, Package,
+  ChevronDown, ChevronUp, Cloud, Zap, BookOpen, Package, Sparkles,
 } from 'lucide-react';
 
 interface CompanyVirtualizor {
@@ -67,6 +67,14 @@ interface CompanyNetbayApi {
   useLiveStockApi?: boolean;
 }
 
+interface CompanyJoyApi {
+  enabled: boolean;
+  label: string;
+  baseUrl: string;
+  apiToken: string;
+  apiKey: string;
+}
+
 interface Company {
   _id: string;
   name: string;
@@ -79,6 +87,7 @@ interface Company {
   virtualizor?: Partial<CompanyVirtualizor>;
   resellerApi?: Partial<CompanyResellerApi> | null;
   netbayApi?: Partial<CompanyNetbayApi> | null;
+  joyApi?: Partial<CompanyJoyApi> | null;
 }
 
 const NEW_VIRT_ENTRY = (): CompanyVirtualizor => ({
@@ -138,6 +147,24 @@ function companyHasNetbayEnabled(company: Pick<Company, 'netbayApi'> | null | un
   return company?.netbayApi?.enabled === true;
 }
 
+const EMPTY_JOY_API = (): CompanyJoyApi => ({
+  enabled: false,
+  label: '',
+  baseUrl: '',
+  apiToken: '',
+  apiKey: '',
+});
+
+// Defaults pre-filled when a company has no Joy config yet — only the
+// documented base URL is set; token/key come from the Joy dashboard.
+const JOY_API_DIALOG_DEFAULTS: CompanyJoyApi = {
+  enabled: false,
+  label: 'Joy Services',
+  baseUrl: 'https://api.joy.services',
+  apiToken: '',
+  apiKey: '',
+};
+
 interface VirtTestState {
   loading: boolean;
   result: { success: boolean; message: string } | null;
@@ -187,6 +214,14 @@ export default function CompaniesPage() {
   const [netbayTesting, setNetbayTesting] = useState(false);
   const [netbayTestResult, setNetbayTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [showNetbaySecret, setShowNetbaySecret] = useState(false);
+
+  // Joy Services API dialog state (manage-only)
+  const [joyCompany, setJoyCompany] = useState<Company | null>(null);
+  const [joyForm, setJoyForm] = useState<CompanyJoyApi>(EMPTY_JOY_API());
+  const [joySaving, setJoySaving] = useState(false);
+  const [joyTesting, setJoyTesting] = useState(false);
+  const [joyTestResult, setJoyTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [showJoyKey, setShowJoyKey] = useState(false);
 
   const [stocksCompany, setStocksCompany] = useState<Company | null>(null);
   const [companyStocks, setCompanyStocks] = useState<CompanyStock[]>([]);
@@ -739,6 +774,126 @@ export default function CompaniesPage() {
     }
   };
 
+  // -------------------- Joy Services API handlers --------------------
+  const openJoyDialog = (c: Company) => {
+    const r = c.joyApi || null;
+    setJoyForm({
+      enabled: r?.enabled === true,
+      label: r?.label || 'Joy Services',
+      baseUrl: r?.baseUrl || JOY_API_DIALOG_DEFAULTS.baseUrl,
+      apiToken: r?.apiToken || '',
+      apiKey: r?.apiKey || '',
+    });
+    setJoyTestResult(null);
+    setShowJoyKey(false);
+    setJoyCompany(c);
+  };
+
+  const closeJoyDialog = () => {
+    if (joySaving || joyTesting) return;
+    setJoyCompany(null);
+    setJoyForm(EMPTY_JOY_API());
+    setJoyTestResult(null);
+    setShowJoyKey(false);
+  };
+
+  const updateJoyField = <K extends keyof CompanyJoyApi>(key: K, value: CompanyJoyApi[K]) => {
+    setJoyForm(prev => ({ ...prev, [key]: value }));
+    setJoyTestResult(null);
+  };
+
+  const handleTestJoyApi = async () => {
+    if (!joyCompany) return;
+    setJoyTesting(true);
+    setJoyTestResult(null);
+    try {
+      const res = await fetch(`/api/admin/companies/${joyCompany._id}/test-joy-api`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ joyApi: joyForm }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setJoyTestResult({ success: true, message: data.message || 'Connected' });
+      } else {
+        setJoyTestResult({ success: false, message: data.error || 'Connection failed' });
+      }
+    } catch (err: any) {
+      setJoyTestResult({ success: false, message: err?.message || 'Request failed' });
+    } finally {
+      setJoyTesting(false);
+    }
+  };
+
+  const handleSaveJoyApi = async () => {
+    if (!joyCompany) return;
+    if (joyForm.enabled && (!joyForm.apiToken.trim() || !joyForm.apiKey.trim())) {
+      const ok = await confirm({
+        title: 'Blank API Credentials',
+        description: 'API Token / Key are blank. The server will fall back to JOY_API_TOKEN / JOY_API_KEY env vars. Continue?',
+        confirmLabel: 'Continue',
+      });
+      if (!ok) return;
+    }
+    setJoySaving(true);
+    try {
+      const res = await fetch(`/api/admin/companies/${joyCompany._id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ joyApi: joyForm }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        const saved = data as Company;
+        setCompanies((prev) =>
+          prev.map((c) => (String(c._id) === String(saved._id) ? saved : c))
+        );
+        openJoyDialog(saved);
+        toast.success('Joy Services config saved');
+      } else {
+        toast.error(data.error || 'Failed to save');
+      }
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to save');
+    } finally {
+      setJoySaving(false);
+    }
+  };
+
+  const handleClearJoyApi = async () => {
+    if (!joyCompany) return;
+    const ok = await confirm({
+      title: 'Clear Joy Services API',
+      description: <>Clear Joy Services API config for <strong>{joyCompany.name}</strong>?</>,
+      confirmLabel: 'Clear',
+      destructive: true,
+    });
+    if (!ok) return;
+    setJoySaving(true);
+    try {
+      const res = await fetch(`/api/admin/companies/${joyCompany._id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ joyApi: null }),
+      });
+      if (res.ok) {
+        toast.success('Joy Services API configuration cleared');
+        setJoyCompany(null);
+        setJoyForm(EMPTY_JOY_API());
+        setJoyTestResult(null);
+        setShowJoyKey(false);
+        fetchCompanies();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error || 'Failed to clear');
+      }
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to clear');
+    } finally {
+      setJoySaving(false);
+    }
+  };
+
   const handleSaveVirtualizor = async () => {
     if (!virtCompany) return;
 
@@ -898,6 +1053,17 @@ export default function CompaniesPage() {
                           </Badge>
                         );
                       }
+                      const j = c.joyApi;
+                      if (j?.enabled) {
+                        let host = j.baseUrl || 'api.joy.services';
+                        try { if (j.baseUrl) host = new URL(j.baseUrl).host; } catch { /* keep as-is */ }
+                        return (
+                          <Badge variant="outline" className="gap-1 text-fuchsia-600 border-fuchsia-200">
+                            <Sparkles className="h-3 w-3" />
+                            Joy: {host} · Manage
+                          </Badge>
+                        );
+                      }
                       return (
                         <Badge variant="outline" className="gap-1 text-muted-foreground">
                           <ShieldAlert className="h-3 w-3" />
@@ -926,6 +1092,10 @@ export default function CompaniesPage() {
                       <Button variant="ghost" size="sm" className="h-8 gap-1.5" onClick={() => openNetbayDialog(c)}>
                         <Zap className="h-3.5 w-3.5" />
                         Netbay
+                      </Button>
+                      <Button variant="ghost" size="sm" className="h-8 gap-1.5" onClick={() => openJoyDialog(c)}>
+                        <Sparkles className="h-3.5 w-3.5" />
+                        Joy
                       </Button>
                       {c.netbayApi?.enabled && (
                         <Button variant="ghost" size="sm" className="h-8 gap-1.5" asChild>
@@ -1612,6 +1782,177 @@ export default function CompaniesPage() {
             </Button>
             <Button onClick={handleSaveNetbayApi} disabled={netbaySaving}>
               {netbaySaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!joyCompany} onOpenChange={(open) => !open && closeJoyDialog()}>
+        <DialogContent className="max-w-xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5" />
+              Joy Services (Manage)
+            </DialogTitle>
+          </DialogHeader>
+          {joyCompany && (
+            <div className="space-y-4">
+              <div className="rounded-md border p-3 text-sm">
+                <p className="font-medium">{joyCompany.name}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Wire orders linked to this company to the Joy Services instances
+                  API (<code className="text-foreground">https://api.joy.services</code>).
+                  This is a <strong>manage-only</strong> integration — customers get
+                  power actions (start / stop / restart) and live status for their
+                  machine. There is no buy/provision endpoint, so machines must be
+                  created in the Joy panel and matched to orders by IP.
+                </p>
+                <p className="text-xs text-muted-foreground mt-2">
+                  <span className="font-medium text-foreground">API docs:</span>{' '}
+                  <a
+                    href="https://docs.joy.services/instance-api/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 hover:underline"
+                  >
+                    docs.joy.services/instance-api
+                  </a>
+                  {' '}— generate the token/key pair from the Joy dashboard.
+                </p>
+                <p className="text-xs text-muted-foreground mt-2">
+                  <span className="font-medium text-foreground">Env fallback:</span>{' '}
+                  leave Token / Key blank to use the global{' '}
+                  <code>JOY_API_TOKEN</code> / <code>JOY_API_KEY</code> env vars.
+                  Per-company values always override env.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-between rounded-md border p-2.5">
+                <div className="text-sm">
+                  <p className="font-medium">Enabled</p>
+                  <p className="text-xs text-muted-foreground">
+                    Disable to stop using Joy without losing the saved config.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className={`text-xs font-bold uppercase tracking-wide min-w-[2rem] text-right ${
+                    joyForm.enabled ? 'text-emerald-600' : 'text-muted-foreground'
+                  }`}>
+                    {joyForm.enabled ? 'ON' : 'OFF'}
+                  </span>
+                  <Switch
+                    checked={!!joyForm.enabled}
+                    onCheckedChange={(c) => {
+                      setJoyForm((prev) => ({ ...prev, enabled: c }));
+                      setJoyTestResult(null);
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <Label className="text-xs">Label (optional)</Label>
+                <Input
+                  placeholder="e.g. Joy Services Production"
+                  value={joyForm.label}
+                  onChange={(e) => updateJoyField('label', e.target.value)}
+                  className="mt-1"
+                />
+              </div>
+
+              <div>
+                <Label className="text-xs">Base URL</Label>
+                <Input
+                  placeholder="https://api.joy.services"
+                  value={joyForm.baseUrl}
+                  onChange={(e) => updateJoyField('baseUrl', e.target.value)}
+                  className="mt-1"
+                />
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Defaults to <code>https://api.joy.services</code> when blank.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 gap-3">
+                <div>
+                  <Label className="text-xs">x-api-token</Label>
+                  <Input
+                    placeholder="JOY-API-TOKEN#API"
+                    value={joyForm.apiToken}
+                    onChange={(e) => updateJoyField('apiToken', e.target.value)}
+                    className="mt-1 font-mono text-xs"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs">x-api-key</Label>
+                  <div className="relative mt-1">
+                    <Input
+                      type={showJoyKey ? 'text' : 'password'}
+                      placeholder="joy-…"
+                      value={joyForm.apiKey}
+                      onChange={(e) => updateJoyField('apiKey', e.target.value)}
+                      className="font-mono text-xs"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowJoyKey((s) => !s)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      tabIndex={-1}
+                    >
+                      {showJoyKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {joyTestResult && (
+                <div
+                  className={`flex items-start gap-2 rounded-md border p-2.5 text-xs ${
+                    joyTestResult.success
+                      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                      : 'border-red-200 bg-red-50 text-red-700'
+                  }`}
+                >
+                  {joyTestResult.success
+                    ? <CheckCircle2 className="h-4 w-4 mt-0.5" />
+                    : <XCircle className="h-4 w-4 mt-0.5" />}
+                  <span>{joyTestResult.message}</span>
+                </div>
+              )}
+
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleTestJoyApi}
+                  disabled={joyTesting || joySaving}
+                  className="gap-2"
+                >
+                  {joyTesting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+                  Test Credentials
+                </Button>
+                {joyCompany.joyApi && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleClearJoyApi}
+                    disabled={joySaving || joyTesting}
+                    className="gap-2 text-red-600 hover:text-red-700"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Clear Config
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
+          <DialogFooter className="gap-2">
+            <Button variant="ghost" onClick={closeJoyDialog} disabled={joySaving || joyTesting}>
+              Cancel
+            </Button>
+            <Button onClick={handleSaveJoyApi} disabled={joySaving}>
+              {joySaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
               Save
             </Button>
           </DialogFooter>

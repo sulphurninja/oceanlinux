@@ -10,6 +10,7 @@ const {
 const { getCompanyVirtualizorAccounts } = require('@/lib/companyVirtualizor');
 const { getCompanyResellerApiConfig } = require('@/lib/companyResellerApi');
 const { getCompanyNetbayApiConfig } = require('@/lib/companyNetbayApi');
+const { getCompanyJoyApiConfig } = require('@/lib/companyJoyApi');
 
 export async function GET(request, { params }) {
     console.log('[IPSTOCK-ID][GET] === REQUEST START ===');
@@ -55,7 +56,7 @@ export async function GET(request, { params }) {
         if (ipStock.company) {
             try {
                 const company = await Company.findById(ipStock.company)
-                    .select('virtualizors virtualizor resellerApi netbayApi name')
+                    .select('virtualizors virtualizor resellerApi netbayApi joyApi name')
                     .lean();
                 const accounts = getCompanyVirtualizorAccounts(company);
                 if (accounts.length > 0) {
@@ -83,6 +84,17 @@ export async function GET(request, { params }) {
                                 companyName: company?.name,
                                 label: netbay.label || null,
                             };
+                        } else {
+                            // Joy Services — manage-only (power actions + status).
+                            const joy = getCompanyJoyApiConfig(company);
+                            if (joy) {
+                                companyAutomation = {
+                                    provider: 'joy',
+                                    enabled: true,
+                                    companyName: company?.name,
+                                    label: joy.label || null,
+                                };
+                            }
                         }
                     }
                 }

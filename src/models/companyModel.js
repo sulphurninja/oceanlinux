@@ -65,6 +65,24 @@ const companyNetbayApiSchema = new mongoose.Schema({
   useLiveStockApi: { type: Boolean, default: false },
 }, { _id: false });
 
+/**
+ * Joy Services instances API (https://docs.joy.services/instance-api/).
+ * MANAGE-ONLY: this API exposes dashboard/account/machine info and power
+ * actions (start/stop/reboot/pause/hibernate) — there is NO buy/create/provision
+ * endpoint. So Joy-linked servers are created manually in the Joy panel; here we
+ * only let users power-manage + see status of their existing machine (matched by
+ * IP via the machine_list operation).
+ *
+ * Auth: two headers on POST /api/connect — x-api-token + x-api-key.
+ */
+const companyJoyApiSchema = new mongoose.Schema({
+  enabled: { type: Boolean, default: false },
+  label: { type: String, default: '' },
+  baseUrl: { type: String, default: '' },   // e.g. https://api.joy.services
+  apiToken: { type: String, default: '' },  // x-api-token — primary token id
+  apiKey: { type: String, default: '' },    // x-api-key   — associated key
+}, { _id: false });
+
 const companySchema = new mongoose.Schema({
   name: { type: String, required: true, unique: true },
   slug: { type: String, required: true, unique: true },
@@ -74,12 +92,17 @@ const companySchema = new mongoose.Schema({
   virtualizor: { type: legacyCompanyVirtualizorSchema, default: null }, // deprecated
   resellerApi: { type: companyResellerApiSchema, default: null },
   netbayApi: { type: companyNetbayApiSchema, default: null },
+  joyApi: { type: companyJoyApiSchema, default: null },
 }, { timestamps: true });
 
 companySchema.index({ slug: 1 });
 
 // Next.js hot-reload can cache an old schema — re-register when new paths were added.
-if (mongoose.models.Company && !mongoose.models.Company.schema.paths['netbayApi.useLiveStockApi']) {
+if (
+  mongoose.models.Company &&
+  (!mongoose.models.Company.schema.paths['netbayApi.useLiveStockApi'] ||
+    !mongoose.models.Company.schema.paths['joyApi.apiToken'])
+) {
   delete mongoose.models.Company;
 }
 

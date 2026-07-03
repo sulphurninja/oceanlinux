@@ -19,6 +19,9 @@ const SmartVpsAPI = require('@/services/smartvpsApi');
 const HostycareAPI = require('@/services/hostycareApi');
 const AdvpsAPI = require('@/services/advpsApi');
 const NetbayApi = require('@/services/netbayApi');
+const JoyApi = require('@/services/joyApi');
+const { getCompanyJoyApiConfig } = require('@/lib/companyJoyApi');
+const { applyJoyMachineToOrderUpdates } = require('@/lib/joyOrderSync');
 const {
   normalizeAdvpsPowerState,
   pickAdvpsRunningStatusRaw,
@@ -82,6 +85,13 @@ const PROVIDER_CAPABILITIES = {
     osOptions: ['ubuntu', 'centos', 'windows'],
     notes: 'Company-linked product. Managed via company automation panel.',
   },
+  joy: {
+    supported: ['start', 'stop', 'restart', 'status', 'sync'],
+    reinstallRequiresOs: false,
+    changeosRequiresOs: false,
+    osOptions: [],
+    notes: 'Joy Services — power actions + status only. OS reinstall/change is not exposed by the Joy connect API.',
+  },
   oceanlinux: {
     supported: [],
     reinstallRequiresOs: false,
@@ -140,6 +150,9 @@ export function resolveResellerManageProvider(order, ipStock = null) {
   const upstream = resolveProviderFromOrder(order, ipStock);
 
   if (hasCompanyAnyAutomation(ipStock) && !hasNativeServiceId(order, upstream)) {
+    // Joy is a real, executable company automation (power via IP → ihash) — route
+    // it to its own runner instead of the internal "company" placeholder.
+    if (ipStock?.companyAutomation?.provider === 'joy') return 'joy';
     return 'company';
   }
 
@@ -179,7 +192,7 @@ export async function loadOrderIpStock(order) {
   if (!stock?.company) return stock;
 
   const company = await Company.findById(stock.company)
-    .select('virtualizors virtualizor resellerApi netbayApi name')
+    .select('virtualizors virtualizor resellerApi netbayApi joyApi name')
     .lean();
 
   let companyAutomation = null;
@@ -188,10 +201,16 @@ export async function loadOrderIpStock(order) {
       (Array.isArray(company.virtualizors) && company.virtualizors.length > 0) ||
       !!company.virtualizor?.host;
     const hasResellerApi = company.resellerApi?.enabled;
+    const hasNetbay = company.netbayApi?.enabled;
+    const hasJoy = !!getCompanyJoyApiConfig(company);
     if (hasVirtualizor) {
       companyAutomation = { enabled: true, provider: 'virtualizor' };
     } else if (hasResellerApi) {
       companyAutomation = { enabled: true, provider: 'reseller-api' };
+    } else if (hasNetbay) {
+      companyAutomation = { enabled: true, provider: 'netbay' };
+    } else if (hasJoy) {
+      companyAutomation = { enabled: true, provider: 'joy' };
     }
   }
 
@@ -477,6 +496,69 @@ async function runNetbay(order, orderId, action, osType, ipStock) {
   }
 }
 
+async function runJoy(order, orderId, action, _osType, ipStock) {
+  const cfg = getCompanyJoyApiConfig(ipStock?.company);
+  if (!cfg) {
+    return { success: false, message: 'Server management is not available for this product.' };
+  }
+  const ip = getOrderIp(order);
+  if (!ip) return { success: false, message: 'No IP address on order yet' };
+
+  const api = new JoyApi(cfg);
+  const machine = await api.findMachineByIp(ip);
+  if (!machine?.ihash) {
+    return { success: false, message: `No machine found for IP ${ip} on the Joy panel.` };
+  }
+  const ihash = machine.ihash;
+
+  switch (action) {
+    case 'start': {
+      const res = await api.changeMachineState(ihash, 'start');
+      await Order.findByIdAndUpdate(orderId, { lastAction: 'start', lastActionTime: new Date() });
+      return { success: true, message: 'Start command sent', data: { powerState: 'running', raw: res } };
+    }
+    case 'stop': {
+      const res = await api.changeMachineState(ihash, 'shutdown');
+      await Order.findByIdAndUpdate(orderId, { lastAction: 'stop', lastActionTime: new Date() });
+      return { success: true, message: 'Stop command sent', data: { powerState: 'stopped', raw: res } };
+    }
+    case 'restart': {
+      const res = await api.changeMachineState(ihash, 'reboot');
+      await Order.findByIdAndUpdate(orderId, { lastAction: 'restart', lastActionTime: new Date() });
+      return { success: true, message: 'Restart command sent', data: { raw: res } };
+    }
+    case 'status':
+    case 'sync': {
+      let powerState = 'unknown';
+      let info = null;
+      try {
+        info = await api.machineInfo(ihash);
+        const raw = String(info?.Current?.status || info?.status || '').toLowerCase();
+        if (['running', 'on', 'active', 'started', 'online'].includes(raw)) powerState = 'running';
+        else if (['stopped', 'off', 'shutdown', 'offline'].includes(raw)) powerState = 'stopped';
+        else if (['paused', 'suspended', 'hibernated'].includes(raw)) powerState = 'suspended';
+      } catch (_) { /* best effort */ }
+      const applied = applyJoyMachineToOrderUpdates(machine, info, order);
+      await Order.findByIdAndUpdate(orderId, applied.dbUpdates);
+      return {
+        success: true,
+        message: applied.changes.includes('expiryDate')
+          ? 'Status synced — expiry updated from Joy'
+          : 'Status retrieved',
+        data: {
+          powerState,
+          machine: info,
+          expiryDate: applied.expiryDate || order.expiryDate || null,
+          expiryUpdated: applied.changes.includes('expiryDate'),
+          changes: applied.changes,
+        },
+      };
+    }
+    default:
+      return actionNotSupported(action, PROVIDER_CAPABILITIES.joy);
+  }
+}
+
 async function runCompanyAutomation(order, orderId, action) {
   // Placeholder — wire to service-action internals when company panel is added.
   // Capabilities are exposed so resellers see what's coming; execution routes here.
@@ -493,6 +575,7 @@ const PROVIDER_RUNNERS = {
   smartvps: (order, orderId, action, osType) => runSmartvps(order, orderId, action, osType),
   hostycare: (order, orderId, action) => runHostycare(order, orderId, action),
   netbay: (order, orderId, action, osType, ipStock) => runNetbay(order, orderId, action, osType, ipStock),
+  joy: (order, orderId, action, osType, ipStock) => runJoy(order, orderId, action, osType, ipStock),
   company: (order, orderId, action) => runCompanyAutomation(order, orderId, action),
   oceanlinux: () => ({
     success: false,

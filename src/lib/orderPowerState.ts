@@ -5,7 +5,7 @@ export type PowerState = 'running' | 'stopped' | 'suspended' | 'busy' | 'unknown
 export type IPStockLike = {
   tags?: string[];
   companyAutomation?: {
-    provider: 'virtualizor' | 'reseller-api' | 'netbay';
+    provider: 'virtualizor' | 'reseller-api' | 'netbay' | 'joy';
     enabled: boolean;
   } | null;
 };
@@ -64,7 +64,8 @@ export function hasCompanyAnyAutomation(stock: IPStockLike | null): boolean {
     stock?.companyAutomation?.enabled &&
     (stock.companyAutomation.provider === 'virtualizor' ||
       stock.companyAutomation.provider === 'reseller-api' ||
-      stock.companyAutomation.provider === 'netbay')
+      stock.companyAutomation.provider === 'netbay' ||
+      stock.companyAutomation.provider === 'joy')
   );
 }
 
