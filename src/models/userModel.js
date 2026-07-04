@@ -17,11 +17,15 @@ const userSchema = new mongoose.Schema({
         type: String,
         default: ''
     },
+    // NOTE: no `default: null` — a sparse unique index only skips documents
+    // where the field is ABSENT. Writing an explicit `null` on every local
+    // signup put multiple `null`s into the index and caused
+    // "duplicate googleId" E11000 errors. Local users simply omit this field;
+    // Google users set it to their real `sub`.
     googleId: {
         type: String,
         unique: true,
-        sparse: true,
-        default: null
+        sparse: true
     },
     authProvider: {
         type: String,
