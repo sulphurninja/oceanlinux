@@ -112,8 +112,8 @@ class SmartVpsAPI {
   }
   status(ip) { return httpFetch('api/oceansmart/status', { jsonBody: { ip } }); }
 
-  // OS change — prefer format+os; changeOS alone often returns "error" for Linux on SmartVPS
-  changeOS(ip, os) { return httpFetch('api/oceansmart/changeos', { jsonBody: { ip, os } }); }
+  // OS change — SmartVPS doc: Windows uses changeos { ip, os: "2022"|"2019"|... }; Linux may need format+os
+  changeOS(ip, os) { return httpFetch('api/oceansmart/changeos', { jsonBody: { ip, os: String(os) } }); }
 
   // Buy (call ipstock first and pick a usable IP; ram string/number)
   // buyVps needs a longer timeout as it provisions a server

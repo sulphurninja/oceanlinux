@@ -109,6 +109,12 @@ function isSmartVpsErrorResponse(response) {
   return false;
 }
 
+const SMARTVPS_WINDOWS_OS = new Set(['2012', '2016', '2019', '2022', '11', '2025']);
+
+function isSmartVpsWindowsOsType(osType) {
+  return SMARTVPS_WINDOWS_OS.has(String(osType));
+}
+
 function getSmartVpsOsCandidates(osType) {
   const aliases = {
     ubuntu: ['ubuntu'],
@@ -123,35 +129,101 @@ function getSmartVpsOsCandidates(osType) {
   return aliases[osType] ? [...aliases[osType]] : [osType];
 }
 
-async function ensureSmartVpsNotBusy(api, serviceIdentifier) {
+async function getSmartVpsParsedStatus(api, serviceIdentifier) {
   const statusData = await api.status(serviceIdentifier);
-  const parsed = parseSmartVPSResponse(statusData, 'status');
-  if (!isPlainObject(parsed)) return;
+  return parseSmartVPSResponse(statusData, 'status');
+}
+
+async function ensureSmartVpsNotBusy(api, serviceIdentifier) {
+  const parsed = await getSmartVpsParsedStatus(api, serviceIdentifier);
+  if (!isPlainObject(parsed)) return parsed;
 
   const actionStatus = String(parsed.ActionStatus || '').toLowerCase();
+  const ip = parsed.IP || serviceIdentifier;
+  const os = parsed.OS || 'unknown';
+
   if (actionStatus === 'processing' || actionStatus === 'pending') {
     throw new Error('Server is still processing a previous action. Please wait 5 minutes and try again.');
   }
+  if (actionStatus === 'failed') {
+    throw new Error(
+      `SmartVPS last action FAILED on this server (IP: ${ip}, OS: ${os}). ` +
+      `The slot is stuck — format/OS change/start/stop will keep returning "failed" until SmartVPS clears it. ` +
+      `Contact SmartVPS support with IP ${ip} and ask them to reset the failed action state.`
+    );
+  }
+  return parsed;
 }
 
-async function executeSmartVpsCrossOsChange(api, serviceIdentifier, osType) {
+async function executeSmartVpsCrossOsChange(api, serviceIdentifier, osType, currentOsType) {
   await ensureSmartVpsNotBusy(api, serviceIdentifier);
 
   const candidates = getSmartVpsOsCandidates(osType);
+  const windowsTarget = isSmartVpsWindowsOsType(osType);
+  const linuxTarget = osType === 'ubuntu' || osType === 'centos';
 
-  // SmartVPS cross-OS uses format+os (changeOS returns "error" for Linux on this provider).
+  // Per SmartVPS API doc: Windows OS switch → changeos { ip, os: "2022" }.
+  // Linux targets work via format+os on this reseller path (changeos returns "error" for ubuntu).
+  const methods = windowsTarget
+    ? ['changeos', 'format+os']
+    : linuxTarget
+      ? ['format+os', 'changeos']
+      : ['changeos', 'format+os'];
+
   for (const candidate of candidates) {
-    console.log('[SMARTVPS-CROSS-OS] Trying format+os:', candidate);
-    const res = await api.format(serviceIdentifier, candidate);
-    if (!isSmartVpsErrorResponse(res)) {
-      return { method: 'format+os', os: candidate, result: res, needsFollowUpFormat: false };
+    for (const method of methods) {
+      console.log('[SMARTVPS-CROSS-OS] Trying', method, 'with os:', candidate);
+      let res;
+      if (method === 'changeos') {
+        res = await api.changeOS(serviceIdentifier, candidate);
+      } else {
+        res = await api.format(serviceIdentifier, candidate);
+      }
+      if (!isSmartVpsErrorResponse(res)) {
+        return { method, os: candidate, result: res, needsFollowUpFormat: false };
+      }
+      console.log('[SMARTVPS-CROSS-OS]', method, 'rejected for', candidate, ':', res);
     }
-    console.log('[SMARTVPS-CROSS-OS] format+os rejected for', candidate, ':', res);
   }
 
   const label = SMARTVPS_OS_TEMPLATES[osType] || osType;
+  const fromLinux = currentOsType === 'ubuntu' || currentOsType === 'centos';
+  const fromWin11 = currentOsType === '11';
+  const toServer = osType === '2022' || osType === '2019' || osType === '2016' || osType === '2012';
+
+  let statusHint = '';
+  try {
+    const parsed = await getSmartVpsParsedStatus(api, serviceIdentifier);
+    if (isPlainObject(parsed)) {
+      const actionStatus = String(parsed.ActionStatus || '').toLowerCase();
+      if (actionStatus === 'failed') {
+        throw new Error(
+          `SmartVPS last action FAILED (IP: ${parsed.IP || serviceIdentifier}, OS: ${parsed.OS || 'unknown'}). ` +
+          `Contact SmartVPS support to reset this slot before trying again.`
+        );
+      }
+      statusHint = ` Current server: ${parsed.OS || 'unknown'}, RAM: ${parsed.RAM || 'unknown'}, ActionStatus: ${parsed.ActionStatus || 'unknown'}.`;
+    }
+  } catch (e) {
+    if (e.message.includes('FAILED')) throw e;
+  }
+
+  if (fromWin11 && toServer) {
+    throw new Error(
+      `SmartVPS rejected switching from Windows 11 to ${label}.${statusHint} ` +
+      `Windows 11 desktop slots often cannot convert to Windows Server — buy a Windows Server 2022 slot instead, or contact SmartVPS support.`
+    );
+  }
+  if (windowsTarget && fromLinux) {
+    throw new Error(
+      `SmartVPS rejected switching to ${label}.${statusHint} ` +
+      `This server slot is likely Linux-only (4GB Ubuntu/CentOS plans usually cannot install Windows). ` +
+      `Buy or migrate to an 8GB+ Windows-capable slot, or contact SmartVPS support.`
+    );
+  }
   throw new Error(
-    `SmartVPS rejected switching to ${label}. Wait 5 minutes if a previous format is still running. If it keeps failing, this server slot may not support ${label} — contact support.`
+    `SmartVPS rejected switching to ${label}.${statusHint} ` +
+    `Wait 5 minutes if a previous format is still running. If it keeps failing, this server slot may not support ${label} — contact SmartVPS support with the IP.`
   );
 }
 
@@ -533,16 +605,23 @@ export async function POST(request) {
                 targetLabel: targetOsLabel,
               });
 
-              const crossOsResult = await executeSmartVpsCrossOsChange(api, serviceIdentifier, osType);
+              const crossOsResult = await executeSmartVpsCrossOsChange(
+                api,
+                serviceIdentifier,
+                osType,
+                currentOsType,
+              );
               console.log('[SMARTVPS-ACTION][POST] Cross-OS initiated via', crossOsResult.method, 'os:', crossOsResult.os);
 
               result = {
                 ...crossOsResult,
                 targetOsType: osType,
                 targetOsLabel,
-                message: crossOsResult.method === 'format+os'
-                  ? `Format to ${targetOsLabel} started.`
-                  : 'OS template change started. Server will format automatically when ready.',
+                message: crossOsResult.method === 'changeos'
+                  ? `OS change to ${targetOsLabel} started via SmartVPS changeos.`
+                  : crossOsResult.method === 'format+os'
+                    ? `Format to ${targetOsLabel} started.`
+                    : 'OS template change started. Server will format automatically when ready.',
               };
 
               if (crossOsResult.needsFollowUpFormat) {
