@@ -24,6 +24,7 @@ export async function detectCompanyManagedRenewal(order) {
   if (order.smartvpsServiceId) return { isCompany: false };
   if (order.advpsServiceId) return { isCompany: false };
   if (order.netbayServiceId) return { isCompany: false };
+  if (order.resellerVmId) return { isCompany: false };
   if (!order.ipStockId) return { isCompany: false };
 
   const ipStock = await IPStock.findById(order.ipStockId)
@@ -45,7 +46,8 @@ export function orderHasUpstreamAutomation(order) {
     order.hostycareServiceId ||
     order.smartvpsServiceId ||
     order.advpsServiceId ||
-    order.netbayServiceId
+    order.netbayServiceId ||
+    order.resellerVmId
   );
 }
 
@@ -59,6 +61,7 @@ export async function resolveRenewalProvider(order) {
 
   if (order.provider === 'advps' || order.advpsServiceId) return 'advps';
   if (order.provider === 'netbay' || order.netbayServiceId) return 'netbay';
+  if (order.provider === 'reseller-api' || order.resellerVmId) return 'reseller-api';
   if (order.hostycareServiceId) return 'hostycare';
   if (order.smartvpsServiceId || order.provider === 'smartvps') return 'smartvps';
 
@@ -69,6 +72,9 @@ export async function resolveRenewalProvider(order) {
         return 'oceanlinux';
       }
       const tagsLower = ipStock.tags?.map((t) => t.toLowerCase()) || [];
+      if (tagsLower.includes('reseller-api') || tagsLower.includes('primevps') || tagsLower.includes('primevm')) {
+        return 'reseller-api';
+      }
       if (tagsLower.includes('smartvps') || tagsLower.includes('ocean linux')) {
         return 'smartvps';
       }

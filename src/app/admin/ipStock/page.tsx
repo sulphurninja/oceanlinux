@@ -41,6 +41,7 @@ type CompanyOption = {
     _id: string;
     name: string;
     netbayApi?: { enabled?: boolean } | null;
+    resellerApi?: { enabled?: boolean } | null;
 };
 
 const IPStockFormWithParams = () => {
@@ -59,6 +60,7 @@ const IPStockFormWithParams = () => {
     );
     const [netbayDefaultOsLinux, setNetbayDefaultOsLinux] = useState('');
     const [netbayDefaultOsWindows, setNetbayDefaultOsWindows] = useState('');
+    const [resellerZoneId, setResellerZoneId] = useState('');
     const [memorySizes, setMemorySizes] = useState<string[]>(DEFAULT_MEMORY_SIZES);
     const [newMemorySize, setNewMemorySize] = useState('');
     const [prices, setPrices] = useState<Record<string, string>>(() =>
@@ -227,6 +229,12 @@ const IPStockFormWithParams = () => {
         return !!(c?.netbayApi?.enabled);
     })();
 
+    const selectedCompanyHasResellerApi = (() => {
+        if (!companyId || companyId === 'none') return false;
+        const c = companies.find((co) => co._id === companyId);
+        return !!(c?.resellerApi?.enabled);
+    })();
+
     const handleNetbayPlanIdChange = (size: string, value: string) => {
         setNetbayPlanIds((prev) => {
             const next = { ...prev };
@@ -301,6 +309,18 @@ const IPStockFormWithParams = () => {
             };
         }
 
+        const submitTags = [...tags];
+        if (selectedCompanyHasResellerApi) {
+            if (resellerZoneId.trim() || !submitTags.includes('reseller-api')) {
+                defaultConfigurations.resellerApi = {
+                    ...(resellerZoneId.trim() ? { zoneId: Number(resellerZoneId) } : {}),
+                    planType: 'SHARED',
+                    gateway: 'WALLET',
+                };
+            }
+            if (!submitTags.includes('reseller-api')) submitTags.push('reseller-api');
+        }
+
         const linkedCompany = companyId && companyId !== 'none' ? companyId : null;
 
         try {
@@ -310,7 +330,7 @@ const IPStockFormWithParams = () => {
                 available: linkedCompany ? Number(stockCount) > 0 : available === 'true',
                 stockCount: linkedCompany ? Math.max(0, Math.floor(Number(stockCount) || 0)) : undefined,
                 serverType,
-                tags,
+                tags: submitTags,
                 memoryOptions,
                 promoCodes,
                 defaultConfigurations,
@@ -337,6 +357,7 @@ const IPStockFormWithParams = () => {
             setNetbayPlanIds(memoryRecord(DEFAULT_MEMORY_SIZES));
             setNetbayDefaultOsLinux('');
             setNetbayDefaultOsWindows('');
+            setResellerZoneId('');
 
             toast.success('IP Stock created successfully!');
         } catch (error: any) {
@@ -501,6 +522,30 @@ const IPStockFormWithParams = () => {
                                     <p className="text-[11px] text-muted-foreground">
                                         OS = template <strong>Name</strong> or <strong>OS ID</strong> from catalog (purchase API needs the name — ID is resolved automatically). Hostycare Product ID above chhod sakte ho Netbay stock ke liye.
                                     </p>
+                                </div>
+                            )}
+
+                            {selectedCompanyHasResellerApi && (
+                                <div className="mb-6 border rounded-lg p-4 bg-sky-50/40 dark:bg-sky-950/10 border-sky-200/60 dark:border-sky-900/40 space-y-3">
+                                    <div>
+                                        <Label className="text-base font-semibold">PrimeVPS / Panel API (UserSide.pdf)</Label>
+                                        <p className="text-xs text-muted-foreground mt-0.5">
+                                            Auto-buy + renew + manage via company reseller API (primevm.in). Tag <code>reseller-api</code> added automatically.
+                                            Pricing IDs auto-resolve from panel catalog if not mapped manually.
+                                        </p>
+                                    </div>
+                                    <div>
+                                        <Label className="text-sm">Zone ID (optional):</Label>
+                                        <Input
+                                            type="number"
+                                            placeholder="e.g. 1 = Mumbai-103.20"
+                                            value={resellerZoneId}
+                                            onChange={(e) => setResellerZoneId(e.target.value)}
+                                        />
+                                        <p className="text-xs text-gray-500 mt-1">
+                                            Blank = first active zone from panel. Wallet on primevm.in must have balance for auto-buy/renew.
+                                        </p>
+                                    </div>
                                 </div>
                             )}
 

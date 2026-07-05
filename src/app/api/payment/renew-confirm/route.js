@@ -18,6 +18,7 @@ const RenewalLogger = require('@/services/renewalLogger');
 const { getAdvpsRebuildResetFields, isAdvpsOrder } = require('@/lib/advpsRebuildLimit');
 const { executeAdvpsUpstreamRenewal } = require('@/lib/advpsRenewal');
 const { executeNetbayUpstreamRenewal } = require('@/lib/netbayRenewal');
+const { executeResellerPanelUpstreamRenewal } = require('@/lib/resellerPanelRenewal');
 const { pickAdvpsExpiryDate } = require('@/lib/advpsOrderExpiry');
 const { extractAdvpsStatusCredentials } = require('@/lib/advpsStatusNormalize');
 const HostycareAPI = require('@/services/hostycareApi');
@@ -669,6 +670,30 @@ export async function POST(request) {
       }
 
       console.log('[RENEWAL-CONFIRM] === NETBAY RENEWAL PROCESS END ===');
+    } else if (provider === 'reseller-api') {
+      console.log('[RENEWAL-CONFIRM] === RESELLER PANEL RENEWAL START ===');
+      try {
+        const apiStart = Date.now();
+        const panelRenew = await executeResellerPanelUpstreamRenewal(order, { months: 1, Order });
+        const apiDuration = Date.now() - apiStart;
+
+        providerRenewalResult = panelRenew.result || { error: panelRenew.error, vmId: panelRenew.vmId };
+        providerRenewalSuccess = panelRenew.success;
+
+        if (panelRenew.success) {
+          logger.setProviderApiResult('reseller-api', true, panelRenew.result, null, apiDuration);
+          if (panelRenew.newExpiryDate) {
+            newExpiryDate = panelRenew.newExpiryDate;
+          }
+        } else {
+          logger.setProviderApiResult('reseller-api', false, panelRenew.result, { message: panelRenew.error }, apiDuration);
+        }
+      } catch (panelErr) {
+        providerRenewalResult = { error: panelErr.message };
+        providerRenewalSuccess = false;
+        logger.setProviderApiResult('reseller-api', false, null, panelErr);
+      }
+      console.log('[RENEWAL-CONFIRM] === RESELLER PANEL RENEWAL END ===');
     } else {
       console.log(`[RENEWAL-CONFIRM] ${provider} renewal - no additional API call needed`);
       providerRenewalSuccess = true; // OceanLinux renewals are handled internally

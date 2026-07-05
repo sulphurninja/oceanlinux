@@ -18,6 +18,7 @@ const SmartVpsAPI = require('@/services/smartvpsApi');
 const AdvpsAPI = require('@/services/advpsApi');
 const { executeAdvpsUpstreamRenewal } = require('@/lib/advpsRenewal');
 const { executeNetbayUpstreamRenewal } = require('@/lib/netbayRenewal');
+const { executeResellerPanelUpstreamRenewal } = require('@/lib/resellerPanelRenewal');
 const { pickAdvpsExpiryDate } = require('@/lib/advpsOrderExpiry');
 const { extractAdvpsStatusCredentials } = require('@/lib/advpsStatusNormalize');
 
@@ -84,6 +85,14 @@ async function runProviderRenewal(order, orderId, provider) {
       const netbayRenew = await executeNetbayUpstreamRenewal(order, { months: 1 });
       providerRenewalResult = netbayRenew.result || { error: netbayRenew.error };
       providerRenewalSuccess = netbayRenew.success;
+    } catch (err) {
+      providerRenewalResult = { error: err.message };
+    }
+  } else if (provider === 'reseller-api') {
+    try {
+      const panelRenew = await executeResellerPanelUpstreamRenewal(order, { months: 1, Order });
+      providerRenewalResult = panelRenew.result || { error: panelRenew.error };
+      providerRenewalSuccess = panelRenew.success;
     } catch (err) {
       providerRenewalResult = { error: err.message };
     }

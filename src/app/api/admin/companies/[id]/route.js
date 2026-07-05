@@ -17,8 +17,10 @@ function normalizeVirtualizorEntry(v) {
 
 function normalizeResellerApiEntry(v) {
   if (v === null) return null;
+  const enabled = asBool(v?.enabled);
+  const useLiveStockApi = enabled && asBool(v?.useLiveStockApi);
   return {
-    enabled: typeof v?.enabled === 'boolean' ? v.enabled : false,
+    enabled,
     label: typeof v?.label === 'string' ? v.label.trim() : '',
     baseUrl: typeof v?.baseUrl === 'string'
       ? v.baseUrl.trim().replace(/\/+$/, '')
@@ -26,6 +28,7 @@ function normalizeResellerApiEntry(v) {
     resellerDomain: typeof v?.resellerDomain === 'string' ? v.resellerDomain.trim() : '',
     email: typeof v?.email === 'string' ? v.email.trim() : '',
     password: typeof v?.password === 'string' ? v.password : '',
+    useLiveStockApi,
   };
 }
 
@@ -119,6 +122,15 @@ export async function PUT(request, { params }) {
   if (!company) return NextResponse.json({ error: 'Company not found' }, { status: 404 });
 
   const prevNetbayLive = company.netbayApi?.useLiveStockApi === true;
+  const prevResellerLive = company.resellerApi?.useLiveStockApi === true;
+
+  if (Object.prototype.hasOwnProperty.call(updates, 'resellerApi')) {
+    await Company.collection.updateOne(
+      { _id: company._id },
+      { $set: { resellerApi: updates.resellerApi } }
+    );
+    delete updates.resellerApi;
+  }
 
   if (Object.prototype.hasOwnProperty.call(updates, 'netbayApi')) {
     // Write netbayApi directly — bypasses stale Mongoose model cache in dev HMR
@@ -162,6 +174,24 @@ export async function PUT(request, { params }) {
       await refreshNetbayStockForCustomer({ force: true });
     } catch (err) {
       console.warn('[admin/companies] Netbay live stock refresh failed:', err.message);
+    }
+  }
+
+  const nextResellerLive = saved.resellerApi?.useLiveStockApi === true;
+  if (prevResellerLive && !nextResellerLive) {
+    try {
+      const { restoreResellerManualStockAvailability } = require('@/lib/resellerLiveStock');
+      await restoreResellerManualStockAvailability(saved._id);
+    } catch (err) {
+      console.warn('[admin/companies] restore manual reseller stock failed:', err.message);
+    }
+  }
+  if (!prevResellerLive && nextResellerLive) {
+    try {
+      const { refreshResellerStockForCustomer } = require('@/lib/resellerLiveStock');
+      await refreshResellerStockForCustomer({ force: true });
+    } catch (err) {
+      console.warn('[admin/companies] Reseller live stock refresh failed:', err.message);
     }
   }
 

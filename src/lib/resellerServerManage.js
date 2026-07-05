@@ -20,7 +20,10 @@ const HostycareAPI = require('@/services/hostycareApi');
 const AdvpsAPI = require('@/services/advpsApi');
 const NetbayApi = require('@/services/netbayApi');
 const JoyApi = require('@/services/joyApi');
+const ResellerApi = require('@/services/resellerApi');
 const { getCompanyJoyApiConfig } = require('@/lib/companyJoyApi');
+const { getCompanyResellerApiConfig } = require('@/lib/companyResellerApi');
+const { syncResellerVmCredentials } = require('@/lib/resellerApiOrderSync');
 const { applyJoyMachineToOrderUpdates } = require('@/lib/joyOrderSync');
 const {
   normalizeAdvpsPowerState,
@@ -92,6 +95,13 @@ const PROVIDER_CAPABILITIES = {
     osOptions: [],
     notes: 'Joy Services — power actions + status only. OS reinstall/change is not exposed by the Joy connect API.',
   },
+  'reseller-api': {
+    supported: ['start', 'stop', 'restart', 'status', 'sync', 'reinstall'],
+    reinstallRequiresOs: true,
+    changeosRequiresOs: false,
+    osOptions: ['ubuntu', 'centos', 'windows'],
+    notes: 'PrimeVPS / Hostheaven panel — full UserSide.pdf manage API.',
+  },
   oceanlinux: {
     supported: [],
     reinstallRequiresOs: false,
@@ -136,6 +146,8 @@ function hasNativeServiceId(order, provider) {
       return !!order.hostycareServiceId;
     case 'netbay':
       return !!order.netbayServiceId;
+    case 'reseller-api':
+      return !!order.resellerVmId;
     default:
       return false;
   }
@@ -150,9 +162,8 @@ export function resolveResellerManageProvider(order, ipStock = null) {
   const upstream = resolveProviderFromOrder(order, ipStock);
 
   if (hasCompanyAnyAutomation(ipStock) && !hasNativeServiceId(order, upstream)) {
-    // Joy is a real, executable company automation (power via IP → ihash) — route
-    // it to its own runner instead of the internal "company" placeholder.
     if (ipStock?.companyAutomation?.provider === 'joy') return 'joy';
+    if (ipStock?.companyAutomation?.provider === 'reseller-api') return 'reseller-api';
     return 'company';
   }
 
@@ -559,6 +570,95 @@ async function runJoy(order, orderId, action, _osType, ipStock) {
   }
 }
 
+async function runResellerApi(order, orderId, action, osType, ipStock) {
+  const cfg = getCompanyResellerApiConfig(ipStock?.company);
+  if (!cfg) {
+    return { success: false, message: 'Reseller panel API is not configured for this company.' };
+  }
+  const ip = getOrderIp(order);
+  if (!ip && !order.resellerVmId) {
+    return { success: false, message: 'No IP address or VM id on order yet' };
+  }
+
+  const api = new ResellerApi(cfg);
+  const findVm = async () => {
+    if (order.resellerVmId) {
+      return { vmId: String(order.resellerVmId), ip: ip || '', raw: null };
+    }
+    const found = await api.findVmByIp(ip);
+    if (!found) throw new Error(`No VM visible for IP ${ip} on ${cfg.baseUrl}`);
+    return found;
+  };
+
+  switch (action) {
+    case 'start': {
+      const { vmId } = await findVm();
+      await api.start(vmId);
+      api.invalidateVmIpCache(ip);
+      await Order.findByIdAndUpdate(orderId, { lastAction: 'start', lastActionTime: new Date() });
+      return { success: true, message: 'Start command sent', data: { powerState: 'starting', vmId } };
+    }
+    case 'stop': {
+      const { vmId } = await findVm();
+      await api.stop(vmId);
+      api.invalidateVmIpCache(ip);
+      await Order.findByIdAndUpdate(orderId, { lastAction: 'stop', lastActionTime: new Date() });
+      return { success: true, message: 'Stop command sent', data: { powerState: 'stopped', vmId } };
+    }
+    case 'restart': {
+      const { vmId } = await findVm();
+      await api.restart(vmId);
+      api.invalidateVmIpCache(ip);
+      await Order.findByIdAndUpdate(orderId, { lastAction: 'restart', lastActionTime: new Date() });
+      return { success: true, message: 'Restart command sent', data: { vmId } };
+    }
+    case 'status':
+    case 'sync': {
+      const found = await findVm();
+      const { powerState, rawStatus, source } = await api.resolveVmPowerState(found.vmId, {
+        overviewRaw: found.raw,
+      });
+      const synced = await syncResellerVmCredentials(api, order, found.vmId);
+      await Order.findByIdAndUpdate(orderId, {
+        ...synced.updates,
+        resellerVmId: found.vmId,
+        lastSyncTime: new Date(),
+      });
+      return {
+        success: true,
+        message: synced.changes.length ? `Synced — ${synced.changes.join(', ')}` : 'Status retrieved',
+        data: {
+          powerState,
+          rawStatus,
+          source,
+          credentialsUpdated: synced.changes.includes('password'),
+          changes: synced.changes,
+        },
+      };
+    }
+    case 'reinstall': {
+      const isoId = osType;
+      if (!isoId) {
+        return missingOsType(action, PROVIDER_CAPABILITIES['reseller-api']);
+      }
+      const { vmId } = await findVm();
+      await api.rebuild(vmId, isoId);
+      await Order.findByIdAndUpdate(orderId, {
+        lastAction: 'reinstall',
+        lastActionTime: new Date(),
+        provisioningStatus: 'provisioning',
+      });
+      return {
+        success: true,
+        message: 'Reinstall submitted — sync after a few minutes for new password',
+        data: { vmId, isoId },
+      };
+    }
+    default:
+      return actionNotSupported(action, PROVIDER_CAPABILITIES['reseller-api']);
+  }
+}
+
 async function runCompanyAutomation(order, orderId, action) {
   // Placeholder — wire to service-action internals when company panel is added.
   // Capabilities are exposed so resellers see what's coming; execution routes here.
@@ -576,6 +676,7 @@ const PROVIDER_RUNNERS = {
   hostycare: (order, orderId, action) => runHostycare(order, orderId, action),
   netbay: (order, orderId, action, osType, ipStock) => runNetbay(order, orderId, action, osType, ipStock),
   joy: (order, orderId, action, osType, ipStock) => runJoy(order, orderId, action, osType, ipStock),
+  'reseller-api': (order, orderId, action, osType, ipStock) => runResellerApi(order, orderId, action, osType, ipStock),
   company: (order, orderId, action) => runCompanyAutomation(order, orderId, action),
   oceanlinux: () => ({
     success: false,

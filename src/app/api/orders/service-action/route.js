@@ -912,7 +912,7 @@ export async function POST(request) {
       if (virtPeek.length === 0) {
         const { config: resellerCfg, companyName: resellerCompanyName } = await resolveCompanyResellerApi(order);
         if (resellerCfg) {
-          const supportedActions = new Set(['start', 'stop', 'restart', 'reboot', 'status', 'sync', 'templates', 'reinstall', 'resetmac']);
+          const supportedActions = new Set(['start', 'stop', 'restart', 'reboot', 'status', 'sync', 'templates', 'reinstall', 'resetmac', 'changepassword', 'reconfigure-network']);
           if (!supportedActions.has(action)) {
             return NextResponse.json({
               success: false,
@@ -1140,6 +1140,57 @@ export async function POST(request) {
                     success: true,
                     message: apiRes?.message || 'MAC address regenerated successfully',
                     newMacAddress: newMac,
+                    vmId,
+                    apiResponse: apiRes,
+                  },
+                });
+              }
+              case 'changepassword': {
+                const newPass = newPassword ?? payload?.password ?? body.password;
+                if (!newPass || String(newPass).length < 8) {
+                  return NextResponse.json({
+                    success: false,
+                    error: 'password is required (minimum 8 characters)',
+                  }, { status: 400 });
+                }
+                const { vmId } = await findVm();
+                const apiRes = await resellerApi.changePassword(vmId, newPass);
+                await Order.findByIdAndUpdate(orderId, {
+                  password: newPass,
+                  lastAction: 'changepassword',
+                  lastActionTime: new Date(),
+                  $push: {
+                    logs: {
+                      action: 'changepassword',
+                      timestamp: new Date(),
+                      details: `Password changed via reseller API (vmId=${vmId})`,
+                      success: true,
+                    },
+                  },
+                });
+                return NextResponse.json({
+                  success: true,
+                  result: {
+                    success: true,
+                    message: apiRes?.message || 'Password updated on VM',
+                    password: newPass,
+                    vmId,
+                    apiResponse: apiRes,
+                  },
+                });
+              }
+              case 'reconfigure-network': {
+                const { vmId } = await findVm();
+                const apiRes = await resellerApi.reconfigureNetwork(vmId);
+                await Order.findByIdAndUpdate(orderId, {
+                  lastAction: 'reconfigure-network',
+                  lastActionTime: new Date(),
+                });
+                return NextResponse.json({
+                  success: true,
+                  result: {
+                    success: true,
+                    message: apiRes?.message || 'Network reconfiguration initiated',
                     vmId,
                     apiResponse: apiRes,
                   },

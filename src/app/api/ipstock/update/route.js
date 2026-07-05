@@ -5,7 +5,7 @@ import connectDB from '@/lib/db';
 import IPStock from '@/models/ipStockModel';
 import Company from '@/models/companyModel';
 import { enforceAdmin } from '@/lib/apiSecurity';
-import { usesNetbayLiveStock } from '@/lib/ipStockAvailability';
+import { usesNetbayLiveStock, usesResellerLiveStock } from '@/lib/ipStockAvailability';
 
 const {
   toPlainConfigurations,
@@ -51,14 +51,21 @@ export async function PUT(req, res) {
     }
 
     const plainMerged = toPlainConfigurations(mergedDefaults);
+    const resolvedTags = tags !== undefined ? tags : (existing.tags || []);
     const hasNetbayPlans = !!(
       plainMerged?.netbay?.planByMemory &&
       Object.values(plainMerged.netbay.planByMemory).some(Boolean)
     );
+    const hasResellerPlans = !!(
+      plainMerged?.resellerApi ||
+      (resolvedTags || []).map((t) => String(t).toLowerCase()).some((t) =>
+        t === 'reseller-api' || t === 'primevps' || t === 'primevm'
+      )
+    );
 
     let companyDoc = null;
     if (resolvedCompany) {
-      companyDoc = await Company.findById(resolvedCompany).select('netbayApi').lean();
+      companyDoc = await Company.findById(resolvedCompany).select('netbayApi resellerApi').lean();
     }
 
     const netbayLiveStock =
@@ -68,13 +75,20 @@ export async function PUT(req, res) {
         companyDoc
       );
 
-    if (resolvedCompany && !netbayLiveStock) {
+    const resellerLiveStock =
+      hasResellerPlans &&
+      usesResellerLiveStock(
+        { company: resolvedCompany, tags: resolvedTags, defaultConfigurations: { resellerApi: plainMerged?.resellerApi } },
+        companyDoc
+      );
+
+    if (resolvedCompany && !netbayLiveStock && !resellerLiveStock) {
       const count = stockCount !== undefined
         ? Math.max(0, Math.floor(Number(stockCount) || 0))
         : Math.max(0, Number(existing.stockCount) || 0);
       updatePayload.stockCount = count;
       updatePayload.available = count > 0;
-    } else if (netbayLiveStock) {
+    } else if (netbayLiveStock || resellerLiveStock) {
       updatePayload.stockCount = 0;
       if (available !== undefined && existing.availabilityManual) {
         updatePayload.available = available;

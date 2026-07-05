@@ -30,6 +30,7 @@ const RenewalLogger = require('@/services/renewalLogger');
 const { getAdvpsRebuildResetFields, isAdvpsOrder } = require('@/lib/advpsRebuildLimit');
 const { executeAdvpsUpstreamRenewal } = require('@/lib/advpsRenewal');
 const { executeNetbayUpstreamRenewal } = require('@/lib/netbayRenewal');
+const { executeResellerPanelUpstreamRenewal } = require('@/lib/resellerPanelRenewal');
 
 export async function POST(request) {
   const webhookStartTime = Date.now();
@@ -637,6 +638,33 @@ async function handleRenewalWebhook(renewalTxnId, payment, webhookStartTime) {
         console.error(`[WEBHOOK-RENEWAL] Netbay renewal threw:`, netbayErr.message);
         logger.setProviderApiResult('netbay', false, null, netbayErr);
         providerRenewalResult = { error: netbayErr.message };
+        providerRenewalSuccess = false;
+      }
+    } else if (provider === 'reseller-api') {
+      console.log(`[WEBHOOK-RENEWAL] Processing reseller panel renewal:`, {
+        resellerVmId: order.resellerVmId,
+        ipAddress: order.ipAddress,
+      });
+
+      try {
+        const apiStart = Date.now();
+        const panelRenew = await executeResellerPanelUpstreamRenewal(order, { months: 1, Order });
+        const apiDuration = Date.now() - apiStart;
+
+        providerRenewalResult = panelRenew.result || { error: panelRenew.error, vmId: panelRenew.vmId };
+        providerRenewalSuccess = panelRenew.success;
+
+        if (panelRenew.success) {
+          logger.setProviderApiResult('reseller-api', true, panelRenew.result, null, apiDuration);
+          if (panelRenew.newExpiryDate) {
+            newExpiryDate = panelRenew.newExpiryDate;
+          }
+        } else {
+          logger.setProviderApiResult('reseller-api', false, panelRenew.result, { message: panelRenew.error }, apiDuration);
+        }
+      } catch (panelErr) {
+        logger.setProviderApiResult('reseller-api', false, null, panelErr);
+        providerRenewalResult = { error: panelErr.message };
         providerRenewalSuccess = false;
       }
     } else {

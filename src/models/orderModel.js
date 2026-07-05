@@ -44,7 +44,7 @@ const orderSchema = new mongoose.Schema({
     // Provider identification
     provider: {
         type: String,
-        enum: ['hostycare', 'smartvps', 'slotip', 'advps', 'netbay'],
+        enum: ['hostycare', 'smartvps', 'slotip', 'advps', 'netbay', 'reseller-api'],
         default: 'hostycare'
     },
 
@@ -70,6 +70,11 @@ const orderSchema = new mongoose.Schema({
     netbayPlanId: { type: String },    // plan used at purchase time (cached for renewals)
     netbayTaskId: { type: String },    // most recent async task (purchase / rebuild)
     netbayGroupTag: { type: String },  // location filter used at purchase
+
+    // Reseller panel integration (PrimeVPS / Hostheaven UserSide.pdf)
+    resellerVmId: { type: String },       // upstream VM database id
+    resellerOrderId: { type: String },    // returned by POST /api/users/vms/create
+    resellerGroupId: { type: String },
 
     provisioningStatus: {
         type: String,

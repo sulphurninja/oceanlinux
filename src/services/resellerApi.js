@@ -7,16 +7,15 @@
  * across instances via a module-level Map so that repeated requests within
  * the same Node process reuse the token.
  *
- * Implements only the verbs the order-management UI needs:
- *   - login()
- *   - findVmByIp(ip)
- *   - getVmDetails(vmId)
- *   - getVmIsos(vmId)            (resolves zone first, then lists ISOs)
- *   - getVmMetrics(vmId)         (drives power-state UI)
- *   - getVmLockStatus(vmId)
- *   - start / stop / restart     (POST .../vms/{id}/control?action=...)
- *   - rebuild(vmId, isoId)       (POST .../vms/{id}/rebuild?isoId=...)
- *   - regenerateMac(vmId)        (POST .../vms/{id}/mac/regenerate)
+ * UserSide.pdf / SomaniOne panel API surface:
+ *   Auth: login(), test()
+ *   Catalog: getZones(), getZoneIsos(), getPricingCatalog(), getUpgradeOptions()
+ *   Wallet: getWallet(), getWalletLogs(), walletTopUp()
+ *   Buy: createVm()              (POST /api/users/vms/create?gateway=)
+ *   Renew: calculateRenewal(), upgradeRenew()
+ *   Manage: findVmByIp(), getVmDetails(), getVmMetrics(), getVmStorage()
+ *           start/stop/restart, rebuild(), changePassword(), regenerateMac()
+ *           reconfigureNetwork(), getVmLockStatus(), getAuditLogs()
  *
  * The {userId} in path params is documented as ignored by the upstream
  * backend (auth comes from the JWT). We hardcode it to "0" so the URL is
@@ -521,6 +520,155 @@ class ResellerApi {
 
   async getZoneIsos(zoneId) {
     return this._request(`/api/users/zones/${encodeURIComponent(zoneId)}/isos`);
+  }
+
+  async getWallet() {
+    return this._request('/api/wallet');
+  }
+
+  async getWalletLogs() {
+    return this._request('/api/wallet/logs');
+  }
+
+  async walletTopUp(amount, { gateway = 'CASHFREE' } = {}) {
+    const qs = new URLSearchParams({ gateway: String(gateway) });
+    return this._request(`/api/wallet/top-up?${qs.toString()}`, {
+      method: 'POST',
+      body: { amount: Number(amount) },
+    });
+  }
+
+  async getPaymentGateways() {
+    return this._request('/api/user/payments/gateways');
+  }
+
+  /**
+   * @param {'SHARED'|'DEDICATED'} planType
+   * @param {'cpu'|'ram'|'disk'|'bandwidth'} resource
+   */
+  async getPricingCatalog(planType = 'SHARED', resource) {
+    const pt = String(planType || 'SHARED').toLowerCase();
+    const res = String(resource || '').toLowerCase();
+    const allowed = ['cpu', 'ram', 'disk', 'bandwidth'];
+    if (!allowed.includes(res)) {
+      throw new Error(`ResellerApi.getPricingCatalog: invalid resource '${resource}'`);
+    }
+    const parsed = await this._request(`/api/pricing/${pt}/${res}`);
+    return Array.isArray(parsed) ? parsed : (parsed?.items || parsed?.data || []);
+  }
+
+  async getUpgradeOptions(vmId) {
+    return this._request(`/api/pricing/upgrades/${encodeURIComponent(vmId)}`);
+  }
+
+  async calculateRenewal(body) {
+    return this._request('/api/billing/price/calculate-renewal', {
+      method: 'POST',
+      body,
+    });
+  }
+
+  /**
+   * Provision a new VM (UserSide.pdf §4). Uses company wallet when
+   * useWalletBalance=true and gateway=WALLET.
+   */
+  async createVm(body, { gateway = 'WALLET' } = {}) {
+    const qs = new URLSearchParams({ gateway: String(gateway) });
+    return this._request(`/api/users/vms/create?${qs.toString()}`, {
+      method: 'POST',
+      body,
+    });
+  }
+
+  /**
+   * Renew or upgrade an existing VM subscription.
+   * POST /api/vms/renew/{vmId}/upgrade-renew?gateway=
+   */
+  async upgradeRenew(vmId, body, { gateway = 'WALLET' } = {}) {
+    const qs = new URLSearchParams({ gateway: String(gateway) });
+    return this._request(
+      `/api/vms/renew/${encodeURIComponent(vmId)}/upgrade-renew?${qs.toString()}`,
+      { method: 'POST', body }
+    );
+  }
+
+  async getVmStorage(vmId) {
+    return this._request(`/api/users/vms/${encodeURIComponent(vmId)}/storage`);
+  }
+
+  async getAuditLogs({ limit = 8 } = {}) {
+    const qs = new URLSearchParams({ limit: String(limit) });
+    return this._request(`/api/users/audit-logs?${qs.toString()}`);
+  }
+
+  async changePassword(vmId, password) {
+    const userId = 0;
+    return this._request(
+      `/api/users/${userId}/vms/${encodeURIComponent(vmId)}/password`,
+      { method: 'PUT', body: { password: String(password) } }
+    );
+  }
+
+  /**
+   * Sum catalog unit prices for a VM spec (UserSide.pdf pricing IDs).
+   * Used by live-stock to compare against GET /api/wallet balance.
+   */
+  async estimateMonthlyVmPrice({
+    planType = 'SHARED',
+    cpuPriceId,
+    ramPriceId,
+    diskPriceId,
+    bandwidthPriceId,
+    months = 1,
+    quantity = 1,
+  } = {}) {
+    const findPrice = (list, id) => {
+      const row = (list || []).find((x) => String(x.id) === String(id));
+      return Number(row?.price ?? 0) || 0;
+    };
+    const pt = String(planType || 'SHARED').toUpperCase();
+    const [cpuList, ramList, diskList, bwList] = await Promise.all([
+      this.getPricingCatalog(pt, 'cpu'),
+      this.getPricingCatalog(pt, 'ram'),
+      this.getPricingCatalog(pt, 'disk'),
+      this.getPricingCatalog(pt, 'bandwidth'),
+    ]);
+    const unitTotal =
+      findPrice(cpuList, cpuPriceId) +
+      findPrice(ramList, ramPriceId) +
+      findPrice(diskList, diskPriceId) +
+      findPrice(bwList, bandwidthPriceId);
+    const estimatedMonthly = unitTotal * Number(months || 1) * Number(quantity || 1);
+    return {
+      unitTotal,
+      estimatedMonthly,
+      currency: 'INR',
+      priceIds: { cpuPriceId, ramPriceId, diskPriceId, bandwidthPriceId },
+    };
+  }
+
+  /** Count ACTIVE zones — no active zone means panel cannot provision. */
+  async getActiveZoneCount() {
+    const zones = await this.getZones();
+    const list = Array.isArray(zones) ? zones : (zones?.zones || []);
+    return list.filter((z) => String(z.status || '').toUpperCase() === 'ACTIVE').length;
+  }
+
+  /**
+   * Reseller-admin unassigned VM pool (UserSide.pdf). Returns null when
+   * forbidden — caller should fall back to wallet-based stock.
+   */
+  async getAdminAvailableVms() {
+    try {
+      const parsed = await this._request('/api/reseller/admin/vms/available');
+      const rows = Array.isArray(parsed) ? parsed : (parsed?.vms || parsed?.items || []);
+      return { ok: true, count: rows.length, rows };
+    } catch (err) {
+      if (err.status === 403 || err.status === 404) {
+        return { ok: false, forbidden: true, count: null, message: err.message };
+      }
+      throw err;
+    }
   }
 
   /** Resolve the VM's zoneId then return its ISO catalog. */

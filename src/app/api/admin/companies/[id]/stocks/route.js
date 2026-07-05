@@ -9,6 +9,7 @@ import {
   setAllCompanyIpStockCounts,
   usesStockCount,
   usesNetbayLiveStock,
+  usesResellerLiveStock,
 } from '@/lib/ipStockAvailability';
 
 function serializeStock(stock, company) {
@@ -26,6 +27,7 @@ function serializeStock(stock, company) {
     stockCount: getIpStockRemaining(stock, company),
     usesStockCount: usesStockCount(stock, company),
     netbayLiveStock: usesNetbayLiveStock(stock, company),
+    resellerLiveStock: usesResellerLiveStock(stock, company),
     serverType: stock.serverType,
     tags: stock.tags || [],
     memorySizes: Object.keys(memoryOptions),
@@ -40,13 +42,14 @@ export async function GET(request, { params }) {
   await connectDB();
   const { id } = await params;
 
-  const company = await Company.findById(id).select('name slug netbayApi').lean();
+  const company = await Company.findById(id).select('name slug netbayApi resellerApi').lean();
   if (!company) return NextResponse.json({ error: 'Company not found' }, { status: 404 });
 
   const stocks = await IPStock.find({ company: id }).sort({ name: 1 }).lean();
   return NextResponse.json({
     company: { _id: String(company._id), name: company.name, slug: company.slug },
     netbayUseLiveStockApi: company.netbayApi?.useLiveStockApi === true,
+    resellerUseLiveStockApi: company.resellerApi?.useLiveStockApi === true,
     stocks: stocks.map((s) => serializeStock(s, company)),
   });
 }
@@ -64,12 +67,19 @@ export async function PUT(request, { params }) {
     return NextResponse.json({ error: 'stockCount is required' }, { status: 400 });
   }
 
-  const company = await Company.findById(id).select('_id netbayApi').lean();
+  const company = await Company.findById(id).select('_id netbayApi resellerApi').lean();
   if (!company) return NextResponse.json({ error: 'Company not found' }, { status: 404 });
 
   if (company.netbayApi?.useLiveStockApi === true) {
     return NextResponse.json(
       { error: 'Live NetBay API stock is ON — turn Live stock OFF in the Netbay dialog to set manual units.' },
+      { status: 400 }
+    );
+  }
+
+  if (company.resellerApi?.useLiveStockApi === true) {
+    return NextResponse.json(
+      { error: 'Live Reseller API stock is ON — turn Live stock OFF in the Reseller dialog to set manual units.' },
       { status: 400 }
     );
   }
@@ -96,6 +106,13 @@ export async function PUT(request, { params }) {
   if (usesNetbayLiveStock(existing, company)) {
     return NextResponse.json(
       { error: 'Live NetBay API stock is ON — turn Live stock OFF in the Netbay dialog to set manual units.' },
+      { status: 400 }
+    );
+  }
+
+  if (usesResellerLiveStock(existing, company)) {
+    return NextResponse.json(
+      { error: 'Live Reseller API stock is ON — turn Live stock OFF in the Reseller dialog to set manual units.' },
       { status: 400 }
     );
   }

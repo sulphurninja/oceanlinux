@@ -43,6 +43,8 @@ const companyResellerApiSchema = new mongoose.Schema({
   resellerDomain: { type: String, default: '' }, // X-Reseller-Domain header value
   email: { type: String, default: '' },
   password: { type: String, default: '' },
+  /** When true, IP stock availability follows panel wallet + pricing (PrimeVPS / Hostheaven). */
+  useLiveStockApi: { type: Boolean, default: false },
 }, { _id: false });
 
 /**
@@ -101,7 +103,8 @@ companySchema.index({ slug: 1 });
 if (
   mongoose.models.Company &&
   (!mongoose.models.Company.schema.paths['netbayApi.useLiveStockApi'] ||
-    !mongoose.models.Company.schema.paths['joyApi.apiToken'])
+    !mongoose.models.Company.schema.paths['joyApi.apiToken'] ||
+    !mongoose.models.Company.schema.paths['resellerApi.useLiveStockApi'])
 ) {
   delete mongoose.models.Company;
 }

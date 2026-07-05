@@ -5,20 +5,26 @@ import Company from '@/models/companyModel';
 import { enforceAdmin } from '@/lib/apiSecurity';
 import { requireAdmin } from '@/lib/adminAuth';
 const { companyUsesNetbayLiveStock } = require('@/lib/companyNetbayApi');
+const { companyUsesResellerLiveStock } = require('@/lib/companyResellerApi');
 
-async function enrichIpStocksWithNetbayMode(ipStocks) {
+async function enrichIpStocksWithProviderModes(ipStocks) {
     const companyIds = [...new Set(
         ipStocks.filter((s) => s.company).map((s) => String(s.company))
     )];
     if (!companyIds.length) return ipStocks;
 
-    const companies = await Company.find({ _id: { $in: companyIds } }).select('netbayApi').lean();
+    const companies = await Company.find({ _id: { $in: companyIds } })
+        .select('netbayApi resellerApi')
+        .lean();
     const companyMap = Object.fromEntries(companies.map((c) => [String(c._id), c]));
 
     return ipStocks.map((stock) => ({
         ...stock,
         netbayUseLiveStockApi: stock.company
             ? companyUsesNetbayLiveStock(companyMap[String(stock.company)])
+            : null,
+        resellerUseLiveStockApi: stock.company
+            ? companyUsesResellerLiveStock(companyMap[String(stock.company)])
             : null,
     }));
 }
@@ -95,7 +101,7 @@ export async function GET(request) {
             });
         }
 
-        const enriched = await enrichIpStocksWithNetbayMode(ipStocks);
+        const enriched = await enrichIpStocksWithProviderModes(ipStocks);
         const jsonResponse = JSON.stringify(enriched);
         console.log(`[IPSTOCK-API] Response size: ${jsonResponse.length} bytes`);
 

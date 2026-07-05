@@ -18,6 +18,28 @@ export function stockHasNetbayPlans(stock) {
   return Object.values(obj || {}).some(Boolean);
 }
 
+/** IP stock has reseller panel buy config (PrimeVPS / Hostheaven tag or block). */
+export function stockHasResellerPanelPlans(stock) {
+  if (!stock?.company) return false;
+  let cfg = stock?.defaultConfigurations?.resellerApi;
+  if (!cfg && typeof stock?.defaultConfigurations?.get === 'function') {
+    cfg = stock.defaultConfigurations.get('resellerApi');
+  }
+  if (cfg && typeof cfg === 'object') return true;
+  const tags = (stock?.tags || []).map((t) => String(t).toLowerCase());
+  return tags.includes('reseller-api') || tags.includes('primevps') || tags.includes('primevm');
+}
+
+/**
+ * Reseller-panel plans with live wallet/pricing sync (company.resellerApi.useLiveStockApi).
+ */
+export function usesResellerLiveStock(stock, company) {
+  if (!stockHasResellerPanelPlans(stock)) return false;
+  if (!company) return false;
+  if (!company?.resellerApi?.enabled) return false;
+  return company.resellerApi.useLiveStockApi === true;
+}
+
 /**
  * Netbay-linked plans with live API stock mode (company.netbayApi.useLiveStockApi).
  * When company is omitted, defaults to manual stockCount mode.
@@ -29,9 +51,10 @@ export function usesNetbayLiveStock(stock, company) {
   return company.netbayApi.useLiveStockApi === true;
 }
 
-/** Company-linked IP stocks use numeric inventory; Netbay live-stock plans do not. */
+/** Company-linked IP stocks use numeric inventory; live API stock plans do not. */
 export function usesStockCount(stock, company) {
   if (usesNetbayLiveStock(stock, company)) return false;
+  if (usesResellerLiveStock(stock, company)) return false;
   return !!(stock?.company);
 }
 
@@ -74,7 +97,7 @@ export async function assertIpStockPurchasable(ipStockId, quantity = 1) {
   let company = null;
   if (stock.company) {
     const Company = (await import('@/models/companyModel')).default;
-    company = await Company.findById(stock.company).select('netbayApi').lean();
+    company = await Company.findById(stock.company).select('netbayApi resellerApi').lean();
   }
   if (!isIpStockPurchasable(stock, quantity, company)) {
     return {

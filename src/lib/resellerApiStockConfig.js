@@ -1,0 +1,152 @@
+/**
+ * Per-IPStock configuration for PrimeVPS / Hostheaven-style panel buy + renew.
+ *
+ * Stored under ipStock.defaultConfigurations.resellerApi:
+ * {
+ *   zoneId: 1,
+ *   planType: "SHARED",
+ *   gateway: "WALLET",
+ *   priceByMemory: {
+ *     "4GB": { cpuPriceId, ramPriceId, diskPriceId, bandwidthPriceId, zoneIsoId? }
+ *   },
+ *   defaultOs: { Linux: { zoneIsoId: 4 }, Windows: { zoneIsoId: 2 } }
+ * }
+ */
+
+function readResellerApiStockConfig(ipStock) {
+  const cfg = ipStock?.defaultConfigurations?.get?.('resellerApi') ||
+    ipStock?.defaultConfigurations?.resellerApi ||
+    {};
+
+  const priceByMemory = cfg.priceByMemory instanceof Map
+    ? Object.fromEntries(cfg.priceByMemory)
+    : (cfg.priceByMemory || {});
+
+  const defaultOs = cfg.defaultOs instanceof Map
+    ? Object.fromEntries(cfg.defaultOs)
+    : (cfg.defaultOs || {});
+
+  return {
+    zoneId: cfg.zoneId != null ? Number(cfg.zoneId) : null,
+    planType: String(cfg.planType || 'SHARED').toUpperCase(),
+    gateway: String(cfg.gateway || 'WALLET').toUpperCase(),
+    priceByMemory,
+    defaultOs,
+  };
+}
+
+function parseMemoryGb(memory) {
+  const m = String(memory || '').match(/(\d+)/);
+  return m ? Number(m[1]) : 4;
+}
+
+function resolvePriceIdsForMemory(stockCfg, memory) {
+  if (!stockCfg?.priceByMemory) return null;
+  const variations = [
+    memory,
+    String(memory || '').toLowerCase(),
+    String(memory || '').toUpperCase(),
+    String(memory || '').replace(/\s+/g, ''),
+  ].filter(Boolean);
+
+  for (const key of variations) {
+    const hit = stockCfg.priceByMemory[key];
+    if (hit && typeof hit === 'object') return hit;
+  }
+
+  const entries = Object.entries(stockCfg.priceByMemory).filter(([, v]) => v && typeof v === 'object');
+  if (entries.length === 1) return entries[0][1];
+  return null;
+}
+
+/**
+ * Best-effort ISO pick from a zone catalog for the order OS family.
+ */
+function resolveZoneIsoIdFromCatalog(isos, { isWindows, orderOs } = {}) {
+  const list = Array.isArray(isos) ? isos : (isos?.isos || []);
+  if (!list.length) return null;
+
+  const os = String(orderOs || '').toLowerCase();
+  const pick = (pred) => list.find(pred);
+
+  if (isWindows || os.includes('windows')) {
+    return (
+      pick((i) => /2022|windows/i.test(String(i.name || i.isoName || ''))) ||
+      pick((i) => String(i.osType || '').toUpperCase().includes('WINDOWS'))
+    )?.id ?? null;
+  }
+  if (os.includes('centos')) {
+    return pick((i) => /centos/i.test(String(i.name || i.isoName || '')))?.id ?? null;
+  }
+  if (os.includes('24')) {
+    return pick((i) => /ubuntu24|24/i.test(String(i.name || i.isoName || '')))?.id ?? null;
+  }
+  return (
+    pick((i) => /ubuntu22|22/i.test(String(i.name || i.isoName || ''))) ||
+    pick((i) => String(i.osType || '').toUpperCase() === 'UBUNTU')
+  )?.id ?? list[0]?.id ?? null;
+}
+
+/**
+ * When admin hasn't mapped price IDs, derive them from the live pricing catalog.
+ */
+async function autoResolveResellerPriceIds(api, { memory, planType = 'SHARED' }) {
+  const gb = parseMemoryGb(memory);
+  const pt = String(planType || 'SHARED').toUpperCase();
+  const [cpuList, ramList, diskList, bwList] = await Promise.all([
+    api.getPricingCatalog(pt, 'cpu'),
+    api.getPricingCatalog(pt, 'ram'),
+    api.getPricingCatalog(pt, 'disk'),
+    api.getPricingCatalog(pt, 'bandwidth'),
+  ]);
+
+  const ramEntry =
+    ramList.find((x) => x.ramMb === gb * 1024) ||
+    ramList.find((x) => String(x.label) === String(gb)) ||
+    ramList.slice().sort((a, b) => a.ramMb - b.ramMb).find((x) => x.ramMb >= gb * 1024) ||
+    ramList[0];
+
+  const targetCores = Math.max(1, Math.min(8, Math.ceil(gb / 2)));
+  const cpuEntry =
+    cpuList.find((x) => x.cores === targetCores) ||
+    cpuList.find((x) => x.cores === 2) ||
+    cpuList[0];
+
+  const diskEntry = diskList[0];
+  const bwEntry = bwList[0];
+
+  if (!ramEntry?.id || !cpuEntry?.id || !diskEntry?.id || !bwEntry?.id) {
+    throw new Error('Could not auto-resolve pricing IDs from upstream catalog');
+  }
+
+  return {
+    cpuPriceId: cpuEntry.id,
+    ramPriceId: ramEntry.id,
+    diskPriceId: diskEntry.id,
+    bandwidthPriceId: bwEntry.id,
+  };
+}
+
+function isResellerApiStock(ipStock, order) {
+  const tags = Array.isArray(ipStock?.tags) ? ipStock.tags : [];
+  const provider = (ipStock?.provider || '').toString().toLowerCase();
+
+  const hasConfig = !!(
+    ipStock?.defaultConfigurations?.resellerApi ||
+    ipStock?.defaultConfigurations?.get?.('resellerApi')
+  );
+  const tagged = tags.some((t) => ['reseller-api', 'resellerapi', 'primevps', 'primevm'].includes(String(t).toLowerCase()));
+  const byProvider = provider === 'reseller-api' || provider === 'resellerapi';
+  const byOrder = !!order?.resellerVmId || order?.provider === 'reseller-api';
+
+  return hasConfig || tagged || byProvider || byOrder;
+}
+
+module.exports = {
+  readResellerApiStockConfig,
+  parseMemoryGb,
+  resolvePriceIdsForMemory,
+  resolveZoneIsoIdFromCatalog,
+  autoResolveResellerPriceIds,
+  isResellerApiStock,
+};

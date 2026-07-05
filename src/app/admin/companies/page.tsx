@@ -56,6 +56,7 @@ interface CompanyResellerApi {
   resellerDomain: string;
   email: string;
   password: string;
+  useLiveStockApi?: boolean;
 }
 
 interface CompanyNetbayApi {
@@ -107,6 +108,7 @@ const EMPTY_RESELLER_API = (): CompanyResellerApi => ({
   resellerDomain: '',
   email: '',
   password: '',
+  useLiveStockApi: false,
 });
 
 // Defaults pre-filled into the dialog when a company has no saved reseller
@@ -147,6 +149,11 @@ function companyHasNetbayEnabled(company: Pick<Company, 'netbayApi'> | null | un
   return company?.netbayApi?.enabled === true;
 }
 
+function companyHasResellerEnabled(company: Pick<Company, 'resellerApi'> | null | undefined) {
+  const r = company?.resellerApi;
+  return !!(r?.enabled && r?.baseUrl && r?.email && r?.password);
+}
+
 const EMPTY_JOY_API = (): CompanyJoyApi => ({
   enabled: false,
   label: '',
@@ -177,6 +184,7 @@ interface CompanyStock {
   stockCount: number;
   usesStockCount?: boolean;
   netbayLiveStock?: boolean;
+  resellerLiveStock?: boolean;
   serverType: string;
   tags: string[];
   memorySizes: string[];
@@ -229,6 +237,7 @@ export default function CompaniesPage() {
   const [savingBulkStock, setSavingBulkStock] = useState(false);
   const [bulkStockCount, setBulkStockCount] = useState('');
   const [stocksNetbayLiveApi, setStocksNetbayLiveApi] = useState(false);
+  const [stocksResellerLiveApi, setStocksResellerLiveApi] = useState(false);
 
   const fetchCompanies = async () => {
     try {
@@ -334,6 +343,7 @@ export default function CompaniesPage() {
       }
       setCompanyStocks(data.stocks || []);
       setStocksNetbayLiveApi(!!data.netbayUseLiveStockApi);
+      setStocksResellerLiveApi(!!data.resellerUseLiveStockApi);
       const counts = (data.stocks || []).map((s: CompanyStock) => s.stockCount ?? 0);
       const allSame = counts.length > 0 && counts.every((c: number) => c === counts[0]);
       setBulkStockCount(allSame ? String(counts[0]) : '');
@@ -518,6 +528,7 @@ export default function CompaniesPage() {
         resellerDomain: r?.resellerDomain || '',
         email: r?.email || '',
         password: r?.password || '',
+        useLiveStockApi: r?.useLiveStockApi === true,
       });
     }
     setResellerTestResult(null);
@@ -563,6 +574,13 @@ export default function CompaniesPage() {
     }
   };
 
+  const openStocksFromReseller = () => {
+    if (!resellerCompany || resellerSaving || resellerTesting) return;
+    const company = resellerCompany;
+    closeResellerDialog();
+    void openStocksDialog(company);
+  };
+
   const handleSaveResellerApi = async () => {
     if (!resellerCompany) return;
     // Empty fields are intentionally accepted here — the backend fills any
@@ -570,20 +588,32 @@ export default function CompaniesPage() {
     // `lib/companyResellerApi.js`.
     setResellerSaving(true);
     try {
+      const payload = {
+        ...resellerForm,
+        enabled: resellerForm.enabled === true || resellerForm.useLiveStockApi === true,
+        useLiveStockApi:
+          (resellerForm.enabled === true || resellerForm.useLiveStockApi === true) &&
+          resellerForm.useLiveStockApi === true,
+      };
       const res = await fetch(`/api/admin/companies/${resellerCompany._id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ resellerApi: resellerForm }),
+        body: JSON.stringify({ resellerApi: payload }),
       });
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        toast.success('Reseller API configuration saved');
-        setResellerCompany(null);
-        setResellerForm(EMPTY_RESELLER_API());
-        setResellerTestResult(null);
-        setShowResellerPassword(false);
-        fetchCompanies();
+        const saved = data as Company;
+        const liveOn = saved.resellerApi?.useLiveStockApi === true;
+        setCompanies((prev) =>
+          prev.map((c) => (String(c._id) === String(saved._id) ? saved : c))
+        );
+        openResellerDialog(saved);
+        toast.success(
+          liveOn
+            ? 'Reseller API saved — Live stock ON (wallet + pricing se sync)'
+            : 'Reseller API saved — Manual stock (Stocks button se units set karo)'
+        );
       } else {
-        const data = await res.json().catch(() => ({}));
         toast.error(data.error || 'Failed to save');
       }
     } catch (err: any) {
@@ -1031,10 +1061,11 @@ export default function CompaniesPage() {
                       if (r?.enabled && r?.baseUrl && r?.email && r?.password) {
                         let host = r.baseUrl;
                         try { host = new URL(r.baseUrl).host; } catch { /* keep as-is */ }
+                        const stockMode = r.useLiveStockApi ? 'API stock' : 'Manual stock';
                         return (
                           <Badge variant="outline" className="gap-1 text-blue-600 border-blue-200">
                             <Cloud className="h-3 w-3" />
-                            Reseller API: {host}
+                            Reseller: {host} · {stockMode}
                           </Badge>
                         );
                       }
@@ -1412,6 +1443,66 @@ export default function CompaniesPage() {
                   onCheckedChange={(c) => updateResellerField('enabled', c)}
                 />
               </div>
+
+              <div className="flex items-center justify-between rounded-md border p-2.5">
+                <div className="text-sm">
+                  <p className="font-medium">Live stock API</p>
+                  {!resellerForm.enabled && !resellerForm.useLiveStockApi ? (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Pehle <strong>Enabled</strong> ON karo, phir live stock ON kar sakte ho.
+                    </p>
+                  ) : (
+                    <>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        <strong>ON</strong> — panel wallet + pricing se auto sync (PrimeVPS / Hostheaven).
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        <strong>OFF</strong> — manual units <strong>Stocks</strong> button se. Buy &amp; VM provision phir bhi panel se chalega.
+                      </p>
+                    </>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className={`text-xs font-bold uppercase tracking-wide min-w-[2rem] text-right ${
+                    resellerForm.useLiveStockApi ? 'text-emerald-600' : 'text-muted-foreground'
+                  }`}>
+                    {resellerForm.useLiveStockApi ? 'ON' : 'OFF'}
+                  </span>
+                  <Switch
+                    checked={!!resellerForm.useLiveStockApi}
+                    onCheckedChange={(c) => {
+                      setResellerForm((prev) => ({
+                        ...prev,
+                        ...(c ? { enabled: true } : {}),
+                        useLiveStockApi: c,
+                      }));
+                      setResellerTestResult(null);
+                    }}
+                  />
+                </div>
+              </div>
+
+              {resellerForm.enabled && !resellerForm.useLiveStockApi && (
+                <div className="rounded-md border border-emerald-300/70 bg-emerald-50/60 dark:bg-emerald-950/30 dark:border-emerald-800/50 p-3 space-y-2">
+                  <p className="text-sm font-medium text-emerald-900 dark:text-emerald-100">
+                    Manual stock units
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Ek hi number daalo (e.g. <strong>5</strong>) — saare linked plans par wahi stock dikhega.
+                  </p>
+                  <Button type="button" variant="outline" size="sm" className="gap-2" onClick={openStocksFromReseller}>
+                    <Package className="h-4 w-4" />
+                    Set units &amp; Save
+                  </Button>
+                </div>
+              )}
+
+              {resellerForm.enabled && resellerForm.useLiveStockApi && (
+                <div className="rounded-md border border-amber-300/70 bg-amber-50/50 dark:bg-amber-950/20 p-3 text-xs text-muted-foreground">
+                  Live API stock ON — customer ko stock panel wallet balance + VM pricing se dikhega (manual units use nahi honge).
+                  Wallet ₹0 ho to plan Out of Stock dikhega jab tak panel me balance na ho.
+                </div>
+              )}
 
               <div>
                 <Label className="text-xs">Label (optional)</Label>
@@ -1971,9 +2062,10 @@ export default function CompaniesPage() {
             <div className="space-y-4">
               <div className="rounded-md border p-3 text-sm">
                 <p className="font-medium">{stocksCompany.name}</p>
-                {stocksNetbayLiveApi ? (
+                {stocksNetbayLiveApi || stocksResellerLiveApi ? (
                   <p className="text-xs text-amber-700 dark:text-amber-400 mt-2 rounded-md border border-amber-200/80 bg-amber-50/80 dark:bg-amber-950/30 p-2">
-                    <strong>Live API ON</strong> — units yahan save nahi hote. Manual units ke liye Netbay dialog me Live stock{' '}
+                    <strong>Live API ON</strong> — units yahan save nahi hote. Manual units ke liye{' '}
+                    {stocksNetbayLiveApi ? 'Netbay' : 'Reseller'} dialog me Live stock{' '}
                     <strong>OFF</strong> karo aur Save karo.
                   </p>
                 ) : (
@@ -1984,13 +2076,15 @@ export default function CompaniesPage() {
                 <p className="text-xs text-muted-foreground mt-2">
                   {companyHasNetbayEnabled(stocksCompany) ? (
                     stocksNetbayLiveApi ? (
-                      <>
-                        NetBay live API mode — stock NetBay se aata hai.
-                      </>
+                      <>NetBay live API mode — stock NetBay se aata hai.</>
                     ) : (
-                      <>
-                        NetBay manual mode — neeche units set karo.
-                      </>
+                      <>NetBay manual mode — neeche units set karo.</>
+                    )
+                  ) : companyHasResellerEnabled(stocksCompany) ? (
+                    stocksResellerLiveApi ? (
+                      <>Reseller live API mode — stock panel wallet + pricing se aata hai.</>
+                    ) : (
+                      <>Reseller manual mode — neeche units set karo.</>
                     )
                   ) : (
                     <>
@@ -2018,7 +2112,7 @@ export default function CompaniesPage() {
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {!stocksNetbayLiveApi && (
+                  {!stocksNetbayLiveApi && !stocksResellerLiveApi && (
                     <div className="flex flex-col sm:flex-row sm:items-end gap-3 rounded-lg border border-emerald-200/80 bg-emerald-50/40 dark:bg-emerald-950/20 p-4">
                       <div className="flex-1 space-y-1.5">
                         <Label htmlFor="admin-bulk-stock">Units (sab plans ke liye)</Label>
@@ -2063,6 +2157,11 @@ export default function CompaniesPage() {
                           {stock.netbayLiveStock && (
                             <Badge variant="outline" className="text-[10px] h-4 text-amber-700 border-amber-200">
                               NetBay API stock
+                            </Badge>
+                          )}
+                          {stock.resellerLiveStock && (
+                            <Badge variant="outline" className="text-[10px] h-4 text-blue-700 border-blue-200">
+                              Reseller API stock
                             </Badge>
                           )}
                           {inStock ? (

@@ -55,7 +55,7 @@ interface CompanyOption {
     _id: string;
     name: string;
     netbayApi?: { enabled?: boolean; useLiveStockApi?: boolean; apiKey?: string; apiSecret?: string } | null;
-    resellerApi?: { enabled?: boolean } | null;
+    resellerApi?: { enabled?: boolean; useLiveStockApi?: boolean } | null;
 }
 
 /**
@@ -78,6 +78,19 @@ function companyUsesNetbayLiveForStock(stock: IPStock, companies: CompanyOption[
     if (!stock.company || !stockHasNetbayConfig(stock)) return false;
     const c = companies.find((co) => co._id === stock.company);
     return !!(c?.netbayApi?.enabled && c?.netbayApi?.useLiveStockApi);
+}
+
+function stockHasResellerPanelConfig(stock: IPStock | null) {
+    const cfg = stock?.defaultConfigurations?.resellerApi;
+    if (cfg && typeof cfg === 'object') return true;
+    const tags = (stock?.tags || []).map((t) => String(t).toLowerCase());
+    return tags.includes('reseller-api') || tags.includes('primevps') || tags.includes('primevm');
+}
+
+function companyUsesResellerLiveForStock(stock: IPStock, companies: CompanyOption[]) {
+    if (!stock.company || !stockHasResellerPanelConfig(stock)) return false;
+    const c = companies.find((co) => co._id === stock.company);
+    return !!(c?.resellerApi?.enabled && c?.resellerApi?.useLiveStockApi);
 }
 
 function readNetbayConfig(stock: IPStock | null): {
@@ -497,6 +510,8 @@ const ManageIpStock = () => {
                                 <TableCell>
                                     {companyUsesNetbayLiveForStock(stock, companies)
                                         ? (stock.available ? 'Netbay API: Yes' : 'Netbay API: No')
+                                        : companyUsesResellerLiveForStock(stock, companies)
+                                        ? (stock.available ? 'Reseller API: Yes' : 'Reseller API: No')
                                         : stock.company
                                         ? `${stock.stockCount ?? 0} units`
                                         : (

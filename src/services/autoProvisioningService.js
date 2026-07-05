@@ -9,6 +9,19 @@ const Order = require('@/models/orderModel').default;
 const IPStock = require('@/models/ipStockModel');
 const Company = require('@/models/companyModel').default;
 const { getCompanyNetbayApiConfig } = require('@/lib/companyNetbayApi');
+const { getCompanyResellerApiConfig } = require('@/lib/companyResellerApi');
+const {
+  readResellerApiStockConfig,
+  resolvePriceIdsForMemory,
+  resolveZoneIsoIdFromCatalog,
+  autoResolveResellerPriceIds,
+  isResellerApiStock,
+} = require('@/lib/resellerApiStockConfig');
+const {
+  waitForProvisionedVm,
+  syncResellerVmCredentials,
+} = require('@/lib/resellerApiOrderSync');
+const ResellerApi = require('@/services/resellerApi');
 const { pickNetbayExpiryDate } = require('@/lib/netbayOrderSync');
 const { orderHasConfirmedPayment } = require('@/lib/orderPaymentStatus');
 
@@ -941,8 +954,9 @@ class AutoProvisioningService {
 
       const advps = this.isAdvpsStock(ipStock, order);
       const netbay = !advps && this.isNetbayStock(ipStock, order);
-      const smartVps = !advps && !netbay && this.isSmartVpsStock(ipStock, order);
-      const providerName = advps ? 'ADVPS' : netbay ? 'Netbay' : smartVps ? 'SmartVPS' : 'Hostycare';
+      const resellerPanel = !advps && !netbay && isResellerApiStock(ipStock, order);
+      const smartVps = !advps && !netbay && !resellerPanel && this.isSmartVpsStock(ipStock, order);
+      const providerName = advps ? 'ADVPS' : netbay ? 'Netbay' : resellerPanel ? 'ResellerPanel' : smartVps ? 'SmartVPS' : 'Hostycare';
       L.line(`➡ Provider route selected: ${providerName}`);
 
       // Branch
@@ -950,6 +964,8 @@ class AutoProvisioningService {
         return await this.provisionViaAdvps(order, ipStock, startTime);
       } else if (netbay) {
         return await this.provisionViaNetbay(order, ipStock, startTime);
+      } else if (resellerPanel) {
+        return await this.provisionViaResellerApi(order, ipStock, startTime);
       } else if (smartVps) {
         return await this.provisionViaSmartVps(order, ipStock, startTime);
       } else {
@@ -1544,6 +1560,239 @@ class AutoProvisioningService {
       productId: planId || null,
       totalTime,
       ...(fullyProvisioned ? {} : { error: `Netbay service ${netbayServiceId} pending IP/credentials` }),
+    };
+  }
+
+  // --- RESELLER PANEL PATH (PrimeVPS / Hostheaven UserSide.pdf) ------------
+
+  async resolveResellerApiConfigForStock(ipStock) {
+    if (!ipStock?.company) {
+      L.line('[RESELLER-API] IPStock has no company link — cannot resolve panel credentials');
+      return null;
+    }
+    try {
+      const company = await Company.findById(ipStock.company).select('resellerApi name').lean();
+      if (!company) return null;
+      const cfg = getCompanyResellerApiConfig(company);
+      if (!cfg) {
+        L.line(`[RESELLER-API] Company "${company.name}" has no enabled reseller API config`);
+        return null;
+      }
+      return { ...cfg, companyName: company.name };
+    } catch (err) {
+      L.line(`[RESELLER-API] Failed to load company config: ${err.message}`);
+      return null;
+    }
+  }
+
+  async provisionViaResellerApi(order, ipStock, startTime) {
+    L.head(`RESELLER PANEL PATH — order ${order._id}`);
+
+    const isWindowsProduct = this.isWindowsOrder(order, ipStock);
+    const orderOs = isWindowsProduct ? 'Windows 2022 64' : 'Ubuntu 22';
+
+    await Order.findByIdAndUpdate(order._id, {
+      provisioningStatus: 'provisioning',
+      provisioningError: '',
+      autoProvisioned: true,
+      lastProvisionAttempt: new Date(),
+      provider: 'reseller-api',
+    });
+
+    const cfg = await this.resolveResellerApiConfigForStock(ipStock);
+    if (!cfg) {
+      throw new Error(
+        `Reseller panel API not configured for IPStock "${ipStock?.name}". ` +
+        `Enable resellerApi on the linked company in /admin/companies (e.g. primevps → primevm.in).`
+      );
+    }
+    L.kv('[RESELLER-API] Using company', cfg.companyName);
+
+    const stockCfg = readResellerApiStockConfig(ipStock);
+    L.kv('[RESELLER-API] Stock config', stockCfg);
+
+    const api = new ResellerApi(cfg);
+
+    let resellerVmId = order.resellerVmId || '';
+    let resellerOrderId = order.resellerOrderId || '';
+    let resellerGroupId = order.resellerGroupId || '';
+
+    if (!resellerVmId && !resellerOrderId) {
+      let priceIds = resolvePriceIdsForMemory(stockCfg, order.memory);
+      if (!priceIds?.cpuPriceId) {
+        L.line('[RESELLER-API] No per-memory price map — auto-resolving from catalog');
+        priceIds = await autoResolveResellerPriceIds(api, {
+          memory: order.memory,
+          planType: stockCfg.planType,
+        });
+      }
+
+      let zoneId = stockCfg.zoneId;
+      if (zoneId == null) {
+        const zones = await api.getZones();
+        const list = Array.isArray(zones) ? zones : (zones?.zones || []);
+        const active = list.find((z) => String(z.status || '').toUpperCase() === 'ACTIVE') || list[0];
+        zoneId = active?.id;
+      }
+      if (zoneId == null) {
+        throw new Error('No zoneId configured and upstream returned no zones');
+      }
+
+      let zoneIsoId = priceIds.zoneIsoId || stockCfg.defaultOs?.[isWindowsProduct ? 'Windows' : 'Linux']?.zoneIsoId;
+      if (zoneIsoId == null) {
+        const isos = await api.getZoneIsos(zoneId);
+        zoneIsoId = resolveZoneIsoIdFromCatalog(isos, {
+          isWindows: isWindowsProduct,
+          orderOs: order.os || orderOs,
+        });
+      }
+      if (zoneIsoId == null) {
+        throw new Error(`Could not resolve ISO for zone ${zoneId}. Set zoneIsoId in IP Stock resellerApi config.`);
+      }
+
+      const companyDoc = await Company.findById(ipStock.company).select('resellerApi').lean();
+      if (companyDoc?.resellerApi?.useLiveStockApi) {
+        const { verifyResellerMemoryInStock } = require('@/lib/resellerLiveStock');
+        const liveCheck = await verifyResellerMemoryInStock(ipStock, order.memory);
+        if (!liveCheck.ok) {
+          throw new Error(
+            liveCheck.message ||
+            'Panel wallet too low for this plan. Top up the primevm.in wallet and try again.'
+          );
+        }
+        L.kv('[RESELLER-API] Live stock OK', liveCheck.result?.walletBalance ?? '(cached)');
+      }
+
+      const createBody = {
+        zoneId: Number(zoneId),
+        zoneIsoId: Number(zoneIsoId),
+        planType: stockCfg.planType || 'SHARED',
+        cpuPriceId: Number(priceIds.cpuPriceId),
+        ramPriceId: Number(priceIds.ramPriceId),
+        diskPriceId: Number(priceIds.diskPriceId),
+        bandwidthPriceId: Number(priceIds.bandwidthPriceId),
+        months: 1,
+        quantity: 1,
+        useWalletBalance: true,
+      };
+
+      L.line(`[RESELLER-API] POST /api/users/vms/create ${JSON.stringify(createBody)}`);
+      let createRes;
+      try {
+        createRes = await api.createVm(createBody, { gateway: stockCfg.gateway || 'WALLET' });
+      } catch (err) {
+        throw new Error(`Panel VM purchase failed: ${err.message}`);
+      }
+
+      resellerOrderId = createRes?.orderId ?? createRes?.data?.orderId ?? '';
+      resellerGroupId = createRes?.groupId ?? createRes?.data?.groupId ?? '';
+
+      await Order.findByIdAndUpdate(order._id, {
+        resellerOrderId: resellerOrderId ? String(resellerOrderId) : undefined,
+        resellerGroupId: resellerGroupId ? String(resellerGroupId) : undefined,
+        provider: 'reseller-api',
+      });
+
+      L.kv('[RESELLER-API] upstream orderId', resellerOrderId || '(none)');
+      L.kv('[RESELLER-API] upstream groupId', resellerGroupId || '(none)');
+    } else {
+      L.line(`[RESELLER-API] Resuming — vmId=${resellerVmId || 'pending'}, orderId=${resellerOrderId || 'n/a'}`);
+    }
+
+    let ipAddress = order.ipAddress || '';
+    let username = isWindowsProduct ? 'Administrator' : 'root';
+    let password = order.password || '';
+    let expiryDate = order.expiryDate || null;
+
+    if (!ipAddress || !password) {
+      const vmIdKnown = resellerVmId || null;
+      let provisioned = null;
+
+      if (vmIdKnown) {
+        try {
+          const synced = await syncResellerVmCredentials(api, order, vmIdKnown);
+          ipAddress = synced.updates.ipAddress || ipAddress;
+          password = synced.updates.password || password;
+          username = synced.updates.username || username;
+          expiryDate = synced.updates.expiryDate || expiryDate;
+          provisioned = { vmId: vmIdKnown, ip: ipAddress, password, username, expiryDate };
+        } catch (err) {
+          L.line(`[RESELLER-API] Direct vm sync failed: ${err.message}`);
+        }
+      }
+
+      if (!provisioned?.ip && !provisioned?.password) {
+        provisioned = await waitForProvisionedVm(api, {
+          resellerOrderId: resellerOrderId || null,
+          maxWaitMs: 180_000,
+          pollMs: 5000,
+        });
+      }
+
+      if (provisioned?.pending) {
+        const { calculateCompanyExpiryDate } = await import('@/lib/expiryHelper');
+        expiryDate = expiryDate || calculateCompanyExpiryDate();
+        await Order.findByIdAndUpdate(order._id, {
+          status: 'confirmed',
+          provisioningStatus: 'provisioning',
+          provisioningError: 'PENDING: VM purchased on panel — waiting for IP/credentials. Will retry automatically.',
+          provider: 'reseller-api',
+          username,
+          os: orderOs,
+          expiryDate,
+          lastProvisionAttempt: new Date(),
+        });
+
+        return {
+          success: false,
+          resellerApiPending: true,
+          error: 'Panel VM pending IP/credentials',
+          totalTime: Date.now() - startTime,
+        };
+      }
+
+      if (provisioned?.vmId) resellerVmId = provisioned.vmId;
+      if (provisioned?.ip) ipAddress = provisioned.ip;
+      if (provisioned?.password) password = provisioned.password;
+      if (provisioned?.username) username = provisioned.username;
+      if (provisioned?.expiryDate) expiryDate = provisioned.expiryDate;
+    }
+
+    if (!expiryDate) {
+      const { calculateCompanyExpiryDate } = await import('@/lib/expiryHelper');
+      expiryDate = calculateCompanyExpiryDate();
+    }
+
+    const fullyProvisioned = !!(ipAddress && (password || resellerVmId));
+    await Order.findByIdAndUpdate(order._id, {
+      status: fullyProvisioned ? 'active' : 'confirmed',
+      provisioningStatus: fullyProvisioned ? 'active' : 'provisioning',
+      provisioningError: fullyProvisioned
+        ? ''
+        : `PENDING: awaiting ${!ipAddress ? 'IP' : 'password'} from panel`,
+      provider: 'reseller-api',
+      resellerVmId: resellerVmId || undefined,
+      resellerOrderId: resellerOrderId || undefined,
+      resellerGroupId: resellerGroupId || undefined,
+      ipAddress: ipAddress || '',
+      username,
+      password: password || '',
+      os: orderOs,
+      expiryDate,
+      autoProvisioned: true,
+    });
+
+    const totalTime = Date.now() - startTime;
+    L.line(`[RESELLER-API] ${fullyProvisioned ? 'COMPLETED' : 'PENDING'} in ${totalTime}ms`);
+
+    return {
+      success: fullyProvisioned,
+      resellerApiPending: !fullyProvisioned,
+      ipAddress: ipAddress || null,
+      credentials: { username, password },
+      vmId: resellerVmId || null,
+      totalTime,
+      ...(fullyProvisioned ? {} : { error: 'Panel VM pending IP/credentials' }),
     };
   }
 

@@ -52,8 +52,15 @@ function hasCompanyResellerApi(company) {
   return !!getCompanyResellerApiConfig(company);
 }
 
+/** True when PrimeVPS / Hostheaven plans sync availability from panel wallet + pricing. */
+function companyUsesResellerLiveStock(company) {
+  if (!company?.resellerApi?.enabled) return false;
+  return company.resellerApi.useLiveStockApi === true;
+}
+
 module.exports = {
   RESELLER_API_DEFAULTS,
   getCompanyResellerApiConfig,
   hasCompanyResellerApi,
+  companyUsesResellerLiveStock,
 };

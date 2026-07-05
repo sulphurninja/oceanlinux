@@ -7,6 +7,8 @@ import { calculateCompanyRenewalExpiryDate } from '@/lib/expiryHelper';
 import { isSlotIpOrder, SLOT_IP_NO_RENEWAL_MESSAGE } from '@/lib/slotIpOrder';
 const { getAdvpsRebuildResetFields, isAdvpsOrder } = require('@/lib/advpsRebuildLimit');
 const { notifyRenewalCompleted } = require('@/lib/renewalNotifications');
+const { executeResellerPanelUpstreamRenewal } = require('@/lib/resellerPanelRenewal');
+const { resolveProviderFromOrder } = require('@/lib/orderAnnouncementTarget');
 
 async function getCompanySession() {
   const cookieStore = await cookies();
@@ -93,7 +95,20 @@ export async function POST(request) {
     // renewal in between, we always extend from `order.expiryDate` (or now,
     // whichever is later). This matches the standard renewal semantics.
     const previousExpiry = order.expiryDate;
-    const newExpiry = calculateCompanyRenewalExpiryDate(previousExpiry);
+    let newExpiry = calculateCompanyRenewalExpiryDate(previousExpiry);
+
+    let providerRenewalSuccess = true;
+    let providerRenewalResult = null;
+    const provider = resolveProviderFromOrder(order);
+
+    if (provider === 'reseller-api') {
+      const panelRenew = await executeResellerPanelUpstreamRenewal(order, { months: 1, Order });
+      providerRenewalSuccess = panelRenew.success;
+      providerRenewalResult = panelRenew.result || { error: panelRenew.error };
+      if (panelRenew.success && panelRenew.newExpiryDate) {
+        newExpiry = panelRenew.newExpiryDate;
+      }
+    }
 
     const renewalPayment = {
       paymentId: renewalReq.paymentId,
@@ -106,7 +121,8 @@ export async function POST(request) {
       paymentMethod: renewalReq.paymentMethod,
       gatewayOrderId: renewalReq.gatewayOrderId,
       paymentDetails: renewalReq.paymentDetails,
-      providerRenewalSuccess: true,
+      providerRenewalSuccess: providerRenewalSuccess,
+      providerRenewalResult: providerRenewalResult,
       processedViaCompanyApproval: true,
       approvedBy: { companyId: String(company.id), companyName: company.name || '' },
     };

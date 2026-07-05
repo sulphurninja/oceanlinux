@@ -107,6 +107,7 @@ interface IPStock {
   stockCount?: number;
   company?: string | null;
   netbayUseLiveStockApi?: boolean | null;
+  resellerUseLiveStockApi?: boolean | null;
   serverType: string;
   tags: string[];
   memoryOptions: Record<string, MemoryOptionDetails>;
@@ -120,12 +121,24 @@ function isNetbayLiveStock(stock: IPStock) {
   return stock.netbayUseLiveStockApi === true;
 }
 
+function stockHasResellerPanelConfig(stock: IPStock) {
+  const cfg = stock.defaultConfigurations?.resellerApi;
+  if (cfg && typeof cfg === 'object') return true;
+  const tags = (stock.tags || []).map((t) => String(t).toLowerCase());
+  return tags.includes('reseller-api') || tags.includes('primevps') || tags.includes('primevm');
+}
+
+function isResellerLiveStock(stock: IPStock) {
+  if (!stockHasResellerPanelConfig(stock)) return false;
+  return stock.resellerUseLiveStockApi === true;
+}
+
 function isCompanyStock(stock: IPStock) {
-  return !!stock.company && !isNetbayLiveStock(stock);
+  return !!stock.company && !isNetbayLiveStock(stock) && !isResellerLiveStock(stock);
 }
 
 function getStockUnitsRemaining(stock: IPStock) {
-  if (isNetbayLiveStock(stock)) {
+  if (isNetbayLiveStock(stock) || isResellerLiveStock(stock)) {
     return stock.available ? Number.POSITIVE_INFINITY : 0;
   }
   if (isCompanyStock(stock)) return Math.max(0, stock.stockCount ?? 0);
@@ -146,11 +159,31 @@ function isNetbayMemoryInStock(stock: IPStock, memory: string) {
   return variant.available === true;
 }
 
+function isResellerMemoryInStock(stock: IPStock, memory: string) {
+  if (stock.available) return true;
+  const reseller = stock.defaultConfigurations?.resellerApi;
+  const variant = reseller?.variantStock?.[memory];
+  if (variant?.available === true) return true;
+  if (!variant) return stock.available !== false;
+  if (variant.skipped || variant.available === null) {
+    const primary = reseller?.variantStock?.['2GB'];
+    if (primary?.available === true) return true;
+    return false;
+  }
+  return variant.available === true;
+}
+
 function isStockPurchasable(stock: IPStock, memory?: string) {
   if (isNetbayLiveStock(stock)) {
     if (memory) return isNetbayMemoryInStock(stock, memory);
     if (stock.available) return true;
     const variants = Object.values(stock.defaultConfigurations?.netbay?.variantStock || {});
+    return variants.some((v) => v?.available === true);
+  }
+  if (isResellerLiveStock(stock)) {
+    if (memory) return isResellerMemoryInStock(stock, memory);
+    if (stock.available) return true;
+    const variants = Object.values(stock.defaultConfigurations?.resellerApi?.variantStock || {});
     return variants.some((v) => v?.available === true);
   }
   if (isCompanyStock(stock)) return getStockUnitsRemaining(stock) > 0;
@@ -259,6 +292,19 @@ function IPStockContent() {
         }
       } catch (e) {
         console.warn("[IP Stock] ADVPS refresh error", e);
+      }
+
+      console.log("[IP Stock] Reseller panel refresh-stock (wallet + pricing)…");
+      try {
+        const resellerRefreshRes = await fetch("/api/reseller-panel/refresh-stock", { cache: "no-store" });
+        const resellerRefreshBody = await resellerRefreshRes.json().catch(() => ({}));
+        if (resellerRefreshRes.ok) {
+          console.log("[IP Stock] Reseller refresh OK", resellerRefreshBody);
+        } else {
+          console.warn("[IP Stock] Reseller refresh failed", resellerRefreshRes.status, resellerRefreshBody);
+        }
+      } catch (e) {
+        console.warn("[IP Stock] Reseller refresh error", e);
       }
 
       // Netbay stock is synced on a schedule (cron) and at checkout — not on every page load
@@ -1535,6 +1581,7 @@ function CompactServerPlanRow({
   const unitsLeft = getStockUnitsRemaining(stock);
   const showUnits = isCompanyStock(stock) && Number.isFinite(unitsLeft);
   const isNetbay = isNetbayLiveStock(stock);
+  const isReseller = isResellerLiveStock(stock);
 
   const memoryOptions = Object.entries(stock.memoryOptions || {})
     .filter(([_, details]) => details.price !== null)
@@ -1589,7 +1636,7 @@ function CompactServerPlanRow({
             {inStock ? (
               <Badge variant="outline" className={cn(premiumBadge.success, "text-[10px] gap-1 px-2 py-0 h-5 font-semibold")}>
                 <CheckCircle2 className="h-3 w-3" />
-                {showUnits ? `${unitsLeft} in stock` : isNetbay ? 'In stock' : 'Available'}
+                {showUnits ? `${unitsLeft} in stock` : isNetbay || isReseller ? 'In stock' : 'Available'}
               </Badge>
             ) : (
               <Badge variant="outline" className="text-[10px] gap-1 px-2 py-0 h-5 font-semibold bg-red-500/20 text-red-300 border-red-400/40">

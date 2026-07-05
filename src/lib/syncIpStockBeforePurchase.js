@@ -15,6 +15,7 @@ import {
   usesStockCount,
   isIpStockHiddenFromStore,
   usesNetbayLiveStock,
+  usesResellerLiveStock,
 } from '@/lib/ipStockAvailability';
 import { customerStockUnavailableMessage } from '@/lib/customerStockMessages';
 import Company from '@/models/companyModel';
@@ -24,6 +25,12 @@ const {
   syncNetbayIpStockRow,
   verifyNetbayMemoryInStock,
 } = require('@/lib/netbayLiveStock');
+
+const {
+  isResellerIpStock,
+  syncResellerIpStockRow,
+  verifyResellerMemoryInStock,
+} = require('@/lib/resellerLiveStock');
 
 function normalizeSmartVpsResponse(payload) {
   if (payload == null) return payload;
@@ -138,9 +145,20 @@ function isNetbayVariantInStock(stock, memory, company) {
   return false;
 }
 
+function isResellerVariantInStock(stock, memory, company) {
+  if (!memory || !isResellerIpStock(stock)) return true;
+  if (!usesResellerLiveStock(stock, company)) return isIpStockPurchasable(stock, 1, company);
+  if (stock.available) return true;
+  const cfg = toPlainConfigurations(stock.defaultConfigurations)?.resellerApi;
+  const variant = cfg?.variantStock?.[memory];
+  if (!variant) return isIpStockPurchasable(stock, 1, company);
+  if (variant.available === true) return true;
+  return false;
+}
+
 async function loadCompanyForStock(stock) {
   if (!stock?.company) return null;
-  return Company.findById(stock.company).select('netbayApi').lean();
+  return Company.findById(stock.company).select('netbayApi resellerApi').lean();
 }
 
 /**
@@ -160,6 +178,7 @@ export async function refreshAndVerifyIpStockPurchase(ipStockId, memory) {
 
   let company = await loadCompanyForStock(stock);
   const netbayLive = isNetbayIpStock(stock) && usesNetbayLiveStock(stock, company);
+  const resellerLive = isResellerIpStock(stock) && usesResellerLiveStock(stock, company);
 
   try {
     if (isAdvpsPlan(stock)) {
@@ -168,6 +187,8 @@ export async function refreshAndVerifyIpStockPurchase(ipStockId, memory) {
       stock = await syncSmartVpsIpStockRow(stock);
     } else if (netbayLive) {
       stock = await syncNetbayIpStockRow(stock, { force: true, memoryOnly: memory || null });
+    } else if (resellerLive) {
+      stock = await syncResellerIpStockRow(stock, { force: true, memoryOnly: memory || null });
     } else {
       stock = await IPStock.findById(ipStockId);
     }
@@ -238,11 +259,26 @@ export async function refreshAndVerifyIpStockPurchase(ipStockId, memory) {
     }
   }
 
+  if (resellerLive && memory && !isResellerVariantInStock(stock, memory, company)) {
+    const liveVerify = await verifyResellerMemoryInStock(stock, memory);
+    if (!liveVerify.ok) {
+      return {
+        ok: false,
+        message: customerStockUnavailableMessage(
+          liveVerify.message ||
+            `${memory} is currently out of stock on the panel. Top up wallet or pick another plan.`
+        ),
+        stock: stock.toObject?.() || stock,
+        synced: true,
+      };
+    }
+  }
+
   return {
     ok: true,
     message: 'In stock',
     stock: stock.toObject?.() || stock,
-    synced: isAdvpsPlan(stock) || isSmartVpsPlan(stock) || netbayLive,
+    synced: isAdvpsPlan(stock) || isSmartVpsPlan(stock) || netbayLive || resellerLive,
   };
 }
 
