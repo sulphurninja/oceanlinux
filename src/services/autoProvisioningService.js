@@ -20,6 +20,8 @@ const {
 const {
   waitForProvisionedVm,
   syncResellerVmCredentials,
+  buildResellerLocationContext,
+  ipMatchesOrderedRange,
 } = require('@/lib/resellerApiOrderSync');
 const ResellerApi = require('@/services/resellerApi');
 const { pickNetbayExpiryDate } = require('@/lib/netbayOrderSync');
@@ -1601,6 +1603,9 @@ class AutoProvisioningService {
 
     const stockCfg = readResellerApiStockConfig(ipStock);
     L.kv('[RESELLER-API] Stock config', stockCfg);
+    const locationCtx = buildResellerLocationContext(ipStock, order);
+    L.kv('[RESELLER-API] Expected zone', locationCtx.expectedZoneId ?? '(none)');
+    L.kv('[RESELLER-API] Expected IP prefix', locationCtx.expectedIpPrefix ?? '(none)');
 
     const api = new ResellerApi(cfg);
 
@@ -1702,6 +1707,7 @@ class AutoProvisioningService {
       await Order.findByIdAndUpdate(order._id, {
         resellerOrderId: resellerOrderId ? String(resellerOrderId) : undefined,
         resellerGroupId: resellerGroupId ? String(resellerGroupId) : undefined,
+        resellerZoneId: stockCfg.zoneId != null ? String(stockCfg.zoneId) : undefined,
         provider: 'reseller-api',
       });
 
@@ -1741,6 +1747,8 @@ class AutoProvisioningService {
           purchaseStartedAt,
           excludeOrderId: order._id,
           order,
+          expectedZoneId: locationCtx.expectedZoneId,
+          expectedIpPrefix: locationCtx.expectedIpPrefix,
           maxWaitMs: 180_000,
           pollMs: 5000,
         });
@@ -1803,6 +1811,19 @@ class AutoProvisioningService {
     username = normalizePanelUsernameForOrder(username, order.productName, username);
     orderOs = normalizePanelOsForOrder(orderOs, order.productName, orderOs);
 
+    if (
+      ipAddress &&
+      locationCtx.expectedIpPrefix &&
+      !ipMatchesOrderedRange(ipAddress, locationCtx.expectedIpPrefix)
+    ) {
+      L.line(
+        `[RESELLER-API] WRONG IP ${ipAddress} for order expecting ${locationCtx.expectedIpPrefix}.* — not activating`
+      );
+      ipAddress = '';
+      password = '';
+      resellerVmId = '';
+    }
+
     if (!expiryDate) {
       const { calculateCompanyExpiryDate } = await import('@/lib/expiryHelper');
       expiryDate = calculateCompanyExpiryDate();
@@ -1819,6 +1840,7 @@ class AutoProvisioningService {
       resellerVmId: resellerVmId || undefined,
       resellerOrderId: resellerOrderId || undefined,
       resellerGroupId: resellerGroupId || undefined,
+      resellerZoneId: stockCfg.zoneId != null ? String(stockCfg.zoneId) : undefined,
       ipAddress: ipAddress || '',
       username,
       password: password || '',

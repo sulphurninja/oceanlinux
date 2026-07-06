@@ -75,6 +75,7 @@ const orderSchema = new mongoose.Schema({
     resellerVmId: { type: String },       // upstream VM database id
     resellerOrderId: { type: String },    // returned by POST /api/users/vms/create
     resellerGroupId: { type: String },
+    resellerZoneId: { type: String },     // panel zone used at purchase (103.129 vs 160.191)
 
     provisioningStatus: {
         type: String,

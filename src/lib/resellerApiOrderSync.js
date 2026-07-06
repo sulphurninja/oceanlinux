@@ -21,6 +21,96 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+/** e.g. "🖥️ 103.129.xx Windows VPS" → "103.129", "160.191.137 ..." → "160.191.137" */
+function extractExpectedIpPrefix(ipStock, order) {
+  const texts = [
+    order?.productName,
+    ipStock?.name,
+    ipStock?.defaultConfigurations?.resellerApi?.zoneName,
+  ];
+  for (const text of texts) {
+    const raw = String(text || '');
+    const clean = raw.replace(/[^\d.]/g, '');
+    const full = clean.match(/^(\d{1,3}(?:\.\d{1,3}){1,2})/);
+    if (full) return full[1];
+    const partial = raw.match(/\b(\d{1,3}\.\d{1,3})\b/);
+    if (partial) return partial[1];
+  }
+  return null;
+}
+
+function resolveExpectedZoneId(ipStock) {
+  const cfg = readResellerApiStockConfig(ipStock);
+  return cfg?.zoneId != null ? Number(cfg.zoneId) : null;
+}
+
+function buildResellerLocationContext(ipStock, order) {
+  return {
+    expectedZoneId: resolveExpectedZoneId(ipStock),
+    expectedIpPrefix: extractExpectedIpPrefix(ipStock, order),
+  };
+}
+
+function ipMatchesOrderedRange(ip, expectedPrefix) {
+  if (!expectedPrefix || !ip) return true;
+  const ipStr = String(ip).trim();
+  if (ipStr.startsWith(expectedPrefix)) return true;
+  const prefixOctets = String(expectedPrefix).split('.').filter(Boolean);
+  const ipOctets = ipStr.split('.');
+  if (prefixOctets.length >= 2 && ipOctets.length >= 2) {
+    return prefixOctets[0] === ipOctets[0] && prefixOctets[1] === ipOctets[1];
+  }
+  return false;
+}
+
+function extractVmZoneId(details) {
+  return details?.zoneId ?? details?.zone?.id ?? details?.zone?.zoneId ?? null;
+}
+
+async function rowMatchesOrderLocation(api, row, { expectedZoneId, expectedIpPrefix } = {}) {
+  if (!expectedZoneId && !expectedIpPrefix) return true;
+
+  const rowIp = ResellerApi.extractOverviewRowIp(row);
+  if (expectedIpPrefix && rowIp && !ipMatchesOrderedRange(rowIp, expectedIpPrefix)) {
+    return false;
+  }
+
+  if (expectedZoneId) {
+    const vmId = extractOverviewVmId(row);
+    if (!vmId) return false;
+    try {
+      const details = await api.getVmDetails(String(vmId));
+      const zoneId = extractVmZoneId(details);
+      if (zoneId != null && Number(zoneId) !== Number(expectedZoneId)) return false;
+    } catch {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function provisionedMatchesOrderLocation(provisioned, { expectedZoneId, expectedIpPrefix } = {}) {
+  if (!provisioned?.ip && !provisioned?.vmId) return false;
+  if (expectedIpPrefix && provisioned.ip && !ipMatchesOrderedRange(provisioned.ip, expectedIpPrefix)) {
+    return false;
+  }
+  return true;
+}
+
+async function provisionedMatchesOrderLocationAsync(api, provisioned, ctx = {}) {
+  if (!provisionedMatchesOrderLocation(provisioned, ctx)) return false;
+  if (!ctx.expectedZoneId || !provisioned?.vmId) return true;
+  try {
+    const details = await api.getVmDetails(String(provisioned.vmId));
+    const zoneId = extractVmZoneId(details);
+    if (zoneId != null && Number(zoneId) !== Number(ctx.expectedZoneId)) return false;
+  } catch {
+    return false;
+  }
+  return true;
+}
+
 function resolveResellerApiConfigFromCompany(company) {
   return getCompanyResellerApiConfig(company);
 }
@@ -92,22 +182,34 @@ async function getAssignedResellerVmIds(excludeOrderId = null) {
   return new Set(rows.map((r) => String(r.resellerVmId)).filter(Boolean));
 }
 
-async function pickBestRecentCandidate(api, candidates, purchaseStartedAt, excludeVmIds = new Set()) {
+async function pickBestRecentCandidate(
+  api,
+  candidates,
+  purchaseStartedAt,
+  excludeVmIds = new Set(),
+  locationCtx = {}
+) {
   const scored = [];
   for (const row of candidates) {
     const vmId = extractOverviewVmId(row);
     if (!vmId || excludeVmIds.has(String(vmId))) continue;
+    if (!(await rowMatchesOrderLocation(api, row, locationCtx))) continue;
     try {
       const details = await api.getVmDetails(String(vmId));
       const created = details?.createdAt ? new Date(details.createdAt).getTime() : 0;
       if (created >= purchaseStartedAt - 180_000) {
-        scored.push({ row, diff: Math.abs(created - purchaseStartedAt) });
+        scored.push({ row, diff: Math.abs(created - purchaseStartedAt), vmId: String(vmId) });
       }
     } catch {
       /* details may lag */
     }
   }
+  if (scored.length === 0) return null;
   scored.sort((a, b) => a.diff - b.diff);
+  // Ambiguous — two VMs created within 30s: do not guess (prevents IP swap)
+  if (scored.length > 1 && scored[1].diff - scored[0].diff < 30_000) {
+    return null;
+  }
   return scored[0]?.row || null;
 }
 
@@ -182,6 +284,8 @@ async function waitForProvisionedVm(
     purchaseStartedAt,
     excludeOrderId = null,
     order = null,
+    expectedZoneId = null,
+    expectedIpPrefix = null,
     maxWaitMs = 180_000,
     pollMs = 5000,
   } = {}
@@ -189,9 +293,10 @@ async function waitForProvisionedVm(
   const deadline = Date.now() + maxWaitMs;
   const purchaseAt = purchaseStartedAt || Date.now();
   let lastOverview = null;
-  const assignedVmIds = await getAssignedResellerVmIds(excludeOrderId);
+  const locationCtx = { expectedZoneId, expectedIpPrefix };
 
   while (Date.now() < deadline) {
+    const assignedVmIds = await getAssignedResellerVmIds(excludeOrderId);
     let page = 0;
     let totalPages = 1;
     const recentCandidates = [];
@@ -205,6 +310,7 @@ async function waitForProvisionedVm(
       for (const row of orders) {
         const vmId = extractOverviewVmId(row);
         if (!vmId) continue;
+        if (assignedVmIds.has(String(vmId))) continue;
 
         const matched = overviewRowMatchesPurchase(row, {
           resellerOrderId,
@@ -213,13 +319,18 @@ async function waitForProvisionedVm(
         });
 
         if (matched) {
+          if (!(await rowMatchesOrderLocation(api, row, locationCtx))) continue;
           const hydrated = await hydrateProvisionedRow(api, row, order);
-          if (hydrated) return hydrated;
+          if (hydrated && (await provisionedMatchesOrderLocationAsync(api, hydrated, locationCtx))) {
+            return hydrated;
+          }
         }
 
         if (resellerOrderId || resellerGroupId || purchaseStartedAt) {
           if (await isRecentPanelVm(api, row, purchaseAt)) {
-            recentCandidates.push(row);
+            if (await rowMatchesOrderLocation(api, row, locationCtx)) {
+              recentCandidates.push(row);
+            }
           }
         } else if (orders.indexOf(row) === 0) {
           const hydrated = await hydrateProvisionedRow(api, row, order);
@@ -230,12 +341,18 @@ async function waitForProvisionedVm(
     }
 
     if (recentCandidates.length > 0) {
-      const best = recentCandidates.length === 1
-        ? recentCandidates[0]
-        : await pickBestRecentCandidate(api, recentCandidates, purchaseAt, assignedVmIds);
+      const best = await pickBestRecentCandidate(
+        api,
+        recentCandidates,
+        purchaseAt,
+        assignedVmIds,
+        locationCtx
+      );
       if (best) {
         const hydrated = await hydrateProvisionedRow(api, best, order);
-        if (hydrated) return hydrated;
+        if (hydrated && (await provisionedMatchesOrderLocationAsync(api, hydrated, locationCtx))) {
+          return hydrated;
+        }
       }
     }
 
@@ -355,13 +472,24 @@ async function completeResellerPendingOrder(order, ipStock, { api: existingApi =
     api = new ResellerApi(cfg);
   }
 
+  const locationCtx = buildResellerLocationContext(ipStock, order);
   const purchaseStartedAt = order.createdAt
     ? new Date(order.createdAt).getTime()
     : Date.now() - 600_000;
 
   let provisioned = null;
+  const ipLooksWrong =
+    order.ipAddress &&
+    locationCtx.expectedIpPrefix &&
+    !ipMatchesOrderedRange(order.ipAddress, locationCtx.expectedIpPrefix);
 
-  if (order.resellerVmId) {
+  if (ipLooksWrong) {
+    console.warn(
+      `[RESELLER-SYNC] Order ${order._id} has IP ${order.ipAddress} but product expects ${locationCtx.expectedIpPrefix}.* — re-resolving`
+    );
+  }
+
+  if (order.resellerVmId && !ipLooksWrong) {
     try {
       const synced = await syncResellerVmCredentials(api, order, order.resellerVmId);
       if (synced.updates.ipAddress || synced.updates.password) {
@@ -377,14 +505,21 @@ async function completeResellerPendingOrder(order, ipStock, { api: existingApi =
     } catch (_) { /* fall through to overview poll */ }
   }
 
-  if (!provisioned?.ip || !provisioned?.password) {
+  if (
+    !provisioned?.ip ||
+    !provisioned?.password ||
+    ipLooksWrong ||
+    !(await provisionedMatchesOrderLocationAsync(api, provisioned, locationCtx))
+  ) {
     provisioned = await waitForProvisionedVm(api, {
       resellerOrderId: order.resellerOrderId || null,
       resellerGroupId: order.resellerGroupId || null,
-      resellerVmId: order.resellerVmId || null,
+      resellerVmId: ipLooksWrong ? null : (order.resellerVmId || null),
       purchaseStartedAt,
       excludeOrderId: order._id,
       order,
+      expectedZoneId: locationCtx.expectedZoneId,
+      expectedIpPrefix: locationCtx.expectedIpPrefix,
       maxWaitMs: 90_000,
       pollMs: 3000,
     });
@@ -396,6 +531,14 @@ async function completeResellerPendingOrder(order, ipStock, { api: existingApi =
 
   if (!provisioned?.vmId && !provisioned?.ip && !provisioned?.password) {
     return { success: false, error: 'No VM found on panel for this order' };
+  }
+
+  if (!(await provisionedMatchesOrderLocationAsync(api, provisioned, locationCtx))) {
+    return {
+      success: false,
+      pending: true,
+      error: `Panel VM IP ${provisioned.ip || '(none)'} does not match ordered region ${locationCtx.expectedIpPrefix || locationCtx.expectedZoneId}`,
+    };
   }
 
   const username = normalizePanelUsernameForOrder(
@@ -420,6 +563,7 @@ async function completeResellerPendingOrder(order, ipStock, { api: existingApi =
     provisioningError: fullyProvisioned ? '' : 'PENDING: awaiting IP/password from panel',
     provider: 'reseller-api',
     resellerVmId: provisioned.vmId || order.resellerVmId || undefined,
+    resellerZoneId: locationCtx.expectedZoneId != null ? String(locationCtx.expectedZoneId) : undefined,
     ipAddress,
     username,
     password,
@@ -493,21 +637,28 @@ async function maybeSyncResellerOrderOnFetch(order) {
   if (!order) return order;
   const ip = (order.ipAddress || '').trim();
   const pwd = (order.password || '').trim();
-  if (ip && pwd) return order;
 
   const hasPanelRef =
     (order.resellerOrderId && String(order.resellerOrderId).trim()) ||
     (order.resellerVmId && String(order.resellerVmId).trim());
   if (!hasPanelRef && order.provider !== 'reseller-api') return order;
 
+  const IPStock = require('@/models/ipStockModel');
+  const ipStock = order.ipStockId ? await IPStock.findById(order.ipStockId) : null;
+  if (!ipStock) return order;
+
+  const locationCtx = buildResellerLocationContext(ipStock, order);
+  const ipLooksWrong =
+    ip &&
+    locationCtx.expectedIpPrefix &&
+    !ipMatchesOrderedRange(ip, locationCtx.expectedIpPrefix);
+
+  if (ip && pwd && !ipLooksWrong) return order;
+
   const lastAttempt = order.lastProvisionAttempt
     ? new Date(order.lastProvisionAttempt).getTime()
     : 0;
   if (Date.now() - lastAttempt < RESELLER_FETCH_SYNC_COOLDOWN_MS) return order;
-
-  const IPStock = require('@/models/ipStockModel');
-  const ipStock = order.ipStockId ? await IPStock.findById(order.ipStockId) : null;
-  if (!ipStock) return order;
 
   try {
     await completeResellerPendingOrder(order, ipStock);
@@ -524,6 +675,10 @@ module.exports = {
   resolveResellerApiConfigFromCompany,
   buildRenewBody,
   resolveVmId,
+  extractExpectedIpPrefix,
+  resolveExpectedZoneId,
+  buildResellerLocationContext,
+  ipMatchesOrderedRange,
   waitForProvisionedVm,
   syncResellerVmCredentials,
   renewResellerPanelVm,
