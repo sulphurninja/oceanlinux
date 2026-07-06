@@ -19,6 +19,7 @@ import { Cashfree } from 'cashfree-pg';
 import { getRazorpayClient } from '@/lib/razorpayClient';
 import crypto from 'crypto';
 const { resolvePromoForPrice, getMemoryOption, normalizePromoCode } = require('@/lib/promoCode');
+const { defaultOsForProduct } = require('@/lib/orderOs');
 
 // Initialize Cashfree with your credentials
 Cashfree.XClientId = process.env.CASHFREE_APP_ID;
@@ -429,6 +430,7 @@ export async function POST(request) {
       originalPrice: originalPrice,
       promoCode: appliedPromoCode,
       promoDiscount: promoDiscount,
+      os: defaultOsForProduct(productName),
       clientTxnId,
       gatewayOrderId: gatewayOrderId,
       paymentMethod: paymentMethodLabel,

@@ -11,6 +11,11 @@ const {
   autoResolveResellerPriceIds,
 } = require('@/lib/resellerApiStockConfig');
 const { parseAdvpsExpiryDate } = require('@/lib/advpsOrderExpiry');
+const {
+  defaultOsForProduct,
+  normalizePanelOsForOrder,
+  normalizePanelUsernameForOrder,
+} = require('@/lib/orderOs');
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
@@ -143,7 +148,10 @@ async function hydrateProvisionedRow(api, row) {
 
   const ip = ips[0] || details?.ipAddress || details?.ip || null;
   const password = ResellerApi.extractVmPassword(details);
-  const username = ResellerApi.extractVmUsername(details);
+  const rawUsername = ResellerApi.extractVmUsername(details);
+  const rawOs = ResellerApi.extractVmOs(details);
+  const username = normalizePanelUsernameForOrder(rawUsername, order.productName, order.username);
+  const os = normalizePanelOsForOrder(rawOs, order.productName, order.os);
   const expiryDate = ResellerApi.extractVmExpiryDate(row, details);
 
   if (!ip && !password) return null;
@@ -153,6 +161,7 @@ async function hydrateProvisionedRow(api, row) {
     ip,
     password,
     username,
+    os,
     expiryDate,
     raw: row,
   };
@@ -238,8 +247,10 @@ async function syncResellerVmCredentials(api, order, vmId) {
   const details = await api.getVmDetails(vmId);
   const overviewRow = await resolveOverviewRowForVm(api, vmId);
   const password = ResellerApi.extractVmPassword(details);
-  const username = ResellerApi.extractVmUsername(details);
-  const os = ResellerApi.extractVmOs(details);
+  const rawUsername = ResellerApi.extractVmUsername(details);
+  const rawOs = ResellerApi.extractVmOs(details);
+  const username = normalizePanelUsernameForOrder(rawUsername, order.productName, order.username);
+  const os = normalizePanelOsForOrder(rawOs, order.productName, order.os);
   const ip =
     ResellerApi.extractOverviewRowIp(overviewRow) ||
     details?.ipAddress ||
@@ -357,6 +368,7 @@ async function completeResellerPendingOrder(order, ipStock, { api: existingApi =
           ip: synced.updates.ipAddress || order.ipAddress,
           password: synced.updates.password || order.password,
           username: synced.updates.username || order.username,
+          os: synced.updates.os || order.os,
           expiryDate: synced.updates.expiryDate || order.expiryDate,
         };
       }
@@ -383,8 +395,12 @@ async function completeResellerPendingOrder(order, ipStock, { api: existingApi =
     return { success: false, error: 'No VM found on panel for this order' };
   }
 
-  const isWindows = /windows|rdp/i.test(String(order.productName || ''));
-  const username = provisioned.username || (isWindows ? 'Administrator' : 'root');
+  const username = normalizePanelUsernameForOrder(
+    provisioned.username,
+    order.productName,
+    order.username
+  );
+  const os = normalizePanelOsForOrder(provisioned.os, order.productName, order.os);
   const ipAddress = provisioned.ip || order.ipAddress || '';
   const password = provisioned.password || order.password || '';
   const fullyProvisioned = !!(ipAddress && (password || provisioned.vmId));
@@ -404,6 +420,7 @@ async function completeResellerPendingOrder(order, ipStock, { api: existingApi =
     ipAddress,
     username,
     password,
+    os,
     expiryDate,
     autoProvisioned: true,
     lastProvisionAttempt: new Date(),

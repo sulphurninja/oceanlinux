@@ -6,6 +6,7 @@ import { getDataFromToken } from '@/helper/getDataFromToken';
 import { assertIpStockPurchasable } from '@/lib/ipStockAvailability';
 import { refreshAndVerifyPurchase } from '@/lib/syncIpStockBeforePurchase';
 import { customerStockUnavailableMessage } from '@/lib/customerStockMessages';
+const { defaultOsForProduct } = require('@/lib/orderOs');
 
 export async function POST(request) {
   await connectDB();
@@ -87,6 +88,7 @@ export async function POST(request) {
       originalPrice: originalPrice,
       promoCode: promoDiscount > 0 ? promoCode : null,
       promoDiscount: promoDiscount,
+      os: defaultOsForProduct(productName),
       ipStockId: ipStockId,
       transactionId,      // Store user-entered transaction reference
       status: 'pending',   // Pending until admin verifies

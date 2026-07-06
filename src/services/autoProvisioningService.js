@@ -166,20 +166,11 @@ class AutoProvisioningService {
   }
 
   /**
-   * Linux vs Windows for provisioning. Prefer order.os and IP stock serverType
-   * over product name — "vps" in a name must not flip a Linux order to Windows.
+   * Linux vs Windows for provisioning. Product name wins over default order.os (Ubuntu 22).
    */
   isWindowsOrder(order, ipStock) {
-    const os = String(order?.os || '').toLowerCase();
-    if (os.includes('windows')) return true;
-    if (os.includes('ubuntu') || os.includes('centos')) return false;
-
-    const serverType = String(ipStock?.serverType || '').toUpperCase();
-    if (serverType === 'VPS') return true;
-    if (serverType === 'LINUX') return false;
-
-    const productNameLower = String(order?.productName || '').toLowerCase();
-    return productNameLower.includes('windows') || productNameLower.includes('rdp');
+    const { isWindowsOrder: resolveWindows } = require('@/lib/orderOs');
+    return resolveWindows(order, ipStock);
   }
 
   /**
@@ -1798,9 +1789,18 @@ class AutoProvisioningService {
       if (provisioned?.vmId) resellerVmId = provisioned.vmId;
       if (provisioned?.ip) ipAddress = provisioned.ip;
       if (provisioned?.password) password = provisioned.password;
-      if (provisioned?.username) username = provisioned.username;
+      if (provisioned?.username) {
+        username = provisioned.username;
+      }
+      if (provisioned?.os) {
+        orderOs = provisioned.os;
+      }
       if (provisioned?.expiryDate) expiryDate = provisioned.expiryDate;
     }
+
+    const { normalizePanelUsernameForOrder, normalizePanelOsForOrder } = require('@/lib/orderOs');
+    username = normalizePanelUsernameForOrder(username, order.productName, username);
+    orderOs = normalizePanelOsForOrder(orderOs, order.productName, orderOs);
 
     if (!expiryDate) {
       const { calculateCompanyExpiryDate } = await import('@/lib/expiryHelper');
