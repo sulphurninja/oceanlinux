@@ -557,11 +557,20 @@ async function completeResellerPendingOrder(order, ipStock, { api: existingApi =
     expiryDate = calculateCompanyExpiryDate();
   }
 
+  // OceanLinux member-panel login (OL-xxxx) — generate if payment path skipped it
+  let panelCredsUpdate = {};
+  if (!order.panelUsername) {
+    const { generatePanelCredentials } = await import('@/lib/panelCredentials');
+    const { panelUsername, panelPassword } = generatePanelCredentials();
+    panelCredsUpdate = { panelUsername, panelPassword };
+  }
+
   await Order.findByIdAndUpdate(order._id, {
     status: fullyProvisioned ? 'active' : 'confirmed',
     provisioningStatus: fullyProvisioned ? 'active' : 'provisioning',
     provisioningError: fullyProvisioned ? '' : 'PENDING: awaiting IP/password from panel',
     provider: 'reseller-api',
+    ...panelCredsUpdate,
     resellerVmId: provisioned.vmId || order.resellerVmId || undefined,
     resellerZoneId: locationCtx.expectedZoneId != null ? String(locationCtx.expectedZoneId) : undefined,
     ipAddress,

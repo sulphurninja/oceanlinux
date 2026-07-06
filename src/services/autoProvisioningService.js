@@ -1829,6 +1829,13 @@ class AutoProvisioningService {
       expiryDate = calculateCompanyExpiryDate();
     }
 
+    let panelCredsUpdate = {};
+    if (!order.panelUsername) {
+      const { generatePanelCredentials } = require('@/lib/panelCredentials');
+      const { panelUsername, panelPassword } = generatePanelCredentials();
+      panelCredsUpdate = { panelUsername, panelPassword };
+    }
+
     const fullyProvisioned = !!(ipAddress && (password || resellerVmId));
     await Order.findByIdAndUpdate(order._id, {
       status: fullyProvisioned ? 'active' : 'confirmed',
@@ -1837,6 +1844,7 @@ class AutoProvisioningService {
         ? ''
         : `PENDING: awaiting ${!ipAddress ? 'IP' : 'password'} from panel`,
       provider: 'reseller-api',
+      ...panelCredsUpdate,
       resellerVmId: resellerVmId || undefined,
       resellerOrderId: resellerOrderId || undefined,
       resellerGroupId: resellerGroupId || undefined,
