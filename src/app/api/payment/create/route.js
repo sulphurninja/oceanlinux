@@ -18,6 +18,7 @@ import NotificationService from '@/services/notificationService';
 import { Cashfree } from 'cashfree-pg';
 import { getRazorpayClient } from '@/lib/razorpayClient';
 import crypto from 'crypto';
+const { resolvePromoForPrice, getMemoryOption, normalizePromoCode } = require('@/lib/promoCode');
 
 // Initialize Cashfree with your credentials
 Cashfree.XClientId = process.env.CASHFREE_APP_ID;
@@ -117,15 +118,22 @@ export async function POST(request) {
       originalPrice = slotPkg.price;
       price = originalPrice;
 
-      if (promoCode && slotPkg.promoCodes) {
-        const validPromo = slotPkg.promoCodes.find(
-          p => p.code.toUpperCase() === promoCode.toUpperCase() && p.isActive
-        );
-        if (validPromo) {
-          promoDiscount = validPromo.discountType === 'percentage'
-            ? Math.round((originalPrice * validPromo.discount) / 100)
-            : validPromo.discount;
-          price = Math.max(1, originalPrice - promoDiscount);
+      const normalizedPromo = normalizePromoCode(promoCode);
+      if (normalizedPromo) {
+        const promoResult = resolvePromoForPrice({
+          promoCodes: slotPkg.promoCodes,
+          promoCode: normalizedPromo,
+          originalPrice,
+        });
+        if (!promoResult.valid) {
+          return NextResponse.json(
+            { message: promoResult.message || 'Invalid or inactive promo code' },
+            { status: 400 }
+          );
+        }
+        promoDiscount = promoResult.discount;
+        price = promoResult.finalPrice;
+        if (promoDiscount > 0) {
           console.log(`[Payment] Slot IP promo applied: ${originalPrice} - ${promoDiscount} = ${price}`);
         }
       }
@@ -161,7 +169,7 @@ export async function POST(request) {
         return NextResponse.json({ message: 'Product not found' }, { status: 404 });
       }
 
-      const memoryOption = ipStock.memoryOptions.get(memory);
+      const memoryOption = getMemoryOption(ipStock, memory);
       if (!memoryOption || !memoryOption.price) {
         return NextResponse.json(
           { message: `Memory option ${memory} is not available for this product` },
@@ -172,16 +180,23 @@ export async function POST(request) {
       originalPrice = memoryOption.price;
       price = originalPrice;
 
-      if (promoCode) {
-        const validPromo = ipStock.promoCodes.find(
-          p => p.code.toUpperCase() === promoCode.toUpperCase() && p.isActive
-        );
-        if (validPromo) {
-          promoDiscount = validPromo.discountType === 'percentage'
-            ? Math.round((originalPrice * validPromo.discount) / 100)
-            : validPromo.discount;
-          price = Math.max(1, originalPrice - promoDiscount);
-          console.log(`[Payment] Applied promo code ${promoCode}: ${originalPrice} - ${promoDiscount} = ${price}`);
+      const normalizedPromo = normalizePromoCode(promoCode);
+      if (normalizedPromo) {
+        const promoResult = resolvePromoForPrice({
+          promoCodes: ipStock.promoCodes,
+          promoCode: normalizedPromo,
+          originalPrice,
+        });
+        if (!promoResult.valid) {
+          return NextResponse.json(
+            { message: promoResult.message || 'Invalid or inactive promo code' },
+            { status: 400 }
+          );
+        }
+        promoDiscount = promoResult.discount;
+        price = promoResult.finalPrice;
+        if (promoDiscount > 0) {
+          console.log(`[Payment] Applied promo code ${normalizedPromo}: ${originalPrice} - ${promoDiscount} = ${price}`);
         }
       }
     }
@@ -225,6 +240,9 @@ export async function POST(request) {
       orderId: null,
       clientTxnId: clientTxnId,
       totalPrice: price,
+      originalPrice,
+      promoDiscount,
+      promoApplied: promoDiscount > 0,
       walletApplied,
       gatewayCharge,
       customer: {

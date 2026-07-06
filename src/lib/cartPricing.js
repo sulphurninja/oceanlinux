@@ -1,6 +1,7 @@
 import IPStock from '@/models/ipStockModel';
 import SlotIPPackage from '@/models/slotIpPackageModel';
 import { isIpStockPurchasable } from '@/lib/ipStockAvailability';
+const { resolvePromoForPrice, getMemoryOption } = require('@/lib/promoCode');
 
 /**
  * Server-side pricing + availability validator for cart line items.
@@ -47,7 +48,7 @@ export async function priceCartLine(item) {
     if (!memory) {
       return { valid: false, reason: 'Memory option is required', stock };
     }
-    const memoryOption = stock.memoryOptions?.get?.(memory) || stock.memoryOptions?.[memory];
+    const memoryOption = getMemoryOption(stock, memory);
     if (!memoryOption || !memoryOption.price) {
       return { valid: false, reason: `Memory option "${memory}" is not available`, stock };
     }
@@ -56,14 +57,14 @@ export async function priceCartLine(item) {
     let unitDiscount = 0;
     let promoApplied;
     if (item.promoCode) {
-      const validPromo = (stock.promoCodes || []).find(
-        p => p.code?.toUpperCase() === item.promoCode.toUpperCase() && p.isActive
-      );
-      if (validPromo) {
-        unitDiscount = validPromo.discountType === 'percentage'
-          ? Math.round((unitOriginalPrice * validPromo.discount) / 100)
-          : validPromo.discount;
-        promoApplied = validPromo.code;
+      const promoResult = resolvePromoForPrice({
+        promoCodes: stock.promoCodes,
+        promoCode: item.promoCode,
+        originalPrice: unitOriginalPrice,
+      });
+      if (promoResult.valid && promoResult.discount > 0) {
+        unitDiscount = promoResult.discount;
+        promoApplied = promoResult.code || item.promoCode;
       }
     }
     const unitPrice = Math.max(1, unitOriginalPrice - unitDiscount);
@@ -106,14 +107,14 @@ export async function priceCartLine(item) {
     let unitDiscount = 0;
     let promoApplied;
     if (item.promoCode) {
-      const validPromo = (pkg.promoCodes || []).find(
-        p => p.code?.toUpperCase() === item.promoCode.toUpperCase() && p.isActive
-      );
-      if (validPromo) {
-        unitDiscount = validPromo.discountType === 'percentage'
-          ? Math.round((unitOriginalPrice * validPromo.discount) / 100)
-          : validPromo.discount;
-        promoApplied = validPromo.code;
+      const promoResult = resolvePromoForPrice({
+        promoCodes: pkg.promoCodes,
+        promoCode: item.promoCode,
+        originalPrice: unitOriginalPrice,
+      });
+      if (promoResult.valid && promoResult.discount > 0) {
+        unitDiscount = promoResult.discount;
+        promoApplied = promoResult.code || item.promoCode;
       }
     }
     const unitPrice = Math.max(1, unitOriginalPrice - unitDiscount);

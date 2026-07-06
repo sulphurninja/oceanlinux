@@ -580,45 +580,82 @@ function IPStockContent() {
     }
   };
 
+  const resolvePromoForCheckout = async (): Promise<{
+    code: string | null;
+    discount: number;
+    applied: boolean;
+    message?: string;
+  }> => {
+    if (!selectedProduct) {
+      return { code: null, discount: 0, applied: false };
+    }
+
+    const code = promoCode.trim().toUpperCase();
+    if (!code) {
+      return { code: null, discount: 0, applied: false };
+    }
+
+    if (promoApplied && promoDiscount > 0) {
+      return { code, discount: promoDiscount, applied: true, message: promoMessage };
+    }
+
+    const body: Record<string, any> = {
+      promoCode: code,
+      productPrice: selectedProduct.price,
+    };
+
+    if (selectedProduct.slotIpPackageId) {
+      body.slotIpPackageId = selectedProduct.slotIpPackageId;
+    } else {
+      body.ipStockId = selectedProduct.ipStockId;
+    }
+
+    const response = await fetch('/api/validate-promo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await response.json();
+
+    if (data.valid) {
+      setPromoCode(code);
+      setPromoDiscount(data.discountAmount);
+      setPromoMessage(data.message);
+      setPromoApplied(true);
+      return {
+        code,
+        discount: Number(data.discountAmount) || 0,
+        applied: true,
+        message: data.message,
+      };
+    }
+
+    setPromoDiscount(0);
+    setPromoMessage(data.message || 'Invalid promo code');
+    setPromoApplied(false);
+    return {
+      code: null,
+      discount: 0,
+      applied: false,
+      message: data.message || 'Invalid promo code',
+    };
+  };
+
   const validatePromoCode = async () => {
     if (!promoCode.trim() || !selectedProduct) return;
 
     setPromoValidating(true);
     try {
-      const body: Record<string, any> = {
-        promoCode: promoCode.trim(),
-        productPrice: selectedProduct.price,
-      };
-
-      if (selectedProduct.slotIpPackageId) {
-        body.slotIpPackageId = selectedProduct.slotIpPackageId;
+      const result = await resolvePromoForCheckout();
+      if (result.applied) {
+        toast.success(result.message || 'Promo applied');
       } else {
-        body.ipStockId = selectedProduct.ipStockId;
-      }
-
-      const response = await fetch("/api/validate-promo", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-
-      const data = await response.json();
-
-      if (data.valid) {
-        setPromoDiscount(data.discountAmount); // Store the actual discount amount
-        setPromoMessage(data.message);
-        setPromoApplied(true);
-        toast.success(data.message);
-      } else {
-        setPromoDiscount(0);
-        setPromoMessage(data.message);
-        setPromoApplied(false);
-        toast.error(data.message);
+        toast.error(result.message || 'Invalid promo code');
       }
     } catch (error) {
-      toast.error("Failed to validate promo code");
+      toast.error('Failed to validate promo code');
       setPromoDiscount(0);
-      setPromoMessage("Error validating promo code");
+      setPromoMessage('Error validating promo code');
       setPromoApplied(false);
     } finally {
       setPromoValidating(false);
@@ -714,15 +751,25 @@ function IPStockContent() {
         return;
       }
 
-      const finalPrice = getDiscountedPrice();
+      let checkoutPromo = { code: null as string | null, discount: 0, applied: false };
+      if (promoCode.trim()) {
+        checkoutPromo = await resolvePromoForCheckout();
+        if (!checkoutPromo.applied) {
+          toast.error(checkoutPromo.message || 'Please apply a valid promo code or remove it');
+          setPaymentInitiating(false);
+          return;
+        }
+      }
+
+      const finalPrice = Math.max(0, selectedProduct.price - checkoutPromo.discount);
 
       const paymentBody: Record<string, any> = {
         productName: selectedProduct.name,
         memory: selectedProduct.memory,
         price: finalPrice,
         originalPrice: selectedProduct.price,
-        promoCode: promoApplied ? promoCode : null,
-        promoDiscount: promoApplied ? promoDiscount : 0,
+        promoCode: checkoutPromo.applied ? checkoutPromo.code : null,
+        promoDiscount: checkoutPromo.applied ? checkoutPromo.discount : 0,
         paymentMethod: paymentMethod,
         useWallet,
       };
@@ -759,6 +806,21 @@ function IPStockContent() {
         setPaymentInitiating(false);
         fetchWalletSummary().then((w) => { if (w) setWalletBalance(w.balance); }).catch(() => {});
         return;
+      }
+
+      if (checkoutPromo.applied) {
+        const serverTotal = Number(data.totalPrice);
+        const expectedTotal = Math.max(1, Math.round(finalPrice));
+        if (Number.isFinite(serverTotal) && Math.abs(serverTotal - expectedTotal) > 1) {
+          toast.error('Promo could not be applied at checkout. Please try again.');
+          setPaymentInitiating(false);
+          return;
+        }
+        if (data.promoApplied === false || Number(data.promoDiscount) <= 0) {
+          toast.error('Promo was not applied on the server. Please try again.');
+          setPaymentInitiating(false);
+          return;
+        }
       }
 
       if (data.walletApplied > 0) {
@@ -824,8 +886,8 @@ function IPStockContent() {
               memory: selectedProduct.memory,
               price: finalPrice,
               originalPrice: selectedProduct.price,
-              promoCode: promoApplied ? promoCode : null,
-              promoDiscount: promoApplied ? promoDiscount : 0,
+              promoCode: checkoutPromo.applied ? checkoutPromo.code : null,
+              promoDiscount: checkoutPromo.applied ? checkoutPromo.discount : 0,
               paymentMethod: fallbackMethod,
               useWallet,
             };
@@ -1421,6 +1483,12 @@ function IPStockContent() {
                 placeholder="Promo code"
                 value={promoCode}
                 onChange={(e) => setPromoCode(e.target.value.toUpperCase())}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (!promoApplied && promoCode.trim()) validatePromoCode();
+                  }
+                }}
                 disabled={promoApplied}
                 className="h-9 flex-1 premium-dashboard-input text-sm"
               />
