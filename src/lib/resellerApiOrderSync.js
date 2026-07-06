@@ -136,7 +136,7 @@ async function isRecentPanelVm(api, row, purchaseStartedAt) {
   }
 }
 
-async function hydrateProvisionedRow(api, row) {
+async function hydrateProvisionedRow(api, row, order = null) {
   const vmId = extractOverviewVmId(row);
   if (!vmId) return null;
 
@@ -150,8 +150,9 @@ async function hydrateProvisionedRow(api, row) {
   const password = ResellerApi.extractVmPassword(details);
   const rawUsername = ResellerApi.extractVmUsername(details);
   const rawOs = ResellerApi.extractVmOs(details);
-  const username = normalizePanelUsernameForOrder(rawUsername, order.productName, order.username);
-  const os = normalizePanelOsForOrder(rawOs, order.productName, order.os);
+  const productName = order?.productName || '';
+  const username = normalizePanelUsernameForOrder(rawUsername, productName, order?.username);
+  const os = normalizePanelOsForOrder(rawOs, productName, order?.os);
   const expiryDate = ResellerApi.extractVmExpiryDate(row, details);
 
   if (!ip && !password) return null;
@@ -180,6 +181,7 @@ async function waitForProvisionedVm(
     resellerVmId,
     purchaseStartedAt,
     excludeOrderId = null,
+    order = null,
     maxWaitMs = 180_000,
     pollMs = 5000,
   } = {}
@@ -211,7 +213,7 @@ async function waitForProvisionedVm(
         });
 
         if (matched) {
-          const hydrated = await hydrateProvisionedRow(api, row);
+          const hydrated = await hydrateProvisionedRow(api, row, order);
           if (hydrated) return hydrated;
         }
 
@@ -220,7 +222,7 @@ async function waitForProvisionedVm(
             recentCandidates.push(row);
           }
         } else if (orders.indexOf(row) === 0) {
-          const hydrated = await hydrateProvisionedRow(api, row);
+          const hydrated = await hydrateProvisionedRow(api, row, order);
           if (hydrated) return hydrated;
         }
       }
@@ -232,7 +234,7 @@ async function waitForProvisionedVm(
         ? recentCandidates[0]
         : await pickBestRecentCandidate(api, recentCandidates, purchaseAt, assignedVmIds);
       if (best) {
-        const hydrated = await hydrateProvisionedRow(api, best);
+        const hydrated = await hydrateProvisionedRow(api, best, order);
         if (hydrated) return hydrated;
       }
     }
@@ -382,8 +384,9 @@ async function completeResellerPendingOrder(order, ipStock, { api: existingApi =
       resellerVmId: order.resellerVmId || null,
       purchaseStartedAt,
       excludeOrderId: order._id,
-      maxWaitMs: 30_000,
-      pollMs: 2000,
+      order,
+      maxWaitMs: 90_000,
+      pollMs: 3000,
     });
   }
 
@@ -439,21 +442,25 @@ async function syncStuckResellerPendingOrders({ limit = 5 } = {}) {
   const IPStock = require('@/models/ipStockModel');
 
   const stuck = await Order.find({
-    provider: 'reseller-api',
-    provisioningStatus: { $in: ['provisioning', 'failed', 'pending', 'in_progress'] },
-    $or: [
-      { ipAddress: '' },
-      { ipAddress: { $exists: false } },
-      { ipAddress: null },
-    ],
     $and: [
       {
         $or: [
+          { ipAddress: { $in: [null, ''] } },
+          { ipAddress: { $exists: false } },
+          { password: { $in: [null, ''] } },
+          { password: { $exists: false } },
+        ],
+      },
+      {
+        $or: [
+          { provider: 'reseller-api' },
           { resellerOrderId: { $exists: true, $nin: [null, ''] } },
           { resellerVmId: { $exists: true, $nin: [null, ''] } },
         ],
       },
     ],
+    provisioningStatus: { $in: ['provisioning', 'failed', 'pending', 'in_progress', ''] },
+    status: { $in: ['confirmed', 'active', 'pending'] },
   })
     .sort({ createdAt: 1 })
     .limit(limit);
@@ -483,7 +490,7 @@ const RESELLER_FETCH_SYNC_COOLDOWN_MS = 8000;
  * When customer opens manage order, pull IP/credentials from panel if still missing.
  */
 async function maybeSyncResellerOrderOnFetch(order) {
-  if (!order || order.provider !== 'reseller-api') return order;
+  if (!order) return order;
   const ip = (order.ipAddress || '').trim();
   const pwd = (order.password || '').trim();
   if (ip && pwd) return order;
@@ -491,7 +498,7 @@ async function maybeSyncResellerOrderOnFetch(order) {
   const hasPanelRef =
     (order.resellerOrderId && String(order.resellerOrderId).trim()) ||
     (order.resellerVmId && String(order.resellerVmId).trim());
-  if (!hasPanelRef) return order;
+  if (!hasPanelRef && order.provider !== 'reseller-api') return order;
 
   const lastAttempt = order.lastProvisionAttempt
     ? new Date(order.lastProvisionAttempt).getTime()

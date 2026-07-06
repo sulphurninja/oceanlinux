@@ -1740,6 +1740,7 @@ class AutoProvisioningService {
           resellerVmId: resellerVmId || null,
           purchaseStartedAt,
           excludeOrderId: order._id,
+          order,
           maxWaitMs: 180_000,
           pollMs: 5000,
         });

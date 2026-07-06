@@ -408,7 +408,7 @@ export async function POST(request) {
 
         try {
             const { syncStuckResellerPendingOrders } = require('@/lib/resellerApiOrderSync');
-            const resellerSync = await syncStuckResellerPendingOrders({ limit: 5 });
+            const resellerSync = await syncStuckResellerPendingOrders({ limit: 15 });
             if (resellerSync.length) {
                 console.log(`[CRON-${cronId}] Reseller pending sync:`, JSON.stringify(resellerSync));
             }
