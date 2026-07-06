@@ -405,6 +405,17 @@ export async function POST(request) {
     try {
         await connectDB();
         console.log(`[CRON-${cronId}] ✅ Database connected`);
+
+        try {
+            const { syncStuckResellerPendingOrders } = require('@/lib/resellerApiOrderSync');
+            const resellerSync = await syncStuckResellerPendingOrders({ limit: 5 });
+            if (resellerSync.length) {
+                console.log(`[CRON-${cronId}] Reseller pending sync:`, JSON.stringify(resellerSync));
+            }
+        } catch (resellerSyncErr) {
+            console.warn(`[CRON-${cronId}] Reseller pending sync skipped:`, resellerSyncErr.message);
+        }
+
         // ADVPS "assignment pending" follow-up: /api/admin/advps-pending-cron (separate schedule; saves ADVPS rate limit)
 
         // STEP 1: Try to acquire a database lock on a VALIDATED order

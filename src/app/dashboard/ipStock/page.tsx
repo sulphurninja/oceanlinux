@@ -159,6 +159,13 @@ function isNetbayMemoryInStock(stock: IPStock, memory: string) {
   return variant.available === true;
 }
 
+function resellerVariantValues(stock: IPStock) {
+  const raw = stock.defaultConfigurations?.resellerApi?.variantStock || {};
+  return Object.entries(raw)
+    .filter(([k, v]) => k && !String(k).startsWith('$') && v && typeof v === 'object')
+    .map(([, v]) => v as { available?: boolean; skipped?: boolean });
+}
+
 function isResellerMemoryInStock(stock: IPStock, memory: string) {
   if (stock.available) return true;
   const reseller = stock.defaultConfigurations?.resellerApi;
@@ -166,8 +173,9 @@ function isResellerMemoryInStock(stock: IPStock, memory: string) {
   if (variant?.available === true) return true;
   if (!variant) return stock.available !== false;
   if (variant.skipped || variant.available === null) {
-    const primary = reseller?.variantStock?.['2GB'];
-    if (primary?.available === true) return true;
+    for (const fallback of ['2GB', '4GB', '8GB']) {
+      if (reseller?.variantStock?.[fallback]?.available === true) return true;
+    }
     return false;
   }
   return variant.available === true;
@@ -183,8 +191,7 @@ function isStockPurchasable(stock: IPStock, memory?: string) {
   if (isResellerLiveStock(stock)) {
     if (memory) return isResellerMemoryInStock(stock, memory);
     if (stock.available) return true;
-    const variants = Object.values(stock.defaultConfigurations?.resellerApi?.variantStock || {});
-    return variants.some((v) => v?.available === true);
+    return resellerVariantValues(stock).some((v) => v?.available === true);
   }
   if (isCompanyStock(stock)) return getStockUnitsRemaining(stock) > 0;
   return stock.available !== false;

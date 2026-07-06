@@ -43,57 +43,189 @@ async function resolveVmId(api, order) {
   return found?.vmId || null;
 }
 
+function extractOverviewVmId(row) {
+  return row?.virtualMachineId ?? row?.vmId ?? row?.vmid ?? null;
+}
+
+function collectOverviewOrderIds(row) {
+  return [
+    row?.orderId,
+    row?.purchaseOrderId,
+    row?.orderReference,
+    row?.transactionId,
+    row?.id,
+    row?.groupId,
+    row?.bulkGroupId,
+    row?.purchaseGroupId,
+  ]
+    .filter(Boolean)
+    .map(String);
+}
+
+function overviewRowMatchesPurchase(row, { resellerOrderId, resellerGroupId, resellerVmId } = {}) {
+  const vmId = extractOverviewVmId(row);
+  if (resellerVmId && vmId && String(vmId) === String(resellerVmId)) return true;
+
+  const rowIds = collectOverviewOrderIds(row);
+  if (resellerOrderId && rowIds.some((id) => id === String(resellerOrderId))) return true;
+  if (resellerGroupId && rowIds.some((id) => id.includes(String(resellerGroupId)))) return true;
+
+  // createVm returns numeric id (1103) — overview row may expose it only on nested refs
+  if (resellerOrderId && /^\d+$/.test(String(resellerOrderId))) {
+    const needle = String(resellerOrderId);
+    if (rowIds.some((id) => id.endsWith(needle) || id.includes(`-${needle}`))) return true;
+  }
+
+  return false;
+}
+
+async function getAssignedResellerVmIds(excludeOrderId = null) {
+  const Order = (await import('@/models/orderModel')).default;
+  const query = { resellerVmId: { $exists: true, $nin: [null, ''] } };
+  if (excludeOrderId) query._id = { $ne: excludeOrderId };
+  const rows = await Order.find(query).select('resellerVmId').lean();
+  return new Set(rows.map((r) => String(r.resellerVmId)).filter(Boolean));
+}
+
+async function pickBestRecentCandidate(api, candidates, purchaseStartedAt, excludeVmIds = new Set()) {
+  const scored = [];
+  for (const row of candidates) {
+    const vmId = extractOverviewVmId(row);
+    if (!vmId || excludeVmIds.has(String(vmId))) continue;
+    try {
+      const details = await api.getVmDetails(String(vmId));
+      const created = details?.createdAt ? new Date(details.createdAt).getTime() : 0;
+      if (created >= purchaseStartedAt - 180_000) {
+        scored.push({ row, diff: Math.abs(created - purchaseStartedAt) });
+      }
+    } catch {
+      /* details may lag */
+    }
+  }
+  scored.sort((a, b) => a.diff - b.diff);
+  return scored[0]?.row || null;
+}
+
+async function resolveOverviewRowForVm(api, vmId, { maxPages = 5 } = {}) {
+  if (!vmId) return null;
+  for (let page = 0; page < maxPages; page++) {
+    const data = await api.getOrderOverviewPage(page, 20);
+    const orders = data?.orders || data?.content || data?.items || [];
+    const row = orders.find((r) => String(extractOverviewVmId(r)) === String(vmId));
+    if (row) return row;
+    const totalPages = Number(data?.totalPages || data?.totalPage || 1) || 1;
+    if (page + 1 >= totalPages || orders.length === 0) break;
+  }
+  return null;
+}
+
+async function isRecentPanelVm(api, row, purchaseStartedAt) {
+  const vmId = extractOverviewVmId(row);
+  if (!vmId || !purchaseStartedAt) return false;
+  try {
+    const details = await api.getVmDetails(String(vmId));
+    const created = details?.createdAt ? new Date(details.createdAt).getTime() : 0;
+    return created >= purchaseStartedAt - 120_000;
+  } catch {
+    return false;
+  }
+}
+
+async function hydrateProvisionedRow(api, row) {
+  const vmId = extractOverviewVmId(row);
+  if (!vmId) return null;
+
+  const ips = ResellerApi.extractOverviewRowIps(row);
+  let details = null;
+  try {
+    details = await api.getVmDetails(String(vmId));
+  } catch (_) { /* details may lag */ }
+
+  const ip = ips[0] || details?.ipAddress || details?.ip || null;
+  const password = ResellerApi.extractVmPassword(details);
+  const username = ResellerApi.extractVmUsername(details);
+  const expiryDate = ResellerApi.extractVmExpiryDate(row, details);
+
+  if (!ip && !password) return null;
+
+  return {
+    vmId: String(vmId),
+    ip,
+    password,
+    username,
+    expiryDate,
+    raw: row,
+  };
+}
+
 /**
- * Poll overview until a VM appears for a fresh purchase (by upstream orderId or newest row).
+ * Poll overview until a VM appears for a fresh purchase.
+ * primevm.in create returns numeric orderId (e.g. 1102) but overview uses ORD-… strings —
+ * we also match groupId, vmId, and recently-created VMs.
  */
-async function waitForProvisionedVm(api, { resellerOrderId, maxWaitMs = 180_000, pollMs = 5000 } = {}) {
+async function waitForProvisionedVm(
+  api,
+  {
+    resellerOrderId,
+    resellerGroupId,
+    resellerVmId,
+    purchaseStartedAt,
+    excludeOrderId = null,
+    maxWaitMs = 180_000,
+    pollMs = 5000,
+  } = {}
+) {
   const deadline = Date.now() + maxWaitMs;
+  const purchaseAt = purchaseStartedAt || Date.now();
   let lastOverview = null;
+  const assignedVmIds = await getAssignedResellerVmIds(excludeOrderId);
 
   while (Date.now() < deadline) {
     let page = 0;
     let totalPages = 1;
+    const recentCandidates = [];
+
     while (page < Math.min(totalPages, 10)) {
       const data = await api.getOrderOverviewPage(page, 20);
       lastOverview = data;
-      const orders = data?.orders || data?.content || [];
-      totalPages = Number(data?.totalPages || 1) || 1;
+      const orders = data?.orders || data?.content || data?.items || [];
+      totalPages = Number(data?.totalPages || data?.totalPage || 1) || 1;
 
       for (const row of orders) {
-        const rowOrderId = row?.orderId ?? row?.purchaseOrderId ?? row?.id;
-        const vmId = row?.virtualMachineId ?? row?.vmId ?? row?.vmid;
+        const vmId = extractOverviewVmId(row);
         if (!vmId) continue;
 
-        const matchByOrder = resellerOrderId != null &&
-          String(rowOrderId) === String(resellerOrderId);
-        if (matchByOrder || (!resellerOrderId && orders.indexOf(row) === 0)) {
-          const ips = ResellerApi.extractOverviewRowIps(row);
-          let details = null;
-          try {
-            details = await api.getVmDetails(String(vmId));
-          } catch (_) { /* details may lag */ }
+        const matched = overviewRowMatchesPurchase(row, {
+          resellerOrderId,
+          resellerGroupId,
+          resellerVmId,
+        });
 
-          const ip = ips[0] ||
-            details?.ipAddress ||
-            details?.ip ||
-            null;
-          const password = ResellerApi.extractVmPassword(details);
-          const username = ResellerApi.extractVmUsername(details);
-          const expiryDate = ResellerApi.extractVmExpiryDate(row, details);
+        if (matched) {
+          const hydrated = await hydrateProvisionedRow(api, row);
+          if (hydrated) return hydrated;
+        }
 
-          if (ip || password) {
-            return {
-              vmId: String(vmId),
-              ip,
-              password,
-              username,
-              expiryDate,
-              raw: row,
-            };
+        if (resellerOrderId || resellerGroupId || purchaseStartedAt) {
+          if (await isRecentPanelVm(api, row, purchaseAt)) {
+            recentCandidates.push(row);
           }
+        } else if (orders.indexOf(row) === 0) {
+          const hydrated = await hydrateProvisionedRow(api, row);
+          if (hydrated) return hydrated;
         }
       }
       page++;
+    }
+
+    if (recentCandidates.length > 0) {
+      const best = recentCandidates.length === 1
+        ? recentCandidates[0]
+        : await pickBestRecentCandidate(api, recentCandidates, purchaseAt, assignedVmIds);
+      if (best) {
+        const hydrated = await hydrateProvisionedRow(api, best);
+        if (hydrated) return hydrated;
+      }
     }
 
     await sleep(pollMs);
@@ -104,11 +236,17 @@ async function waitForProvisionedVm(api, { resellerOrderId, maxWaitMs = 180_000,
 
 async function syncResellerVmCredentials(api, order, vmId) {
   const details = await api.getVmDetails(vmId);
+  const overviewRow = await resolveOverviewRowForVm(api, vmId);
   const password = ResellerApi.extractVmPassword(details);
   const username = ResellerApi.extractVmUsername(details);
   const os = ResellerApi.extractVmOs(details);
-  const ip = details?.ipAddress || details?.ip || order.ipAddress || null;
-  const expiryDate = ResellerApi.extractVmExpiryDate(details);
+  const ip =
+    ResellerApi.extractOverviewRowIp(overviewRow) ||
+    details?.ipAddress ||
+    details?.ip ||
+    order.ipAddress ||
+    null;
+  const expiryDate = ResellerApi.extractVmExpiryDate(overviewRow, details);
 
   const updates = { lastSyncTime: new Date() };
   const changes = [];
@@ -188,6 +326,175 @@ async function renewResellerPanelVm({ api, order, ipStock, Order }) {
   };
 }
 
+/**
+ * Resume a stuck reseller order — panel VM exists but IP/password not saved yet.
+ */
+async function completeResellerPendingOrder(order, ipStock, { api: existingApi = null } = {}) {
+  const Company = (await import('@/models/companyModel')).default;
+  const Order = (await import('@/models/orderModel')).default;
+
+  let api = existingApi;
+  if (!api) {
+    if (!ipStock?.company) return { success: false, error: 'No company on IP stock' };
+    const company = await Company.findById(ipStock.company).select('resellerApi name').lean();
+    const cfg = getCompanyResellerApiConfig(company);
+    if (!cfg) return { success: false, error: 'Reseller API not configured' };
+    api = new ResellerApi(cfg);
+  }
+
+  const purchaseStartedAt = order.createdAt
+    ? new Date(order.createdAt).getTime()
+    : Date.now() - 600_000;
+
+  let provisioned = null;
+
+  if (order.resellerVmId) {
+    try {
+      const synced = await syncResellerVmCredentials(api, order, order.resellerVmId);
+      if (synced.updates.ipAddress || synced.updates.password) {
+        provisioned = {
+          vmId: String(order.resellerVmId),
+          ip: synced.updates.ipAddress || order.ipAddress,
+          password: synced.updates.password || order.password,
+          username: synced.updates.username || order.username,
+          expiryDate: synced.updates.expiryDate || order.expiryDate,
+        };
+      }
+    } catch (_) { /* fall through to overview poll */ }
+  }
+
+  if (!provisioned?.ip || !provisioned?.password) {
+    provisioned = await waitForProvisionedVm(api, {
+      resellerOrderId: order.resellerOrderId || null,
+      resellerGroupId: order.resellerGroupId || null,
+      resellerVmId: order.resellerVmId || null,
+      purchaseStartedAt,
+      excludeOrderId: order._id,
+      maxWaitMs: 30_000,
+      pollMs: 2000,
+    });
+  }
+
+  if (provisioned?.pending) {
+    return { success: false, pending: true, error: 'Panel VM still pending IP/credentials' };
+  }
+
+  if (!provisioned?.vmId && !provisioned?.ip && !provisioned?.password) {
+    return { success: false, error: 'No VM found on panel for this order' };
+  }
+
+  const isWindows = /windows|rdp/i.test(String(order.productName || ''));
+  const username = provisioned.username || (isWindows ? 'Administrator' : 'root');
+  const ipAddress = provisioned.ip || order.ipAddress || '';
+  const password = provisioned.password || order.password || '';
+  const fullyProvisioned = !!(ipAddress && (password || provisioned.vmId));
+
+  let expiryDate = provisioned.expiryDate || order.expiryDate;
+  if (!expiryDate) {
+    const { calculateCompanyExpiryDate } = await import('@/lib/expiryHelper');
+    expiryDate = calculateCompanyExpiryDate();
+  }
+
+  await Order.findByIdAndUpdate(order._id, {
+    status: fullyProvisioned ? 'active' : 'confirmed',
+    provisioningStatus: fullyProvisioned ? 'active' : 'provisioning',
+    provisioningError: fullyProvisioned ? '' : 'PENDING: awaiting IP/password from panel',
+    provider: 'reseller-api',
+    resellerVmId: provisioned.vmId || order.resellerVmId || undefined,
+    ipAddress,
+    username,
+    password,
+    expiryDate,
+    autoProvisioned: true,
+    lastProvisionAttempt: new Date(),
+  });
+
+  return {
+    success: fullyProvisioned,
+    ipAddress,
+    vmId: provisioned.vmId || order.resellerVmId,
+    pending: !fullyProvisioned,
+  };
+}
+
+async function syncStuckResellerPendingOrders({ limit = 5 } = {}) {
+  const Order = (await import('@/models/orderModel')).default;
+  const IPStock = require('@/models/ipStockModel');
+
+  const stuck = await Order.find({
+    provider: 'reseller-api',
+    provisioningStatus: { $in: ['provisioning', 'failed', 'pending', 'in_progress'] },
+    $or: [
+      { ipAddress: '' },
+      { ipAddress: { $exists: false } },
+      { ipAddress: null },
+    ],
+    $and: [
+      {
+        $or: [
+          { resellerOrderId: { $exists: true, $nin: [null, ''] } },
+          { resellerVmId: { $exists: true, $nin: [null, ''] } },
+        ],
+      },
+    ],
+  })
+    .sort({ createdAt: 1 })
+    .limit(limit);
+
+  const results = [];
+  for (const order of stuck) {
+    try {
+      const ipStock = order.ipStockId
+        ? await IPStock.findById(order.ipStockId)
+        : null;
+      if (!ipStock) {
+        results.push({ orderId: String(order._id), success: false, error: 'No ipStockId' });
+        continue;
+      }
+      const out = await completeResellerPendingOrder(order, ipStock);
+      results.push({ orderId: String(order._id), ...out });
+    } catch (err) {
+      results.push({ orderId: String(order._id), success: false, error: err.message });
+    }
+  }
+  return results;
+}
+
+const RESELLER_FETCH_SYNC_COOLDOWN_MS = 8000;
+
+/**
+ * When customer opens manage order, pull IP/credentials from panel if still missing.
+ */
+async function maybeSyncResellerOrderOnFetch(order) {
+  if (!order || order.provider !== 'reseller-api') return order;
+  const ip = (order.ipAddress || '').trim();
+  const pwd = (order.password || '').trim();
+  if (ip && pwd) return order;
+
+  const hasPanelRef =
+    (order.resellerOrderId && String(order.resellerOrderId).trim()) ||
+    (order.resellerVmId && String(order.resellerVmId).trim());
+  if (!hasPanelRef) return order;
+
+  const lastAttempt = order.lastProvisionAttempt
+    ? new Date(order.lastProvisionAttempt).getTime()
+    : 0;
+  if (Date.now() - lastAttempt < RESELLER_FETCH_SYNC_COOLDOWN_MS) return order;
+
+  const IPStock = require('@/models/ipStockModel');
+  const ipStock = order.ipStockId ? await IPStock.findById(order.ipStockId) : null;
+  if (!ipStock) return order;
+
+  try {
+    await completeResellerPendingOrder(order, ipStock);
+    const Order = (await import('@/models/orderModel')).default;
+    return await Order.findById(order._id).lean();
+  } catch (err) {
+    console.warn('[RESELLER-SYNC] Order fetch sync failed:', err.message);
+    return order;
+  }
+}
+
 module.exports = {
   sleep,
   resolveResellerApiConfigFromCompany,
@@ -196,4 +503,7 @@ module.exports = {
   waitForProvisionedVm,
   syncResellerVmCredentials,
   renewResellerPanelVm,
+  completeResellerPendingOrder,
+  syncStuckResellerPendingOrders,
+  maybeSyncResellerOrderOnFetch,
 };

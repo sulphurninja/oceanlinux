@@ -7,7 +7,6 @@ import {
     Copy,
     CheckCircle,
     XCircle,
-    Computer,
     RefreshCw,
     Shield,
     Calendar,
@@ -66,6 +65,7 @@ import {
     shouldPollOrderForDelivery,
 } from '@/lib/orderDeliveryStatus';
 import { isWithinRenewalWindow } from '@/lib/expiryHelper';
+import { OsIcon, humanizeOsLabel } from '@/components/os/OsIcon';
 
 interface Order {
     _id: string;
@@ -103,36 +103,7 @@ interface Order {
     }>;
 }
 
-// OS Icon Component
-const OSIcon = ({ os, className = "h-8 w-8" }: { os: string; className?: string }) => {
-    const osLower = os.toLowerCase();
-
-    if (osLower.includes('ubuntu')) {
-        return (
-            <div className={`${className} rounded-lg flex items-center justify-center shadow-sm`}>
-                <img src='/ubuntu.png' className={`${className} rounded-lg object-cover`} alt={os} />
-            </div>
-        );
-    } else if (osLower.includes('centos')) {
-        return (
-            <div className={`${className} rounded-lg flex items-center justify-center shadow-sm`}>
-                <img src='/centos.png' className={`${className} rounded-lg object-cover`} alt={os} />
-            </div>
-        );
-    } else if (osLower.includes('windows')) {
-        return (
-            <div className={`${className} rounded-lg flex items-center justify-center shadow-sm`}>
-                <img src='/windows.png' className={`${className} rounded-lg object-cover`} alt={os} />
-            </div>
-        );
-    } else {
-        return (
-            <div className={`${className} bg-gray-500 rounded-lg flex items-center justify-center text-white shadow-sm`}>
-                <Computer className="h-5 w-5" />
-            </div>
-        );
-    }
-};
+// OS icons — shared component handles win-22, Windows, Ubuntu, etc.
 
 function styleText(content: string) {
     const regex = /(\([^)]*\)|[a-zA-Z]+)/g;
@@ -722,7 +693,7 @@ const ViewLinux = () => {
                                                 <div className="block lg:hidden space-y-3">
                                                     <div className="flex items-start justify-between gap-2">
                                                         <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
-                                                            <OSIcon os={order.os} className="h-8 w-8 sm:h-10 sm:w-10 flex-shrink-0" />
+                                                            <OsIcon os={order.os} productName={order.productName} className="h-8 w-8 sm:h-10 sm:w-10 flex-shrink-0" />
                                                             <div className="flex-1 min-w-0">
                                                                 <h3 className="font-semibold text-sm sm:text-base leading-snug break-words premium-dashboard-title">
                                                                     {styleText(order.productName)}
@@ -740,7 +711,7 @@ const ViewLinux = () => {
                                                     <div className="grid grid-cols-1 xs:grid-cols-2 gap-2 text-xs text-muted-foreground">
                                                         <div className="flex items-center gap-1.5">
                                                             <Terminal className="h-3 w-3 flex-shrink-0" />
-                                                            <span className="truncate">{order.os}</span>
+                                                            <span className="truncate">{humanizeOsLabel(order.os, order.productName)}</span>
                                                         </div>
                                                         <div className="flex items-center gap-1.5">
                                                             <MemoryStick className="h-3 w-3 flex-shrink-0" />
@@ -841,7 +812,7 @@ const ViewLinux = () => {
                                                 {/* Desktop Layout - Responsive improvements */}
                                                 <div className="hidden lg:flex items-center justify-between">
                                                     <div className="flex items-center gap-4 flex-1 min-w-0">
-                                                        <OSIcon os={order.os} className="h-12 w-12 xl:h-14 xl:w-14 flex-shrink-0" />
+                                                        <OsIcon os={order.os} productName={order.productName} className="h-12 w-12 xl:h-14 xl:w-14 flex-shrink-0" />
                                                         <div className="flex-1 min-w-0">
                                                             <h3 className="font-semibold text-lg xl:text-xl break-words">
                                                                 {styleText(order.productName)}
@@ -849,7 +820,7 @@ const ViewLinux = () => {
                                                             <div className="flex items-center gap-4 xl:gap-6 mt-1 text-sm xl:text-base text-muted-foreground flex-wrap">
                                                                 <span className="flex items-center gap-1">
                                                                     <Terminal className="h-3 w-3 xl:h-4 xl:w-4" />
-                                                                    {order.os}
+                                                                    {humanizeOsLabel(order.os, order.productName)}
                                                                 </span>
                                                                 <span className="flex items-center gap-1">
                                                                     <MemoryStick className="h-3 w-3 xl:h-4 xl:w-4" />

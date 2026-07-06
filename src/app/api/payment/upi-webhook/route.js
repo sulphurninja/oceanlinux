@@ -285,10 +285,10 @@ export async function POST(request) {
                   password: result.password || 'Check dashboard'
                 });
                 WhatsAppService.notifyOrderViaWhatsApp(order.user, order).catch(() => {});
-              } else if (!result.success && !result.alreadyProvisioning && !result.advpsPending) {
+              } else if (!result.success && !result.alreadyProvisioning && !result.advpsPending && !result.resellerApiPending) {
                 await NotificationService.notifyOrderFailed(order.user, order, result.error);
-              } else if (result.advpsPending) {
-                console.log(`[UPI Webhook] ADVPS order pending assignment — skipping failure notification`);
+              } else if (result.advpsPending || result.resellerApiPending) {
+                console.log(`[UPI Webhook] Upstream order pending assignment — skipping failure notification`);
               }
             })
             .catch(async error => {

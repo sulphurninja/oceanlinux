@@ -103,6 +103,38 @@ function deepMapToPlain(obj) {
   return obj;
 }
 
+/** RAM tier keys from IPStock.memoryOptions — safe for Mongoose Map documents. */
+function getIpStockMemoryKeys(stock) {
+  const mo = stock?.memoryOptions;
+  if (!mo) return [];
+
+  if (typeof mo.forEach === 'function' && typeof mo.get === 'function') {
+    const keys = [];
+    mo.forEach((_, k) => {
+      const key = String(k);
+      if (key && !key.startsWith('$')) keys.push(key);
+    });
+    return keys;
+  }
+
+  if (mo instanceof Map) {
+    return [...mo.keys()].filter((k) => k && !String(k).startsWith('$'));
+  }
+
+  return Object.keys(mo).filter((k) => k && !String(k).startsWith('$'));
+}
+
+/** Drop Mongoose internal keys from per-RAM variantStock blobs before persisting. */
+function sanitizeVariantStockMap(obj) {
+  const out = {};
+  for (const [k, v] of Object.entries(obj || {})) {
+    if (!k || String(k).startsWith('$')) continue;
+    if (!v || typeof v !== 'object' || Array.isArray(v)) continue;
+    out[k] = deepMapToPlain(v);
+  }
+  return out;
+}
+
 function cloneAdvpsForMutation(advps) {
   if (!advps || typeof advps !== 'object') return null;
   return deepMapToPlain(advps);
@@ -352,6 +384,8 @@ module.exports = {
   toPlainConfigurations,
   mergeDefaultConfigurationsPlain,
   deepMapToPlain,
+  getIpStockMemoryKeys,
+  sanitizeVariantStockMap,
   cloneAdvpsForMutation,
   isAdvpsIpStockName,
   collectAdvpsProductIds,

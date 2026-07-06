@@ -1,13 +1,12 @@
 /**
- * Live PrimeVPS / Hostheaven panel stock via wallet + pricing catalog.
+ * Live PrimeVPS / Hostheaven panel stock.
  *
- * There is no dedicated GET /stock on the user API (unlike Netbay). We treat
- * a plan as in-stock when:
- *   1) At least one zone is ACTIVE, and
- *   2) Panel wallet balance >= estimated monthly VM price for that RAM tier.
+ * Per-plan mode (default when ipStock.defaultConfigurations.resellerApi.zoneId is set):
+ *   GET /api/users/zones → that zone status ACTIVE/AVAILABLE = in stock.
+ *   Each region (Mumbai-103.20, 103.148, …) syncs independently — no manual stockCount.
  *
- * Optional: GET /api/reseller/admin/vms/available (403 for user accounts —
- * ignored, wallet check still applies).
+ * Legacy mode (no zoneId on the plan):
+ *   Wallet balance >= estimated monthly VM price + at least one active zone.
  */
 
 const Company = require('@/models/companyModel').default;
@@ -21,7 +20,7 @@ const {
   isResellerApiStock,
 } = require('@/lib/resellerApiStockConfig');
 const { usesResellerLiveStock } = require('@/lib/ipStockAvailability');
-const { toPlainConfigurations } = require('@/lib/advpsLiveStock');
+const { toPlainConfigurations, getIpStockMemoryKeys, sanitizeVariantStockMap } = require('@/lib/advpsLiveStock');
 
 const LOG = '[RESELLER-LIVE-STOCK]';
 const STOCK_ROW_TTL_MS = 5 * 60 * 1000;
@@ -42,14 +41,6 @@ function stockHasResellerPanelPlans(stock) {
   if (isResellerApiStock(stock, null)) return true;
   const tags = (stock?.tags || []).map((t) => String(t).toLowerCase());
   return tags.includes('reseller-api') || tags.includes('primevps') || tags.includes('primevm');
-}
-
-function isWindowsStock(ipStock) {
-  const serverType = String(ipStock?.serverType || '').toUpperCase();
-  if (serverType === 'VPS') return true;
-  if (serverType === 'LINUX') return false;
-  const name = String(ipStock?.name || '').toLowerCase();
-  return name.includes('windows') || name.includes('rdp');
 }
 
 function pickPrimaryMemory(memories) {
@@ -84,9 +75,47 @@ async function resolvePriceIds(api, stockCfg, memory) {
 }
 
 /**
- * Check one RAM tier against panel wallet + zones.
+ * Zone-only stock: one plan ↔ one zoneId (PrimeVM regions like Mumbai-103.20).
  */
-async function checkResellerVariantStock(api, { stockCfg, memory, ipStock }) {
+async function checkResellerZoneStock(api, { stockCfg, memory, zonesList = null }) {
+  const zoneId = Number(stockCfg.zoneId);
+  const zones = zonesList || (await api.listZones());
+  const zone = zones.find((z) => Number(z.id) === zoneId);
+
+  if (!zone) {
+    return {
+      memory,
+      available: false,
+      stockMode: 'zone',
+      zoneId,
+      zoneOk: false,
+      unitsAvailable: 0,
+      reason: `Region (zone ${zoneId}) not found on panel`,
+      message: 'Region not available on panel',
+      checkedAt: new Date().toISOString(),
+    };
+  }
+
+  const zoneOk = ResellerApi.isZoneStatusLive(zone.status);
+  return {
+    memory,
+    available: zoneOk,
+    stockMode: 'zone',
+    zoneId: zone.id,
+    zoneName: zone.name,
+    zoneStatus: zone.status,
+    zoneOk,
+    unitsAvailable: zoneOk ? 1 : 0,
+    reason: zoneOk ? '' : `Region ${zone.name} is ${zone.status || 'unavailable'}`,
+    message: zoneOk ? `In stock (${zone.name})` : `Out of stock (${zone.name} unavailable)`,
+    checkedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Legacy wallet-based stock when plan has no zoneId.
+ */
+async function checkResellerWalletStock(api, { stockCfg, memory }) {
   const priceIds = await resolvePriceIds(api, stockCfg, memory);
   const [wallet, pricing, activeZones, adminPool] = await Promise.all([
     api.getWallet(),
@@ -108,7 +137,6 @@ async function checkResellerVariantStock(api, { stockCfg, memory, ipStock }) {
   const zoneOk = activeZones > 0;
   const walletOk = estimatedPrice > 0 ? balance >= estimatedPrice : balance > 0;
   const adminOk = adminPool?.ok && adminPool.count > 0;
-
   const available = zoneOk && (walletOk || adminOk);
   const unitsAvailable = estimatedPrice > 0
     ? Math.max(0, Math.floor(balance / estimatedPrice))
@@ -123,6 +151,7 @@ async function checkResellerVariantStock(api, { stockCfg, memory, ipStock }) {
   return {
     memory,
     available,
+    stockMode: 'wallet',
     walletBalance: balance,
     estimatedPrice,
     unitsAvailable,
@@ -137,7 +166,17 @@ async function checkResellerVariantStock(api, { stockCfg, memory, ipStock }) {
   };
 }
 
-async function syncResellerIpStockRow(stock, { force = false, memoryOnly = null } = {}) {
+/**
+ * Check one RAM tier — zone API when zoneId set, else wallet fallback.
+ */
+async function checkResellerVariantStock(api, { stockCfg, memory, zonesList = null }) {
+  if (stockCfg?.zoneId != null && Number.isFinite(Number(stockCfg.zoneId))) {
+    return checkResellerZoneStock(api, { stockCfg, memory, zonesList });
+  }
+  return checkResellerWalletStock(api, { stockCfg, memory });
+}
+
+async function syncResellerIpStockRow(stock, { force = false, memoryOnly = null, zonesList = null } = {}) {
   if (!isResellerIpStock(stock) || !stockHasResellerPanelPlans(stock)) return stock;
 
   const ctx = await getResellerApiForStock(stock);
@@ -153,23 +192,43 @@ async function syncResellerIpStockRow(stock, { force = false, memoryOnly = null 
   }
 
   const stockCfg = readResellerApiStockConfig(stock);
-  const memories = Object.keys(stock.memoryOptions || {}).filter(Boolean);
+  let memories = getIpStockMemoryKeys(stock);
   if (memories.length === 0) {
-    memories.push('4GB', '2GB', '8GB');
+    memories = ['4GB', '2GB', '8GB'];
   }
 
   const memoriesToCheck = memoryOnly
-    ? memories.filter((m) => m === memoryOnly)
+    ? [memoryOnly]
     : [pickPrimaryMemory(memories)].filter(Boolean);
 
-  const variantResults = { ...(prevReseller.variantStock || {}) };
+  let resolvedZones = zonesList;
+  if (stockCfg.zoneId != null && !resolvedZones) {
+    try {
+      resolvedZones = await ctx.api.listZones();
+    } catch (err) {
+      console.warn(`${LOG} listZones failed for ${stock.name}:`, err.message);
+    }
+  }
+
+  const plainVariantStock = sanitizeVariantStockMap(
+    prevReseller.variantStock && typeof prevReseller.variantStock === 'object'
+      ? JSON.parse(JSON.stringify(prevReseller.variantStock))
+      : {}
+  );
+  const variantResults = { ...plainVariantStock };
   let upstreamYes = 0;
   let upstreamNo = 0;
+  let lastZoneName = prevReseller.zoneName || null;
 
   for (const memory of memoriesToCheck) {
     try {
-      const result = await checkResellerVariantStock(ctx.api, { stockCfg, memory, ipStock: stock });
+      const result = await checkResellerVariantStock(ctx.api, {
+        stockCfg,
+        memory,
+        zonesList: resolvedZones,
+      });
       variantResults[memory] = result;
+      if (result.zoneName) lastZoneName = result.zoneName;
       if (result.available) upstreamYes += 1;
       else upstreamNo += 1;
     } catch (err) {
@@ -190,14 +249,14 @@ async function syncResellerIpStockRow(stock, { force = false, memoryOnly = null 
     }
   }
 
-  // Mirror primary tier to all RAM options on listing sync
   if (!memoryOnly && memoriesToCheck.length === 1) {
     const primary = memoriesToCheck[0];
     const primaryResult = variantResults[primary];
-    if (primaryResult) {
+    if (primaryResult && typeof primaryResult === 'object') {
+      const plainPrimary = JSON.parse(JSON.stringify(primaryResult));
       for (const memory of memories) {
         if (memory === primary) continue;
-        variantResults[memory] = { ...primaryResult, memory, mirroredFrom: primary };
+        variantResults[memory] = { ...plainPrimary, memory, mirroredFrom: primary };
       }
     }
   }
@@ -207,13 +266,17 @@ async function syncResellerIpStockRow(stock, { force = false, memoryOnly = null 
     .map((v) => Number(v?.unitsAvailable) || 0)
     .reduce((a, b) => Math.max(a, b), 0);
 
+  const primaryResult = variantResults[memoriesToCheck[0]] || {};
+
   const updatePayload = {
     defaultConfigurations: {
       ...defaults,
       resellerApi: {
         ...stockCfg,
+        ...(lastZoneName ? { zoneName: lastZoneName } : {}),
         lastStockSync: new Date().toISOString(),
-        variantStock: variantResults,
+        lastStockMode: primaryResult.stockMode || (stockCfg.zoneId != null ? 'zone' : 'wallet'),
+        variantStock: sanitizeVariantStockMap(variantResults),
       },
     },
   };
@@ -229,7 +292,7 @@ async function syncResellerIpStockRow(stock, { force = false, memoryOnly = null 
   return IPStock.findById(stock._id);
 }
 
-async function verifyResellerMemoryInStock(stock, memory, { preferCache = false } = {}) {
+async function verifyResellerMemoryInStock(stock, memory, { preferCache = false, zonesList = null } = {}) {
   if (!isResellerIpStock(stock)) return { ok: true, skipped: true };
 
   const ctx = await getResellerApiForStock(stock);
@@ -255,13 +318,16 @@ async function verifyResellerMemoryInStock(stock, memory, { preferCache = false 
     const result = await checkResellerVariantStock(ctx.api, {
       stockCfg,
       memory,
-      ipStock: stock,
+      zonesList,
     });
 
     if (!result.available) {
+      const defaultMsg = stockCfg.zoneId != null
+        ? 'This region is currently unavailable on the panel.'
+        : 'Panel wallet too low for this plan. Top up primevm.in wallet.';
       return {
         ok: false,
-        message: result.reason || result.message || 'Panel wallet too low for this plan. Top up primevm.in wallet.',
+        message: result.reason || result.message || defaultMsg,
         result,
       };
     }
@@ -308,15 +374,45 @@ async function refreshResellerStockForCustomer({ force = false } = {}) {
     (r) => liveCompanyIds.has(String(r.company)) && stockHasResellerPanelPlans(r)
   );
 
+  const rowsByCompany = {};
+  for (const row of rows) {
+    const cid = String(row.company);
+    if (!rowsByCompany[cid]) rowsByCompany[cid] = [];
+    rowsByCompany[cid].push(row);
+  }
+
   let synced = 0;
   let inStock = 0;
-  for (const row of rows) {
+  const zoneSnapshots = [];
+
+  for (const [companyId, companyRows] of Object.entries(rowsByCompany)) {
+    let zonesList = null;
     try {
-      const updated = await syncResellerIpStockRow(row, { force: true });
-      synced += 1;
-      if (updated?.available) inStock += 1;
+      const ctx = await getResellerApiForStock(companyRows[0]);
+      if (ctx) {
+        zonesList = await ctx.api.listZones();
+        for (const z of zonesList) {
+          zoneSnapshots.push({
+            companyId,
+            zoneId: z.id,
+            name: z.name,
+            status: z.status,
+            live: ResellerApi.isZoneStatusLive(z.status),
+          });
+        }
+      }
     } catch (err) {
-      console.warn(`${LOG} refresh row failed (${row.name}):`, err.message);
+      console.warn(`${LOG} listZones failed for company ${companyId}:`, err.message);
+    }
+
+    for (const row of companyRows) {
+      try {
+        const updated = await syncResellerIpStockRow(row, { force: true, zonesList });
+        synced += 1;
+        if (updated?.available) inStock += 1;
+      } catch (err) {
+        console.warn(`${LOG} refresh row failed (${row.name}):`, err.message);
+      }
     }
   }
 
@@ -325,6 +421,7 @@ async function refreshResellerStockForCustomer({ force = false } = {}) {
     synced,
     inStock,
     total: rows.length,
+    zones: zoneSnapshots,
     refreshedAt: now,
   };
   cache.lastAt = now;

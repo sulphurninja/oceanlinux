@@ -14,7 +14,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { X, Zap, BookOpen } from 'lucide-react';
+import { X, Zap, BookOpen, RefreshCw, Loader2 } from 'lucide-react';
 import Link from 'next/link';
 import axios from 'axios';
 import { toast } from 'sonner';
@@ -41,7 +41,14 @@ type CompanyOption = {
     _id: string;
     name: string;
     netbayApi?: { enabled?: boolean } | null;
-    resellerApi?: { enabled?: boolean } | null;
+    resellerApi?: { enabled?: boolean; useLiveStockApi?: boolean } | null;
+};
+
+type PanelZone = {
+    id: number;
+    name: string;
+    status: string;
+    live: boolean;
 };
 
 const IPStockFormWithParams = () => {
@@ -61,6 +68,8 @@ const IPStockFormWithParams = () => {
     const [netbayDefaultOsLinux, setNetbayDefaultOsLinux] = useState('');
     const [netbayDefaultOsWindows, setNetbayDefaultOsWindows] = useState('');
     const [resellerZoneId, setResellerZoneId] = useState('');
+    const [panelZones, setPanelZones] = useState<PanelZone[]>([]);
+    const [panelZonesLoading, setPanelZonesLoading] = useState(false);
     const [memorySizes, setMemorySizes] = useState<string[]>(DEFAULT_MEMORY_SIZES);
     const [newMemorySize, setNewMemorySize] = useState('');
     const [prices, setPrices] = useState<Record<string, string>>(() =>
@@ -235,6 +244,63 @@ const IPStockFormWithParams = () => {
         return !!(c?.resellerApi?.enabled);
     })();
 
+    const selectedCompanyUsesResellerLiveStock = (() => {
+        if (!companyId || companyId === 'none') return false;
+        const c = companies.find((co) => co._id === companyId);
+        return !!(c?.resellerApi?.enabled && c?.resellerApi?.useLiveStockApi);
+    })();
+
+    const fetchPanelZones = async (silent = false) => {
+        if (!companyId || companyId === 'none') {
+            if (!silent) toast.error('Pehle company select karo');
+            return;
+        }
+        if (!selectedCompanyHasResellerApi) {
+            if (!silent) toast.error('Is company par Reseller API enabled nahi hai');
+            return;
+        }
+        setPanelZonesLoading(true);
+        try {
+            const r = await fetch(
+                `/api/reseller-panel/zones?companyId=${encodeURIComponent(companyId)}`,
+                { credentials: 'include', cache: 'no-store' }
+            );
+            const j = await r.json();
+            if (!r.ok) throw new Error(j.error || 'Failed to fetch zones');
+            const zones: PanelZone[] = Array.isArray(j.zones) ? j.zones : [];
+            setPanelZones(zones);
+            if (!silent) {
+                toast.success(`${zones.length} region(s) loaded from panel`);
+            }
+        } catch (e: unknown) {
+            const msg = e instanceof Error ? e.message : 'Zone fetch failed';
+            if (!silent) toast.error(msg);
+            setPanelZones([]);
+        } finally {
+            setPanelZonesLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        setPanelZones([]);
+        setResellerZoneId('');
+        if (companyId && companyId !== 'none' && selectedCompanyHasResellerApi) {
+            void fetchPanelZones(true);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [companyId, selectedCompanyHasResellerApi]);
+
+    const handlePanelZoneSelect = (value: string) => {
+        setResellerZoneId(value);
+        const zone = panelZones.find((z) => String(z.id) === value);
+        if (zone && !name.trim()) {
+            const suffix = serverType === 'VPS' ? 'Windows VPS' : 'Linux';
+            setName(`${zone.name} ${suffix}`);
+        }
+    };
+
+    const selectedPanelZone = panelZones.find((z) => String(z.id) === resellerZoneId);
+
     const handleNetbayPlanIdChange = (size: string, value: string) => {
         setNetbayPlanIds((prev) => {
             const next = { ...prev };
@@ -261,6 +327,11 @@ const IPStockFormWithParams = () => {
 
         if (Object.keys(memoryOptions).length === 0) {
             toast.error('Add at least one RAM size with a price (or Netbay Plan ID)');
+            return;
+        }
+
+        if (selectedCompanyHasResellerApi && !resellerZoneId.trim()) {
+            toast.error('Sync regions karo aur panel se ek zone select karo');
             return;
         }
 
@@ -310,25 +381,34 @@ const IPStockFormWithParams = () => {
         }
 
         const submitTags = [...tags];
+        const selectedZone = panelZones.find((z) => String(z.id) === resellerZoneId);
         if (selectedCompanyHasResellerApi) {
-            if (resellerZoneId.trim() || !submitTags.includes('reseller-api')) {
-                defaultConfigurations.resellerApi = {
-                    ...(resellerZoneId.trim() ? { zoneId: Number(resellerZoneId) } : {}),
-                    planType: 'SHARED',
-                    gateway: 'WALLET',
-                };
-            }
+            defaultConfigurations.resellerApi = {
+                zoneId: Number(resellerZoneId),
+                ...(selectedZone?.name ? { zoneName: selectedZone.name } : {}),
+                planType: 'SHARED',
+                gateway: 'WALLET',
+            };
             if (!submitTags.includes('reseller-api')) submitTags.push('reseller-api');
         }
 
         const linkedCompany = companyId && companyId !== 'none' ? companyId : null;
+        const liveResellerStock = selectedCompanyUsesResellerLiveStock;
 
         try {
             const response = await axios.post('/api/ipstock', {
                 name,
                 description,
-                available: linkedCompany ? Number(stockCount) > 0 : available === 'true',
-                stockCount: linkedCompany ? Math.max(0, Math.floor(Number(stockCount) || 0)) : undefined,
+                available: liveResellerStock
+                    ? true
+                    : linkedCompany
+                    ? Number(stockCount) > 0
+                    : available === 'true',
+                stockCount: liveResellerStock
+                    ? 1
+                    : linkedCompany
+                    ? Math.max(0, Math.floor(Number(stockCount) || 0))
+                    : undefined,
                 serverType,
                 tags: submitTags,
                 memoryOptions,
@@ -358,6 +438,7 @@ const IPStockFormWithParams = () => {
             setNetbayDefaultOsLinux('');
             setNetbayDefaultOsWindows('');
             setResellerZoneId('');
+            setPanelZones([]);
 
             toast.success('IP Stock created successfully!');
         } catch (error: any) {
@@ -427,11 +508,18 @@ const IPStockFormWithParams = () => {
                                     </SelectContent>
                                 </Select>
                                 <p className="text-xs text-gray-500 mt-1">
-                                    Netbay / company stocks: select company, set stock count, and fill Netbay config below.
+                                    PrimeVPS: company select karo → regions sync → zone pick → price daalo → create.
+                                    Netbay: stock count + plan IDs neeche.
                                 </p>
                             </div>
 
-                            {companyId && companyId !== 'none' && (
+                            {selectedCompanyUsesResellerLiveStock && (
+                                <div className="mb-4 rounded-md border border-emerald-200/80 bg-emerald-50/60 dark:bg-emerald-950/20 p-3 text-xs text-emerald-800 dark:text-emerald-200">
+                                    <strong>Live stock ON</strong> — manual stock count ki zaroorat nahi. Availability panel zone se auto sync hogi.
+                                </div>
+                            )}
+
+                            {companyId && companyId !== 'none' && !selectedCompanyUsesResellerLiveStock && (
                                 <div className="mb-4">
                                     <Label className="block text-sm font-medium mb-1">Stock Count (orderable units):</Label>
                                     <Input
@@ -443,7 +531,7 @@ const IPStockFormWithParams = () => {
                                         placeholder="e.g. 50"
                                     />
                                     <p className="text-xs text-gray-500 mt-1">
-                                        Kitni baar sell kar sakte ho. Har sale par Netbay se naya VM banega.
+                                        Manual mode — kitni baar sell kar sakte ho.
                                     </p>
                                 </div>
                             )}
@@ -527,23 +615,71 @@ const IPStockFormWithParams = () => {
 
                             {selectedCompanyHasResellerApi && (
                                 <div className="mb-6 border rounded-lg p-4 bg-sky-50/40 dark:bg-sky-950/10 border-sky-200/60 dark:border-sky-900/40 space-y-3">
-                                    <div>
-                                        <Label className="text-base font-semibold">PrimeVPS / Panel API (UserSide.pdf)</Label>
-                                        <p className="text-xs text-muted-foreground mt-0.5">
-                                            Auto-buy + renew + manage via company reseller API (primevm.in). Tag <code>reseller-api</code> added automatically.
-                                            Pricing IDs auto-resolve from panel catalog if not mapped manually.
-                                        </p>
+                                    <div className="flex flex-wrap items-start justify-between gap-3">
+                                        <div>
+                                            <Label className="text-base font-semibold">PrimeVPS / Panel API</Label>
+                                            <p className="text-xs text-muted-foreground mt-0.5">
+                                                Sync regions → zone select → name + price → create. Tag <code>reseller-api</code> auto.
+                                            </p>
+                                        </div>
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            size="sm"
+                                            className="gap-1.5 shrink-0"
+                                            onClick={() => void fetchPanelZones(false)}
+                                            disabled={panelZonesLoading}
+                                        >
+                                            {panelZonesLoading ? (
+                                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                            ) : (
+                                                <RefreshCw className="h-3.5 w-3.5" />
+                                            )}
+                                            Sync regions
+                                        </Button>
                                     </div>
                                     <div>
-                                        <Label className="text-sm">Zone ID (optional):</Label>
-                                        <Input
-                                            type="number"
-                                            placeholder="e.g. 1 = Mumbai-103.20"
-                                            value={resellerZoneId}
-                                            onChange={(e) => setResellerZoneId(e.target.value)}
-                                        />
+                                        <Label className="text-sm">Region (from panel)</Label>
+                                        <Select
+                                            value={resellerZoneId || undefined}
+                                            onValueChange={handlePanelZoneSelect}
+                                            disabled={panelZonesLoading || panelZones.length === 0}
+                                        >
+                                            <SelectTrigger className="mt-1">
+                                                <SelectValue
+                                                    placeholder={
+                                                        panelZonesLoading
+                                                            ? 'Loading regions…'
+                                                            : panelZones.length
+                                                            ? 'Select region (e.g. 160.191.137-2server)'
+                                                            : 'Click Sync regions first'
+                                                    }
+                                                />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {panelZones.map((z) => (
+                                                    <SelectItem key={z.id} value={String(z.id)}>
+                                                        <span className="font-mono text-xs">ID {z.id}</span>
+                                                        {' — '}
+                                                        {z.name}
+                                                        {' '}
+                                                        <span className={z.live ? 'text-emerald-600' : 'text-red-500'}>
+                                                            ({z.live ? 'Available' : z.status || 'Unavailable'})
+                                                        </span>
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                        {resellerZoneId && selectedPanelZone && (
+                                            <p className="text-xs text-emerald-700 dark:text-emerald-300 mt-1.5">
+                                                Selected: zone <strong>{resellerZoneId}</strong> — {selectedPanelZone.name}
+                                                {selectedCompanyUsesResellerLiveStock
+                                                    ? ' · live stock iske status se sync hogi'
+                                                    : ''}
+                                            </p>
+                                        )}
                                         <p className="text-xs text-gray-500 mt-1">
-                                            Blank = first active zone from panel. Wallet on primevm.in must have balance for auto-buy/renew.
+                                            Har IP series = alag product. Buy ke liye primevm.in wallet balance chahiye.
                                         </p>
                                     </div>
                                 </div>

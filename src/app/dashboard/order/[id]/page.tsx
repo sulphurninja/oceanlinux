@@ -26,7 +26,6 @@ import {
   Clock,
   CreditCard,
   AlertTriangle,
-  Computer,
   MemoryStick,
   Database,
   Shield,
@@ -51,6 +50,7 @@ import { Switch } from '@/components/ui/switch';
 import { fetchWalletSummary } from '@/lib/walletClient';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { OsIcon } from '@/components/os/OsIcon';
 import { premiumBtnOutline, premiumBadge } from '@/lib/premium-badges';
 import { ADVPS_REBUILD_LIMIT, getAdvpsRebuildUsage } from '@/lib/advpsRebuildLimit';
 import { isWithinRenewalWindow } from '@/lib/expiryHelper';
@@ -212,36 +212,44 @@ interface Order {
   };
 }
 
-// OS Icon Component
-const OSIcon = ({ os, className = "h-8 w-8" }: { os: string; className?: string }) => {
-  const osLower = os.toLowerCase();
+function humanizeOsTemplateName(name: unknown, id: string): string {
+  const raw =
+    (typeof name === 'string'
+      ? name
+      : name && typeof name === 'object'
+      ? (name as { label?: string; name?: string; os?: string }).label ||
+        (name as { name?: string }).name ||
+        (name as { os?: string }).os ||
+        ''
+      : String(id)
+    )
+      .trim()
+      .toLowerCase()
+      .replace(/[_\s]+/g, '-');
 
-  if (osLower.includes('ubuntu')) {
-    return (
-      <div className={`${className} rounded-lg flex items-center justify-center shadow-sm`}>
-        <img src='/ubuntu.png' className={`${className} rounded-lg object-cover`} alt={os} />
-      </div>
-    );
-  } else if (osLower.includes('centos')) {
-    return (
-      <div className={`${className} rounded-lg flex items-center justify-center shadow-sm`}>
-        <img src='/centos.png' className={`${className} rounded-lg object-cover`} alt={os} />
-      </div>
-    );
-  } else if (osLower.includes('windows')) {
-    return (
-      <div className={`${className} rounded-lg flex items-center justify-center shadow-sm`}>
-        <img src='/windows.png' className={`${className} rounded-lg object-cover`} alt={os} />
-      </div>
-    );
-  } else {
-    return (
-      <div className={`${className} bg-gray-500 rounded-lg flex items-center justify-center text-white shadow-sm`}>
-        <Computer className="h-5 w-5" />
-      </div>
-    );
+  const known: Record<string, string> = {
+    'win-22': 'Windows Server 2022',
+    win22: 'Windows Server 2022',
+    window2022: 'Windows Server 2022',
+    window2025: 'Windows Server 2025',
+    'win-25': 'Windows Server 2025',
+    ubuntu22: 'Ubuntu 22.04',
+    ubuntu24: 'Ubuntu 24.04',
+    'ubuntu-22': 'Ubuntu 22.04',
+    'ubuntu-24': 'Ubuntu 24.04',
+  };
+  if (known[raw]) return known[raw];
+
+  const winYear = raw.match(/^win-?(\d{2})$/);
+  if (winYear) return `Windows Server 20${winYear[1]}`;
+
+  if (typeof name === 'string' && name.trim()) return name.trim();
+  if (name && typeof name === 'object') {
+    const template = name as { name?: string; label?: string; os?: string; distro?: string };
+    return template.label || template.name || template.os || template.distro || `Template ${id}`;
   }
-};
+  return `Template ${id}`;
+}
 
 function styleText(content: string) {
   const regex = /(\([^)]*\)|[a-zA-Z]+)/g;
@@ -255,12 +263,7 @@ function styleText(content: string) {
 }
 
 function getOsTemplateLabel(name: unknown, id: string): string {
-  if (typeof name === 'string') return name;
-  if (name && typeof name === 'object') {
-    const template = name as { name?: string; label?: string; os?: string; distro?: string; category?: string };
-    return template.label || template.name || template.os || template.distro || `Template ${id}`;
-  }
-  return `Template ${id}`;
+  return humanizeOsTemplateName(name, id);
 }
 
 /** Netbay rebuild expects the catalog template name, not the internal id. */
@@ -2233,7 +2236,7 @@ const OrderDetails = () => {
               >
                 <ArrowLeft className="h-5 w-5" />
               </Button>
-              <OSIcon os={order.os} className="h-10 w-10 sm:h-12 sm:w-12 flex-shrink-0" />
+              <OsIcon os={order.os} productName={order.productName} className="h-10 w-10 sm:h-12 sm:w-12 flex-shrink-0" />
               <div className="min-w-0 flex-1">
                 <h1 className='text-base sm:text-lg font-semibold break-words mb-1.5 premium-dashboard-title'>
                   {styleText(order.productName)}
@@ -3251,7 +3254,7 @@ const OrderDetails = () => {
                                       : 'border-white/12 bg-white/[0.03] hover:bg-white/[0.06] hover:border-emerald-400/20'
                                   )}
                                 >
-                                  <OSIcon os={label} className="h-8 w-8 shrink-0" />
+                                  <OsIcon os={label} className="h-8 w-8 shrink-0" />
                                   <span className="min-w-0 flex-1 text-sm font-medium leading-tight">{label}</span>
                                   {isSelected && <Check className="h-4 w-4 shrink-0 text-primary" />}
                                 </button>

@@ -28,6 +28,7 @@ import {
   buildCompanyValidityMismatchReport,
 } from '@/lib/companyValidityMismatch';
 import { getCompanyValidityDays } from '@/lib/expiryHelper';
+import { OsIcon, humanizeOsLabel } from '@/components/os/OsIcon';
 
 function orderStatusBadgeProps(status: string): {
   variant: 'default' | 'secondary' | 'outline' | 'destructive';
@@ -73,24 +74,6 @@ function getValidityDays(createdAt?: string, expiryDate?: string) {
   return Math.max(
     0,
     Math.ceil((new Date(expiryDate).getTime() - new Date(createdAt).getTime()) / (1000 * 60 * 60 * 24))
-  );
-}
-
-function OSIcon({ os, className = 'h-9 w-9' }: { os?: string; className?: string }) {
-  const osLower = (os || '').toLowerCase();
-  if (osLower.includes('ubuntu')) {
-    return <img src="/ubuntu.png" className={cn(className, 'rounded-lg object-cover shadow-sm shrink-0')} alt={os} />;
-  }
-  if (osLower.includes('centos')) {
-    return <img src="/centos.png" className={cn(className, 'rounded-lg object-cover shadow-sm shrink-0')} alt={os} />;
-  }
-  if (osLower.includes('windows')) {
-    return <img src="/windows.png" className={cn(className, 'rounded-lg object-cover shadow-sm shrink-0')} alt={os} />;
-  }
-  return (
-    <div className={cn(className, 'rounded-lg bg-muted flex items-center justify-center text-base shrink-0')}>
-      🐧
-    </div>
   );
 }
 
@@ -1490,7 +1473,7 @@ export default function CompanyDashboard() {
                 <Card key={order._id} className="overflow-hidden">
                   <CardContent className="p-2.5 sm:p-3">
                     <div className="flex items-start gap-2.5 sm:gap-3">
-                      <OSIcon os={order.os} className="h-8 w-8 sm:h-9 sm:w-9" />
+                      <OsIcon os={order.os} productName={order.productName} className="h-8 w-8 sm:h-9 sm:w-9" />
 
                       <div className="min-w-0 flex-1">
                         <div className="flex items-start justify-between gap-2">
@@ -1509,7 +1492,7 @@ export default function CompanyDashboard() {
                               {order.os && (
                                 <Badge variant="outline" className="text-[10px] h-4 px-1.5">
                                   <Terminal className="h-2.5 w-2.5 mr-0.5" />
-                                  {order.os}
+                                  {humanizeOsLabel(order.os, order.productName)}
                                 </Badge>
                               )}
                               <Badge {...statusBadge}>{label || order.status}</Badge>

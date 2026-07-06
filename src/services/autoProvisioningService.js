@@ -1616,6 +1616,9 @@ class AutoProvisioningService {
     let resellerVmId = order.resellerVmId || '';
     let resellerOrderId = order.resellerOrderId || '';
     let resellerGroupId = order.resellerGroupId || '';
+    let purchaseStartedAt = order.createdAt
+      ? new Date(order.createdAt).getTime()
+      : Date.now();
 
     if (!resellerVmId && !resellerOrderId) {
       let priceIds = resolvePriceIdsForMemory(stockCfg, order.memory);
@@ -1677,6 +1680,7 @@ class AutoProvisioningService {
       };
 
       L.line(`[RESELLER-API] POST /api/users/vms/create ${JSON.stringify(createBody)}`);
+      purchaseStartedAt = Date.now();
       let createRes;
       try {
         createRes = await api.createVm(createBody, { gateway: stockCfg.gateway || 'WALLET' });
@@ -1684,8 +1688,25 @@ class AutoProvisioningService {
         throw new Error(`Panel VM purchase failed: ${err.message}`);
       }
 
-      resellerOrderId = createRes?.orderId ?? createRes?.data?.orderId ?? '';
-      resellerGroupId = createRes?.groupId ?? createRes?.data?.groupId ?? '';
+      const createData = createRes?.data && typeof createRes.data === 'object' ? createRes.data : createRes;
+      resellerOrderId =
+        createData?.transactionId ??
+        createData?.orderReference ??
+        createData?.orderId ??
+        createRes?.transactionId ??
+        createRes?.orderId ??
+        '';
+      resellerGroupId =
+        createData?.groupId ??
+        createRes?.groupId ??
+        '';
+      const createdVmId =
+        createData?.vmId ??
+        createData?.virtualMachineId ??
+        createRes?.vmId ??
+        createRes?.virtualMachineId ??
+        '';
+      if (createdVmId) resellerVmId = String(createdVmId);
 
       await Order.findByIdAndUpdate(order._id, {
         resellerOrderId: resellerOrderId ? String(resellerOrderId) : undefined,
@@ -1724,31 +1745,54 @@ class AutoProvisioningService {
       if (!provisioned?.ip && !provisioned?.password) {
         provisioned = await waitForProvisionedVm(api, {
           resellerOrderId: resellerOrderId || null,
+          resellerGroupId: resellerGroupId || null,
+          resellerVmId: resellerVmId || null,
+          purchaseStartedAt,
+          excludeOrderId: order._id,
           maxWaitMs: 180_000,
           pollMs: 5000,
         });
       }
 
       if (provisioned?.pending) {
-        const { calculateCompanyExpiryDate } = await import('@/lib/expiryHelper');
-        expiryDate = expiryDate || calculateCompanyExpiryDate();
-        await Order.findByIdAndUpdate(order._id, {
-          status: 'confirmed',
-          provisioningStatus: 'provisioning',
-          provisioningError: 'PENDING: VM purchased on panel — waiting for IP/credentials. Will retry automatically.',
-          provider: 'reseller-api',
-          username,
-          os: orderOs,
-          expiryDate,
-          lastProvisionAttempt: new Date(),
-        });
+        const { completeResellerPendingOrder } = require('@/lib/resellerApiOrderSync');
+        const freshOrder = await Order.findById(order._id);
+        const recovered = await completeResellerPendingOrder(freshOrder, ipStock, { api });
+        if (recovered?.success || recovered?.ipAddress) {
+          const updated = await Order.findById(order._id).lean();
+          ipAddress = updated?.ipAddress || recovered.ipAddress || ipAddress;
+          password = updated?.password || password;
+          username = updated?.username || username;
+          resellerVmId = updated?.resellerVmId || recovered.vmId || resellerVmId;
+          expiryDate = updated?.expiryDate || expiryDate;
+          provisioned = {
+            vmId: resellerVmId,
+            ip: ipAddress,
+            password,
+            username,
+            expiryDate,
+          };
+        } else {
+          const { calculateCompanyExpiryDate } = await import('@/lib/expiryHelper');
+          expiryDate = expiryDate || calculateCompanyExpiryDate();
+          await Order.findByIdAndUpdate(order._id, {
+            status: 'confirmed',
+            provisioningStatus: 'provisioning',
+            provisioningError: 'PENDING: VM purchased on panel — waiting for IP/credentials. Will retry automatically.',
+            provider: 'reseller-api',
+            username,
+            os: orderOs,
+            expiryDate,
+            lastProvisionAttempt: new Date(),
+          });
 
-        return {
-          success: false,
-          resellerApiPending: true,
-          error: 'Panel VM pending IP/credentials',
-          totalTime: Date.now() - startTime,
-        };
+          return {
+            success: false,
+            resellerApiPending: true,
+            error: 'Panel VM pending IP/credentials',
+            totalTime: Date.now() - startTime,
+          };
+        }
       }
 
       if (provisioned?.vmId) resellerVmId = provisioned.vmId;

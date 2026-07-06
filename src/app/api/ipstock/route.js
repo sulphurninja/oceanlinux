@@ -6,6 +6,8 @@ import { enforceAdmin } from '@/lib/apiSecurity';
 import { requireAdmin } from '@/lib/adminAuth';
 const { companyUsesNetbayLiveStock } = require('@/lib/companyNetbayApi');
 const { companyUsesResellerLiveStock } = require('@/lib/companyResellerApi');
+const { usesResellerLiveStock, stockHasResellerPanelPlans } = require('@/lib/ipStockAvailability');
+const { syncResellerIpStockRow } = require('@/lib/resellerLiveStock');
 
 async function enrichIpStocksWithProviderModes(ipStocks) {
     const companyIds = [...new Set(
@@ -42,13 +44,41 @@ export async function POST(request) {
         const linkedCompany = company && company !== 'none' ? company : null;
         const count = linkedCompany ? Math.max(0, Math.floor(Number(stockCount) || 0)) : undefined;
 
+        let companyDoc = null;
+        if (linkedCompany) {
+            companyDoc = await Company.findById(linkedCompany).select('netbayApi resellerApi').lean();
+        }
+
+        const submitTags = tags || [];
+        const hasResellerPlans = !!(
+            defaultConfigurations?.resellerApi ||
+            submitTags.map((t) => String(t).toLowerCase()).some((t) =>
+                t === 'reseller-api' || t === 'primevps' || t === 'primevm'
+            )
+        );
+        const resellerLiveStock =
+            linkedCompany &&
+            hasResellerPlans &&
+            usesResellerLiveStock(
+                { company: linkedCompany, tags: submitTags, defaultConfigurations },
+                companyDoc
+            );
+
         const newIPStock = new IPStock({
             name,
-            available: linkedCompany ? (count > 0) : available,
-            stockCount: linkedCompany ? count : 0,
+            available: resellerLiveStock
+                ? true
+                : linkedCompany
+                ? (count > 0)
+                : available,
+            stockCount: resellerLiveStock
+                ? 1
+                : linkedCompany
+                ? count
+                : 0,
             hiddenFromStore: !!hiddenFromStore,
             serverType,
-            tags: tags || [],
+            tags: submitTags,
             memoryOptions,
             promoCodes: promoCodes || [],
             defaultConfigurations: defaultConfigurations || {},
@@ -57,7 +87,16 @@ export async function POST(request) {
 
         await newIPStock.save();
 
-        return new Response(JSON.stringify(newIPStock), {
+        let responseStock = newIPStock;
+        if (resellerLiveStock && hasResellerPlans) {
+            try {
+                responseStock = await syncResellerIpStockRow(newIPStock, { force: true }) || newIPStock;
+            } catch (syncErr) {
+                console.warn('[IPSTOCK-CREATE] reseller live sync failed:', syncErr.message);
+            }
+        }
+
+        return new Response(JSON.stringify(responseStock), {
             status: 201,
             headers: { 'Content-Type': 'application/json' }
         });

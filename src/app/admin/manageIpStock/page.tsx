@@ -19,7 +19,7 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import Link from 'next/link';
-import { X, ExternalLink, Zap, BookOpen, Copy } from 'lucide-react';
+import { X, ExternalLink, Zap, BookOpen, Copy, RefreshCw, Loader2, Cloud } from 'lucide-react';
 
 interface MemoryOptionDetails {
     price: number;
@@ -56,6 +56,32 @@ interface CompanyOption {
     name: string;
     netbayApi?: { enabled?: boolean; useLiveStockApi?: boolean; apiKey?: string; apiSecret?: string } | null;
     resellerApi?: { enabled?: boolean; useLiveStockApi?: boolean } | null;
+}
+
+type PanelZone = {
+    id: number;
+    name: string;
+    status: string;
+    live: boolean;
+};
+
+function readResellerApiConfig(stock: IPStock | null) {
+    const cfg: any = stock?.defaultConfigurations?.resellerApi || {};
+    return {
+        zoneId: cfg.zoneId != null ? Number(cfg.zoneId) : null,
+        zoneName: cfg.zoneName || '',
+        planType: cfg.planType || 'SHARED',
+        gateway: cfg.gateway || 'WALLET',
+        lastStockSync: cfg.lastStockSync || '',
+        variantStock: (cfg.variantStock && typeof cfg.variantStock === 'object') ? cfg.variantStock : {},
+    };
+}
+
+function resellerZoneLabel(stock: IPStock) {
+    const cfg = readResellerApiConfig(stock);
+    if (cfg.zoneName) return cfg.zoneName;
+    if (cfg.zoneId != null) return `Zone ${cfg.zoneId}`;
+    return '—';
 }
 
 /**
@@ -123,19 +149,63 @@ const ManageIpStock = () => {
     const [cloneName, setCloneName] = useState('');
     const [isCloneDialogOpen, setIsCloneDialogOpen] = useState(false);
     const [cloning, setCloning] = useState(false);
+    const [panelZones, setPanelZones] = useState<PanelZone[]>([]);
+    const [panelZonesLoading, setPanelZonesLoading] = useState(false);
+    const [refreshingLiveStock, setRefreshingLiveStock] = useState(false);
+
+    const reloadIpStocks = async () => {
+        const response = await fetch('/api/ipstock?includeHidden=1', { credentials: 'include', cache: 'no-store' });
+        const data = await response.json();
+        if (Array.isArray(data)) setIpStocks(data);
+    };
 
     useEffect(() => {
-        const fetchIPStocks = async () => {
-            const response = await fetch('/api/ipstock?includeHidden=1');
-            const data = await response.json();
-            setIpStocks(data);
-        };
-        fetchIPStocks();
+        reloadIpStocks();
         fetch('/api/admin/companies')
             .then(r => r.json())
             .then(data => { if (Array.isArray(data)) setCompanies(data); })
             .catch(() => {});
     }, []);
+
+    const fetchPanelZones = async (companyId: string, silent = false) => {
+        if (!companyId) return;
+        setPanelZonesLoading(true);
+        try {
+            const r = await fetch(
+                `/api/reseller-panel/zones?companyId=${encodeURIComponent(companyId)}`,
+                { credentials: 'include', cache: 'no-store' }
+            );
+            const j = await r.json();
+            if (!r.ok) throw new Error(j.error || 'Failed to fetch zones');
+            setPanelZones(Array.isArray(j.zones) ? j.zones : []);
+            if (!silent) toast.success(`${j.zones?.length || 0} region(s) loaded`);
+        } catch (e: unknown) {
+            const msg = e instanceof Error ? e.message : 'Zone fetch failed';
+            if (!silent) toast.error(msg);
+            setPanelZones([]);
+        } finally {
+            setPanelZonesLoading(false);
+        }
+    };
+
+    const refreshLivePanelStock = async () => {
+        setRefreshingLiveStock(true);
+        try {
+            const r = await fetch('/api/admin/reseller-panel/refresh-stock', { credentials: 'include', cache: 'no-store' });
+            const j = await r.json();
+            if (!r.ok && !j.skipped) throw new Error(j.error || 'Refresh failed');
+            await reloadIpStocks();
+            toast.success(
+                j.throttled
+                    ? 'Stock recently synced — list refreshed'
+                    : `Panel stock synced (${j.inStock ?? 0}/${j.total ?? 0} in stock)`
+            );
+        } catch (e: unknown) {
+            toast.error(e instanceof Error ? e.message : 'Refresh failed');
+        } finally {
+            setRefreshingLiveStock(false);
+        }
+    };
 
     const addMemoryOption = () => {
         if (!currentStock || !newMemorySize.trim()) return;
@@ -186,7 +256,14 @@ const ManageIpStock = () => {
             ...stock,
             hiddenFromStore: stock.hiddenFromStore === true,
         });
+        setPanelZones([]);
         setIsDialogOpen(true);
+        if (stock.company && stockHasResellerPanelConfig(stock)) {
+            const c = companies.find((co) => co._id === stock.company);
+            if (c?.resellerApi?.enabled) {
+                void fetchPanelZones(stock.company, true);
+            }
+        }
     };
 
     const handleDelete = async (id: string) => {
@@ -258,20 +335,34 @@ const ManageIpStock = () => {
 
     const handleUpdate = async () => {
         if (!currentStock) return;
+        const resellerCfg = readResellerApiConfig(currentStock);
+        const editCompany = currentStock.company
+            ? companies.find((co) => co._id === currentStock.company)
+            : null;
+        const companyHasResellerApi = !!(editCompany?.resellerApi?.enabled);
+        const companyUsesResellerLiveStock = !!(
+            editCompany?.resellerApi?.enabled && editCompany?.resellerApi?.useLiveStockApi
+        );
+        const liveResellerStock =
+            companyUsesResellerLiveStock && stockHasResellerPanelConfig(currentStock);
+        if (companyHasResellerApi && stockHasResellerPanelConfig(currentStock) && resellerCfg.zoneId == null) {
+            toast.error('Sync regions karo aur panel se zone select karo');
+            return;
+        }
         try {
             const payload = {
                 _id: currentStock._id,
                 name: currentStock.name,
                 description: currentStock.description,
                 available: currentStock.available,
-                availabilityManual: currentStock.availabilityManual,
+                availabilityManual: liveResellerStock ? false : currentStock.availabilityManual,
                 serverType: currentStock.serverType,
                 tags: currentStock.tags,
                 memoryOptions: currentStock.memoryOptions,
                 promoCodes: currentStock.promoCodes,
                 defaultConfigurations: currentStock.defaultConfigurations,
                 company: currentStock.company ?? null,
-                stockCount: currentStock.stockCount,
+                stockCount: liveResellerStock ? 1 : currentStock.stockCount,
                 hiddenFromStore: currentStock.hiddenFromStore === true,
             };
 
@@ -302,11 +393,7 @@ const ManageIpStock = () => {
                 );
             }
 
-            toast.success(
-                payload.hiddenFromStore
-                    ? 'Plan hidden from customer store'
-                    : 'Plan visible on customer store'
-            );
+            toast.success('IP Stock updated successfully');
             setIsDialogOpen(false);
         } catch (error: any) {
             toast.error(error?.message || 'Failed to update IP stock');
@@ -362,17 +449,92 @@ const ManageIpStock = () => {
         updateNetbayConfig({ planByMemory: next });
     };
 
+    const updateResellerApiConfig = (
+        next: Partial<{ zoneId: number | null; zoneName: string; planType: string; gateway: string }>
+    ) => {
+        if (!currentStock) return;
+        const existing = readResellerApiConfig(currentStock);
+        const merged = {
+            zoneId: next.zoneId !== undefined ? next.zoneId : existing.zoneId,
+            zoneName: next.zoneName !== undefined ? next.zoneName : existing.zoneName,
+            planType: next.planType ?? existing.planType,
+            gateway: next.gateway ?? existing.gateway,
+        };
+        const prevBlock = (currentStock.defaultConfigurations?.resellerApi || {}) as Record<string, unknown>;
+        const nextDefaults = { ...(currentStock.defaultConfigurations || {}) } as Record<string, unknown>;
+        nextDefaults.resellerApi = {
+            ...prevBlock,
+            zoneId: merged.zoneId,
+            zoneName: merged.zoneName || undefined,
+            planType: merged.planType,
+            gateway: merged.gateway,
+        };
+        const tags = currentStock.tags.includes('reseller-api')
+            ? currentStock.tags
+            : [...currentStock.tags, 'reseller-api'];
+        setCurrentStock({ ...currentStock, defaultConfigurations: nextDefaults, tags });
+    };
+
+    const handlePanelZoneSelect = (value: string) => {
+        if (!currentStock) return;
+        const zone = panelZones.find((z) => String(z.id) === value);
+        const existing = readResellerApiConfig(currentStock);
+        const prevBlock = (currentStock.defaultConfigurations?.resellerApi || {}) as Record<string, unknown>;
+        const nextDefaults = { ...(currentStock.defaultConfigurations || {}) } as Record<string, unknown>;
+        nextDefaults.resellerApi = {
+            ...prevBlock,
+            zoneId: Number(value),
+            zoneName: zone?.name || undefined,
+            planType: existing.planType,
+            gateway: existing.gateway,
+        };
+        const tags = currentStock.tags.includes('reseller-api')
+            ? currentStock.tags
+            : [...currentStock.tags, 'reseller-api'];
+        const nextName =
+            zone?.name && !currentStock.name.trim() ? `${zone.name} VPS` : currentStock.name;
+        setCurrentStock({
+            ...currentStock,
+            name: nextName,
+            defaultConfigurations: nextDefaults,
+            tags,
+        });
+    };
+
+    const selectedCompanyHasResellerApi = (() => {
+        if (!currentStock?.company) return false;
+        const c = companies.find((co) => co._id === currentStock.company);
+        return !!(c?.resellerApi?.enabled);
+    })();
+
+    const selectedCompanyUsesResellerLiveStock = (() => {
+        if (!currentStock?.company) return false;
+        const c = companies.find((co) => co._id === currentStock.company);
+        return !!(c?.resellerApi?.enabled && c?.resellerApi?.useLiveStockApi);
+    })();
+
+    const selectedPanelZoneId = currentStock ? readResellerApiConfig(currentStock).zoneId : null;
+    const resellerCfgForDialog = currentStock ? readResellerApiConfig(currentStock) : null;
+    const selectedPanelZone =
+        panelZones.find((z) => selectedPanelZoneId != null && Number(z.id) === selectedPanelZoneId) ||
+        (resellerCfgForDialog?.zoneName
+            ? {
+                id: selectedPanelZoneId,
+                name: resellerCfgForDialog.zoneName,
+                status: '',
+                live: !!currentStock?.available,
+            }
+            : null);
+
     const selectedCompanyHasNetbay = (() => {
         if (!currentStock?.company) return false;
-        const c = companies.find(c => c._id === currentStock.company);
-        const n: any = c?.netbayApi;
-        // apiKey/apiSecret can live in env vars, so just check `enabled`.
-        return !!(n && n.enabled);
+        const c = companies.find((co) => co._id === currentStock.company);
+        return !!(c?.netbayApi?.enabled);
     })();
 
     const selectedCompanyUsesNetbayLiveStock = (() => {
         if (!currentStock?.company) return false;
-        const c = companies.find(c => c._id === currentStock.company);
+        const c = companies.find((co) => co._id === currentStock.company);
         return !!(c?.netbayApi?.enabled && c?.netbayApi?.useLiveStockApi);
     })();
 
@@ -467,8 +629,23 @@ const ManageIpStock = () => {
 
     return (
         <div className='w-full'>
-            <div className='h-[63px] flex gap-2 items-center border dark:border-none-b p-4'>
+            <div className='h-[63px] flex gap-2 items-center justify-between border dark:border-none-b p-4'>
                 <h1 className='text-xl'>Manage IP Stock</h1>
+                <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5"
+                    onClick={() => void refreshLivePanelStock()}
+                    disabled={refreshingLiveStock}
+                >
+                    {refreshingLiveStock ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                        <RefreshCw className="h-4 w-4" />
+                    )}
+                    Sync PrimeVPS stock
+                </Button>
             </div>
             <div className='mx-12 mt-6'>
                 <Table className='w-full border dark:border-none'>
@@ -476,6 +653,7 @@ const ManageIpStock = () => {
                         <TableRow>
                             <TableHead>Name</TableHead>
                             <TableHead>Type</TableHead>
+                            <TableHead>Region</TableHead>
                             <TableHead>Available</TableHead>
                             <TableHead>Store</TableHead>
                             <TableHead>4 GB</TableHead>
@@ -508,10 +686,30 @@ const ManageIpStock = () => {
                                     </Badge>
                                 </TableCell>
                                 <TableCell>
+                                    {stockHasResellerPanelConfig(stock) ? (
+                                        <span className="text-xs">
+                                            {resellerZoneLabel(stock)}
+                                            {readResellerApiConfig(stock).zoneId != null && (
+                                                <span className="text-muted-foreground"> (ID {readResellerApiConfig(stock).zoneId})</span>
+                                            )}
+                                        </span>
+                                    ) : (
+                                        <span className="text-xs text-muted-foreground">—</span>
+                                    )}
+                                </TableCell>
+                                <TableCell>
                                     {companyUsesNetbayLiveForStock(stock, companies)
                                         ? (stock.available ? 'Netbay API: Yes' : 'Netbay API: No')
                                         : companyUsesResellerLiveForStock(stock, companies)
-                                        ? (stock.available ? 'Reseller API: Yes' : 'Reseller API: No')
+                                        ? (
+                                            <span className="text-xs">
+                                                {stock.available ? (
+                                                    <Badge className="bg-sky-50 text-sky-700 border-sky-200">Panel: In stock</Badge>
+                                                ) : (
+                                                    <Badge variant="destructive">Panel: Out</Badge>
+                                                )}
+                                            </span>
+                                        )
                                         : stock.company
                                         ? `${stock.stockCount ?? 0} units`
                                         : (
@@ -610,6 +808,27 @@ const ManageIpStock = () => {
                                                 <p className="text-xs text-muted-foreground">
                                                     Auto-synced from Netbay GET /services/stock. Toggle live stock in{' '}
                                                     <Link href="/admin/companies" className="text-blue-600 hover:underline">/admin/companies</Link>.
+                                                </p>
+                                            </div>
+                                        ) : currentStock.company && stockHasResellerPanelConfig(currentStock) && selectedCompanyUsesResellerLiveStock ? (
+                                            <div className="rounded-lg border p-3 bg-sky-50/50 dark:bg-sky-950/20 border-sky-200/60 space-y-1">
+                                                <Label>Availability</Label>
+                                                <p className="text-sm font-medium">
+                                                    {currentStock.available ? 'In stock (panel zone)' : 'Out of stock (panel zone)'}
+                                                </p>
+                                                {resellerCfgForDialog?.zoneName && (
+                                                    <p className="text-xs text-muted-foreground">
+                                                        Region: <strong>{resellerCfgForDialog.zoneName}</strong>
+                                                        {resellerCfgForDialog.zoneId != null ? ` (ID ${resellerCfgForDialog.zoneId})` : ''}
+                                                    </p>
+                                                )}
+                                                {resellerCfgForDialog?.lastStockSync && (
+                                                    <p className="text-xs text-muted-foreground">
+                                                        Last sync: {new Date(resellerCfgForDialog.lastStockSync).toLocaleString()}
+                                                    </p>
+                                                )}
+                                                <p className="text-xs text-muted-foreground">
+                                                    Auto-synced from primevm GET /api/users/zones. Use <strong>Sync PrimeVPS stock</strong> above or customer page refresh.
                                                 </p>
                                             </div>
                                         ) : currentStock.company ? (
@@ -720,6 +939,13 @@ const ManageIpStock = () => {
                                                 stockCount: company ? (currentStock.stockCount ?? 0) : currentStock.stockCount,
                                                 available: company ? (currentStock.stockCount ?? 0) > 0 : currentStock.available,
                                             });
+                                            setPanelZones([]);
+                                            if (company) {
+                                                const c = companies.find((co) => co._id === company);
+                                                if (c?.resellerApi?.enabled) {
+                                                    void fetchPanelZones(company, true);
+                                                }
+                                            }
                                         }}
                                     >
                                         <SelectTrigger>
@@ -732,7 +958,16 @@ const ManageIpStock = () => {
                                             ))}
                                         </SelectContent>
                                     </Select>
+                                    <p className="text-xs text-muted-foreground mt-1">
+                                        PrimeVPS: company select → Sync regions → zone pick. Netbay: plan IDs neeche.
+                                    </p>
                                 </div>
+
+                                {selectedCompanyUsesResellerLiveStock && stockHasResellerPanelConfig(currentStock) && (
+                                    <div className="rounded-md border border-emerald-200/80 bg-emerald-50/60 dark:bg-emerald-950/20 p-3 text-xs text-emerald-800 dark:text-emerald-200">
+                                        <strong>Live stock ON</strong> — manual stock count ki zaroorat nahi. Availability panel zone se auto sync hogi.
+                                    </div>
+                                )}
 
                                 {/* Memory Options and Hostycare Mapping */}
                                 <div>
@@ -903,6 +1138,79 @@ const ManageIpStock = () => {
                                             <strong>Name</strong> or <strong>OS ID</strong> — purchase sends the name; ID is resolved from catalog.
                                             <code> Windows Server 2022</code> when blank.
                                         </p>
+                                    </div>
+                                )}
+
+                                {selectedCompanyHasResellerApi && (
+                                    <div className="border rounded-lg p-4 bg-sky-50/40 dark:bg-sky-950/10 border-sky-200/60 dark:border-sky-900/40 space-y-3">
+                                        <div className="flex flex-wrap items-start justify-between gap-3">
+                                            <div>
+                                                <Label className="text-base font-semibold flex items-center gap-2">
+                                                    <Cloud className="h-4 w-4 text-sky-600" />
+                                                    PrimeVPS / Panel API
+                                                </Label>
+                                                <p className="text-xs text-muted-foreground mt-0.5">
+                                                    Sync regions from primevm.in — pick zone for live stock + auto-buy.
+                                                    Pricing IDs resolve automatically at purchase.
+                                                </p>
+                                            </div>
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                size="sm"
+                                                className="gap-1.5 shrink-0"
+                                                disabled={panelZonesLoading || !currentStock.company}
+                                                onClick={() => currentStock.company && void fetchPanelZones(currentStock.company, false)}
+                                            >
+                                                {panelZonesLoading ? (
+                                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                                ) : (
+                                                    <RefreshCw className="h-3.5 w-3.5" />
+                                                )}
+                                                Sync regions
+                                            </Button>
+                                        </div>
+                                        <div>
+                                            <Label className="text-sm">Region (from panel)</Label>
+                                            <Select
+                                                value={selectedPanelZoneId != null ? String(selectedPanelZoneId) : undefined}
+                                                onValueChange={handlePanelZoneSelect}
+                                                disabled={panelZonesLoading || panelZones.length === 0}
+                                            >
+                                                <SelectTrigger className="mt-1">
+                                                    <SelectValue
+                                                        placeholder={
+                                                            panelZonesLoading
+                                                                ? 'Loading regions…'
+                                                                : panelZones.length
+                                                                ? 'Select region'
+                                                                : 'Click Sync regions'
+                                                        }
+                                                    />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {panelZones.map((z) => (
+                                                        <SelectItem key={z.id} value={String(z.id)}>
+                                                            ID {z.id} — {z.name}{' '}
+                                                            <span className={z.live ? 'text-emerald-600' : 'text-red-500'}>
+                                                                ({z.live ? 'Available' : z.status || 'Unavailable'})
+                                                            </span>
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                            {selectedPanelZone && (
+                                                <p className="text-xs text-emerald-700 dark:text-emerald-300 mt-1.5">
+                                                    Selected: zone <strong>{selectedPanelZoneId}</strong> — {selectedPanelZone.name}
+                                                    {selectedCompanyUsesResellerLiveStock ? ' · live stock auto-sync' : ''}
+                                                </p>
+                                            )}
+                                        </div>
+                                        {selectedCompanyUsesResellerLiveStock && (
+                                            <p className="text-[11px] text-muted-foreground">
+                                                Live stock ON — manual stock count hidden. Zone band on panel → Out of stock here automatically.
+                                            </p>
+                                        )}
                                     </div>
                                 )}
 

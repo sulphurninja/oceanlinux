@@ -13,10 +13,11 @@
  * }
  */
 
+const { toPlainConfigurations } = require('@/lib/advpsLiveStock');
+
 function readResellerApiStockConfig(ipStock) {
-  const cfg = ipStock?.defaultConfigurations?.get?.('resellerApi') ||
-    ipStock?.defaultConfigurations?.resellerApi ||
-    {};
+  const plain = toPlainConfigurations(ipStock?.defaultConfigurations);
+  const cfg = plain?.resellerApi || {};
 
   const priceByMemory = cfg.priceByMemory instanceof Map
     ? Object.fromEntries(cfg.priceByMemory)

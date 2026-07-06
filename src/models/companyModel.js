@@ -43,7 +43,7 @@ const companyResellerApiSchema = new mongoose.Schema({
   resellerDomain: { type: String, default: '' }, // X-Reseller-Domain header value
   email: { type: String, default: '' },
   password: { type: String, default: '' },
-  /** When true, IP stock availability follows panel wallet + pricing (PrimeVPS / Hostheaven). */
+  /** When true, IP stock follows GET /api/users/zones (per-plan zoneId) or wallet fallback. */
   useLiveStockApi: { type: Boolean, default: false },
 }, { _id: false });
 

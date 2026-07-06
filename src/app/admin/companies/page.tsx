@@ -1499,8 +1499,9 @@ export default function CompaniesPage() {
 
               {resellerForm.enabled && resellerForm.useLiveStockApi && (
                 <div className="rounded-md border border-amber-300/70 bg-amber-50/50 dark:bg-amber-950/20 p-3 text-xs text-muted-foreground">
-                  Live API stock ON — customer ko stock panel wallet balance + VM pricing se dikhega (manual units use nahi honge).
-                  Wallet ₹0 ho to plan Out of Stock dikhega jab tak panel me balance na ho.
+                  Live API stock ON — har IP Stock plan ka <strong>Zone ID</strong> set karo (1=103.20, 2=103.148, …).
+                  Stock auto sync: zone <strong>ACTIVE</strong> = In stock, band = Out. Manual units ki zaroorat nahi.
+                  Buy/renew ke liye primevm.in panel wallet balance chahiye.
                 </div>
               )}
 

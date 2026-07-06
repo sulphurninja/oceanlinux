@@ -264,7 +264,7 @@ export async function POST(request) {
                 password: result.password || 'Check dashboard',
               });
               WhatsAppService.notifyOrderViaWhatsApp(order.user, order).catch(() => {});
-            } else if (!result.success && !result.alreadyProvisioning && !result.advpsPending) {
+            } else if (!result.success && !result.alreadyProvisioning && !result.advpsPending && !result.resellerApiPending) {
               await NotificationService.notifyOrderFailed(order.user, order, result.error);
             }
           })

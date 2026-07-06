@@ -11,6 +11,7 @@ const {
   toPlainConfigurations,
   mergeDefaultConfigurationsPlain,
 } = require('@/lib/advpsLiveStock');
+const { syncResellerIpStockRow } = require('@/lib/resellerLiveStock');
 
 export async function PUT(req, res) {
   const denied = await enforceAdmin(req);
@@ -89,8 +90,8 @@ export async function PUT(req, res) {
       updatePayload.stockCount = count;
       updatePayload.available = count > 0;
     } else if (netbayLiveStock || resellerLiveStock) {
-      updatePayload.stockCount = 0;
-      if (available !== undefined && existing.availabilityManual) {
+      // Live stock: availability comes from panel sync — do not zero stockCount on save.
+      if (existing.availabilityManual && available !== undefined) {
         updatePayload.available = available;
       }
     } else if (available !== undefined) {
@@ -120,7 +121,16 @@ export async function PUT(req, res) {
       updatedStock.hiddenFromStore = reqBody.hiddenFromStore === true;
     }
 
-    const responseDoc = updatedStock.toObject ? updatedStock.toObject() : updatedStock;
+    let finalStock = updatedStock;
+    if (resellerLiveStock && hasResellerPlans) {
+      try {
+        finalStock = await syncResellerIpStockRow(updatedStock, { force: true }) || updatedStock;
+      } catch (syncErr) {
+        console.warn('[IPSTOCK-UPDATE] reseller live sync failed:', syncErr.message);
+      }
+    }
+
+    const responseDoc = finalStock.toObject ? finalStock.toObject() : finalStock;
     if ('hiddenFromStore' in reqBody) {
       responseDoc.hiddenFromStore = reqBody.hiddenFromStore === true;
     }

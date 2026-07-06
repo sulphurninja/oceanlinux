@@ -647,11 +647,35 @@ class ResellerApi {
     };
   }
 
+  /** Panel treats a zone as open for provisioning (PrimeVM: ACTIVE). */
+  static isZoneStatusLive(status) {
+    const s = String(status || '').toUpperCase();
+    return s === 'ACTIVE' || s === 'AVAILABLE';
+  }
+
+  /** Normalized zone rows from GET /api/users/zones. */
+  async listZones() {
+    const raw = await this.getZones();
+    const list = Array.isArray(raw) ? raw : (raw?.zones || []);
+    return list.map((z) => ({
+      id: z?.id,
+      name: z?.name || z?.label || '',
+      status: z?.status || '',
+    }));
+  }
+
+  /** Look up one zone; pass `zonesList` to avoid duplicate GET /zones calls. */
+  async getZoneById(zoneId, { zonesList = null } = {}) {
+    const id = Number(zoneId);
+    if (!Number.isFinite(id)) return null;
+    const list = zonesList || (await this.listZones());
+    return list.find((z) => Number(z.id) === id) || null;
+  }
+
   /** Count ACTIVE zones — no active zone means panel cannot provision. */
   async getActiveZoneCount() {
-    const zones = await this.getZones();
-    const list = Array.isArray(zones) ? zones : (zones?.zones || []);
-    return list.filter((z) => String(z.status || '').toUpperCase() === 'ACTIVE').length;
+    const list = await this.listZones();
+    return list.filter((z) => ResellerApi.isZoneStatusLive(z.status)).length;
   }
 
   /**

@@ -253,7 +253,7 @@ export async function purchaseServerViaApi(user, body) {
             username: result.username || 'root',
             password: result.password || 'Check dashboard',
           });
-        } else if (!result.success && !result.alreadyProvisioning && !result.advpsPending) {
+        } else if (!result.success && !result.alreadyProvisioning && !result.advpsPending && !result.resellerApiPending) {
           await NotificationService.notifyOrderFailed(order.user, order, result.error);
         }
       })
