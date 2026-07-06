@@ -1580,7 +1580,7 @@ class AutoProvisioningService {
     L.head(`RESELLER PANEL PATH — order ${order._id}`);
 
     const isWindowsProduct = this.isWindowsOrder(order, ipStock);
-    const orderOs = isWindowsProduct ? 'Windows 2022 64' : 'Ubuntu 22';
+    let orderOs = isWindowsProduct ? 'Windows 2022 64' : 'Ubuntu 22';
 
     await Order.findByIdAndUpdate(order._id, {
       provisioningStatus: 'provisioning',
