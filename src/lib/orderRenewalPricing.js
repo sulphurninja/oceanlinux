@@ -1,9 +1,9 @@
 /**
  * Renewal pricing for existing orders.
  *
- * - Base rate = current IP stock list price (falls back to locked purchase price
- *   when live stock price is unavailable).
- * - Promo from first purchase applies on every renewal (subtracted from base).
+ * - Base rate = current IP stock list price (live rate for this memory tier).
+ * - Promo from first purchase applies on every renewal: renewal = currentRate − promoDiscount.
+ * - Example: bought at 1299−100=1199; rate raised to 1499 → renewal = 1499−100 = 1399.
  */
 
 function reconstructListPriceAtPurchase(order) {
@@ -40,12 +40,52 @@ export function getOrderLockedListPrice(order) {
   return paid;
 }
 
+/** Normalize "8GB Vps", "8gb", "8 GB" → "8GB" for memoryOptions lookup. */
+export function normalizeMemoryKey(memory) {
+  const raw = String(memory || '').trim();
+  const m = raw.match(/(\d+)\s*GB/i);
+  if (m) return `${m[1]}GB`;
+  return raw;
+}
+
 export function getCurrentListPriceFromStock(ipStock, memory) {
   if (!ipStock?.memoryOptions || !memory) return null;
   const opts = ipStock.memoryOptions;
-  const entry = typeof opts.get === 'function' ? opts.get(memory) : opts[memory];
-  const price = Number(entry?.price);
-  return Number.isFinite(price) && price > 0 ? price : null;
+  const normalized = normalizeMemoryKey(memory);
+  const variations = [memory, normalized, String(memory).replace(/\s+/g, ''), String(memory).toLowerCase()];
+  for (const key of variations) {
+    const entry = typeof opts.get === 'function' ? opts.get(key) : opts[key];
+    const price = Number(entry?.price);
+    if (Number.isFinite(price) && price > 0) return price;
+  }
+  // Last resort: match any key with same GB number
+  const gb = normalized.match(/^(\d+)GB$/i);
+  if (gb) {
+    const entries = typeof opts.entries === 'function' ? [...opts.entries()] : Object.entries(opts || {});
+    for (const [k, v] of entries) {
+      if (String(k).replace(/\s+/g, '').toLowerCase().startsWith(`${gb[1]}gb`)) {
+        const price = Number(v?.price);
+        if (Number.isFinite(price) && price > 0) return price;
+      }
+    }
+  }
+  return null;
+}
+
+/** e.g. "🖥️ 192.232.xx" → "192.232", "103.183.232" → "103.183.232" (prefer 3 octets) */
+export function extractIpPrefixFromLabel(label) {
+  const raw = String(label || '');
+  const three = raw.match(/\b(\d{1,3}\.\d{1,3}\.\d{1,3})(?:\.xx)?\b/i);
+  if (three) return three[1];
+  const two = raw.match(/\b(\d{1,3}\.\d{1,3})(?:\.xx)?\b/i);
+  if (two) return two[1];
+  return null;
+}
+
+export function labelContainsIpPrefix(label, prefix) {
+  if (!prefix || !label) return false;
+  const escaped = String(prefix).replace(/\./g, '\\.');
+  return new RegExp(`\\b${escaped}(?:\\.|\\b|\\.xx)`, 'i').test(String(label));
 }
 
 /**

@@ -158,7 +158,14 @@ export async function PUT(request) {
         { status: 400 }
       );
     }
-    const updated = await setIpStockCount(stockId, stockCount);
+    const count = Math.max(0, Math.floor(Number(stockCount) || 0));
+    // Manual override: mark availabilityManual so live panel sync (PrimeVPS zone
+    // status) does not wipe the count/availability the owner just set.
+    await IPStock.collection.updateOne(
+      { _id: stock._id },
+      { $set: { stockCount: count, available: count > 0, availabilityManual: true } }
+    );
+    const updated = await IPStock.findById(stockId);
     return NextResponse.json({ success: true, stock: serializeStock(updated.toObject?.() || updated, companyDoc) });
   }
 

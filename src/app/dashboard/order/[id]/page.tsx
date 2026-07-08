@@ -1006,11 +1006,33 @@ const OrderDetails = () => {
   };
 
   /** Poll until start/stop/restart is reflected (providers can lag 30–90s on Windows). */
-  const pollPowerStateAfterAction = async (action: 'start' | 'stop' | 'restart') => {
+  const pollPowerStateAfterAction = async (
+    action: 'start' | 'stop' | 'restart',
+    provider?: ReturnType<typeof getProviderFromOrder>,
+  ) => {
     const target = action === 'stop' ? 'stopped' : 'running';
     const resellerPoll = hasCompanyResellerApiAutomation(ipStock);
     const pollIntervalMs = resellerPoll ? 8000 : 3000;
     const maxAttempts = resellerPoll ? 20 : 60;
+
+    if (action === 'restart' && provider === 'smartvps') {
+      let sawStopped = false;
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        if (attempt > 0) {
+          await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+        }
+        if (powerFetchInFlight.current) continue;
+        const state = await fetchServerPowerState({ force: true });
+        if (state === 'stopped' || state === 'suspended') sawStopped = true;
+        if (sawStopped && state === 'running') return state;
+      }
+
+      toast.info(
+        'Restart was sent to SmartVPS. Status may still be updating — use Refresh if it looks stale.',
+        { duration: 6000 }
+      );
+      return null;
+    }
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       if (attempt > 0) {
@@ -1172,7 +1194,7 @@ const OrderDetails = () => {
             duration: 6000,
           });
 
-          await pollPowerStateAfterAction(action as 'start' | 'stop' | 'restart');
+          await pollPowerStateAfterAction(action as 'start' | 'stop' | 'restart', provider);
         } else if (action === 'resetmac') {
           const r = data.result;
           const oldM = r?.oldMacAddress;
@@ -3066,6 +3088,7 @@ const OrderDetails = () => {
                           {order.lastAction === 'start' && <Play className="h-5 w-5 text-primary" />}
                           {order.lastAction === 'stop' && <Square className="h-5 w-5 text-primary" />}
                           {order.lastAction === 'restart' && <RotateCcw className="h-5 w-5 text-primary" />}
+                          {order.lastAction === 'reboot' && <RotateCcw className="h-5 w-5 text-primary" />}
                           {order.lastAction === 'renew' && <CreditCard className="h-5 w-5 text-primary" />}
                           {order.lastAction === 'changepassword' && <KeyRound className="h-5 w-5 text-primary" />}
                           {order.lastAction === 'reinstall' && <HardDriveIcon className="h-5 w-5 text-primary" />}

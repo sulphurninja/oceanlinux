@@ -1457,9 +1457,9 @@ const ManageOrders = () => {
                                                 <div className="min-w-0 flex-1">
                                                     <p className="truncate text-sm font-semibold">{order.user?.name || 'N/A'}</p>
                                                     <p className="truncate text-xs text-muted-foreground">{order.user?.email}</p>
-                                                </div>
+                </div>
                                                 <div className="shrink-0">{getStatusBadge(order.status)}</div>
-                                            </div>
+            </div>
 
                                             <p className="text-sm font-medium leading-snug break-words">{order.productName}</p>
 
@@ -1712,8 +1712,8 @@ const ManageOrders = () => {
                                             </CardContent>
                                         </Card>
                                     ))
-                                )}
-                            </div>
+                                                        )}
+                                                    </div>
 
                             <div className="hidden xl:block w-full min-w-0 overflow-x-auto rounded-lg border">
                                 <Table className="min-w-[900px]">
@@ -1769,16 +1769,16 @@ const ManageOrders = () => {
                                                         </TableCell>
                                                         <TableCell className="text-xs whitespace-nowrap">
                                                             {format(new Date(recharge.creditedAt || recharge.createdAt), 'MMM dd, yyyy HH:mm')}
-                                                        </TableCell>
-                                                    </TableRow>
-                                                ))
-                                            )}
-                                        </TableBody>
-                                    </Table>
-                            </div>
+                                                </TableCell>
+                                            </TableRow>
+                                        ))
+                                    )}
+                                </TableBody>
+                            </Table>
+                        </div>
                         </TabsContent>
                     </Tabs>
-                </div>
+                    </div>
             </div>
 
             {/* Edit Dialog - FULLY EDITABLE */}

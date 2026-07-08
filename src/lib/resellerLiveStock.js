@@ -284,7 +284,8 @@ async function syncResellerIpStockRow(stock, { force = false, memoryOnly = null,
   if (!stock.availabilityManual) {
     updatePayload.available = shouldAvailable;
   }
-  if (usesResellerLiveStock(stock, company)) {
+  // Manual override wins over panel zone status — owner set count by hand.
+  if (usesResellerLiveStock(stock, company) && !stock.availabilityManual) {
     updatePayload.stockCount = shouldAvailable ? Math.max(1, maxUnits) : 0;
   }
 

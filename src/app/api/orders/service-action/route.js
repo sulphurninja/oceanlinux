@@ -1454,14 +1454,12 @@ export async function POST(request) {
       case 'restart':
         console.log('[RESTART] Restarting VPS service');
         if (smartvpsApi) {
-          // SmartVPS doesn't have restart - do stop then start
-          console.log('[RESTART] Using SmartVPS API - stop then start');
-          await smartvpsApi.stop(ipAddress);
-          await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2s
-          const apiRes = await smartvpsApi.start(ipAddress);
+          console.log('[RESTART] Using SmartVPS API - stop, wait for offline, then start');
+          const { executeSmartVpsRestart } = require('@/lib/smartvpsPowerActions');
+          const apiRes = await executeSmartVpsRestart(smartvpsApi, ipAddress);
           result = {
             success: true,
-            message: 'SmartVPS restart command sent successfully (stop + start)',
+            message: apiRes.message || 'SmartVPS restart completed (stop + start)',
             apiResponse: apiRes
           };
         } else if (hostycareApi && order.hostycareServiceId) {

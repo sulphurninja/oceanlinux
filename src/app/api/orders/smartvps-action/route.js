@@ -4,6 +4,13 @@ import Order from '@/models/orderModel';
 import { getDataFromToken } from '@/helper/getDataFromToken';
 import { resolveOrderForUserOrAdmin } from '@/lib/resolveOrderAccess';
 const SmartVPSAPI = require('@/services/smartvpsApi');
+const {
+  ensureSmartVpsNotBusy: ensureSmartVpsNotBusyFromLib,
+  executeSmartVpsRestart,
+} = require('@/lib/smartvpsPowerActions');
+
+/** Restart waits for stop → offline → start; can exceed default serverless limits. */
+export const maxDuration = 180;
 
 const SMARTVPS_OS_TEMPLATES = {
   ubuntu: 'Ubuntu 22',
@@ -134,25 +141,8 @@ async function getSmartVpsParsedStatus(api, serviceIdentifier) {
   return parseSmartVPSResponse(statusData, 'status');
 }
 
-async function ensureSmartVpsNotBusy(api, serviceIdentifier) {
-  const parsed = await getSmartVpsParsedStatus(api, serviceIdentifier);
-  if (!isPlainObject(parsed)) return parsed;
-
-  const actionStatus = String(parsed.ActionStatus || '').toLowerCase();
-  const ip = parsed.IP || serviceIdentifier;
-  const os = parsed.OS || 'unknown';
-
-  if (actionStatus === 'processing' || actionStatus === 'pending') {
-    throw new Error('Server is still processing a previous action. Please wait 5 minutes and try again.');
-  }
-  if (actionStatus === 'failed') {
-    throw new Error(
-      `SmartVPS last action FAILED on this server (IP: ${ip}, OS: ${os}). ` +
-      `The slot is stuck — format/OS change/start/stop will keep returning "failed" until SmartVPS clears it. ` +
-      `Contact SmartVPS support with IP ${ip} and ask them to reset the failed action state.`
-    );
-  }
-  return parsed;
+async function ensureSmartVpsNotBusy(api, serviceIdentifier, opts) {
+  return ensureSmartVpsNotBusyFromLib(api, serviceIdentifier, opts);
 }
 
 async function executeSmartVpsCrossOsChange(api, serviceIdentifier, osType, currentOsType) {
@@ -197,9 +187,8 @@ async function executeSmartVpsCrossOsChange(api, serviceIdentifier, osType, curr
     if (isPlainObject(parsed)) {
       const actionStatus = String(parsed.ActionStatus || '').toLowerCase();
       if (actionStatus === 'failed') {
-        throw new Error(
-          `SmartVPS last action FAILED (IP: ${parsed.IP || serviceIdentifier}, OS: ${parsed.OS || 'unknown'}). ` +
-          `Contact SmartVPS support to reset this slot before trying again.`
+        console.warn(
+          `[SMARTVPS-CROSS-OS] ActionStatus=failed for ${parsed.IP || serviceIdentifier} — trying format/changeos anyway`
         );
       }
       statusHint = ` Current server: ${parsed.OS || 'unknown'}, RAM: ${parsed.RAM || 'unknown'}, ActionStatus: ${parsed.ActionStatus || 'unknown'}.`;
@@ -531,7 +520,9 @@ export async function POST(request) {
     switch (action) {
       case 'start':
         console.log('[SMARTVPS-ACTION][POST] Starting service:', serviceIdentifier);
+        await ensureSmartVpsNotBusy(api, serviceIdentifier);
         result = await api.start(serviceIdentifier);
+        assertSmartVpsActionOk(result, 'start');
         console.log('[SMARTVPS-ACTION][POST] Start service result:', result);
 
         console.log('[SMARTVPS-ACTION][POST] Updating order status to active');
@@ -545,7 +536,9 @@ export async function POST(request) {
 
       case 'stop':
         console.log('[SMARTVPS-ACTION][POST] Stopping service:', serviceIdentifier);
+        await ensureSmartVpsNotBusy(api, serviceIdentifier);
         result = await api.stop(serviceIdentifier);
+        assertSmartVpsActionOk(result, 'stop');
         console.log('[SMARTVPS-ACTION][POST] Stop service result:', result);
 
         console.log('[SMARTVPS-ACTION][POST] Updating order status to suspended');
@@ -560,23 +553,18 @@ export async function POST(request) {
       case 'reboot':
       case 'restart': // Support both 'reboot' and 'restart' action names
         console.log('[SMARTVPS-ACTION][POST] Rebooting/Restarting service:', serviceIdentifier);
-        // SmartVPS doesn't have direct reboot, so we stop then start
         try {
-          console.log('[SMARTVPS-ACTION][POST] Stopping for reboot...');
-          await api.stop(serviceIdentifier);
-          console.log('[SMARTVPS-ACTION][POST] Waiting 2 seconds before restart...');
-          await new Promise(resolve => setTimeout(resolve, 2000));
-          console.log('[SMARTVPS-ACTION][POST] Starting after stop...');
-          result = await api.start(serviceIdentifier);
+          result = await executeSmartVpsRestart(api, serviceIdentifier);
           console.log('[SMARTVPS-ACTION][POST] Reboot sequence completed:', result);
         } catch (error) {
           console.error('[SMARTVPS-ACTION][POST] Reboot sequence failed:', error);
-          throw new Error(`Reboot failed: ${error.message}`);
+          throw new Error(`Restart failed: ${error.message}`);
         }
 
-        console.log('[SMARTVPS-ACTION][POST] Updating order last action to reboot');
+        console.log('[SMARTVPS-ACTION][POST] Updating order after restart');
         await Order.findByIdAndUpdate(orderId, {
-          lastAction: 'reboot',
+          provisioningStatus: 'active',
+          lastAction: 'restart',
           lastActionTime: new Date()
         });
         console.log('[SMARTVPS-ACTION][POST] Order updated successfully');

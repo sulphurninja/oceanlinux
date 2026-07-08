@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 import { resolveOrderForUserOrAdmin } from '@/lib/resolveOrderAccess';
+import { ensureOrderRenewalStockLink } from '@/lib/orderRenewalPricingServer';
 const { maybeSyncResellerOrderOnFetch } = require('@/lib/resellerApiOrderSync');
 
 export async function GET(request, { params }) {
@@ -14,6 +15,14 @@ export async function GET(request, { params }) {
 
         let order = resolved.order;
         order = await maybeSyncResellerOrderOnFetch(order);
+
+        if (order?.ipStockId && ['active', 'confirmed'].includes(String(order.status || ''))) {
+            const orderDoc = await Order.findById(order._id);
+            if (orderDoc) {
+                await ensureOrderRenewalStockLink(orderDoc);
+                order = await Order.findById(order._id).lean();
+            }
+        }
 
         return NextResponse.json(order);
     } catch (error) {

@@ -133,9 +133,12 @@ export async function POST(request) {
     // 8. Generate a unique renewal transaction ID
     renewalTxnId = `RENEWAL_${Date.now()}_${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
 
-    // 9. Use the original order price for renewal
+    // 9. Renewal = current product list price − locked promo discount
     const renewalPrice = await resolveOrderRenewalPrice(order);
-    console.log(`[RENEWAL-INIT] Renewal price: ₹${renewalPrice} (paid=${order.price}, originalPrice=${order.originalPrice ?? 'n/a'}, promoDiscount=${order.promoDiscount ?? 0})`);
+    console.log(
+      `[RENEWAL-INIT] Renewal price: ₹${renewalPrice} ` +
+      `(promoOff=₹${order.promoDiscount ?? 0}, paid=${order.price}, originalPrice=${order.originalPrice ?? 'n/a'})`
+    );
 
     if (!Number.isFinite(renewalPrice) || renewalPrice <= 0) {
       return NextResponse.json(
