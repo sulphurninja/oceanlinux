@@ -4,6 +4,8 @@
  * Stored under ipStock.defaultConfigurations.resellerApi:
  * {
  *   zoneId: 1,
+ *   zoneIds: [1, 19],
+ *   zoneNames: { "1": "Mumbai", "19": "160.191-3rd Server" },
  *   planType: "SHARED",
  *   gateway: "WALLET",
  *   priceByMemory: {
@@ -14,6 +16,28 @@
  */
 
 const { toPlainConfigurations } = require('@/lib/advpsLiveStock');
+const ResellerApi = require('@/services/resellerApi');
+
+function normalizeResellerZoneIds(cfg = {}) {
+  const ids = [];
+  const push = (value) => {
+    const n = Number(value);
+    if (!Number.isFinite(n) || ids.includes(n)) return;
+    ids.push(n);
+  };
+
+  if (Array.isArray(cfg.zoneIds)) {
+    for (const value of cfg.zoneIds) push(value);
+  }
+  if (cfg.zoneId != null) {
+    const primary = Number(cfg.zoneId);
+    if (Number.isFinite(primary)) {
+      const withoutPrimary = ids.filter((id) => id !== primary);
+      return [primary, ...withoutPrimary];
+    }
+  }
+  return ids;
+}
 
 function readResellerApiStockConfig(ipStock) {
   const plain = toPlainConfigurations(ipStock?.defaultConfigurations);
@@ -27,13 +51,54 @@ function readResellerApiStockConfig(ipStock) {
     ? Object.fromEntries(cfg.defaultOs)
     : (cfg.defaultOs || {});
 
+  const zoneIds = normalizeResellerZoneIds(cfg);
+  const zoneNames =
+    cfg.zoneNames instanceof Map
+      ? Object.fromEntries(cfg.zoneNames)
+      : (cfg.zoneNames && typeof cfg.zoneNames === 'object' ? cfg.zoneNames : {});
+
   return {
-    zoneId: cfg.zoneId != null ? Number(cfg.zoneId) : null,
+    zoneId: zoneIds[0] ?? (cfg.zoneId != null ? Number(cfg.zoneId) : null),
+    zoneIds,
+    zoneNames,
     planType: String(cfg.planType || 'SHARED').toUpperCase(),
     gateway: String(cfg.gateway || 'WALLET').toUpperCase(),
     priceByMemory,
     defaultOs,
   };
+}
+
+function resolveExpectedZoneIds(ipStock) {
+  const cfg = readResellerApiStockConfig(ipStock);
+  return cfg.zoneIds.length ? cfg.zoneIds : (cfg.zoneId != null ? [cfg.zoneId] : []);
+}
+
+/**
+ * Ordered live zones for auto-buy — primary first, then fallback when inactive.
+ */
+async function resolveResellerZoneCandidatesForPurchase(api, stockCfg, { zonesList = null } = {}) {
+  const configured = stockCfg?.zoneIds?.length
+    ? stockCfg.zoneIds
+    : stockCfg?.zoneId != null
+      ? [Number(stockCfg.zoneId)]
+      : [];
+
+  const zones = zonesList || (await api.listZones());
+
+  if (!configured.length) {
+    const active = zones.find((z) => ResellerApi.isZoneStatusLive(z.status)) || zones[0];
+    return active
+      ? [{ zoneId: Number(active.id), zone: active, live: ResellerApi.isZoneStatusLive(active.status) }]
+      : [];
+  }
+
+  const candidates = [];
+  for (const id of configured) {
+    const zone = zones.find((z) => Number(z.id) === Number(id));
+    if (!zone || !ResellerApi.isZoneStatusLive(zone.status)) continue;
+    candidates.push({ zoneId: Number(id), zone, live: true });
+  }
+  return candidates;
 }
 
 function parseMemoryGb(memory) {
@@ -145,6 +210,9 @@ function isResellerApiStock(ipStock, order) {
 
 module.exports = {
   readResellerApiStockConfig,
+  normalizeResellerZoneIds,
+  resolveExpectedZoneIds,
+  resolveResellerZoneCandidatesForPurchase,
   parseMemoryGb,
   resolvePriceIdsForMemory,
   resolveZoneIsoIdFromCatalog,

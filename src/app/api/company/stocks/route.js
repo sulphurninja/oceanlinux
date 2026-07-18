@@ -11,6 +11,7 @@ import {
   syncStockCountFromInventory,
   normalizeOsForServerType,
   resolveUsernameForOs,
+  reconcileCompanyInventoryOrderIps,
 } from '@/lib/companyInventory';
 import Order from '@/models/orderModel';
 import { COMPANY_FILTER_VERSION } from '@/lib/companyOrders';
@@ -114,9 +115,11 @@ export async function PUT(request) {
           ipStockId: { $in: stockIds },
           status: { $nin: ['cancelled', 'failed'] },
         })
-          .select('_id expiryDate createdAt ipStockId ipAddress')
+          .select('_id expiryDate createdAt ipStockId ipAddress inventoryItemId')
           .lean()
       : [];
+
+    const inventoryIpHeal = await reconcileCompanyInventoryOrderIps(stocks, orders);
 
     const serializedStocks = stocks.map((s) => serializeStock(s.toObject?.() || s, companyDoc));
     const mismatches = buildCompanyValidityMismatchReport(

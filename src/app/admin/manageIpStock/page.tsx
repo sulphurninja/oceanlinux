@@ -20,6 +20,7 @@ import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import Link from 'next/link';
 import { X, ExternalLink, Zap, BookOpen, Copy, RefreshCw, Loader2, Cloud } from 'lucide-react';
+import { ResellerZonePicker, buildResellerZoneConfig } from '@/components/admin/ResellerZonePicker';
 
 interface MemoryOptionDetails {
     price: number;
@@ -67,9 +68,16 @@ type PanelZone = {
 
 function readResellerApiConfig(stock: IPStock | null) {
     const cfg: any = stock?.defaultConfigurations?.resellerApi || {};
+    const zoneIds = Array.isArray(cfg.zoneIds)
+        ? cfg.zoneIds.map(Number).filter((n: number) => Number.isFinite(n))
+        : cfg.zoneId != null
+        ? [Number(cfg.zoneId)]
+        : [];
     return {
-        zoneId: cfg.zoneId != null ? Number(cfg.zoneId) : null,
+        zoneId: zoneIds[0] ?? (cfg.zoneId != null ? Number(cfg.zoneId) : null),
+        zoneIds,
         zoneName: cfg.zoneName || '',
+        zoneNames: (cfg.zoneNames && typeof cfg.zoneNames === 'object') ? cfg.zoneNames : {},
         planType: cfg.planType || 'SHARED',
         gateway: cfg.gateway || 'WALLET',
         lastStockSync: cfg.lastStockSync || '',
@@ -475,24 +483,28 @@ const ManageIpStock = () => {
         setCurrentStock({ ...currentStock, defaultConfigurations: nextDefaults, tags });
     };
 
-    const handlePanelZoneSelect = (value: string) => {
+    const handleResellerZoneIdsChange = (nextZoneIds: number[]) => {
         if (!currentStock) return;
-        const zone = panelZones.find((z) => String(z.id) === value);
         const existing = readResellerApiConfig(currentStock);
         const prevBlock = (currentStock.defaultConfigurations?.resellerApi || {}) as Record<string, unknown>;
         const nextDefaults = { ...(currentStock.defaultConfigurations || {}) } as Record<string, unknown>;
+        const zoneBlock = buildResellerZoneConfig(panelZones, nextZoneIds);
+
         nextDefaults.resellerApi = {
             ...prevBlock,
-            zoneId: Number(value),
-            zoneName: zone?.name || undefined,
+            ...zoneBlock,
             planType: existing.planType,
             gateway: existing.gateway,
         };
+
         const tags = currentStock.tags.includes('reseller-api')
             ? currentStock.tags
             : [...currentStock.tags, 'reseller-api'];
+
+        const primaryZone = panelZones.find((z) => Number(z.id) === Number(nextZoneIds[0]));
         const nextName =
-            zone?.name && !currentStock.name.trim() ? `${zone.name} VPS` : currentStock.name;
+            primaryZone?.name && !currentStock.name.trim() ? `${primaryZone.name} VPS` : currentStock.name;
+
         setCurrentStock({
             ...currentStock,
             name: nextName,
@@ -513,18 +525,7 @@ const ManageIpStock = () => {
         return !!(c?.resellerApi?.enabled && c?.resellerApi?.useLiveStockApi);
     })();
 
-    const selectedPanelZoneId = currentStock ? readResellerApiConfig(currentStock).zoneId : null;
-    const resellerCfgForDialog = currentStock ? readResellerApiConfig(currentStock) : null;
-    const selectedPanelZone =
-        panelZones.find((z) => selectedPanelZoneId != null && Number(z.id) === selectedPanelZoneId) ||
-        (resellerCfgForDialog?.zoneName
-            ? {
-                id: selectedPanelZoneId,
-                name: resellerCfgForDialog.zoneName,
-                status: '',
-                live: !!currentStock?.available,
-            }
-            : null);
+    const selectedResellerZoneIds = currentStock ? readResellerApiConfig(currentStock).zoneIds : [];
 
     const selectedCompanyHasNetbay = (() => {
         if (!currentStock?.company) return false;
@@ -1150,8 +1151,7 @@ const ManageIpStock = () => {
                                                     PrimeVPS / Panel API
                                                 </Label>
                                                 <p className="text-xs text-muted-foreground mt-0.5">
-                                                    Sync regions from primevm.in — pick zone for live stock + auto-buy.
-                                                    Pricing IDs resolve automatically at purchase.
+                                                    Sync regions → 1, 2, 3… jitne zones chaho select karo (order = buy priority).
                                                 </p>
                                             </div>
                                             <Button
@@ -1170,42 +1170,13 @@ const ManageIpStock = () => {
                                                 Sync regions
                                             </Button>
                                         </div>
-                                        <div>
-                                            <Label className="text-sm">Region (from panel)</Label>
-                                            <Select
-                                                value={selectedPanelZoneId != null ? String(selectedPanelZoneId) : undefined}
-                                                onValueChange={handlePanelZoneSelect}
-                                                disabled={panelZonesLoading || panelZones.length === 0}
-                                            >
-                                                <SelectTrigger className="mt-1">
-                                                    <SelectValue
-                                                        placeholder={
-                                                            panelZonesLoading
-                                                                ? 'Loading regions…'
-                                                                : panelZones.length
-                                                                ? 'Select region'
-                                                                : 'Click Sync regions'
-                                                        }
-                                                    />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    {panelZones.map((z) => (
-                                                        <SelectItem key={z.id} value={String(z.id)}>
-                                                            ID {z.id} — {z.name}{' '}
-                                                            <span className={z.live ? 'text-emerald-600' : 'text-red-500'}>
-                                                                ({z.live ? 'Available' : z.status || 'Unavailable'})
-                                                            </span>
-                                                        </SelectItem>
-                                                    ))}
-                                                </SelectContent>
-                                            </Select>
-                                            {selectedPanelZone && (
-                                                <p className="text-xs text-emerald-700 dark:text-emerald-300 mt-1.5">
-                                                    Selected: zone <strong>{selectedPanelZoneId}</strong> — {selectedPanelZone.name}
-                                                    {selectedCompanyUsesResellerLiveStock ? ' · live stock auto-sync' : ''}
-                                                </p>
-                                            )}
-                                        </div>
+                                        <ResellerZonePicker
+                                            zones={panelZones}
+                                            zoneIds={selectedResellerZoneIds}
+                                            onChange={handleResellerZoneIdsChange}
+                                            loading={panelZonesLoading}
+                                            disabled={panelZonesLoading || panelZones.length === 0}
+                                        />
                                         {selectedCompanyUsesResellerLiveStock && (
                                             <p className="text-[11px] text-muted-foreground">
                                                 Live stock ON — manual stock count hidden. Zone band on panel → Out of stock here automatically.

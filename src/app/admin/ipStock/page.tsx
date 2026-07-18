@@ -18,6 +18,7 @@ import { X, Zap, BookOpen, RefreshCw, Loader2 } from 'lucide-react';
 import Link from 'next/link';
 import axios from 'axios';
 import { toast } from 'sonner';
+import { ResellerZonePicker, buildResellerZoneConfig } from '@/components/admin/ResellerZonePicker';
 
 const ALL_RAM_OPTIONS = ['1GB', '2GB', '4GB', '6GB', '8GB', '12GB', '16GB', '32GB'] as const;
 const DEFAULT_MEMORY_SIZES = ['2GB', '4GB', '8GB', '16GB'];
@@ -67,7 +68,7 @@ const IPStockFormWithParams = () => {
     );
     const [netbayDefaultOsLinux, setNetbayDefaultOsLinux] = useState('');
     const [netbayDefaultOsWindows, setNetbayDefaultOsWindows] = useState('');
-    const [resellerZoneId, setResellerZoneId] = useState('');
+    const [resellerZoneIds, setResellerZoneIds] = useState<number[]>([]);
     const [panelZones, setPanelZones] = useState<PanelZone[]>([]);
     const [panelZonesLoading, setPanelZonesLoading] = useState(false);
     const [memorySizes, setMemorySizes] = useState<string[]>(DEFAULT_MEMORY_SIZES);
@@ -283,23 +284,23 @@ const IPStockFormWithParams = () => {
 
     useEffect(() => {
         setPanelZones([]);
-        setResellerZoneId('');
+        setResellerZoneIds([]);
         if (companyId && companyId !== 'none' && selectedCompanyHasResellerApi) {
             void fetchPanelZones(true);
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [companyId, selectedCompanyHasResellerApi]);
 
-    const handlePanelZoneSelect = (value: string) => {
-        setResellerZoneId(value);
-        const zone = panelZones.find((z) => String(z.id) === value);
-        if (zone && !name.trim()) {
-            const suffix = serverType === 'VPS' ? 'Windows VPS' : 'Linux';
-            setName(`${zone.name} ${suffix}`);
+    const handleResellerZoneIdsChange = (nextZoneIds: number[]) => {
+        setResellerZoneIds(nextZoneIds);
+        if (nextZoneIds.length === 1 && !name.trim()) {
+            const zone = panelZones.find((z) => Number(z.id) === Number(nextZoneIds[0]));
+            if (zone) {
+                const suffix = serverType === 'VPS' ? 'Windows VPS' : 'Linux';
+                setName(`${zone.name} ${suffix}`);
+            }
         }
     };
-
-    const selectedPanelZone = panelZones.find((z) => String(z.id) === resellerZoneId);
 
     const handleNetbayPlanIdChange = (size: string, value: string) => {
         setNetbayPlanIds((prev) => {
@@ -330,8 +331,8 @@ const IPStockFormWithParams = () => {
             return;
         }
 
-        if (selectedCompanyHasResellerApi && !resellerZoneId.trim()) {
-            toast.error('Sync regions karo aur panel se ek zone select karo');
+        if (selectedCompanyHasResellerApi && resellerZoneIds.length === 0) {
+            toast.error('Sync regions karo aur kam se kam 1 zone select karo');
             return;
         }
 
@@ -381,11 +382,9 @@ const IPStockFormWithParams = () => {
         }
 
         const submitTags = [...tags];
-        const selectedZone = panelZones.find((z) => String(z.id) === resellerZoneId);
         if (selectedCompanyHasResellerApi) {
             defaultConfigurations.resellerApi = {
-                zoneId: Number(resellerZoneId),
-                ...(selectedZone?.name ? { zoneName: selectedZone.name } : {}),
+                ...buildResellerZoneConfig(panelZones, resellerZoneIds),
                 planType: 'SHARED',
                 gateway: 'WALLET',
             };
@@ -619,7 +618,7 @@ const IPStockFormWithParams = () => {
                                         <div>
                                             <Label className="text-base font-semibold">PrimeVPS / Panel API</Label>
                                             <p className="text-xs text-muted-foreground mt-0.5">
-                                                Sync regions → zone select → name + price → create. Tag <code>reseller-api</code> auto.
+                                                Sync regions → 1, 2, 3… jitne zones chaho select karo (order = buy priority).
                                             </p>
                                         </div>
                                         <Button
@@ -638,50 +637,13 @@ const IPStockFormWithParams = () => {
                                             Sync regions
                                         </Button>
                                     </div>
-                                    <div>
-                                        <Label className="text-sm">Region (from panel)</Label>
-                                        <Select
-                                            value={resellerZoneId || undefined}
-                                            onValueChange={handlePanelZoneSelect}
-                                            disabled={panelZonesLoading || panelZones.length === 0}
-                                        >
-                                            <SelectTrigger className="mt-1">
-                                                <SelectValue
-                                                    placeholder={
-                                                        panelZonesLoading
-                                                            ? 'Loading regions…'
-                                                            : panelZones.length
-                                                            ? 'Select region (e.g. 160.191.137-2server)'
-                                                            : 'Click Sync regions first'
-                                                    }
-                                                />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {panelZones.map((z) => (
-                                                    <SelectItem key={z.id} value={String(z.id)}>
-                                                        <span className="font-mono text-xs">ID {z.id}</span>
-                                                        {' — '}
-                                                        {z.name}
-                                                        {' '}
-                                                        <span className={z.live ? 'text-emerald-600' : 'text-red-500'}>
-                                                            ({z.live ? 'Available' : z.status || 'Unavailable'})
-                                                        </span>
-                                                    </SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                        {resellerZoneId && selectedPanelZone && (
-                                            <p className="text-xs text-emerald-700 dark:text-emerald-300 mt-1.5">
-                                                Selected: zone <strong>{resellerZoneId}</strong> — {selectedPanelZone.name}
-                                                {selectedCompanyUsesResellerLiveStock
-                                                    ? ' · live stock iske status se sync hogi'
-                                                    : ''}
-                                            </p>
-                                        )}
-                                        <p className="text-xs text-gray-500 mt-1">
-                                            Har IP series = alag product. Buy ke liye primevm.in wallet balance chahiye.
-                                        </p>
-                                    </div>
+                                    <ResellerZonePicker
+                                        zones={panelZones}
+                                        zoneIds={resellerZoneIds}
+                                        onChange={handleResellerZoneIdsChange}
+                                        loading={panelZonesLoading}
+                                        disabled={panelZonesLoading || panelZones.length === 0}
+                                    />
                                 </div>
                             )}
 

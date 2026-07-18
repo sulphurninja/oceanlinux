@@ -1,4 +1,5 @@
 const IPStock = require('@/models/ipStockModel');
+const Order = require('@/models/orderModel');
 
 const VALID_OS = ['CentOS 7', 'Ubuntu 22', 'Windows 2022 64'];
 
@@ -101,6 +102,135 @@ async function syncStockCountFromInventory(stockId) {
   return stock;
 }
 
+function cleanInventoryIp(ipAddress) {
+  return String(ipAddress || '').split(':')[0].trim();
+}
+
+/**
+ * Keep pre-configured inventory in sync when company edits order credentials/IP.
+ * Finds the linked row via inventoryItemId, orderId, or the order's previous IP.
+ */
+async function syncCompanyInventoryAfterOrderUpdate(order, fields = {}) {
+  if (!order?.ipStockId) {
+    return { synced: false, reason: 'no_stock' };
+  }
+
+  const stock = await IPStock.findById(order.ipStockId);
+  if (!stock || !Array.isArray(stock.inventoryItems) || stock.inventoryItems.length === 0) {
+    return { synced: false, reason: 'no_inventory' };
+  }
+
+  const orderIdStr = String(order._id);
+  let itemIndex = -1;
+
+  if (order.inventoryItemId) {
+    itemIndex = stock.inventoryItems.findIndex(
+      (row) => String(row._id) === String(order.inventoryItemId)
+    );
+  }
+
+  if (itemIndex < 0) {
+    itemIndex = stock.inventoryItems.findIndex(
+      (row) => row.orderId && String(row.orderId) === orderIdStr
+    );
+  }
+
+  if (itemIndex < 0 && order.ipAddress) {
+    const previousIp = cleanInventoryIp(order.ipAddress);
+    itemIndex = stock.inventoryItems.findIndex(
+      (row) => cleanInventoryIp(row.ipAddress) === previousIp && (!!row.allocated || !!row.orderId)
+    );
+  }
+
+  if (itemIndex < 0) {
+    return { synced: false, reason: 'no_linked_item' };
+  }
+
+  const item = stock.inventoryItems[itemIndex];
+  const nextIp =
+    fields.ipAddress !== undefined ? cleanInventoryIp(fields.ipAddress) : cleanInventoryIp(item.ipAddress);
+
+  if (fields.ipAddress !== undefined && nextIp) {
+    const duplicate = stock.inventoryItems.some(
+      (row, idx) => idx !== itemIndex && cleanInventoryIp(row.ipAddress) === nextIp
+    );
+    if (duplicate) {
+      throw new Error(`IP ${nextIp} is already in this stock inventory`);
+    }
+    item.ipAddress = nextIp;
+  }
+
+  if (fields.username !== undefined) item.username = fields.username;
+  if (fields.password !== undefined) item.password = fields.password;
+  if (fields.os !== undefined) item.os = fields.os;
+
+  item.allocated = true;
+  item.orderId = order._id;
+  if (!item.allocatedAt) item.allocatedAt = new Date();
+
+  stock.markModified('inventoryItems');
+  await stock.save();
+
+  if (!order.inventoryItemId) {
+    await Order.updateOne(
+      { _id: order._id },
+      { $set: { inventoryItemId: String(item._id) } }
+    );
+  }
+
+  return { synced: true, itemId: String(item._id), ipAddress: item.ipAddress };
+}
+
+/**
+ * Heal inventory rows that still store an old IP while the linked order has a new IP.
+ * Runs during sync-all so extend lists stop showing superseded panel IPs.
+ */
+async function reconcileCompanyInventoryOrderIps(stockDocs, orders = []) {
+  if (!Array.isArray(stockDocs) || !Array.isArray(orders) || orders.length === 0) {
+    return { updated: 0 };
+  }
+
+  const orderById = new Map(orders.map((order) => [String(order._id), order]));
+  const orderByInventoryItemId = new Map(
+    orders
+      .filter((order) => order.inventoryItemId)
+      .map((order) => [String(order.inventoryItemId), order])
+  );
+
+  let updated = 0;
+
+  for (const stock of stockDocs) {
+    if (!Array.isArray(stock.inventoryItems) || stock.inventoryItems.length === 0) continue;
+
+    let dirty = false;
+    for (const item of stock.inventoryItems) {
+      const linkedOrder =
+        (item.orderId ? orderById.get(String(item.orderId)) : null) ||
+        orderByInventoryItemId.get(String(item._id)) ||
+        null;
+      if (!linkedOrder?.ipAddress) continue;
+
+      const orderIp = cleanInventoryIp(linkedOrder.ipAddress);
+      const itemIp = cleanInventoryIp(item.ipAddress);
+      if (!orderIp || orderIp === itemIp) continue;
+
+      item.ipAddress = orderIp;
+      item.allocated = true;
+      item.orderId = linkedOrder._id;
+      if (!item.allocatedAt) item.allocatedAt = new Date();
+      dirty = true;
+      updated += 1;
+    }
+
+    if (dirty) {
+      stock.markModified('inventoryItems');
+      await stock.save();
+    }
+  }
+
+  return { updated };
+}
+
 /**
  * Assign the next unallocated inventory row to a confirmed order.
  * Idempotent if order.inventoryItemId is already set.
@@ -178,4 +308,7 @@ module.exports = {
   parseInventoryBulkLines,
   syncStockCountFromInventory,
   allocateCompanyInventoryForOrder,
+  syncCompanyInventoryAfterOrderUpdate,
+  reconcileCompanyInventoryOrderIps,
+  cleanInventoryIp,
 };

@@ -16,6 +16,7 @@ const {
   resolveZoneIsoIdFromCatalog,
   autoResolveResellerPriceIds,
   isResellerApiStock,
+  resolveResellerZoneCandidatesForPurchase,
 } = require('@/lib/resellerApiStockConfig');
 const {
   waitForProvisionedVm,
@@ -1605,6 +1606,9 @@ class AutoProvisioningService {
     L.kv('[RESELLER-API] Stock config', stockCfg);
     const locationCtx = buildResellerLocationContext(ipStock, order);
     L.kv('[RESELLER-API] Expected zone', locationCtx.expectedZoneId ?? '(none)');
+    if (locationCtx.expectedZoneIds?.length > 1) {
+      L.kv('[RESELLER-API] Fallback zones', locationCtx.expectedZoneIds.join(', '));
+    }
     L.kv('[RESELLER-API] Expected IP prefix', locationCtx.expectedIpPrefix ?? '(none)');
 
     const api = new ResellerApi(cfg);
@@ -1612,6 +1616,7 @@ class AutoProvisioningService {
     let resellerVmId = order.resellerVmId || '';
     let resellerOrderId = order.resellerOrderId || '';
     let resellerGroupId = order.resellerGroupId || '';
+    let purchasedZoneId = order.resellerZoneId ? String(order.resellerZoneId) : null;
     let purchaseStartedAt = order.createdAt
       ? new Date(order.createdAt).getTime()
       : Date.now();
@@ -1626,27 +1631,12 @@ class AutoProvisioningService {
         });
       }
 
-      let zoneId = stockCfg.zoneId;
-      if (zoneId == null) {
-        const zones = await api.getZones();
-        const list = Array.isArray(zones) ? zones : (zones?.zones || []);
-        const active = list.find((z) => String(z.status || '').toUpperCase() === 'ACTIVE') || list[0];
-        zoneId = active?.id;
-      }
-      if (zoneId == null) {
-        throw new Error('No zoneId configured and upstream returned no zones');
-      }
-
-      let zoneIsoId = priceIds.zoneIsoId || stockCfg.defaultOs?.[isWindowsProduct ? 'Windows' : 'Linux']?.zoneIsoId;
-      if (zoneIsoId == null) {
-        const isos = await api.getZoneIsos(zoneId);
-        zoneIsoId = resolveZoneIsoIdFromCatalog(isos, {
-          isWindows: isWindowsProduct,
-          orderOs: order.os || orderOs,
-        });
-      }
-      if (zoneIsoId == null) {
-        throw new Error(`Could not resolve ISO for zone ${zoneId}. Set zoneIsoId in IP Stock resellerApi config.`);
+      const zonesList = await api.listZones();
+      const zoneCandidates = await resolveResellerZoneCandidatesForPurchase(api, stockCfg, { zonesList });
+      if (!zoneCandidates.length) {
+        throw new Error(
+          'No live region available for this IP stock. Primary/fallback zones are inactive on panel — try another region or wait.'
+        );
       }
 
       const companyDoc = await Company.findById(ipStock.company).select('resellerApi').lean();
@@ -1662,27 +1652,72 @@ class AutoProvisioningService {
         L.kv('[RESELLER-API] Live stock OK', liveCheck.result?.walletBalance ?? '(cached)');
       }
 
-      const createBody = {
-        zoneId: Number(zoneId),
-        zoneIsoId: Number(zoneIsoId),
-        planType: stockCfg.planType || 'SHARED',
-        cpuPriceId: Number(priceIds.cpuPriceId),
-        ramPriceId: Number(priceIds.ramPriceId),
-        diskPriceId: Number(priceIds.diskPriceId),
-        bandwidthPriceId: Number(priceIds.bandwidthPriceId),
-        months: 1,
-        quantity: 1,
-        useWalletBalance: true,
-      };
+      let zoneId = null;
+      let zoneIsoId = null;
+      let createRes = null;
+      let lastPurchaseError = null;
 
-      L.line(`[RESELLER-API] POST /api/users/vms/create ${JSON.stringify(createBody)}`);
-      purchaseStartedAt = Date.now();
-      let createRes;
-      try {
-        createRes = await api.createVm(createBody, { gateway: stockCfg.gateway || 'WALLET' });
-      } catch (err) {
-        throw new Error(`Panel VM purchase failed: ${err.message}`);
+      for (const candidate of zoneCandidates) {
+        zoneId = candidate.zoneId;
+        zoneIsoId =
+          priceIds.zoneIsoId ||
+          stockCfg.defaultOs?.[isWindowsProduct ? 'Windows' : 'Linux']?.zoneIsoId ||
+          null;
+
+        if (zoneIsoId == null) {
+          try {
+            const isos = await api.getZoneIsos(zoneId);
+            zoneIsoId = resolveZoneIsoIdFromCatalog(isos, {
+              isWindows: isWindowsProduct,
+              orderOs: order.os || orderOs,
+            });
+          } catch (err) {
+            lastPurchaseError = err;
+            L.line(`[RESELLER-API] ISO lookup failed for zone ${zoneId}: ${err.message}`);
+            continue;
+          }
+        }
+
+        if (zoneIsoId == null) {
+          lastPurchaseError = new Error(
+            `Could not resolve ISO for zone ${zoneId}. Set zoneIsoId in IP Stock resellerApi config.`
+          );
+          continue;
+        }
+
+        const createBody = {
+          zoneId: Number(zoneId),
+          zoneIsoId: Number(zoneIsoId),
+          planType: stockCfg.planType || 'SHARED',
+          cpuPriceId: Number(priceIds.cpuPriceId),
+          ramPriceId: Number(priceIds.ramPriceId),
+          diskPriceId: Number(priceIds.diskPriceId),
+          bandwidthPriceId: Number(priceIds.bandwidthPriceId),
+          months: 1,
+          quantity: 1,
+          useWalletBalance: true,
+        };
+
+        L.line(
+          `[RESELLER-API] POST /api/users/vms/create zone ${zoneId} ${JSON.stringify(createBody)}`
+        );
+        try {
+          createRes = await api.createVm(createBody, { gateway: stockCfg.gateway || 'WALLET' });
+          L.line(`[RESELLER-API] Purchase OK on zone ${zoneId}${candidate.zone?.name ? ` (${candidate.zone.name})` : ''}`);
+          break;
+        } catch (err) {
+          lastPurchaseError = err;
+          L.line(`[RESELLER-API] Zone ${zoneId} purchase failed: ${err.message} — trying fallback`);
+        }
       }
+
+      if (!createRes) {
+        throw new Error(
+          `Panel VM purchase failed on all configured regions: ${lastPurchaseError?.message || 'unknown error'}`
+        );
+      }
+
+      purchaseStartedAt = Date.now();
 
       const createData = createRes?.data && typeof createRes.data === 'object' ? createRes.data : createRes;
       resellerOrderId =
@@ -1707,9 +1742,10 @@ class AutoProvisioningService {
       await Order.findByIdAndUpdate(order._id, {
         resellerOrderId: resellerOrderId ? String(resellerOrderId) : undefined,
         resellerGroupId: resellerGroupId ? String(resellerGroupId) : undefined,
-        resellerZoneId: stockCfg.zoneId != null ? String(stockCfg.zoneId) : undefined,
+        resellerZoneId: zoneId != null ? String(zoneId) : undefined,
         provider: 'reseller-api',
       });
+      purchasedZoneId = zoneId != null ? String(zoneId) : purchasedZoneId;
 
       L.kv('[RESELLER-API] upstream orderId', resellerOrderId || '(none)');
       L.kv('[RESELLER-API] upstream groupId', resellerGroupId || '(none)');
@@ -1748,6 +1784,7 @@ class AutoProvisioningService {
           excludeOrderId: order._id,
           order,
           expectedZoneId: locationCtx.expectedZoneId,
+          expectedZoneIds: locationCtx.expectedZoneIds,
           expectedIpPrefix: locationCtx.expectedIpPrefix,
           maxWaitMs: 180_000,
           pollMs: 5000,
@@ -1848,7 +1885,7 @@ class AutoProvisioningService {
       resellerVmId: resellerVmId || undefined,
       resellerOrderId: resellerOrderId || undefined,
       resellerGroupId: resellerGroupId || undefined,
-      resellerZoneId: stockCfg.zoneId != null ? String(stockCfg.zoneId) : undefined,
+      resellerZoneId: purchasedZoneId || (stockCfg.zoneId != null ? String(stockCfg.zoneId) : undefined),
       ipAddress: ipAddress || '',
       username,
       password: password || '',

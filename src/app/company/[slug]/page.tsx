@@ -26,6 +26,10 @@ import { COMPANY_FILTER_VERSION, isCompanyVisibleOrder } from '@/lib/companyOrde
 import {
   buildCompanyInventoryActivity,
   buildCompanyValidityMismatchReport,
+  splitValidityMismatchesByRisk,
+  groupValidityMismatchesByGapDays,
+  getValidityMismatchRisk,
+  type ValidityMismatchRow,
 } from '@/lib/companyValidityMismatch';
 import { getCompanyValidityDays } from '@/lib/expiryHelper';
 import { OsIcon, humanizeOsLabel } from '@/components/os/OsIcon';
@@ -157,6 +161,15 @@ function formatExtendLine(ipAddress: string, gapDays: number) {
   return `${ipAddress} extend ${gapDays} ${unit}`;
 }
 
+function formatExtendLines(rows: ValidityMismatchRow[]) {
+  return rows.map((row) => formatExtendLine(row.ipAddress, row.gapDays)).join('\n');
+}
+
+function gapDayGroupLabel(gapDays: number, count: number) {
+  const unit = gapDays === 1 ? 'day' : 'days';
+  return `${gapDays} ${unit} extend (${count})`;
+}
+
 function toDateInputValue(value?: string | Date | null) {
   if (!value) return '';
   const d = new Date(value);
@@ -194,6 +207,7 @@ interface Order {
   stockName: string;
   serverType?: string;
   ipStockId?: string;
+  inventoryItemId?: string;
 }
 
 interface ActionRequest {
@@ -451,6 +465,13 @@ export default function CompanyDashboard() {
         setStockCountDrafts(Object.fromEntries(data.stocks.map((s: Stock) => [s._id, String(s.stockCount ?? 0)])));
       }
 
+      const orderRes = await fetch(`/api/company/orders?_=${Date.now()}`, { cache: 'no-store' });
+      if (orderRes.ok) {
+        const orderData = await orderRes.json();
+        const orderRows: Order[] = Array.isArray(orderData) ? orderData : (orderData.orders ?? []);
+        setOrders(orderRows.filter(isCompanyVisibleOrder));
+      }
+
       setLastSyncFailed(
         Array.isArray(data.failed)
           ? data.failed.map((f: { ipAddress: string; error?: string }) => ({
@@ -469,6 +490,9 @@ export default function CompanyDashboard() {
       }
 
       const mismatchIps: string[] = data.mismatchIps || [];
+      const urgentCount = Array.isArray(data.mismatches)
+        ? data.mismatches.filter((m: { panelDaysLeft?: number }) => (m.panelDaysLeft ?? 99) <= 10).length
+        : 0;
       if (data.failedCount > 0) {
         toast.warning(`${data.updatedCount} synced, ${data.failedCount} failed (panel par nahi mile)`);
       } else {
@@ -477,7 +501,9 @@ export default function CompanyDashboard() {
 
       if (mismatchIps.length > 0) {
         toast.error(
-          `${mismatchIps.length} IP par panel expiry kam hai — extend karo: ${mismatchIps.slice(0, 5).join(', ')}${mismatchIps.length > 5 ? '…' : ''}`,
+          urgentCount > 0
+            ? `${urgentCount} urgent (≤10d panel) + ${mismatchIps.length - urgentCount} extend needed — lists updated`
+            : `${mismatchIps.length} IP par panel expiry kam hai — extend karo`,
           { duration: 8000 }
         );
       } else if (data.updatedCount > 0) {
@@ -652,6 +678,12 @@ export default function CompanyDashboard() {
         setOrders(prev => prev.map(o =>
           o._id === editOrder._id ? { ...o, ipAddress: editIp, username: editUsername, password: editPassword, os: editOs, status: 'active', provisioningStatus: 'active' } : o
         ));
+        const stockRes = await fetch('/api/company/stocks', { cache: 'no-store' });
+        if (stockRes.ok) {
+          const payload = await stockRes.json();
+          const rows: Stock[] = Array.isArray(payload) ? payload : (payload.stocks ?? []);
+          setStocks(rows);
+        }
         setEditOrder(null);
       } else {
         const data = await res.json();
@@ -795,9 +827,34 @@ export default function CompanyDashboard() {
     [stocks, visibleOrders, panelExpiryByIp]
   );
 
-  const extendLinesText = useMemo(
-    () => validityMismatches.map((row) => formatExtendLine(row.ipAddress, row.gapDays)).join('\n'),
+  const { urgent: urgentValidityMismatches, standard: standardValidityMismatches } = useMemo(
+    () => splitValidityMismatchesByRisk(validityMismatches),
     [validityMismatches]
+  );
+
+  const urgentGapGroups = useMemo(
+    () => groupValidityMismatchesByGapDays(urgentValidityMismatches),
+    [urgentValidityMismatches]
+  );
+
+  const standardGapGroups = useMemo(
+    () => groupValidityMismatchesByGapDays(standardValidityMismatches),
+    [standardValidityMismatches]
+  );
+
+  const extendLinesText = useMemo(
+    () => formatExtendLines(validityMismatches),
+    [validityMismatches]
+  );
+
+  const urgentExtendLinesText = useMemo(
+    () => formatExtendLines(urgentValidityMismatches),
+    [urgentValidityMismatches]
+  );
+
+  const standardExtendLinesText = useMemo(
+    () => formatExtendLines(standardValidityMismatches),
+    [standardValidityMismatches]
   );
 
   const copyText = async (text: string, label = 'Copied') => {
@@ -1324,10 +1381,10 @@ export default function CompanyDashboard() {
                         : 'Hostheaven sync enable karo, phir expiry sync kar sakte ho.'}
                     </p>
                   ) : (
-                    <>
+                    <div className="space-y-4">
                       <div className="flex items-center justify-between gap-2">
                         <p className="text-xs font-medium text-amber-800 dark:text-amber-200">
-                          {validityMismatches.length} VPS
+                          {validityMismatches.length} VPS — panel expiry customer se kam hai
                         </p>
                         <Button
                           type="button"
@@ -1340,36 +1397,172 @@ export default function CompanyDashboard() {
                           Copy all
                         </Button>
                       </div>
-                      <div className="rounded-md border border-amber-500/30 bg-background/80 max-h-[420px] overflow-y-auto">
-                        {validityMismatches.map((row) => {
-                          const line = formatExtendLine(row.ipAddress, row.gapDays);
-                          return (
-                            <div
-                              key={row.id}
-                              className="flex items-center justify-between gap-2 px-2.5 py-1.5 border-b border-amber-500/10 last:border-0 hover:bg-amber-500/5"
-                            >
-                              <button
-                                type="button"
-                                className="font-mono text-xs text-left truncate flex-1"
-                                onClick={() => copyText(line, 'Copied')}
-                                title="Click to copy"
-                              >
-                                {line}
-                              </button>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                className="h-6 w-6 p-0 shrink-0"
-                                onClick={() => copyText(line, 'Copied')}
-                              >
-                                <Copy className="h-3 w-3" />
-                              </Button>
+
+                      {urgentValidityMismatches.length > 0 && (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <div>
+                              <p className="text-xs font-semibold text-red-700 dark:text-red-300 flex items-center gap-1.5">
+                                <AlertTriangle className="h-3.5 w-3.5" />
+                                High risk — urgent extend ({urgentValidityMismatches.length})
+                              </p>
+                              <p className="text-[11px] text-muted-foreground mt-0.5">
+                                Panel par ≤10 din bache (≤5 = critical). Pehle inko Hostheaven par extend karo.
+                              </p>
                             </div>
-                          );
-                        })}
-                      </div>
-                    </>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-7 text-xs shrink-0 border-red-500/40 text-red-700 dark:text-red-300"
+                              onClick={() => copyText(urgentExtendLinesText, 'Urgent list copy ho gayi')}
+                            >
+                              <Copy className="h-3 w-3 mr-1" />
+                              Copy urgent
+                            </Button>
+                          </div>
+                          <div className="space-y-3">
+                            {urgentGapGroups.map((group) => {
+                              const groupText = formatExtendLines(group.rows);
+                              return (
+                                <div key={`urgent-gap-${group.gapDays}`} className="space-y-1.5">
+                                  <div className="flex items-center justify-between gap-2 px-0.5">
+                                    <p className="text-[11px] font-semibold text-red-700 dark:text-red-300">
+                                      {gapDayGroupLabel(group.gapDays, group.rows.length)}
+                                    </p>
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-6 text-[10px] shrink-0 border-red-500/40 text-red-700 dark:text-red-300"
+                                      onClick={() => copyText(groupText, `${group.gapDays} day list copy ho gayi`)}
+                                    >
+                                      <Copy className="h-3 w-3 mr-1" />
+                                      Copy
+                                    </Button>
+                                  </div>
+                                  <div className="rounded-md border border-red-500/40 bg-red-500/5 max-h-[220px] overflow-y-auto">
+                                    {group.rows.map((row) => {
+                                      const risk = getValidityMismatchRisk(row.panelDaysLeft);
+                                      const line = formatExtendLine(row.ipAddress, row.gapDays);
+                                      return (
+                                        <div
+                                          key={row.id}
+                                          className="flex items-center justify-between gap-2 px-2.5 py-1.5 border-b border-red-500/10 last:border-0 hover:bg-red-500/5"
+                                        >
+                                          <button
+                                            type="button"
+                                            className="text-left flex-1 min-w-0"
+                                            onClick={() => copyText(line, 'Copied')}
+                                            title="Click to copy"
+                                          >
+                                            <span className="font-mono text-xs block truncate">{line}</span>
+                                            <span className="text-[10px] text-muted-foreground">
+                                              {row.status === 'sold' ? 'Sold' : 'Ready'} · panel {row.panelDaysLeft}d left
+                                              {risk === 'critical' ? ' · CRITICAL' : ''}
+                                            </span>
+                                          </button>
+                                          <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-6 w-6 p-0 shrink-0"
+                                            onClick={() => copyText(line, 'Copied')}
+                                          >
+                                            <Copy className="h-3 w-3" />
+                                          </Button>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {standardValidityMismatches.length > 0 && (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <div>
+                              <p className="text-xs font-semibold text-amber-800 dark:text-amber-200">
+                                Extend needed — panel &gt;10 din ({standardValidityMismatches.length})
+                              </p>
+                              <p className="text-[11px] text-muted-foreground mt-0.5">
+                                Abhi urgent nahi, lekin customer validity se pehle panel extend karna hoga.
+                              </p>
+                            </div>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-7 text-xs shrink-0 border-amber-500/40 text-amber-800 dark:text-amber-200"
+                              onClick={() => copyText(standardExtendLinesText, 'Standard list copy ho gayi')}
+                            >
+                              <Copy className="h-3 w-3 mr-1" />
+                              Copy list
+                            </Button>
+                          </div>
+                          <div className="space-y-3">
+                            {standardGapGroups.map((group) => {
+                              const groupText = formatExtendLines(group.rows);
+                              return (
+                                <div key={`standard-gap-${group.gapDays}`} className="space-y-1.5">
+                                  <div className="flex items-center justify-between gap-2 px-0.5">
+                                    <p className="text-[11px] font-semibold text-amber-800 dark:text-amber-200">
+                                      {gapDayGroupLabel(group.gapDays, group.rows.length)}
+                                    </p>
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-6 text-[10px] shrink-0 border-amber-500/40 text-amber-800 dark:text-amber-200"
+                                      onClick={() => copyText(groupText, `${group.gapDays} day list copy ho gayi`)}
+                                    >
+                                      <Copy className="h-3 w-3 mr-1" />
+                                      Copy
+                                    </Button>
+                                  </div>
+                                  <div className="rounded-md border border-amber-500/30 bg-background/80 max-h-[220px] overflow-y-auto">
+                                    {group.rows.map((row) => {
+                                      const line = formatExtendLine(row.ipAddress, row.gapDays);
+                                      return (
+                                        <div
+                                          key={row.id}
+                                          className="flex items-center justify-between gap-2 px-2.5 py-1.5 border-b border-amber-500/10 last:border-0 hover:bg-amber-500/5"
+                                        >
+                                          <button
+                                            type="button"
+                                            className="text-left flex-1 min-w-0"
+                                            onClick={() => copyText(line, 'Copied')}
+                                            title="Click to copy"
+                                          >
+                                            <span className="font-mono text-xs block truncate">{line}</span>
+                                            <span className="text-[10px] text-muted-foreground">
+                                              {row.status === 'sold' ? 'Sold' : 'Ready'} · panel {row.panelDaysLeft}d left
+                                            </span>
+                                          </button>
+                                          <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-6 w-6 p-0 shrink-0"
+                                            onClick={() => copyText(line, 'Copied')}
+                                          >
+                                            <Copy className="h-3 w-3" />
+                                          </Button>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   )}
                   {lastSyncFailed.length > 0 && (
                     <div className="space-y-1.5 pt-1 border-t border-dashed">

@@ -30,6 +30,7 @@ export type CompanyOrderLike = {
   expiryDate?: string | Date | null;
   createdAt?: string | Date | null;
   ipAddress?: string | null;
+  inventoryItemId?: string | null;
   stockName?: string;
   ipStockId?: string;
 };
@@ -50,6 +51,45 @@ export type ValidityMismatchRow = {
   addedAt?: string | null;
 };
 
+/** Panel pe kitne din bache — isse urgent extend list banati hai. */
+export type ValidityMismatchRisk = 'critical' | 'high' | 'normal';
+
+export function getValidityMismatchRisk(panelDaysLeft: number): ValidityMismatchRisk {
+  if (panelDaysLeft <= 5) return 'critical';
+  if (panelDaysLeft <= 10) return 'high';
+  return 'normal';
+}
+
+/** ≤10 days panel = urgent extend; baaki mismatch alag list. */
+export function splitValidityMismatchesByRisk(rows: ValidityMismatchRow[]) {
+  const urgent = rows.filter((r) => r.panelDaysLeft <= 10);
+  const standard = rows.filter((r) => r.panelDaysLeft > 10);
+  return { urgent, standard };
+}
+
+export type ValidityMismatchGapGroup = {
+  gapDays: number;
+  rows: ValidityMismatchRow[];
+};
+
+/** Hostheaven extend batch — same gapDays wali IPs ek list me. */
+export function groupValidityMismatchesByGapDays(rows: ValidityMismatchRow[]): ValidityMismatchGapGroup[] {
+  const byGap = new Map<number, ValidityMismatchRow[]>();
+
+  for (const row of rows) {
+    const list = byGap.get(row.gapDays) || [];
+    list.push(row);
+    byGap.set(row.gapDays, list);
+  }
+
+  return [...byGap.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([gapDays, groupRows]) => ({
+      gapDays,
+      rows: groupRows.sort((a, b) => a.panelDaysLeft - b.panelDaysLeft),
+    }));
+}
+
 function cleanIp(ip?: string | null) {
   return String(ip || '').split(':')[0].trim();
 }
@@ -68,10 +108,57 @@ function parsePanelExpiry(value: string | Date | null | undefined): Date | null 
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
+function buildOrderLookupMaps(orders: CompanyOrderLike[]) {
+  const orderById = new Map(orders.map((o) => [String(o._id), o]));
+  const orderByInventoryItemId = new Map(
+    orders
+      .filter((o) => o.inventoryItemId)
+      .map((o) => [String(o.inventoryItemId), o])
+  );
+  return { orderById, orderByInventoryItemId };
+}
+
+function resolveLinkedOrderForInventoryItem(
+  item: CompanyInventoryItemLike,
+  orderById: Map<string, CompanyOrderLike>,
+  orderByInventoryItemId: Map<string, CompanyOrderLike>
+) {
+  return (
+    (item.orderId ? orderById.get(String(item.orderId)) : null) ||
+    orderByInventoryItemId.get(String(item._id)) ||
+    null
+  );
+}
+
+/** Inventory me purani IP reh gayi ho lekin order par nayi IP ho — purani IP list me mat dikhao. */
+function buildSupersededInventoryIps(
+  stocks: CompanyStockLike[],
+  orders: CompanyOrderLike[]
+) {
+  const superseded = new Set<string>();
+  const { orderById, orderByInventoryItemId } = buildOrderLookupMaps(orders);
+
+  for (const stock of stocks) {
+    for (const item of stock.inventoryItems || []) {
+      const inventoryIp = cleanIp(item.ipAddress);
+      const linkedOrder = resolveLinkedOrderForInventoryItem(item, orderById, orderByInventoryItemId);
+      if (!linkedOrder) continue;
+
+      const orderIp = cleanIp(linkedOrder.ipAddress);
+      if (inventoryIp && orderIp && inventoryIp !== orderIp) {
+        superseded.add(inventoryIp);
+      }
+    }
+  }
+
+  return superseded;
+}
+
 /** IP → panel expiry from inventory rows + optional Hostheaven sync map. */
 export function buildPanelExpiryByIp(
   stocks: CompanyStockLike[],
-  panelExpiryByIp?: Record<string, string | Date | null>
+  panelExpiryByIp?: Record<string, string | Date | null>,
+  orders: CompanyOrderLike[] = []
 ): Map<string, Date> {
   const map = new Map<string, Date>();
 
@@ -80,6 +167,25 @@ export function buildPanelExpiryByIp(
       const ip = cleanIp(item.ipAddress);
       const expiry = parsePanelExpiry(item.expiryDate);
       if (ip && expiry) map.set(ip, expiry);
+    }
+  }
+
+  if (orders.length > 0) {
+    const { orderById, orderByInventoryItemId } = buildOrderLookupMaps(orders);
+    for (const stock of stocks) {
+      for (const item of stock.inventoryItems || []) {
+        const inventoryIp = cleanIp(item.ipAddress);
+        const linkedOrder = resolveLinkedOrderForInventoryItem(item, orderById, orderByInventoryItemId);
+        if (!linkedOrder) continue;
+
+        const orderIp = cleanIp(linkedOrder.ipAddress);
+        if (!inventoryIp || !orderIp || inventoryIp === orderIp) continue;
+
+        const expiry = map.get(inventoryIp) || parsePanelExpiry(item.expiryDate);
+        if (expiry && !map.has(orderIp)) {
+          map.set(orderIp, expiry);
+        }
+      }
     }
   }
 
@@ -113,24 +219,36 @@ export function buildCompanyValidityMismatchReport(
 ): ValidityMismatchRow[] {
   const rows: ValidityMismatchRow[] = [];
   const seenIps = new Set<string>();
-  const orderById = new Map(orders.map((o) => [String(o._id), o]));
-  const panelByIp = buildPanelExpiryByIp(stocks, panelExpiryByIp);
+  const { orderById, orderByInventoryItemId } = buildOrderLookupMaps(orders);
+  const supersededIps = buildSupersededInventoryIps(stocks, orders);
+  const panelByIp = buildPanelExpiryByIp(stocks, panelExpiryByIp, orders);
 
   const stockById = new Map(stocks.map((s) => [String(s._id), s]));
 
   for (const stock of stocks) {
     for (const item of stock.inventoryItems || []) {
-      const ip = cleanIp(item.ipAddress);
-      if (!ip) continue;
+      const inventoryIp = cleanIp(item.ipAddress);
+      if (!inventoryIp) continue;
 
-      const panelExpiry = panelByIp.get(ip) || parsePanelExpiry(item.expiryDate);
+      const linkedOrder = resolveLinkedOrderForInventoryItem(item, orderById, orderByInventoryItemId);
+      const orderByIp = orders.find((o) => cleanIp(o.ipAddress) === inventoryIp) || null;
+      const soldOrder = linkedOrder || orderByIp;
+
+      if (supersededIps.has(inventoryIp) && !linkedOrder) {
+        continue;
+      }
+
+      // Linked order IP wins — inventory row can lag after manual IP edit.
+      const ip = linkedOrder?.ipAddress ? cleanIp(linkedOrder.ipAddress) : inventoryIp;
+      if (!ip || supersededIps.has(ip)) continue;
+
+      const panelExpiry =
+        panelByIp.get(ip) ||
+        (ip === inventoryIp ? parsePanelExpiry(item.expiryDate) : null);
       if (!panelExpiry) continue;
 
       const panelDaysLeft = getDaysUntilExpiry(panelExpiry);
 
-      const linkedOrder = item.orderId ? orderById.get(String(item.orderId)) : null;
-      const orderByIp = orders.find((o) => cleanIp(o.ipAddress) === ip) || null;
-      const soldOrder = linkedOrder || orderByIp;
       const isSold = !!item.allocated || !!soldOrder;
 
       if (!isSold) {
@@ -141,7 +259,7 @@ export function buildCompanyValidityMismatchReport(
 
         pushMismatchRow(rows, seenIps, {
           id: `ready-${item._id}`,
-          ipAddress: item.ipAddress,
+          ipAddress: ip,
           stockName: stock.name,
           stockId: stock._id,
           status: 'ready',
@@ -168,7 +286,7 @@ export function buildCompanyValidityMismatchReport(
 
       pushMismatchRow(rows, seenIps, {
         id: `sold-${item._id}`,
-        ipAddress: item.ipAddress,
+        ipAddress: ip,
         stockName: stock.name,
         stockId: stock._id,
         status: 'sold',
@@ -216,7 +334,9 @@ export function buildCompanyValidityMismatchReport(
     });
   }
 
-  return rows.sort((a, b) => a.panelDaysLeft - b.panelDaysLeft);
+  return rows
+    .filter((row) => !supersededIps.has(cleanIp(row.ipAddress)))
+    .sort((a, b) => a.panelDaysLeft - b.panelDaysLeft);
 }
 
 export type CompanyInventoryActivity = {

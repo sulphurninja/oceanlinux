@@ -13,6 +13,7 @@ import {
   defaultOsForServerType,
   normalizeOsForServerType,
   resolveUsernameForOs,
+  syncCompanyInventoryAfterOrderUpdate,
 } from '@/lib/companyInventory';
 
 export const dynamic = 'force-dynamic';
@@ -61,7 +62,7 @@ export async function GET() {
     status: { $in: COMPANY_VISIBLE_ORDER_STATUSES },
   })
     .select(
-      'productName memory ipAddress username password os status provisioningStatus createdAt expiryDate customerName customerEmail ipStockId panelUsername'
+      'productName memory ipAddress username password os status provisioningStatus createdAt expiryDate customerName customerEmail ipStockId panelUsername inventoryItemId'
     )
     .sort({ createdAt: -1 })
     .lean();
@@ -121,12 +122,26 @@ export async function PUT(request) {
     : (order.os || defaultOsForServerType(serverType));
 
   const updateFields = {};
-  if (ipAddress !== undefined) updateFields.ipAddress = ipAddress;
+  if (ipAddress !== undefined) updateFields.ipAddress = String(ipAddress).split(':')[0].trim();
   if (username !== undefined) updateFields.username = resolveUsernameForOs(username, normalizedOs);
   if (password !== undefined) updateFields.password = password;
   if (os !== undefined) updateFields.os = normalizedOs;
   updateFields.status = 'active';
   updateFields.provisioningStatus = 'active';
+
+  try {
+    await syncCompanyInventoryAfterOrderUpdate(order, {
+      ipAddress: updateFields.ipAddress,
+      username: updateFields.username,
+      password: updateFields.password,
+      os: updateFields.os,
+    });
+  } catch (err) {
+    return NextResponse.json(
+      { error: err.message || 'Failed to sync inventory with order update' },
+      { status: 400, headers: responseHeaders() }
+    );
+  }
 
   await Order.updateOne({ _id: orderId }, { $set: updateFields });
 

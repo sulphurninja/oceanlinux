@@ -9,6 +9,8 @@ const {
   resolvePriceIdsForMemory,
   resolveZoneIsoIdFromCatalog,
   autoResolveResellerPriceIds,
+  resolveResellerZoneCandidatesForPurchase,
+  resolveExpectedZoneIds,
 } = require('@/lib/resellerApiStockConfig');
 const { parseAdvpsExpiryDate } = require('@/lib/advpsOrderExpiry');
 const {
@@ -40,15 +42,28 @@ function extractExpectedIpPrefix(ipStock, order) {
 }
 
 function resolveExpectedZoneId(ipStock) {
-  const cfg = readResellerApiStockConfig(ipStock);
-  return cfg?.zoneId != null ? Number(cfg.zoneId) : null;
+  const ids = resolveExpectedZoneIds(ipStock);
+  return ids[0] ?? null;
 }
 
 function buildResellerLocationContext(ipStock, order) {
+  const expectedZoneIds = resolveExpectedZoneIds(ipStock);
   return {
-    expectedZoneId: resolveExpectedZoneId(ipStock),
+    expectedZoneId: expectedZoneIds[0] ?? null,
+    expectedZoneIds,
     expectedIpPrefix: extractExpectedIpPrefix(ipStock, order),
   };
+}
+
+function zoneIdAllowed(zoneId, ctx = {}) {
+  if (zoneId == null) return true;
+  const allowed = Array.isArray(ctx.expectedZoneIds) && ctx.expectedZoneIds.length
+    ? ctx.expectedZoneIds
+    : ctx.expectedZoneId != null
+      ? [ctx.expectedZoneId]
+      : [];
+  if (!allowed.length) return true;
+  return allowed.some((id) => Number(id) === Number(zoneId));
 }
 
 function ipMatchesOrderedRange(ip, expectedPrefix) {
@@ -67,21 +82,24 @@ function extractVmZoneId(details) {
   return details?.zoneId ?? details?.zone?.id ?? details?.zone?.zoneId ?? null;
 }
 
-async function rowMatchesOrderLocation(api, row, { expectedZoneId, expectedIpPrefix } = {}) {
-  if (!expectedZoneId && !expectedIpPrefix) return true;
+async function rowMatchesOrderLocation(api, row, ctx = {}) {
+  const { expectedZoneId, expectedIpPrefix } = ctx;
+  if (!expectedZoneId && !(Array.isArray(ctx.expectedZoneIds) && ctx.expectedZoneIds.length) && !expectedIpPrefix) {
+    return true;
+  }
 
   const rowIp = ResellerApi.extractOverviewRowIp(row);
   if (expectedIpPrefix && rowIp && !ipMatchesOrderedRange(rowIp, expectedIpPrefix)) {
     return false;
   }
 
-  if (expectedZoneId) {
+  if (expectedZoneId || (Array.isArray(ctx.expectedZoneIds) && ctx.expectedZoneIds.length)) {
     const vmId = extractOverviewVmId(row);
     if (!vmId) return false;
     try {
       const details = await api.getVmDetails(String(vmId));
       const zoneId = extractVmZoneId(details);
-      if (zoneId != null && Number(zoneId) !== Number(expectedZoneId)) return false;
+      if (zoneId != null && !zoneIdAllowed(zoneId, ctx)) return false;
     } catch {
       return false;
     }
@@ -100,11 +118,13 @@ function provisionedMatchesOrderLocation(provisioned, { expectedZoneId, expected
 
 async function provisionedMatchesOrderLocationAsync(api, provisioned, ctx = {}) {
   if (!provisionedMatchesOrderLocation(provisioned, ctx)) return false;
-  if (!ctx.expectedZoneId || !provisioned?.vmId) return true;
+  if ((!ctx.expectedZoneId && !(Array.isArray(ctx.expectedZoneIds) && ctx.expectedZoneIds.length)) || !provisioned?.vmId) {
+    return true;
+  }
   try {
     const details = await api.getVmDetails(String(provisioned.vmId));
     const zoneId = extractVmZoneId(details);
-    if (zoneId != null && Number(zoneId) !== Number(ctx.expectedZoneId)) return false;
+    if (zoneId != null && !zoneIdAllowed(zoneId, ctx)) return false;
   } catch {
     return false;
   }
@@ -285,6 +305,7 @@ async function waitForProvisionedVm(
     excludeOrderId = null,
     order = null,
     expectedZoneId = null,
+    expectedZoneIds = null,
     expectedIpPrefix = null,
     maxWaitMs = 180_000,
     pollMs = 5000,
@@ -293,7 +314,11 @@ async function waitForProvisionedVm(
   const deadline = Date.now() + maxWaitMs;
   const purchaseAt = purchaseStartedAt || Date.now();
   let lastOverview = null;
-  const locationCtx = { expectedZoneId, expectedIpPrefix };
+  const locationCtx = {
+    expectedZoneId,
+    expectedZoneIds: Array.isArray(expectedZoneIds) ? expectedZoneIds : undefined,
+    expectedIpPrefix,
+  };
 
   while (Date.now() < deadline) {
     const assignedVmIds = await getAssignedResellerVmIds(excludeOrderId);

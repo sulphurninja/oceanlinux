@@ -75,39 +75,74 @@ async function resolvePriceIds(api, stockCfg, memory) {
 }
 
 /**
- * Zone-only stock: one plan ↔ one zoneId (PrimeVM regions like Mumbai-103.20).
+ * Zone-only stock: one plan ↔ one or more zoneIds (primary + fallback regions).
  */
 async function checkResellerZoneStock(api, { stockCfg, memory, zonesList = null }) {
-  const zoneId = Number(stockCfg.zoneId);
-  const zones = zonesList || (await api.listZones());
-  const zone = zones.find((z) => Number(z.id) === zoneId);
+  const zoneIds = stockCfg?.zoneIds?.length
+    ? stockCfg.zoneIds
+    : stockCfg?.zoneId != null
+      ? [Number(stockCfg.zoneId)]
+      : [];
 
-  if (!zone) {
+  const zones = zonesList || (await api.listZones());
+  const checked = [];
+  let firstLive = null;
+
+  for (const zoneId of zoneIds) {
+    const zone = zones.find((z) => Number(z.id) === Number(zoneId));
+    if (!zone) {
+      checked.push({ zoneId, zoneOk: false, reason: `Region (zone ${zoneId}) not found on panel` });
+      continue;
+    }
+    const zoneOk = ResellerApi.isZoneStatusLive(zone.status);
+    checked.push({
+      zoneId: zone.id,
+      zoneName: zone.name,
+      zoneStatus: zone.status,
+      zoneOk,
+    });
+    if (zoneOk && !firstLive) firstLive = zone;
+  }
+
+  if (!zoneIds.length) {
     return {
       memory,
       available: false,
       stockMode: 'zone',
-      zoneId,
+      zoneId: null,
       zoneOk: false,
       unitsAvailable: 0,
-      reason: `Region (zone ${zoneId}) not found on panel`,
-      message: 'Region not available on panel',
+      reason: 'No region configured on this IP stock',
+      message: 'Region not configured',
       checkedAt: new Date().toISOString(),
     };
   }
 
-  const zoneOk = ResellerApi.isZoneStatusLive(zone.status);
+  const zoneOk = !!firstLive;
+  const unavailableNames = checked
+    .filter((row) => !row.zoneOk)
+    .map((row) => row.zoneName || `zone ${row.zoneId}`)
+    .join(', ');
+
   return {
     memory,
     available: zoneOk,
     stockMode: 'zone',
-    zoneId: zone.id,
-    zoneName: zone.name,
-    zoneStatus: zone.status,
+    zoneId: firstLive?.id ?? zoneIds[0],
+    zoneName: firstLive?.name || checked[0]?.zoneName || '',
+    zoneIds,
+    zoneStatus: firstLive?.status || checked[0]?.zoneStatus,
     zoneOk,
     unitsAvailable: zoneOk ? 1 : 0,
-    reason: zoneOk ? '' : `Region ${zone.name} is ${zone.status || 'unavailable'}`,
-    message: zoneOk ? `In stock (${zone.name})` : `Out of stock (${zone.name} unavailable)`,
+    fallbackZones: checked,
+    reason: zoneOk
+      ? ''
+      : unavailableNames
+        ? `All configured regions unavailable (${unavailableNames})`
+        : 'Configured regions unavailable on panel',
+    message: zoneOk
+      ? `In stock (${firstLive?.name || `zone ${firstLive?.id}`}${checked.length > 1 ? ', fallback ready' : ''})`
+      : 'Out of stock (all configured regions unavailable)',
     checkedAt: new Date().toISOString(),
   };
 }
@@ -170,7 +205,10 @@ async function checkResellerWalletStock(api, { stockCfg, memory }) {
  * Check one RAM tier — zone API when zoneId set, else wallet fallback.
  */
 async function checkResellerVariantStock(api, { stockCfg, memory, zonesList = null }) {
-  if (stockCfg?.zoneId != null && Number.isFinite(Number(stockCfg.zoneId))) {
+  if (
+    (stockCfg?.zoneIds?.length ?? 0) > 0 ||
+    (stockCfg?.zoneId != null && Number.isFinite(Number(stockCfg.zoneId)))
+  ) {
     return checkResellerZoneStock(api, { stockCfg, memory, zonesList });
   }
   return checkResellerWalletStock(api, { stockCfg, memory });
