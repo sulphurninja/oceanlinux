@@ -20,7 +20,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { 
     Eye, Settings, Play, RotateCcw, Loader2, AlertCircle, CheckCircle, 
     Wrench, Search, Filter, Calendar, X, ChevronLeft, ChevronRight, 
-    ChevronsLeft, ChevronsRight, Edit2, Save, XCircle, Download, RefreshCw, KeyRound, ArrowRightLeft, Wallet, CreditCard, Clock
+    ChevronsLeft, ChevronsRight, Edit2, Save, XCircle, Download, RefreshCw, KeyRound, ArrowRightLeft, Wallet, CreditCard, Clock, TrendingUp
 } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -28,6 +28,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Calendar as CalendarComponent } from '@/components/ui/calendar';
 import { format } from 'date-fns';
 import { Textarea } from '@/components/ui/textarea';
+import { PaymentDashboard } from '@/components/admin/PaymentDashboard';
 
 const ADMIN_ORDER_STATUSES = ['pending', 'confirmed', 'active'] as const;
 
@@ -249,7 +250,7 @@ interface PaginationState {
 }
 
 const ManageOrders = () => {
-    const [activeTab, setActiveTab] = useState<'orders' | 'wallet'>('orders');
+    const [activeTab, setActiveTab] = useState<'orders' | 'wallet' | 'payments'>('orders');
     const [orders, setOrders] = useState<Order[]>([]);
     const [walletRecharges, setWalletRecharges] = useState<WalletRecharge[]>([]);
     const [loading, setLoading] = useState(true);
@@ -1101,9 +1102,13 @@ const ManageOrders = () => {
                         </div>
                     </div>
 
-                    <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'orders' | 'wallet')}>
+                    <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'orders' | 'wallet' | 'payments')}>
                         <TabsList>
                             <TabsTrigger value="orders">VPS Orders</TabsTrigger>
+                            <TabsTrigger value="payments" className="gap-2">
+                                <TrendingUp className="w-4 h-4" />
+                                Daily Payments
+                            </TabsTrigger>
                             <TabsTrigger value="wallet" className="gap-2">
                                 <Wallet className="w-4 h-4" />
                                 Wallet Top-ups
@@ -1612,6 +1617,10 @@ const ManageOrders = () => {
                             </Table>
                         </div>
                     </div>
+                        </TabsContent>
+
+                        <TabsContent value="payments" className="mt-4 space-y-4 sm:mt-6 sm:space-y-6">
+                            <PaymentDashboard />
                         </TabsContent>
 
                         <TabsContent value="wallet" className="mt-4 space-y-4 sm:mt-6 sm:space-y-6">

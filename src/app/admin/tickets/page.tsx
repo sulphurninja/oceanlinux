@@ -1,11 +1,22 @@
 "use client";
 
-import { useState, useEffect } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Search,
   Eye,
@@ -14,11 +25,14 @@ import {
   CheckCircle,
   AlertCircle,
   XCircle,
-  Users,
   Calendar,
-  Loader2
+  Loader2,
+  RefreshCw,
+  Archive,
 } from "lucide-react";
 import Link from "next/link";
+import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
 
 interface AdminTicket {
   _id: string;
@@ -36,165 +50,208 @@ interface AdminTicket {
   updatedAt: string;
 }
 
+interface TicketSummary {
+  total: number;
+  open: number;
+  inProgress: number;
+  waitingResponse: number;
+  resolved: number;
+  closed: number;
+  closable: number;
+}
+
 const statusConfig = {
-  open: { icon: AlertCircle, color: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300', label: 'Open' },
-  'in-progress': { icon: Clock, color: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300', label: 'In Progress' },
-  'waiting-response': { icon: MessageSquare, color: 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-300', label: 'Waiting Response' },
-  resolved: { icon: CheckCircle, color: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300', label: 'Resolved' },
-  closed: { icon: XCircle, color: 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-300', label: 'Closed' }
+  open: { icon: AlertCircle, color: 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300', label: 'Open' },
+  'in-progress': { icon: Clock, color: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-950 dark:text-yellow-300', label: 'In Progress' },
+  'waiting-response': { icon: MessageSquare, color: 'bg-orange-100 text-orange-800 dark:bg-orange-950 dark:text-orange-300', label: 'Waiting Response' },
+  resolved: { icon: CheckCircle, color: 'bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-300', label: 'Resolved' },
+  closed: { icon: XCircle, color: 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-300', label: 'Closed' },
 };
 
 const priorityConfig = {
   low: { color: 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-300', label: 'Low' },
-  medium: { color: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300', label: 'Medium' },
-  high: { color: 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-300', label: 'High' },
-  critical: { color: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300', label: 'Critical' }
+  medium: { color: 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300', label: 'Medium' },
+  high: { color: 'bg-orange-100 text-orange-800 dark:bg-orange-950 dark:text-orange-300', label: 'High' },
+  critical: { color: 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300', label: 'Critical' },
 };
 
 export default function AdminTicketsPage() {
   const [tickets, setTickets] = useState<AdminTicket[]>([]);
+  const [summary, setSummary] = useState<TicketSummary>({
+    total: 0,
+    open: 0,
+    inProgress: 0,
+    waitingResponse: 0,
+    resolved: 0,
+    closed: 0,
+    closable: 0,
+  });
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [priorityFilter, setPriorityFilter] = useState('all');
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkMessage, setBulkMessage] = useState('');
+  const [includeResolved, setIncludeResolved] = useState(false);
+  const [bulkLoading, setBulkLoading] = useState(false);
 
   useEffect(() => {
-    fetchTickets();
-  }, [statusFilter, priorityFilter, searchQuery]);
+    const timer = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 350);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
-  const fetchTickets = async () => {
+  const fetchTickets = useCallback(async () => {
     try {
       setLoading(true);
       const params = new URLSearchParams();
-
       if (statusFilter !== 'all') params.append('status', statusFilter);
       if (priorityFilter !== 'all') params.append('priority', priorityFilter);
-      if (searchQuery) params.append('search', searchQuery);
+      if (debouncedSearch) params.append('search', debouncedSearch);
 
       const response = await fetch(`/api/admin/tickets?${params.toString()}`, {
         method: 'GET',
         credentials: 'include',
-        headers: {
-          'Content-Type': 'application/json'
-        }
+        cache: 'no-store',
       });
 
-      if (response.ok) {
-        const data = await response.json();
+      if (!response.ok) {
+        throw new Error('Failed to fetch tickets');
+      }
+
+      const data = await response.json();
+      if (Array.isArray(data)) {
         setTickets(data);
       } else {
-        console.error('Failed to fetch tickets');
+        setTickets(data.tickets || []);
+        if (data.summary) setSummary(data.summary);
       }
     } catch (error) {
       console.error('Error fetching tickets:', error);
+      toast.error('Tickets load nahi hue');
     } finally {
       setLoading(false);
     }
+  }, [statusFilter, priorityFilter, debouncedSearch]);
+
+  useEffect(() => {
+    void fetchTickets();
+  }, [fetchTickets]);
+
+  const bulkTargetCount = useMemo(() => {
+    if (includeResolved) {
+      return summary.total - summary.closed;
+    }
+    return summary.closable;
+  }, [includeResolved, summary]);
+
+  const handleBulkClose = async () => {
+    const message = bulkMessage.trim();
+    if (!message) {
+      toast.error('Closing message likho');
+      return;
+    }
+    if (bulkTargetCount === 0) {
+      toast.error('Close karne ke liye koi ticket nahi');
+      return;
+    }
+
+    setBulkLoading(true);
+    try {
+      const res = await fetch('/api/admin/tickets', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message,
+          includeResolved,
+          onlyOpen: !includeResolved,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || 'Bulk close failed');
+
+      toast.success(`${data.closed} ticket close ho gaye${data.failedCount ? ` · ${data.failedCount} fail` : ''}`);
+      setBulkOpen(false);
+      setBulkMessage('');
+      await fetchTickets();
+    } catch (err: any) {
+      toast.error(err.message || 'Bulk close fail');
+    } finally {
+      setBulkLoading(false);
+    }
   };
 
-  const filteredTickets = tickets;
-
-  if (loading) {
-    return (
-      <div className="p-6 space-y-6">
-        <div className="flex items-center justify-center h-64">
-          <div className="text-center">
-            <Loader2 className="w-12 h-12 animate-spin text-primary mx-auto mb-4" />
-            <p className="text-muted-foreground">Loading tickets...</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="p-6 space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+    <div className="admin-page-container space-y-6 min-w-0 overflow-x-hidden">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <h1 className="text-3xl font-bold">Support Tickets</h1>
-          <p className="text-muted-foreground">Manage customer support requests</p>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Support Tickets</h1>
+          <p className="text-muted-foreground mt-1">Customer requests manage karo — reply, status, bulk close</p>
         </div>
-        <div className="flex items-center space-x-4">
-          <Badge variant="outline" className="px-3 py-1">
-            <Users className="w-4 h-4 mr-1" />
-            {tickets.length} Total Tickets
-          </Badge>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button type="button" variant="outline" size="sm" onClick={() => void fetchTickets()} disabled={loading}>
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            <span className="ml-2 hidden sm:inline">Refresh</span>
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            size="sm"
+            className="gap-2"
+            onClick={() => setBulkOpen(true)}
+            disabled={summary.closable === 0 && summary.resolved === 0}
+          >
+            <Archive className="h-4 w-4" />
+            Close all ({summary.closable} open)
+          </Button>
         </div>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center space-x-2">
-              <AlertCircle className="w-4 h-4 text-blue-500" />
-              <div>
-                <p className="text-sm font-medium">Open</p>
-                <p className="text-2xl font-bold">{tickets.filter(t => t.status === 'open').length}</p>
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+        {[
+          { label: 'Open', value: summary.open, tone: 'text-blue-600', icon: AlertCircle },
+          { label: 'In Progress', value: summary.inProgress, tone: 'text-amber-600', icon: Clock },
+          { label: 'Waiting', value: summary.waitingResponse, tone: 'text-orange-600', icon: MessageSquare },
+          { label: 'Resolved', value: summary.resolved, tone: 'text-emerald-600', icon: CheckCircle },
+          { label: 'Closed', value: summary.closed, tone: 'text-muted-foreground', icon: XCircle },
+          { label: 'Total', value: summary.total, tone: 'text-foreground', icon: MessageSquare },
+        ].map((stat) => (
+          <Card key={stat.label} className="border-border/70">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <p className="text-xs text-muted-foreground">{stat.label}</p>
+                  <p className={cn('text-2xl font-bold tabular-nums', stat.tone)}>{stat.value}</p>
+                </div>
+                <stat.icon className={cn('h-5 w-5 opacity-60', stat.tone)} />
               </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center space-x-2">
-              <Clock className="w-4 h-4 text-yellow-500" />
-              <div>
-                <p className="text-sm font-medium">In Progress</p>
-                <p className="text-2xl font-bold">{tickets.filter(t => t.status === 'in-progress').length}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center space-x-2">
-              <MessageSquare className="w-4 h-4 text-orange-500" />
-              <div>
-                <p className="text-sm font-medium">Waiting Response</p>
-                <p className="text-2xl font-bold">{tickets.filter(t => t.status === 'waiting-response').length}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center space-x-2">
-              <CheckCircle className="w-4 h-4 text-green-500" />
-              <div>
-                <p className="text-sm font-medium">Resolved</p>
-                <p className="text-2xl font-bold">{tickets.filter(t => t.status === 'resolved').length}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        ))}
       </div>
 
-      {/* Filters */}
       <Card>
-        <CardHeader>
-          <CardTitle>Filters</CardTitle>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Search & filter</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex flex-wrap gap-4">
-            <div className="flex-1 min-w-[200px]">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
-                <Input
-                  placeholder="Search tickets, users, or ticket IDs..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10"
-                />
-              </div>
+          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+            <div className="relative flex-1 min-w-[220px]">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Ticket ID, subject, user..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9"
+              />
             </div>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-[150px]">
+              <SelectTrigger className="w-full sm:w-[160px]">
                 <SelectValue placeholder="Status" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Status</SelectItem>
+                <SelectItem value="all">All status</SelectItem>
                 <SelectItem value="open">Open</SelectItem>
                 <SelectItem value="in-progress">In Progress</SelectItem>
                 <SelectItem value="waiting-response">Waiting Response</SelectItem>
@@ -203,11 +260,11 @@ export default function AdminTicketsPage() {
               </SelectContent>
             </Select>
             <Select value={priorityFilter} onValueChange={setPriorityFilter}>
-              <SelectTrigger className="w-[150px]">
+              <SelectTrigger className="w-full sm:w-[160px]">
                 <SelectValue placeholder="Priority" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Priority</SelectItem>
+                <SelectItem value="all">All priority</SelectItem>
                 <SelectItem value="low">Low</SelectItem>
                 <SelectItem value="medium">Medium</SelectItem>
                 <SelectItem value="high">High</SelectItem>
@@ -218,77 +275,145 @@ export default function AdminTicketsPage() {
         </CardContent>
       </Card>
 
-      {/* Tickets Table */}
       <Card>
-        <CardHeader>
-          <CardTitle>Tickets ({filteredTickets.length})</CardTitle>
+        <CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0">
+          <div>
+            <CardTitle className="text-base">Tickets</CardTitle>
+            <CardDescription>{tickets.length} result(s) in current view</CardDescription>
+          </div>
         </CardHeader>
         <CardContent>
-          <div className="space-y-4">
-            {filteredTickets.map((ticket) => {
-              const StatusIcon = statusConfig[ticket.status as keyof typeof statusConfig].icon;
-              return (
-                <div key={ticket._id} className="flex items-center justify-between p-4 bg-muted/30 rounded-lg hover:bg-muted/50 transition-colors">
-                  <div className="flex items-center space-x-4">
-                    <div className="flex items-center space-x-2">
-                      <StatusIcon className="w-4 h-4" />
-                      <Badge variant="outline" className="font-mono text-xs">
-                        {ticket.ticketId}
-                      </Badge>
-                    </div>
-                    <div>
-                      <h3 className="font-medium">{ticket.subject}</h3>
-                      <div className="flex items-center space-x-2 text-sm text-muted-foreground">
-                        <span>{ticket.userId?.name || 'Unknown user'}</span>
-                        <span>•</span>
-                        <span>{ticket.userId?.email || '—'}</span>
-                        <span>•</span>
-                        <span className="flex items-center">
-                          <Calendar className="w-3 h-3 mr-1" />
-                          {new Date(ticket.createdAt).toLocaleDateString()}
-                        </span>
-                        <span>•</span>
-                        <span className="flex items-center">
-                          <MessageSquare className="w-3 h-3 mr-1" />
-                          {ticket.messages.length} messages
-                        </span>
+          {loading ? (
+            <div className="flex h-40 items-center justify-center">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            </div>
+          ) : tickets.length === 0 ? (
+            <div className="py-12 text-center">
+              <MessageSquare className="mx-auto mb-3 h-10 w-10 text-muted-foreground/60" />
+              <p className="font-medium">No tickets found</p>
+              <p className="text-sm text-muted-foreground mt-1">
+                {searchQuery || statusFilter !== 'all' || priorityFilter !== 'all'
+                  ? 'Filters change karke try karo'
+                  : 'Abhi koi support ticket nahi'}
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {tickets.map((ticket) => {
+                const status = statusConfig[ticket.status as keyof typeof statusConfig] || statusConfig.open;
+                const priority = priorityConfig[ticket.priority as keyof typeof priorityConfig] || priorityConfig.medium;
+                const StatusIcon = status.icon;
+
+                return (
+                  <div
+                    key={ticket._id}
+                    className="flex flex-col gap-3 rounded-xl border bg-card p-4 transition-colors hover:bg-muted/30 sm:flex-row sm:items-center sm:justify-between"
+                  >
+                    <div className="min-w-0 flex-1 space-y-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <StatusIcon className="h-4 w-4 shrink-0" />
+                        <Badge variant="outline" className="font-mono text-[11px]">
+                          {ticket.ticketId}
+                        </Badge>
+                        <Badge className={priority.color}>{priority.label}</Badge>
+                        <Badge className={status.color}>{status.label}</Badge>
+                      </div>
+                      <div>
+                        <h3 className="font-semibold leading-snug">{ticket.subject}</h3>
+                        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                          <span>{ticket.userId?.name || 'Unknown user'}</span>
+                          <span>·</span>
+                          <span className="truncate max-w-[220px]">{ticket.userId?.email || '—'}</span>
+                          <span>·</span>
+                          <span className="inline-flex items-center gap-1">
+                            <Calendar className="h-3 w-3" />
+                            {new Date(ticket.createdAt).toLocaleDateString('en-IN')}
+                          </span>
+                          <span>·</span>
+                          <span className="inline-flex items-center gap-1">
+                            <MessageSquare className="h-3 w-3" />
+                            {ticket.messages?.length || 0} msgs
+                          </span>
+                        </div>
                       </div>
                     </div>
-                  </div>
-
-                  <div className="flex items-center space-x-2">
-                    <Badge className={priorityConfig[ticket.priority as keyof typeof priorityConfig].color}>
-                      {priorityConfig[ticket.priority as keyof typeof priorityConfig].label}
-                    </Badge>
-                    <Badge className={statusConfig[ticket.status as keyof typeof statusConfig].color}>
-                      {statusConfig[ticket.status as keyof typeof statusConfig].label}
-                    </Badge>
-                    <Link href={`/admin/tickets/${ticket.ticketId}`}>
-                      <Button variant="outline" size="sm">
-                        <Eye className="w-4 h-4 mr-1" />
+                    <Link href={`/admin/tickets/${ticket.ticketId}`} className="shrink-0">
+                      <Button variant="outline" size="sm" className="w-full sm:w-auto">
+                        <Eye className="mr-1 h-4 w-4" />
                         View
                       </Button>
                     </Link>
                   </div>
-                </div>
-              );
-            })}
-
-            {filteredTickets.length === 0 && (
-              <div className="text-center py-8">
-                <MessageSquare className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-                <h3 className="font-medium mb-2">No tickets found</h3>
-                <p className="text-muted-foreground text-sm">
-                  {searchQuery || statusFilter !== 'all' || priorityFilter !== 'all'
-                    ? 'No tickets match your current filters.'
-                    : 'No support tickets have been created yet.'
-                  }
-                </p>
-              </div>
-            )}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </CardContent>
       </Card>
+
+      <Dialog open={bulkOpen} onOpenChange={setBulkOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Close all tickets — same message</DialogTitle>
+            <DialogDescription>
+              Ek message sab targeted tickets me jayega aur status <strong>closed</strong> ho jayega.
+              Customer ko reply email + notification bhi jayegi.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="rounded-lg border bg-muted/40 px-3 py-2 text-sm">
+              <span className="font-semibold text-foreground">{bulkTargetCount}</span>{' '}
+              ticket close honge
+              {includeResolved ? ' (open + in-progress + waiting + resolved)' : ' (open, in-progress, waiting only)'}
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="bulk-message">Closing message (sabko same)</Label>
+              <Textarea
+                id="bulk-message"
+                rows={5}
+                placeholder="Example: Issue fix ho gaya hai. Agar dubara problem ho to naya ticket kholo. Dhanyawad."
+                value={bulkMessage}
+                onChange={(e) => setBulkMessage(e.target.value)}
+              />
+            </div>
+
+            <label className="flex items-start gap-3 rounded-lg border p-3 cursor-pointer">
+              <Checkbox
+                checked={includeResolved}
+                onCheckedChange={(v) => setIncludeResolved(v === true)}
+                className="mt-0.5"
+              />
+              <div>
+                <p className="text-sm font-medium">Resolved tickets bhi close karo</p>
+                <p className="text-xs text-muted-foreground">Warna sirf open / in-progress / waiting wale band honge</p>
+              </div>
+            </label>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button type="button" variant="outline" onClick={() => setBulkOpen(false)} disabled={bulkLoading}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => void handleBulkClose()}
+              disabled={bulkLoading || bulkTargetCount === 0 || !bulkMessage.trim()}
+            >
+              {bulkLoading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Closing…
+                </>
+              ) : (
+                <>Close {bulkTargetCount} tickets</>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
