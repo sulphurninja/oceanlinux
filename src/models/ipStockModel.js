@@ -6,6 +6,8 @@ const IPStockSchema = new mongoose.Schema({
   available: { type: Boolean, default: true },
   /** When true, plan is hidden from customer dashboard / store listing (admin still sees it). */
   hiddenFromStore: { type: Boolean, default: false },
+  /** Set by bulk "hide out of stock" — cleared when live stock / units return. */
+  autoHiddenFromStore: { type: Boolean, default: false },
   /** Units remaining for company-managed stock. Only enforced when `company` is set. */
   stockCount: { type: Number, default: 0, min: 0 },
   company: { type: mongoose.Schema.Types.ObjectId, ref: 'Company', default: null },

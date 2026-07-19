@@ -8,6 +8,7 @@ const { companyUsesNetbayLiveStock } = require('@/lib/companyNetbayApi');
 const { companyUsesResellerLiveStock } = require('@/lib/companyResellerApi');
 const { usesResellerLiveStock, stockHasResellerPanelPlans } = require('@/lib/ipStockAvailability');
 const { syncResellerIpStockRow } = require('@/lib/resellerLiveStock');
+const { getCompanyFulfillmentMode } = require('@/lib/companyInventory');
 
 async function enrichIpStocksWithProviderModes(ipStocks) {
     const companyIds = [...new Set(
@@ -22,6 +23,7 @@ async function enrichIpStocksWithProviderModes(ipStocks) {
 
     return ipStocks.map((stock) => ({
         ...stock,
+        fulfillmentMode: stock.company ? getCompanyFulfillmentMode(stock) : null,
         netbayUseLiveStockApi: stock.company
             ? companyUsesNetbayLiveStock(companyMap[String(stock.company)])
             : null,

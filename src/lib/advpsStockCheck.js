@@ -1,5 +1,6 @@
 import connectDB from '@/lib/db';
 import IPStock from '@/models/ipStockModel';
+import { storeAutoUnhideUpdate } from '@/lib/ipStockAvailability';
 const {
   fetchAdvpsStockMap,
   applyStockMapToAdvpsBlock,
@@ -85,6 +86,7 @@ export async function runAdvpsStockCheck() {
     };
     if (!doc.availabilityManual) {
       updatePayload.available = hasStock;
+      Object.assign(updatePayload, storeAutoUnhideUpdate(doc, hasStock));
     }
 
     await IPStock.findByIdAndUpdate(doc._id, updatePayload);

@@ -10,6 +10,7 @@ export const runtime = 'nodejs';
 import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import IPStock from '@/models/ipStockModel';
+import { storeAutoUnhideUpdate } from '@/lib/ipStockAvailability';
 
 const SmartVpsAPI = require('@/services/smartvpsApi');
 
@@ -119,6 +120,7 @@ async function runSync(req: Request) {
       };
       if (!existing.availabilityManual) {
         updateFields.available = isAvailable;
+        Object.assign(updateFields, storeAutoUnhideUpdate(existing, isAvailable));
       }
 
       await IPStock.findByIdAndUpdate(existing._id, updateFields);

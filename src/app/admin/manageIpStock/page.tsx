@@ -19,7 +19,7 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import Link from 'next/link';
-import { X, ExternalLink, Zap, BookOpen, Copy, RefreshCw, Loader2, Cloud } from 'lucide-react';
+import { X, ExternalLink, Zap, BookOpen, Copy, RefreshCw, Loader2, Cloud, EyeOff, Eye } from 'lucide-react';
 import { ResellerZonePicker, buildResellerZoneConfig } from '@/components/admin/ResellerZonePicker';
 
 interface MemoryOptionDetails {
@@ -127,6 +127,13 @@ function companyUsesResellerLiveForStock(stock: IPStock, companies: CompanyOptio
     return !!(c?.resellerApi?.enabled && c?.resellerApi?.useLiveStockApi);
 }
 
+function isStockOutOfStock(stock: IPStock, companies: CompanyOption[]): boolean {
+    if (companyUsesNetbayLiveForStock(stock, companies)) return !stock.available;
+    if (companyUsesResellerLiveForStock(stock, companies)) return !stock.available;
+    if (stock.company) return (stock.stockCount ?? 0) <= 0;
+    return !stock.available;
+}
+
 function readNetbayConfig(stock: IPStock | null): {
     groupTag: string;
     planByMemory: Record<string, string>;
@@ -160,6 +167,18 @@ const ManageIpStock = () => {
     const [panelZones, setPanelZones] = useState<PanelZone[]>([]);
     const [panelZonesLoading, setPanelZonesLoading] = useState(false);
     const [refreshingLiveStock, setRefreshingLiveStock] = useState(false);
+    const [hideOutDialogOpen, setHideOutDialogOpen] = useState(false);
+    const [unhideOutDialogOpen, setUnhideOutDialogOpen] = useState(false);
+    const [hidingOutOfStock, setHidingOutOfStock] = useState(false);
+    const [unhidingOutOfStock, setUnhidingOutOfStock] = useState(false);
+
+    const outOfStockVisibleCount = ipStocks.filter(
+        (stock) => !stock.hiddenFromStore && isStockOutOfStock(stock, companies)
+    ).length;
+
+    const outOfStockHiddenCount = ipStocks.filter(
+        (stock) => !!stock.hiddenFromStore && isStockOutOfStock(stock, companies)
+    ).length;
 
     const reloadIpStocks = async () => {
         const response = await fetch('/api/ipstock?includeHidden=1', { credentials: 'include', cache: 'no-store' });
@@ -212,6 +231,52 @@ const ManageIpStock = () => {
             toast.error(e instanceof Error ? e.message : 'Refresh failed');
         } finally {
             setRefreshingLiveStock(false);
+        }
+    };
+
+    const hideAllOutOfStock = async () => {
+        setHidingOutOfStock(true);
+        try {
+            const r = await fetch('/api/ipstock/hide-out-of-stock', {
+                method: 'POST',
+                credentials: 'include',
+            });
+            const j = await r.json();
+            if (!r.ok || !j.success) throw new Error(j.error || 'Failed to hide plans');
+            await reloadIpStocks();
+            setHideOutDialogOpen(false);
+            toast.success(
+                j.hiddenCount > 0
+                    ? `${j.hiddenCount} out-of-stock plan(s) hidden from store`
+                    : 'No visible out-of-stock plans to hide'
+            );
+        } catch (e: unknown) {
+            toast.error(e instanceof Error ? e.message : 'Failed to hide out-of-stock plans');
+        } finally {
+            setHidingOutOfStock(false);
+        }
+    };
+
+    const unhideAllOutOfStock = async () => {
+        setUnhidingOutOfStock(true);
+        try {
+            const r = await fetch('/api/ipstock/unhide-out-of-stock', {
+                method: 'POST',
+                credentials: 'include',
+            });
+            const j = await r.json();
+            if (!r.ok || !j.success) throw new Error(j.error || 'Failed to unhide plans');
+            await reloadIpStocks();
+            setUnhideOutDialogOpen(false);
+            toast.success(
+                j.unhiddenCount > 0
+                    ? `${j.unhiddenCount} out-of-stock plan(s) visible on store (still out of stock)`
+                    : 'No hidden out-of-stock plans to show'
+            );
+        } catch (e: unknown) {
+            toast.error(e instanceof Error ? e.message : 'Failed to unhide out-of-stock plans');
+        } finally {
+            setUnhidingOutOfStock(false);
         }
     };
 
@@ -632,21 +697,45 @@ const ManageIpStock = () => {
         <div className='w-full'>
             <div className='h-[63px] flex gap-2 items-center justify-between border dark:border-none-b p-4'>
                 <h1 className='text-xl'>Manage IP Stock</h1>
-                <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="gap-1.5"
-                    onClick={() => void refreshLivePanelStock()}
-                    disabled={refreshingLiveStock}
-                >
-                    {refreshingLiveStock ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                        <RefreshCw className="h-4 w-4" />
-                    )}
-                    Sync PrimeVPS stock
-                </Button>
+                <div className="flex items-center gap-2">
+                    <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="gap-1.5"
+                        onClick={() => setUnhideOutDialogOpen(true)}
+                        disabled={outOfStockHiddenCount === 0 || unhidingOutOfStock}
+                    >
+                        <Eye className="h-4 w-4" />
+                        Show out of stock ({outOfStockHiddenCount})
+                    </Button>
+                    <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="gap-1.5"
+                        onClick={() => setHideOutDialogOpen(true)}
+                        disabled={outOfStockVisibleCount === 0 || hidingOutOfStock}
+                    >
+                        <EyeOff className="h-4 w-4" />
+                        Hide out of stock ({outOfStockVisibleCount})
+                    </Button>
+                    <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="gap-1.5"
+                        onClick={() => void refreshLivePanelStock()}
+                        disabled={refreshingLiveStock}
+                    >
+                        {refreshingLiveStock ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                            <RefreshCw className="h-4 w-4" />
+                        )}
+                        Sync PrimeVPS stock
+                    </Button>
+                </div>
             </div>
             <div className='mx-12 mt-6'>
                 <Table className='w-full border dark:border-none'>
@@ -1323,6 +1412,84 @@ const ManageIpStock = () => {
                             <Button onClick={handleClone} disabled={cloning || !cloneName.trim()} className="gap-1.5">
                                 <Copy className="h-3.5 w-3.5" />
                                 {cloning ? 'Cloning…' : 'Create clone'}
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+
+                <Dialog open={hideOutDialogOpen} onOpenChange={setHideOutDialogOpen}>
+                    <DialogContent className="max-w-md">
+                        <DialogHeader>
+                            <DialogTitle>Hide out-of-stock plans</DialogTitle>
+                            <DialogDescription>
+                                {outOfStockVisibleCount === 0
+                                    ? 'No visible out-of-stock plans right now.'
+                                    : `Hide ${outOfStockVisibleCount} out-of-stock plan(s) from the customer store at once? They will still appear here in admin. When PrimeVPS/Netbay API shows stock again, they auto go live on the store.`}
+                            </DialogDescription>
+                        </DialogHeader>
+                        {outOfStockVisibleCount > 0 && (
+                            <ul className="text-xs text-muted-foreground max-h-40 overflow-y-auto border rounded-md p-2 space-y-1">
+                                {ipStocks
+                                    .filter((stock) => !stock.hiddenFromStore && isStockOutOfStock(stock, companies))
+                                    .map((stock) => (
+                                        <li key={stock._id} className="truncate">{stock.name}</li>
+                                    ))}
+                            </ul>
+                        )}
+                        <DialogFooter>
+                            <Button variant="ghost" onClick={() => setHideOutDialogOpen(false)} disabled={hidingOutOfStock}>
+                                Cancel
+                            </Button>
+                            <Button
+                                onClick={() => void hideAllOutOfStock()}
+                                disabled={hidingOutOfStock || outOfStockVisibleCount === 0}
+                                className="gap-1.5"
+                            >
+                                {hidingOutOfStock ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                    <EyeOff className="h-4 w-4" />
+                                )}
+                                Hide {outOfStockVisibleCount} from store
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+
+                <Dialog open={unhideOutDialogOpen} onOpenChange={setUnhideOutDialogOpen}>
+                    <DialogContent className="max-w-md">
+                        <DialogHeader>
+                            <DialogTitle>Show out-of-stock plans on store</DialogTitle>
+                            <DialogDescription>
+                                {outOfStockHiddenCount === 0
+                                    ? 'No hidden out-of-stock plans right now.'
+                                    : `Show ${outOfStockHiddenCount} hidden out-of-stock plan(s) on the customer store? Customers will see them but cannot buy until stock is back.`}
+                            </DialogDescription>
+                        </DialogHeader>
+                        {outOfStockHiddenCount > 0 && (
+                            <ul className="text-xs text-muted-foreground max-h-40 overflow-y-auto border rounded-md p-2 space-y-1">
+                                {ipStocks
+                                    .filter((stock) => !!stock.hiddenFromStore && isStockOutOfStock(stock, companies))
+                                    .map((stock) => (
+                                        <li key={stock._id} className="truncate">{stock.name}</li>
+                                    ))}
+                            </ul>
+                        )}
+                        <DialogFooter>
+                            <Button variant="ghost" onClick={() => setUnhideOutDialogOpen(false)} disabled={unhidingOutOfStock}>
+                                Cancel
+                            </Button>
+                            <Button
+                                onClick={() => void unhideAllOutOfStock()}
+                                disabled={unhidingOutOfStock || outOfStockHiddenCount === 0}
+                                className="gap-1.5"
+                            >
+                                {unhidingOutOfStock ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                    <Eye className="h-4 w-4" />
+                                )}
+                                Show {outOfStockHiddenCount} on store
                             </Button>
                         </DialogFooter>
                     </DialogContent>

@@ -16,6 +16,7 @@ import {
   isIpStockHiddenFromStore,
   usesNetbayLiveStock,
   usesResellerLiveStock,
+  storeAutoUnhideUpdate,
 } from '@/lib/ipStockAvailability';
 import { customerStockUnavailableMessage } from '@/lib/customerStockMessages';
 import Company from '@/models/companyModel';
@@ -81,6 +82,7 @@ async function syncAdvpsIpStockRow(stock) {
   };
   if (!stock.availabilityManual) {
     updatePayload.available = hasStock;
+    Object.assign(updatePayload, storeAutoUnhideUpdate(stock, hasStock));
   }
 
   await IPStock.findByIdAndUpdate(stock._id, updatePayload);
@@ -115,6 +117,7 @@ async function syncSmartVpsIpStockRow(stock) {
   };
   if (!stock.availabilityManual) {
     updatePayload.available = isAvailable;
+    Object.assign(updatePayload, storeAutoUnhideUpdate(stock, isAvailable));
   }
 
   await IPStock.findByIdAndUpdate(stock._id, updatePayload);

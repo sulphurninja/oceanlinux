@@ -105,6 +105,8 @@ interface IPStock {
   hiddenFromStore?: boolean;
   defaultConfigurations?: Record<string, any>;
   stockCount?: number;
+  availabilityManual?: boolean;
+  fulfillmentMode?: 'units' | 'inventory' | null;
   company?: string | null;
   netbayUseLiveStockApi?: boolean | null;
   resellerUseLiveStockApi?: boolean | null;
@@ -133,11 +135,24 @@ function isResellerLiveStock(stock: IPStock) {
   return stock.resellerUseLiveStockApi === true;
 }
 
+/** Company portal set manual units — overrides live panel stock for store listing. */
+function usesCompanyManualUnits(stock: IPStock) {
+  if (!stock.company) return false;
+  if (stock.fulfillmentMode === 'units') return true;
+  if (stock.availabilityManual === true) return true;
+  if (stock.defaultConfigurations?.company?.fulfillmentMode === 'units') return true;
+  return false;
+}
+
 function isCompanyStock(stock: IPStock) {
+  if (usesCompanyManualUnits(stock)) return true;
   return !!stock.company && !isNetbayLiveStock(stock) && !isResellerLiveStock(stock);
 }
 
 function getStockUnitsRemaining(stock: IPStock) {
+  if (usesCompanyManualUnits(stock)) {
+    return Math.max(0, stock.stockCount ?? 0);
+  }
   if (isNetbayLiveStock(stock) || isResellerLiveStock(stock)) {
     return stock.available ? Number.POSITIVE_INFINITY : 0;
   }
@@ -182,6 +197,9 @@ function isResellerMemoryInStock(stock: IPStock, memory: string) {
 }
 
 function isStockPurchasable(stock: IPStock, memory?: string) {
+  if (usesCompanyManualUnits(stock)) {
+    return getStockUnitsRemaining(stock) > 0;
+  }
   if (isNetbayLiveStock(stock)) {
     if (memory) return isNetbayMemoryInStock(stock, memory);
     if (stock.available) return true;
@@ -1654,7 +1672,8 @@ function CompactServerPlanRow({
   const [isExpanded, setIsExpanded] = useState(false);
   const inStock = isStockPurchasable(stock);
   const unitsLeft = getStockUnitsRemaining(stock);
-  const showUnits = isCompanyStock(stock) && Number.isFinite(unitsLeft);
+  const manualUnits = usesCompanyManualUnits(stock);
+  const showUnits = manualUnits && Number.isFinite(unitsLeft) && unitsLeft < Number.POSITIVE_INFINITY;
   const isNetbay = isNetbayLiveStock(stock);
   const isReseller = isResellerLiveStock(stock);
 

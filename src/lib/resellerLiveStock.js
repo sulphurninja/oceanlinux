@@ -223,6 +223,11 @@ async function syncResellerIpStockRow(stock, { force = false, memoryOnly = null,
   const company = ctx.company;
   if (!companyUsesResellerLiveStock(company)) return stock;
 
+  const { usesCompanyUnitFulfillment } = require('@/lib/companyInventory');
+  if (stock.availabilityManual || usesCompanyUnitFulfillment(stock)) {
+    return IPStock.findById(stock._id).lean();
+  }
+
   const defaults = toPlainConfigurations(stock.defaultConfigurations) || {};
   const prevReseller = defaults.resellerApi || {};
   if (!force && isRecentStockSync(prevReseller.lastStockSync, STOCK_ROW_TTL_MS)) {
@@ -321,6 +326,10 @@ async function syncResellerIpStockRow(stock, { force = false, memoryOnly = null,
 
   if (!stock.availabilityManual) {
     updatePayload.available = shouldAvailable;
+    if (shouldAvailable && stock.autoHiddenFromStore) {
+      updatePayload.hiddenFromStore = false;
+      updatePayload.autoHiddenFromStore = false;
+    }
   }
   // Manual override wins over panel zone status — owner set count by hand.
   if (usesResellerLiveStock(stock, company) && !stock.availabilityManual) {

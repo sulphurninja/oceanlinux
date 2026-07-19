@@ -195,6 +195,11 @@ async function syncNetbayIpStockRow(stock, { force = false, sharedCheckCache = n
     return stock;
   }
 
+  const { usesCompanyUnitFulfillment } = require('@/lib/companyInventory');
+  if (stock.availabilityManual || usesCompanyUnitFulfillment(stock)) {
+    return IPStock.findById(stock._id).lean();
+  }
+
   const defaults = toPlainConfigurations(stock.defaultConfigurations);
   const prevNetbay = defaults?.netbay || {};
   if (!force && isRecentStockSync(prevNetbay.lastStockSync, STOCK_ROW_TTL_MS)) {
@@ -359,6 +364,10 @@ async function syncNetbayIpStockRow(stock, { force = false, sharedCheckCache = n
 
   if (!stock.availabilityManual) {
     updatePayload.available = shouldAvailable;
+    if (shouldAvailable && stock.autoHiddenFromStore) {
+      updatePayload.hiddenFromStore = false;
+      updatePayload.autoHiddenFromStore = false;
+    }
   }
 
   if (usesNetbayLiveStock(stock, company)) {

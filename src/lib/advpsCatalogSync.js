@@ -1,5 +1,6 @@
 import connectDB from '@/lib/db';
 import IPStock from '@/models/ipStockModel';
+import { storeAutoUnhideUpdate } from '@/lib/ipStockAvailability';
 const AdvpsAPI = require('@/services/advpsApi');
 
 function toPlainMap(maybeMap) {
@@ -137,6 +138,7 @@ export async function runAdvpsCatalogSync() {
       };
       if (!existing.availabilityManual) {
         updateFields.available = hasAnyStock;
+        Object.assign(updateFields, storeAutoUnhideUpdate(existing, hasAnyStock));
       }
 
       await IPStock.findByIdAndUpdate(existing._id, updateFields);

@@ -6,6 +6,10 @@ import Company from '@/models/companyModel';
 import { getIpStockRemaining, setIpStockCount, usesStockCount } from '@/lib/ipStockAvailability';
 import {
   usesPreconfiguredInventory,
+  usesCompanyInventoryFulfillment,
+  getCompanyFulfillmentMode,
+  setCompanyFulfillmentMode,
+  mergeCompanyConfig,
   countUnallocatedInventory,
   parseInventoryBulkLines,
   syncStockCountFromInventory,
@@ -50,12 +54,14 @@ function serializeInventoryItem(item) {
 
 function serializeStock(stock, companyDoc) {
   const hasInventory = usesPreconfiguredInventory(stock);
+  const fulfillmentMode = getCompanyFulfillmentMode(stock);
   return {
     _id: String(stock._id),
     name: stock.name,
     available: !!stock.available,
-    stockCount: getIpStockRemaining(stock),
+    stockCount: getIpStockRemaining(stock, companyDoc),
     usesStockCount: usesStockCount(stock, companyDoc),
+    fulfillmentMode,
     usesPreconfiguredInventory: hasInventory,
     inventoryTotal: stock.inventoryItems?.length || 0,
     inventoryAvailable: hasInventory ? countUnallocatedInventory(stock) : 0,
@@ -95,7 +101,7 @@ export async function PUT(request) {
 
   await connectDB();
   const body = await request.json();
-  const { stockId, stockCount, action, items, bulkLines, removeItemId, ipAddress, addToInventory } = body;
+  const { stockId, stockCount, action, items, bulkLines, removeItemId, ipAddress, addToInventory, fulfillmentMode } = body;
 
   if (action === 'syncAllResellerExpiries') {
     const companyDoc = await Company.findById(company.id).select('resellerApi netbayApi name').lean();
@@ -153,23 +159,45 @@ export async function PUT(request) {
 
   const companyDoc = await Company.findById(company.id).select('netbayApi resellerApi name').lean();
 
-  // Legacy: set numeric stock count only (no pre-config rows)
-  if (action === 'setStockCount' || (stockCount !== undefined && !action)) {
-    if (usesPreconfiguredInventory(stock)) {
+  if (action === 'setFulfillmentMode') {
+    if (fulfillmentMode !== 'units' && fulfillmentMode !== 'inventory') {
       return NextResponse.json(
-        { error: 'This stock uses pre-configured servers. Add inventory items instead of changing the count directly.' },
+        { error: 'fulfillmentMode must be "units" or "inventory"' },
         { status: 400 }
       );
     }
+    try {
+      const updated = await setCompanyFulfillmentMode(stockId, fulfillmentMode);
+      if (!updated) {
+        return NextResponse.json({ error: 'Stock not found' }, { status: 404 });
+      }
+      const fresh = await IPStock.findById(stockId).lean();
+      return NextResponse.json({
+        success: true,
+        fulfillmentMode,
+        stock: serializeStock(fresh, companyDoc),
+      });
+    } catch (err) {
+      return NextResponse.json({ error: err.message || 'Failed to set fulfillment mode' }, { status: 400 });
+    }
+  }
+
+  // Manual unit stock — always allowed; switches plan to units mode on save
+  if (action === 'setStockCount' || (stockCount !== undefined && !action)) {
     const count = Math.max(0, Math.floor(Number(stockCount) || 0));
-    // Manual override: mark availabilityManual so live panel sync (PrimeVPS zone
-    // status) does not wipe the count/availability the owner just set.
-    await IPStock.collection.updateOne(
-      { _id: stock._id },
-      { $set: { stockCount: count, available: count > 0, availabilityManual: true } }
-    );
-    const updated = await IPStock.findById(stockId);
-    return NextResponse.json({ success: true, stock: serializeStock(updated.toObject?.() || updated, companyDoc) });
+    const companyCfg = mergeCompanyConfig(stock, { fulfillmentMode: 'units' });
+    stock.defaultConfigurations.set('company', companyCfg);
+    stock.stockCount = count;
+    stock.available = count > 0;
+    stock.availabilityManual = true;
+    if (count > 0) {
+      stock.hiddenFromStore = false;
+      stock.autoHiddenFromStore = false;
+    }
+    stock.markModified('defaultConfigurations');
+    await stock.save();
+    const updated = await IPStock.findById(stockId).lean();
+    return NextResponse.json({ success: true, stock: serializeStock(updated, companyDoc) });
   }
 
   if (action === 'syncResellerCredentials') {
@@ -298,7 +326,7 @@ export async function PUT(request) {
   }
 
   return NextResponse.json(
-    { error: 'Unknown action. Use setStockCount, addInventory, removeInventory, syncResellerCredentials, or syncAllResellerExpiries' },
+    { error: 'Unknown action. Use setStockCount, setFulfillmentMode, addInventory, removeInventory, syncResellerCredentials, or syncAllResellerExpiries' },
     { status: 400 }
   );
 }

@@ -49,6 +49,52 @@ function usesPreconfiguredInventory(stock) {
   return !!(stock?.company && Array.isArray(stock.inventoryItems) && stock.inventoryItems.length > 0);
 }
 
+function readCompanyConfig(stock) {
+  let cfg = stock?.defaultConfigurations?.company;
+  if (!cfg && typeof stock?.defaultConfigurations?.get === 'function') {
+    cfg = stock.defaultConfigurations.get('company');
+  }
+  return cfg && typeof cfg === 'object' ? cfg : {};
+}
+
+function mergeCompanyConfig(stock, patch) {
+  return { ...readCompanyConfig(stock), ...patch };
+}
+
+/** How paid orders are fulfilled: manual units vs pre-configured inventory rows. */
+function getCompanyFulfillmentMode(stock) {
+  const mode = readCompanyConfig(stock).fulfillmentMode;
+  if (mode === 'units' || mode === 'inventory') return mode;
+  return usesPreconfiguredInventory(stock) ? 'inventory' : 'units';
+}
+
+function usesCompanyInventoryFulfillment(stock) {
+  return !!(stock?.company && getCompanyFulfillmentMode(stock) === 'inventory');
+}
+
+function usesCompanyUnitFulfillment(stock) {
+  return !!(stock?.company && getCompanyFulfillmentMode(stock) === 'units');
+}
+
+async function setCompanyFulfillmentMode(stockId, mode) {
+  if (mode !== 'units' && mode !== 'inventory') {
+    throw new Error('fulfillmentMode must be units or inventory');
+  }
+
+  const stock = await IPStock.findById(stockId);
+  if (!stock) return null;
+
+  const companyCfg = { ...readCompanyConfig(stock), fulfillmentMode: mode };
+  stock.defaultConfigurations.set('company', companyCfg);
+  stock.markModified('defaultConfigurations');
+  await stock.save();
+
+  if (mode === 'inventory') {
+    return syncStockCountFromInventory(stockId);
+  }
+  return stock;
+}
+
 function countUnallocatedInventory(stock) {
   if (!Array.isArray(stock?.inventoryItems)) return 0;
   return stock.inventoryItems.filter((i) => !i.allocated).length;
@@ -94,10 +140,14 @@ function parseInventoryBulkLines(text, serverType = 'Linux') {
 
 async function syncStockCountFromInventory(stockId) {
   const stock = await IPStock.findById(stockId);
-  if (!stock || !usesPreconfiguredInventory(stock)) return stock;
+  if (!stock || !usesCompanyInventoryFulfillment(stock)) return stock;
   const remaining = countUnallocatedInventory(stock);
   stock.stockCount = remaining;
   stock.available = remaining > 0;
+  if (remaining > 0 && stock.autoHiddenFromStore) {
+    const { storeAutoUnhideUpdate } = require('@/lib/ipStockAvailability');
+    Object.assign(stock, storeAutoUnhideUpdate(stock, true));
+  }
   await stock.save();
   return stock;
 }
@@ -304,6 +354,12 @@ module.exports = {
   allowedOsForServerType,
   normalizeOsForServerType,
   usesPreconfiguredInventory,
+  getCompanyFulfillmentMode,
+  usesCompanyInventoryFulfillment,
+  usesCompanyUnitFulfillment,
+  setCompanyFulfillmentMode,
+  mergeCompanyConfig,
+  readCompanyConfig,
   countUnallocatedInventory,
   parseInventoryBulkLines,
   syncStockCountFromInventory,

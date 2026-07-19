@@ -114,6 +114,7 @@ interface Stock {
   available: boolean;
   stockCount: number;
   usesStockCount?: boolean;
+  fulfillmentMode?: 'units' | 'inventory';
   usesPreconfiguredInventory?: boolean;
   inventoryTotal?: number;
   inventoryAvailable?: number;
@@ -383,6 +384,9 @@ export default function CompanyDashboard() {
         setHasResellerSync(!!payload.hasResellerSync);
         setResellerLabel(payload.resellerLabel || 'Hostheaven');
       }
+    } else {
+      const errPayload = await stockRes.json().catch(() => ({}));
+      toast.error(errPayload.error || 'Failed to load IP stocks');
     }
     if (orderRes.ok) {
       const data = await orderRes.json();
@@ -1000,14 +1004,15 @@ export default function CompanyDashboard() {
                         <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                           <Badge variant="outline" className="text-[10px] h-4">{stock.serverType}</Badge>
                           {stock.tags?.map(t => <Badge key={t} variant="secondary" className="text-[10px] h-4">{t}</Badge>)}
-                          {hasPreconfig ? (
-                            <Badge className="text-[10px] h-4 bg-blue-500/10 text-blue-700">
-                              {stock.inventoryAvailable}/{stock.inventoryTotal} ready
-                            </Badge>
-                          ) : inStock ? (
+                          {inStock ? (
                             <Badge className="text-[10px] h-4 bg-emerald-500/10 text-emerald-700">{count} in stock</Badge>
                           ) : (
                             <Badge className="text-[10px] h-4 bg-red-500/10 text-red-600">Out of stock</Badge>
+                          )}
+                          {hasPreconfig && (
+                            <Badge className="text-[10px] h-4 bg-blue-500/10 text-blue-700">
+                              {stock.inventoryAvailable}/{stock.inventoryTotal} servers saved
+                            </Badge>
                           )}
                         </div>
                       </div>
@@ -1020,27 +1025,23 @@ export default function CompanyDashboard() {
                       >
                         {expanded ? 'Hide' : 'Manage servers'}
                       </Button>
-                      {!hasPreconfig && (
-                        <>
-                          <Label htmlFor={`stock-${stock._id}`} className="text-xs text-muted-foreground whitespace-nowrap">Units</Label>
-                          <Input
-                            id={`stock-${stock._id}`}
-                            type="number"
-                            min={0}
-                            step={1}
-                            value={stockCountDrafts[stock._id] ?? String(count)}
-                            onChange={(e) => setStockCountDrafts(prev => ({ ...prev, [stock._id]: e.target.value }))}
-                            className="w-24 h-9"
-                          />
-                          <Button
-                            size="sm"
-                            onClick={() => updateStockCount(stock._id)}
-                            disabled={savingStockId === stock._id}
-                          >
-                            {savingStockId === stock._id ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save'}
-                          </Button>
-                        </>
-                      )}
+                      <Label htmlFor={`stock-${stock._id}`} className="text-xs text-muted-foreground whitespace-nowrap">Units</Label>
+                      <Input
+                        id={`stock-${stock._id}`}
+                        type="number"
+                        min={0}
+                        step={1}
+                        value={stockCountDrafts[stock._id] ?? String(count)}
+                        onChange={(e) => setStockCountDrafts(prev => ({ ...prev, [stock._id]: e.target.value }))}
+                        className="w-24 h-9"
+                      />
+                      <Button
+                        size="sm"
+                        onClick={() => updateStockCount(stock._id)}
+                        disabled={savingStockId === stock._id}
+                      >
+                        {savingStockId === stock._id ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save'}
+                      </Button>
                     </div>
                   </div>
 
@@ -1196,7 +1197,6 @@ export default function CompanyDashboard() {
                         >
                           Add from bulk paste
                         </Button>
-                      </div>
 
                       {(stock.inventoryItems?.length ?? 0) > 0 && (
                         <div className="rounded-lg border overflow-hidden">
@@ -1276,6 +1276,7 @@ export default function CompanyDashboard() {
                           </table>
                         </div>
                       )}
+                      </div>
                     </div>
                   )}
                 </CardContent>

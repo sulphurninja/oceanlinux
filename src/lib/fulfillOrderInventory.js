@@ -2,7 +2,7 @@ const IPStock = require('@/models/ipStockModel');
 const { decrementIpStockForOrder } = require('@/lib/ipStockAvailability');
 const { allocateSlotIpForOrder } = require('@/lib/allocateSlotIpForOrder');
 const {
-  usesPreconfiguredInventory,
+  usesCompanyInventoryFulfillment,
   allocateCompanyInventoryForOrder,
 } = require('@/lib/companyInventory');
 const { orderHasConfirmedPayment } = require('@/lib/orderPaymentStatus');
@@ -55,7 +55,7 @@ async function fulfillOrderInventory(order, options = {}) {
     .select('company inventoryItems')
     .lean();
 
-  if (stock && usesPreconfiguredInventory(stock)) {
+  if (stock && usesCompanyInventoryFulfillment(stock)) {
     return allocateCompanyInventoryForOrder(order);
   }
 

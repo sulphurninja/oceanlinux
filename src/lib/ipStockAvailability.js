@@ -1,7 +1,8 @@
 import IPStock from '@/models/ipStockModel';
 import Order from '@/models/orderModel';
 import {
-  usesPreconfiguredInventory,
+  usesCompanyInventoryFulfillment,
+  usesCompanyUnitFulfillment,
   countUnallocatedInventory,
 } from '@/lib/companyInventory';
 
@@ -53,6 +54,7 @@ export function usesNetbayLiveStock(stock, company) {
 
 /** Company-linked IP stocks use numeric inventory; live API stock plans do not. */
 export function usesStockCount(stock, company) {
+  if (usesCompanyUnitFulfillment(stock)) return true;
   if (usesNetbayLiveStock(stock, company)) return false;
   if (usesResellerLiveStock(stock, company)) return false;
   return !!(stock?.company);
@@ -60,7 +62,7 @@ export function usesStockCount(stock, company) {
 
 export function getIpStockRemaining(stock, company) {
   if (!stock) return 0;
-  if (usesPreconfiguredInventory(stock)) {
+  if (usesCompanyInventoryFulfillment(stock)) {
     return countUnallocatedInventory(stock);
   }
   if (usesStockCount(stock, company)) {
@@ -71,6 +73,12 @@ export function getIpStockRemaining(stock, company) {
 
 export function isIpStockHiddenFromStore(stock) {
   return !!stock?.hiddenFromStore;
+}
+
+/** Restore store listing when live stock returns after bulk "hide out of stock". */
+export function storeAutoUnhideUpdate(stock, inStock) {
+  if (!inStock || !stock?.autoHiddenFromStore) return {};
+  return { hiddenFromStore: false, autoHiddenFromStore: false };
 }
 
 export function isIpStockPurchasable(stock, quantity = 1, company) {
@@ -121,7 +129,7 @@ export async function decrementIpStockForOrder(order) {
   let company = null;
   if (stock?.company) {
     const Company = (await import('@/models/companyModel')).default;
-    company = await Company.findById(stock.company).select('netbayApi').lean();
+    company = await Company.findById(stock.company).select('netbayApi resellerApi').lean();
   }
   if (!stock || !usesStockCount(stock, company)) {
     return { success: true, skipped: true };

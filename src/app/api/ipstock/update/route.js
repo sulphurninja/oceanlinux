@@ -5,8 +5,8 @@ import connectDB from '@/lib/db';
 import IPStock from '@/models/ipStockModel';
 import Company from '@/models/companyModel';
 import { enforceAdmin } from '@/lib/apiSecurity';
-import { usesNetbayLiveStock, usesResellerLiveStock } from '@/lib/ipStockAvailability';
-const { usesPreconfiguredInventory, countUnallocatedInventory } = require('@/lib/companyInventory');
+import { usesNetbayLiveStock, usesResellerLiveStock, storeAutoUnhideUpdate } from '@/lib/ipStockAvailability';
+const { usesCompanyInventoryFulfillment, countUnallocatedInventory } = require('@/lib/companyInventory');
 
 const {
   toPlainConfigurations,
@@ -50,6 +50,7 @@ export async function PUT(req, res) {
 
     if ('hiddenFromStore' in reqBody) {
       updatePayload.hiddenFromStore = reqBody.hiddenFromStore === true;
+      updatePayload.autoHiddenFromStore = false;
     }
 
     const plainMerged = toPlainConfigurations(mergedDefaults);
@@ -85,18 +86,20 @@ export async function PUT(req, res) {
       );
 
     if (resolvedCompany && !netbayLiveStock && !resellerLiveStock) {
-      if (usesPreconfiguredInventory(existing)) {
+      if (usesCompanyInventoryFulfillment(existing)) {
         // Preconfigured servers: availability is driven by free inventory rows,
         // never by the stockCount field (which drifts stale on unrelated edits).
         const free = countUnallocatedInventory(existing);
         updatePayload.stockCount = free;
         updatePayload.available = free > 0;
+        Object.assign(updatePayload, storeAutoUnhideUpdate(existing, free > 0));
       } else {
         const count = stockCount !== undefined
           ? Math.max(0, Math.floor(Number(stockCount) || 0))
           : Math.max(0, Number(existing.stockCount) || 0);
         updatePayload.stockCount = count;
         updatePayload.available = count > 0;
+        Object.assign(updatePayload, storeAutoUnhideUpdate(existing, count > 0));
       }
     } else if (netbayLiveStock || resellerLiveStock) {
       // Live stock: availability comes from panel sync — do not zero stockCount on save.
@@ -112,7 +115,7 @@ export async function PUT(req, res) {
     if ('hiddenFromStore' in reqBody) {
       await IPStock.collection.updateOne(
         { _id: new mongoose.Types.ObjectId(String(_id)) },
-        { $set: { hiddenFromStore: reqBody.hiddenFromStore === true } }
+        { $set: { hiddenFromStore: reqBody.hiddenFromStore === true, autoHiddenFromStore: false } }
       );
     }
 
