@@ -77,22 +77,34 @@ export async function GET() {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers: { 'X-Deploy-Version': COMPANY_FILTER_VERSION } });
   }
 
-  await connectDB();
-  const [stocks, companyDoc] = await Promise.all([
-    IPStock.find({ company: company.id }).sort({ name: 1 }).lean(),
-    Company.findById(company.id).select('resellerApi netbayApi name').lean(),
-  ]);
+  try {
+    await connectDB();
+    const companyDoc = await Company.findOne({ slug: company.slug, isActive: true })
+      .select('resellerApi netbayApi name slug')
+      .lean();
+    if (!companyDoc) {
+      return NextResponse.json({ error: 'Company not found' }, { status: 404, headers: { 'X-Deploy-Version': COMPANY_FILTER_VERSION } });
+    }
 
-  const resellerCfg = getCompanyResellerApiConfig(companyDoc);
-  const hasResellerSync = !!resellerCfg;
+    const stocks = await IPStock.find({ company: companyDoc._id }).sort({ name: 1 }).lean();
 
-  return NextResponse.json({
-    stocks: stocks.map((s) => serializeStock(s, companyDoc)),
-    hasResellerSync,
-    resellerLabel: resellerCfg?.label || 'Hostheaven',
-  }, {
-    headers: { 'X-Deploy-Version': COMPANY_FILTER_VERSION },
-  });
+    const resellerCfg = getCompanyResellerApiConfig(companyDoc);
+    const hasResellerSync = !!resellerCfg;
+
+    return NextResponse.json({
+      stocks: stocks.map((s) => serializeStock(s, companyDoc)),
+      hasResellerSync,
+      resellerLabel: resellerCfg?.label || 'Hostheaven',
+    }, {
+      headers: { 'X-Deploy-Version': COMPANY_FILTER_VERSION },
+    });
+  } catch (err) {
+    console.error('[company/stocks GET]', err);
+    return NextResponse.json(
+      { error: err.message || 'Failed to load stocks' },
+      { status: 500, headers: { 'X-Deploy-Version': COMPANY_FILTER_VERSION } }
+    );
+  }
 }
 
 export async function PUT(request) {
