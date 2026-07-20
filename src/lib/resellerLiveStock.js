@@ -223,8 +223,7 @@ async function syncResellerIpStockRow(stock, { force = false, memoryOnly = null,
   const company = ctx.company;
   if (!companyUsesResellerLiveStock(company)) return stock;
 
-  const { usesCompanyUnitFulfillment } = require('@/lib/companyInventory');
-  if (stock.availabilityManual || usesCompanyUnitFulfillment(stock)) {
+  if (stock.availabilityManual === true) {
     return IPStock.findById(stock._id).lean();
   }
 

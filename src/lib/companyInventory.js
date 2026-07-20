@@ -64,16 +64,19 @@ function mergeCompanyConfig(stock, patch) {
 /** How paid orders are fulfilled: manual units vs pre-configured inventory rows. */
 function getCompanyFulfillmentMode(stock) {
   const mode = readCompanyConfig(stock).fulfillmentMode;
-  if (mode === 'units' || mode === 'inventory') return mode;
-  return usesPreconfiguredInventory(stock) ? 'inventory' : 'units';
+  if (mode === 'inventory') return 'inventory';
+  if (stock?.availabilityManual === true) return 'units';
+  if (usesPreconfiguredInventory(stock)) return 'inventory';
+  return 'auto';
 }
 
 function usesCompanyInventoryFulfillment(stock) {
   return !!(stock?.company && getCompanyFulfillmentMode(stock) === 'inventory');
 }
 
+/** True only when company owner explicitly saved manual units (not live panel sync). */
 function usesCompanyUnitFulfillment(stock) {
-  return !!(stock?.company && getCompanyFulfillmentMode(stock) === 'units');
+  return !!(stock?.company && stock.availabilityManual === true);
 }
 
 async function setCompanyFulfillmentMode(stockId, mode) {

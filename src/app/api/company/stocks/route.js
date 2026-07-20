@@ -10,6 +10,7 @@ import {
   getCompanyFulfillmentMode,
   setCompanyFulfillmentMode,
   mergeCompanyConfig,
+  readCompanyConfig,
   countUnallocatedInventory,
   parseInventoryBulkLines,
   syncStockCountFromInventory,
@@ -20,7 +21,8 @@ import {
 import Order from '@/models/orderModel';
 import { COMPANY_FILTER_VERSION } from '@/lib/companyOrders';
 import { buildCompanyValidityMismatchReport } from '@/lib/companyValidityMismatch';
-const { hasCompanyResellerApi, getCompanyResellerApiConfig } = require('@/lib/companyResellerApi');
+const { hasCompanyResellerApi, getCompanyResellerApiConfig, companyUsesResellerLiveStock } = require('@/lib/companyResellerApi');
+const { syncResellerIpStockRow, stockHasResellerPanelPlans } = require('@/lib/resellerLiveStock');
 const {
   fetchResellerCredentialsByIp,
   syncAllInventoryExpiriesFromReseller,
@@ -52,9 +54,34 @@ function serializeInventoryItem(item) {
   };
 }
 
+function readLiveStockSummary(stock, companyDoc) {
+  const liveEnabled = companyUsesResellerLiveStock(companyDoc) && stockHasResellerPanelPlans(stock);
+  if (!liveEnabled) return { enabled: false };
+
+  let cfg = stock?.defaultConfigurations?.resellerApi;
+  if (!cfg && typeof stock?.defaultConfigurations?.get === 'function') {
+    cfg = stock.defaultConfigurations.get('resellerApi');
+  }
+  const variantStock = cfg?.variantStock && typeof cfg.variantStock === 'object' ? cfg.variantStock : {};
+  const primary = Object.values(variantStock).find(
+    (v) => v && typeof v === 'object' && !v.mirroredFrom
+  ) || Object.values(variantStock)[0] || null;
+
+  return {
+    enabled: true,
+    manualOverride: stock.availabilityManual === true,
+    zoneLive: primary?.available === true,
+    zoneName: primary?.zoneName || cfg?.zoneName || null,
+    zoneStatus: primary?.zoneStatus || null,
+    message: primary?.message || primary?.reason || null,
+    lastSync: cfg?.lastStockSync || null,
+  };
+}
+
 function serializeStock(stock, companyDoc) {
   const hasInventory = usesPreconfiguredInventory(stock);
   const fulfillmentMode = getCompanyFulfillmentMode(stock);
+  const liveStock = readLiveStockSummary(stock, companyDoc);
   return {
     _id: String(stock._id),
     name: stock.name,
@@ -62,6 +89,7 @@ function serializeStock(stock, companyDoc) {
     stockCount: getIpStockRemaining(stock, companyDoc),
     usesStockCount: usesStockCount(stock, companyDoc),
     fulfillmentMode,
+    liveStock,
     usesPreconfiguredInventory: hasInventory,
     inventoryTotal: stock.inventoryItems?.length || 0,
     inventoryAvailable: hasInventory ? countUnallocatedInventory(stock) : 0,
@@ -90,10 +118,12 @@ export async function GET() {
 
     const resellerCfg = getCompanyResellerApiConfig(companyDoc);
     const hasResellerSync = !!resellerCfg;
+    const hasLiveStockSync = companyUsesResellerLiveStock(companyDoc);
 
     return NextResponse.json({
       stocks: stocks.map((s) => serializeStock(s, companyDoc)),
       hasResellerSync,
+      hasLiveStockSync,
       resellerLabel: resellerCfg?.label || 'Hostheaven',
     }, {
       headers: { 'X-Deploy-Version': COMPANY_FILTER_VERSION },
@@ -159,6 +189,79 @@ export async function PUT(request) {
       mismatchIps: mismatches.map((m) => m.ipAddress),
       panelExpiriesByIp,
       stocks: serializedStocks,
+    });
+  }
+
+  if (action === 'syncLiveStock') {
+    const companyDoc = await Company.findOne({ slug: company.slug, isActive: true })
+      .select('resellerApi netbayApi name slug')
+      .lean();
+    if (!companyDoc) {
+      return NextResponse.json({ error: 'Company not found' }, { status: 404 });
+    }
+    if (!companyUsesResellerLiveStock(companyDoc)) {
+      return NextResponse.json(
+        { error: 'Live stock sync is off. Admin → Companies → PrimeVPS → Reseller API → Live stock ON karo.' },
+        { status: 403 }
+      );
+    }
+
+    const stocks = await IPStock.find({ company: companyDoc._id });
+    for (const stock of stocks) {
+      if (stock.availabilityManual) continue;
+      const companyCfg = readCompanyConfig(stock);
+      if (companyCfg.fulfillmentMode === 'units') {
+        const nextCfg = { ...companyCfg };
+        delete nextCfg.fulfillmentMode;
+        stock.defaultConfigurations.set('company', nextCfg);
+        stock.markModified('defaultConfigurations');
+        await stock.save();
+      }
+    }
+
+    let zonesList = null;
+    try {
+      const firstReseller = stocks.find((s) => stockHasResellerPanelPlans(s));
+      if (firstReseller) {
+        const ctx = await (async () => {
+          const ResellerApi = require('@/services/resellerApi');
+          const cfg = getCompanyResellerApiConfig(companyDoc);
+          return cfg ? new ResellerApi(cfg) : null;
+        })();
+        if (ctx) zonesList = await ctx.listZones();
+      }
+    } catch (err) {
+      console.warn('[company/stocks syncLiveStock] listZones failed:', err.message);
+    }
+
+    let synced = 0;
+    let inStock = 0;
+    let skippedManual = 0;
+    const failed = [];
+
+    for (const stock of stocks) {
+      if (!stockHasResellerPanelPlans(stock)) continue;
+      if (stock.availabilityManual) {
+        skippedManual += 1;
+        continue;
+      }
+      try {
+        const updated = await syncResellerIpStockRow(stock, { force: true, zonesList });
+        synced += 1;
+        if (updated?.available) inStock += 1;
+      } catch (err) {
+        failed.push({ stockId: String(stock._id), name: stock.name, error: err.message || 'Sync failed' });
+      }
+    }
+
+    const fresh = await IPStock.find({ company: companyDoc._id }).sort({ name: 1 }).lean();
+    return NextResponse.json({
+      success: true,
+      synced,
+      inStock,
+      skippedManual,
+      failed,
+      stocks: fresh.map((s) => serializeStock(s, companyDoc)),
     });
   }
 

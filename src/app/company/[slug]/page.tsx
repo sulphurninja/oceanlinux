@@ -114,7 +114,16 @@ interface Stock {
   available: boolean;
   stockCount: number;
   usesStockCount?: boolean;
-  fulfillmentMode?: 'units' | 'inventory';
+  fulfillmentMode?: 'units' | 'inventory' | 'auto';
+  liveStock?: {
+    enabled: boolean;
+    manualOverride?: boolean;
+    zoneLive?: boolean;
+    zoneName?: string | null;
+    zoneStatus?: string | null;
+    message?: string | null;
+    lastSync?: string | null;
+  };
   usesPreconfiguredInventory?: boolean;
   inventoryTotal?: number;
   inventoryAvailable?: number;
@@ -291,9 +300,11 @@ export default function CompanyDashboard() {
   >({});
   const [expandedStockId, setExpandedStockId] = useState<string | null>(null);
   const [hasResellerSync, setHasResellerSync] = useState(false);
+  const [hasLiveStockSync, setHasLiveStockSync] = useState(false);
   const [resellerLabel, setResellerLabel] = useState('Hostheaven');
   const [syncingStockId, setSyncingStockId] = useState<string | null>(null);
   const [syncingAllExpiries, setSyncingAllExpiries] = useState(false);
+  const [syncingLiveStock, setSyncingLiveStock] = useState(false);
   const [lastSyncFailed, setLastSyncFailed] = useState<Array<{ ipAddress: string; error: string }>>([]);
   const [panelExpiryByIp, setPanelExpiryByIp] = useState<Record<string, string>>({});
 
@@ -382,6 +393,7 @@ export default function CompanyDashboard() {
       setStockCountDrafts(Object.fromEntries(rows.map(s => [s._id, String(s.stockCount ?? 0)])));
       if (!Array.isArray(payload)) {
         setHasResellerSync(!!payload.hasResellerSync);
+        setHasLiveStockSync(!!payload.hasLiveStockSync);
         setResellerLabel(payload.resellerLabel || 'Hostheaven');
       }
     } else {
@@ -448,6 +460,34 @@ export default function CompanyDashboard() {
       toast.error('Failed to update stock');
     } finally {
       setSavingStockId(null);
+    }
+  };
+
+  const syncLiveStock = async () => {
+    setSyncingLiveStock(true);
+    try {
+      const res = await fetch('/api/company/stocks', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'syncLiveStock' }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Live stock sync failed');
+      }
+      if (Array.isArray(data.stocks)) {
+        setStocks(data.stocks);
+        setStockCountDrafts(Object.fromEntries(data.stocks.map((s: Stock) => [s._id, String(s.stockCount ?? 0)])));
+      }
+      if (data.failed?.length) {
+        toast.warning(`${data.inStock}/${data.synced} in stock · ${data.failed.length} failed`);
+      } else {
+        toast.success(`Live stock synced — ${data.inStock}/${data.synced} in stock on panel`);
+      }
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Live stock sync failed');
+    } finally {
+      setSyncingLiveStock(false);
     }
   };
 
@@ -978,12 +1018,40 @@ export default function CompanyDashboard() {
         {/* ── Stocks Tab ── */}
         {tab === 'stocks' && (
           <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_340px] gap-4 items-start">
+            {hasLiveStockSync && (
+              <div className="xl:col-span-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-4 py-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-emerald-800 dark:text-emerald-200">PrimeVPS live stock</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Panel zone status se auto in/out of stock. Manual Units save karoge to live sync skip hoga us plan par.
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  className="shrink-0 bg-emerald-600 hover:bg-emerald-700"
+                  onClick={syncLiveStock}
+                  disabled={syncingLiveStock}
+                >
+                  {syncingLiveStock ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <>
+                      <RefreshCw className="h-4 w-4 mr-1.5" />
+                      Sync live stock
+                    </>
+                  )}
+                </Button>
+              </div>
+            )}
             <div className="space-y-2 min-w-0">
             {stocks.length === 0 ? (
               <Card><CardContent className="py-12 text-center"><Server className="h-10 w-10 mx-auto text-muted-foreground mb-3" /><p className="text-sm text-muted-foreground">No IP stocks assigned to your company yet.</p></CardContent></Card>
             ) : stocks.map((stock) => {
               const count = stock.stockCount ?? 0;
-              const inStock = count > 0;
+              const live = stock.liveStock;
+              const usesLivePanel = live?.enabled && !live.manualOverride;
+              const inStock = usesLivePanel ? !!live.zoneLive : count > 0;
               const hasPreconfig = stock.usesPreconfiguredInventory;
               const form = getInventoryForm(stock);
               const osOptions = osOptionsForStock(stock.serverType);
@@ -1005,9 +1073,17 @@ export default function CompanyDashboard() {
                           <Badge variant="outline" className="text-[10px] h-4">{stock.serverType}</Badge>
                           {stock.tags?.map(t => <Badge key={t} variant="secondary" className="text-[10px] h-4">{t}</Badge>)}
                           {inStock ? (
-                            <Badge className="text-[10px] h-4 bg-emerald-500/10 text-emerald-700">{count} in stock</Badge>
+                            <Badge className="text-[10px] h-4 bg-emerald-500/10 text-emerald-700">
+                              {usesLivePanel ? 'Live on panel' : `${count} in stock`}
+                            </Badge>
                           ) : (
                             <Badge className="text-[10px] h-4 bg-red-500/10 text-red-600">Out of stock</Badge>
+                          )}
+                          {usesLivePanel && live?.zoneName && (
+                            <Badge variant="outline" className="text-[10px] h-4">{live.zoneName}</Badge>
+                          )}
+                          {live?.manualOverride && (
+                            <Badge variant="secondary" className="text-[10px] h-4">Manual units</Badge>
                           )}
                           {hasPreconfig && (
                             <Badge className="text-[10px] h-4 bg-blue-500/10 text-blue-700">

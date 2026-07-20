@@ -138,10 +138,7 @@ function isResellerLiveStock(stock: IPStock) {
 /** Company portal set manual units — overrides live panel stock for store listing. */
 function usesCompanyManualUnits(stock: IPStock) {
   if (!stock.company) return false;
-  if (stock.fulfillmentMode === 'units') return true;
-  if (stock.availabilityManual === true) return true;
-  if (stock.defaultConfigurations?.company?.fulfillmentMode === 'units') return true;
-  return false;
+  return stock.availabilityManual === true;
 }
 
 function isCompanyStock(stock: IPStock) {

@@ -591,6 +591,7 @@ const ManageIpStock = () => {
     })();
 
     const selectedResellerZoneIds = currentStock ? readResellerApiConfig(currentStock).zoneIds : [];
+    const resellerCfgForDialog = currentStock ? readResellerApiConfig(currentStock) : null;
 
     const selectedCompanyHasNetbay = (() => {
         if (!currentStock?.company) return false;

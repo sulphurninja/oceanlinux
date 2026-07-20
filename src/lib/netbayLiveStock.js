@@ -195,8 +195,7 @@ async function syncNetbayIpStockRow(stock, { force = false, sharedCheckCache = n
     return stock;
   }
 
-  const { usesCompanyUnitFulfillment } = require('@/lib/companyInventory');
-  if (stock.availabilityManual || usesCompanyUnitFulfillment(stock)) {
+  if (stock.availabilityManual === true) {
     return IPStock.findById(stock._id).lean();
   }
 
