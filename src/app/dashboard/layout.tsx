@@ -333,6 +333,11 @@ export default function DashboardLayout({
                 description: 'Review items and complete checkout',
                 icon: ShoppingCart,
             },
+            '/dashboard/support/tickets': {
+                title: 'Raise Ticket',
+                description: 'View tickets and get help from our team',
+                icon: MessageCircle,
+            },
             '/dashboard/scripts': {
                 title: 'Proxy Setup Scripts',
                 description: 'Find server scripts and installation assistance',
@@ -379,8 +384,8 @@ export default function DashboardLayout({
                 // breadcrumb: [{ name: 'Dashboard', href: '/dashboard' }]
             },
             '/support/tickets': {
-                title: 'Support Center',
-                description: 'Get help and manage support tickets',
+                title: 'Raise Ticket',
+                description: 'Redirecting to support…',
                 icon: MessageCircle,
             }
         };
@@ -398,12 +403,19 @@ export default function DashboardLayout({
             };
         }
 
+        if (path.startsWith('/dashboard/support/tickets/')) {
+            return {
+                title: 'Ticket Details',
+                description: 'View and reply to your support ticket',
+                icon: MessageCircle,
+            };
+        }
+
         if (path.startsWith('/support/tickets/')) {
             return {
                 title: 'Ticket Details',
                 description: 'View and manage support ticket',
                 icon: MessageCircle,
-                // breadcrumb: [{ name: 'Support', href: '/support/tickets' }]
             };
         }
 
@@ -542,9 +554,9 @@ export default function DashboardLayout({
                                                     </Link>
                                                 </DropdownMenuItem>
                                                 <DropdownMenuItem asChild className="premium-dropdown-item cursor-pointer">
-                                                    <Link href="/support/tickets">
+                                                    <Link href="/dashboard/support/tickets">
                                                         <MessageCircle className="mr-2.5 h-4 w-4 premium-dropdown-icon" />
-                                                        Support
+                                                        Raise Ticket
                                                     </Link>
                                                 </DropdownMenuItem>
                                             </DropdownMenuGroup>

@@ -156,7 +156,7 @@ export default function UserDetailsPage() {
 
   if (loading) {
     return (
-      <div className="p-6">
+      <div className="min-w-0 overflow-x-hidden p-4 sm:p-6">
         <div className="flex items-center justify-center h-64">
           <div className="text-center">
             <Loader2 className="w-12 h-12 animate-spin text-primary mx-auto mb-4" />
@@ -169,9 +169,9 @@ export default function UserDetailsPage() {
 
   if (!user) {
     return (
-      <div className="p-6">
+      <div className="min-w-0 overflow-x-hidden p-4 sm:p-6">
         <div className="text-center py-12">
-          <h2 className="text-2xl font-bold mb-4">User Not Found</h2>
+          <h2 className="text-xl sm:text-2xl font-bold mb-4">User Not Found</h2>
           <p className="text-muted-foreground mb-8">The user you&apos;re looking for doesn&apos;t exist.</p>
           <Link href="/admin/users">
             <Button>
@@ -185,38 +185,38 @@ export default function UserDetailsPage() {
   }
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-4">
+    <div className="min-w-0 overflow-x-hidden p-4 sm:p-6 space-y-4 sm:space-y-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex flex-col gap-3 min-w-0 sm:flex-row sm:items-center sm:gap-4">
           <Link href="/admin/users">
-            <Button variant="ghost" size="sm">
+            <Button variant="ghost" size="sm" className="w-full sm:w-auto justify-start px-0 sm:px-3">
               <ArrowLeft className="w-4 h-4 mr-2" />
               Back to Users
             </Button>
           </Link>
-          <div>
-            <h1 className="text-3xl font-bold">User Details</h1>
-            <p className="text-muted-foreground">Manage user profile and their orders</p>
+          <div className="min-w-0">
+            <h1 className="text-xl font-bold sm:text-2xl lg:text-3xl">User Details</h1>
+            <p className="text-sm text-muted-foreground sm:text-base">Manage user profile and their orders</p>
           </div>
         </div>
-        <Button onClick={fetchUserDetails} variant="outline" size="sm">
+        <Button onClick={fetchUserDetails} variant="outline" size="sm" className="w-full sm:w-auto shrink-0">
           <RefreshCw className="w-4 h-4 mr-1" />
           Refresh
         </Button>
       </div>
 
       <Card>
-        <CardContent className="p-6">
-          <div className="flex items-start justify-between flex-wrap gap-4">
-            <div className="flex items-start space-x-4">
-              <Avatar className="h-16 w-16">
+        <CardContent className="p-4 sm:p-6">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex items-start gap-3 sm:gap-4 min-w-0">
+              <Avatar className="h-14 w-14 sm:h-16 sm:w-16 shrink-0">
                 <AvatarFallback className="text-lg">
                   {user.name.charAt(0).toUpperCase()}
                 </AvatarFallback>
               </Avatar>
-              <div>
-                <div className="flex items-center space-x-2 mb-2 flex-wrap">
-                  <h2 className="text-2xl font-bold">{user.name}</h2>
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mb-2">
+                  <h2 className="text-xl sm:text-2xl font-bold break-words">{user.name}</h2>
                   {user.isVerified ? (
                     <CheckCircle className="w-5 h-5 text-green-500" />
                   ) : (
@@ -227,9 +227,9 @@ export default function UserDetailsPage() {
                   </Badge>
                 </div>
                 <div className="space-y-1 text-sm text-muted-foreground">
-                  <div className="flex items-center">
-                    <Mail className="w-4 h-4 mr-2" />
-                    {user.email}
+                  <div className="flex items-start min-w-0">
+                    <Mail className="w-4 h-4 mr-2 shrink-0 mt-0.5" />
+                    <span className="break-all">{user.email}</span>
                   </div>
                   {user.phone && (
                     <div className="flex items-center">
@@ -244,11 +244,12 @@ export default function UserDetailsPage() {
                 </div>
               </div>
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-col sm:flex-row flex-wrap gap-2 w-full sm:w-auto">
               {user.isVerified ? (
                 <Button
                   variant="outline"
                   size="sm"
+                  className="w-full sm:w-auto"
                   onClick={() => handleUserAction('unverify')}
                   disabled={!!actionLoading}
                 >
@@ -259,6 +260,7 @@ export default function UserDetailsPage() {
                 <Button
                   variant="outline"
                   size="sm"
+                  className="w-full sm:w-auto"
                   onClick={() => handleUserAction('verify')}
                   disabled={!!actionLoading}
                 >
@@ -269,6 +271,7 @@ export default function UserDetailsPage() {
               <Button
                 variant="outline"
                 size="sm"
+                className="w-full sm:w-auto"
                 onClick={() => handleUserAction('changeRole', { role: user.role === 'Admin' ? 'User' : 'Admin' })}
                 disabled={!!actionLoading}
               >
@@ -281,18 +284,18 @@ export default function UserDetailsPage() {
       </Card>
 
       {stats && (
-        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
-          <Card><CardContent className="p-4 text-center"><p className="text-2xl font-bold">{stats.totalOrders}</p><p className="text-sm text-muted-foreground">Total Orders</p></CardContent></Card>
-          <Card><CardContent className="p-4 text-center"><p className="text-2xl font-bold">₹{stats.totalSpent.toLocaleString()}</p><p className="text-sm text-muted-foreground">Total Spent</p></CardContent></Card>
-          <Card><CardContent className="p-4 text-center"><p className="text-2xl font-bold">{stats.activeServices}</p><p className="text-sm text-muted-foreground">Active Services</p></CardContent></Card>
-          <Card><CardContent className="p-4 text-center"><p className="text-2xl font-bold">{stats.pendingOrders}</p><p className="text-sm text-muted-foreground">Pending Orders</p></CardContent></Card>
-          <Card><CardContent className="p-4 text-center"><p className="text-2xl font-bold">{stats.failedOrders}</p><p className="text-sm text-muted-foreground">Failed Orders</p></CardContent></Card>
-          <Card><CardContent className="p-4 text-center"><p className="text-2xl font-bold">₹{Math.round(stats.avgOrderValue).toLocaleString()}</p><p className="text-sm text-muted-foreground">Avg Order Value</p></CardContent></Card>
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
+          <Card><CardContent className="p-3 sm:p-4 text-center"><p className="text-lg sm:text-2xl font-bold">{stats.totalOrders}</p><p className="text-xs sm:text-sm text-muted-foreground">Total Orders</p></CardContent></Card>
+          <Card><CardContent className="p-3 sm:p-4 text-center"><p className="text-lg sm:text-2xl font-bold truncate">₹{stats.totalSpent.toLocaleString()}</p><p className="text-xs sm:text-sm text-muted-foreground">Total Spent</p></CardContent></Card>
+          <Card><CardContent className="p-3 sm:p-4 text-center"><p className="text-lg sm:text-2xl font-bold">{stats.activeServices}</p><p className="text-xs sm:text-sm text-muted-foreground">Active Services</p></CardContent></Card>
+          <Card><CardContent className="p-3 sm:p-4 text-center"><p className="text-lg sm:text-2xl font-bold">{stats.pendingOrders}</p><p className="text-xs sm:text-sm text-muted-foreground">Pending Orders</p></CardContent></Card>
+          <Card><CardContent className="p-3 sm:p-4 text-center"><p className="text-lg sm:text-2xl font-bold">{stats.failedOrders}</p><p className="text-xs sm:text-sm text-muted-foreground">Failed Orders</p></CardContent></Card>
+          <Card className="col-span-2 md:col-span-1"><CardContent className="p-3 sm:p-4 text-center"><p className="text-lg sm:text-2xl font-bold truncate">₹{Math.round(stats.avgOrderValue).toLocaleString()}</p><p className="text-xs sm:text-sm text-muted-foreground">Avg Order Value</p></CardContent></Card>
         </div>
       )}
 
       <Tabs defaultValue="orders" className="space-y-4">
-        <TabsList>
+        <TabsList className="w-full h-auto flex-wrap justify-start gap-1 p-1">
           <TabsTrigger value="orders">Orders ({orders.length})</TabsTrigger>
           <TabsTrigger value="activity">Activity Log</TabsTrigger>
         </TabsList>

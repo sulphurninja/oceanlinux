@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { buildResellerZoneConfig } from '@/lib/resellerZoneConfig';
 
 export type PanelZoneOption = {
   id: number;
@@ -13,20 +14,7 @@ export type PanelZoneOption = {
   live: boolean;
 };
 
-export function buildResellerZoneConfig(zones: PanelZoneOption[], zoneIds: number[]) {
-  const zoneNames: Record<string, string> = {};
-  for (const id of zoneIds) {
-    const zone = zones.find((z) => Number(z.id) === Number(id));
-    if (zone?.name) zoneNames[String(id)] = zone.name;
-  }
-  const primary = zones.find((z) => Number(z.id) === Number(zoneIds[0]));
-  return {
-    zoneId: zoneIds[0],
-    zoneIds,
-    zoneName: primary?.name,
-    zoneNames,
-  };
-}
+export { buildResellerZoneConfig };
 
 function moveZoneId(zoneIds: number[], index: number, direction: -1 | 1) {
   const next = [...zoneIds];

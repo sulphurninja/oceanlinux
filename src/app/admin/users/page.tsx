@@ -227,7 +227,7 @@ export default function AdminUsersPage() {
 
   if (loading && users.length === 0) {
     return (
-      <div className="p-6 space-y-6">
+      <div className="min-w-0 overflow-x-hidden p-4 sm:p-6 space-y-6">
         <div className="flex items-center justify-center h-64">
           <div className="text-center">
             <Loader2 className="w-12 h-12 animate-spin text-primary mx-auto mb-4" />
@@ -239,64 +239,62 @@ export default function AdminUsersPage() {
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="min-w-0 overflow-x-hidden p-4 sm:p-6 space-y-4 sm:space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">User Management</h1>
-          <p className="text-muted-foreground">Manage and monitor all platform users</p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-xl font-bold sm:text-2xl lg:text-3xl">User Management</h1>
+          <p className="text-sm text-muted-foreground sm:text-base">Manage and monitor all platform users</p>
         </div>
-        <div className="flex items-center space-x-2">
-          <Button onClick={fetchUsers} variant="outline" size="sm">
-            <RefreshCw className="w-4 h-4 mr-1" />
-            Refresh
-          </Button>
-        </div>
+        <Button onClick={fetchUsers} variant="outline" size="sm" className="w-full sm:w-auto shrink-0">
+          <RefreshCw className="w-4 h-4 mr-1" />
+          Refresh
+        </Button>
       </div>
 
       {/* Stats Cards */}
       {stats && (
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
           <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center space-x-2">
-                <Users className="w-4 h-4 text-blue-500" />
-                <div>
-                  <p className="text-sm font-medium">Total Users</p>
-                  <p className="text-2xl font-bold">{stats.totalUsers}</p>
+            <CardContent className="p-3 sm:p-4">
+              <div className="flex items-center space-x-2 min-w-0">
+                <Users className="w-4 h-4 text-blue-500 shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-xs sm:text-sm font-medium truncate">Total Users</p>
+                  <p className="text-lg sm:text-2xl font-bold">{stats.totalUsers}</p>
                 </div>
               </div>
             </CardContent>
           </Card>
           <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center space-x-2">
-                <CheckCircle className="w-4 h-4 text-green-500" />
-                <div>
-                  <p className="text-sm font-medium">Verified Users</p>
-                  <p className="text-2xl font-bold">{users.filter(u => u.isVerified).length}</p>
+            <CardContent className="p-3 sm:p-4">
+              <div className="flex items-center space-x-2 min-w-0">
+                <CheckCircle className="w-4 h-4 text-green-500 shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-xs sm:text-sm font-medium truncate">Verified Users</p>
+                  <p className="text-lg sm:text-2xl font-bold">{users.filter(u => u.isVerified).length}</p>
                 </div>
               </div>
             </CardContent>
           </Card>
           <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center space-x-2">
-                <TrendingUp className="w-4 h-4 text-purple-500" />
-                <div>
-                  <p className="text-sm font-medium">Active Orders</p>
-                  <p className="text-2xl font-bold">{users.reduce((sum, u) => sum + u.orderCount, 0)}</p>
+            <CardContent className="p-3 sm:p-4">
+              <div className="flex items-center space-x-2 min-w-0">
+                <TrendingUp className="w-4 h-4 text-purple-500 shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-xs sm:text-sm font-medium truncate">Active Orders</p>
+                  <p className="text-lg sm:text-2xl font-bold">{users.reduce((sum, u) => sum + u.orderCount, 0)}</p>
                 </div>
               </div>
             </CardContent>
           </Card>
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center space-x-2">
-                <CreditCard className="w-4 h-4 text-orange-500" />
-                <div>
-                  <p className="text-sm font-medium">Total Revenue</p>
-                  <p className="text-2xl font-bold">₹{users.reduce((sum, u) => sum + u.totalSpent, 0).toLocaleString()}</p>
+          <Card className="col-span-2 md:col-span-1">
+            <CardContent className="p-3 sm:p-4">
+              <div className="flex items-center space-x-2 min-w-0">
+                <CreditCard className="w-4 h-4 text-orange-500 shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-xs sm:text-sm font-medium truncate">Total Revenue</p>
+                  <p className="text-lg sm:text-2xl font-bold truncate">₹{users.reduce((sum, u) => sum + u.totalSpent, 0).toLocaleString()}</p>
                 </div>
               </div>
             </CardContent>
@@ -309,13 +307,13 @@ export default function AdminUsersPage() {
         <CardHeader>
           <CardTitle>Filters & Search</CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="flex flex-wrap gap-4 mb-4">
-            <div className="flex-1 min-w-[200px]">
+        <CardContent className="p-4 sm:p-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 sm:gap-4 mb-4">
+            <div className="sm:col-span-2 lg:col-span-1 xl:col-span-1">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
                 <Input
-                  placeholder="Search by name, email, or phone..."
+                  placeholder="Search name, email, phone..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="pl-10"
@@ -323,7 +321,7 @@ export default function AdminUsersPage() {
               </div>
             </div>
             <Select value={roleFilter} onValueChange={setRoleFilter}>
-              <SelectTrigger className="w-[150px]">
+              <SelectTrigger className="w-full">
                 <SelectValue placeholder="Role" />
               </SelectTrigger>
               <SelectContent>
@@ -333,7 +331,7 @@ export default function AdminUsersPage() {
               </SelectContent>
             </Select>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-[150px]">
+              <SelectTrigger className="w-full">
                 <SelectValue placeholder="Status" />
               </SelectTrigger>
               <SelectContent>
@@ -343,7 +341,7 @@ export default function AdminUsersPage() {
               </SelectContent>
             </Select>
             <Select value={sortBy} onValueChange={setSortBy}>
-              <SelectTrigger className="w-[150px]">
+              <SelectTrigger className="w-full">
                 <SelectValue placeholder="Sort By" />
               </SelectTrigger>
               <SelectContent>
@@ -355,7 +353,7 @@ export default function AdminUsersPage() {
               </SelectContent>
             </Select>
             <Select value={sortOrder} onValueChange={(value: 'asc' | 'desc') => setSortOrder(value)}>
-              <SelectTrigger className="w-[120px]">
+              <SelectTrigger className="w-full">
                 <SelectValue placeholder="Order" />
               </SelectTrigger>
               <SelectContent>
@@ -367,12 +365,13 @@ export default function AdminUsersPage() {
 
           {/* Bulk Actions */}
           {selectedUsers.length > 0 && (
-            <div className="flex items-center space-x-2 p-3 bg-muted/50 rounded-lg">
-              <span className="text-sm font-medium">{selectedUsers.length} selected</span>
-              <div className="flex items-center space-x-1 ml-auto">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center p-3 bg-muted/50 rounded-lg">
+              <span className="text-sm font-medium shrink-0">{selectedUsers.length} selected</span>
+              <div className="flex flex-wrap gap-2 sm:ml-auto">
                 <Button
                   size="sm"
                   variant="outline"
+                  className="flex-1 sm:flex-none"
                   onClick={() => handleBulkAction('verify')}
                   disabled={bulkActionLoading}
                 >
@@ -382,6 +381,7 @@ export default function AdminUsersPage() {
                 <Button
                   size="sm"
                   variant="outline"
+                  className="flex-1 sm:flex-none"
                   onClick={() => handleBulkAction('unverify')}
                   disabled={bulkActionLoading}
                 >
@@ -391,6 +391,7 @@ export default function AdminUsersPage() {
                 <Button
                   size="sm"
                   variant="destructive"
+                  className="flex-1 sm:flex-none"
                   onClick={() => handleBulkAction('delete')}
                   disabled={bulkActionLoading}
                 >
@@ -405,8 +406,8 @@ export default function AdminUsersPage() {
 
       {/* Users Table */}
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle>Users ({users.length})</CardTitle>
+        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between p-4 sm:p-6">
+          <CardTitle className="text-lg sm:text-xl">Users ({users.length})</CardTitle>
           <div className="flex items-center space-x-2">
             <Checkbox
               checked={selectedUsers.length === users.length && users.length > 0}
@@ -415,54 +416,64 @@ export default function AdminUsersPage() {
             <span className="text-sm text-muted-foreground">Select All</span>
           </div>
         </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
+        <CardContent className="p-4 sm:p-6 pt-0 sm:pt-0">
+          <div className="space-y-3 sm:space-y-4">
             {users.map((user) => (
-              <div key={user._id} className="flex items-center justify-between p-4 bg-muted/30 rounded-lg hover:bg-muted/50 transition-colors">
-                <div className="flex items-center space-x-4">
+              <div
+                key={user._id}
+                className="flex flex-col gap-3 p-3 sm:p-4 bg-muted/30 rounded-lg hover:bg-muted/50 transition-colors min-w-0"
+              >
+                <div className="flex items-start gap-3 min-w-0">
                   <Checkbox
                     checked={selectedUsers.includes(user._id)}
                     onCheckedChange={() => toggleUserSelection(user._id)}
+                    className="mt-1 shrink-0"
                   />
-                  <Avatar className="h-10 w-10">
+                  <Avatar className="h-10 w-10 shrink-0">
                     <AvatarFallback>
                       {user.name.charAt(0).toUpperCase()}
                     </AvatarFallback>
                   </Avatar>
-                  <div>
-                    <div className="flex items-center space-x-2">
-                      <h3 className="font-medium">{user.name}</h3>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <h3 className="font-medium truncate max-w-full">{user.name}</h3>
                       {user.isVerified ? (
-                        <CheckCircle className="w-4 h-4 text-green-500" />
+                        <CheckCircle className="w-4 h-4 text-green-500 shrink-0" />
                       ) : (
-                        <AlertCircle className="w-4 h-4 text-orange-500" />
+                        <AlertCircle className="w-4 h-4 text-orange-500 shrink-0" />
                       )}
+                      <Badge
+                        variant={user.isVerified ? "default" : "secondary"}
+                        className="sm:hidden shrink-0"
+                      >
+                        {user.isVerified ? 'Verified' : 'Unverified'}
+                      </Badge>
                     </div>
-                    <div className="flex items-center space-x-4 text-sm text-muted-foreground">
-                      <span className="flex items-center">
-                        <Mail className="w-3 h-3 mr-1" />
-                        {user.email}
+                    <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5 text-sm text-muted-foreground">
+                      <span className="flex items-start min-w-0 sm:col-span-2">
+                        <Mail className="w-3 h-3 mr-1.5 mt-0.5 shrink-0" />
+                        <span className="break-all">{user.email}</span>
                       </span>
-                     {user.phone && (
-                        <span className="flex items-center">
-                          <Phone className="w-3 h-3 mr-1" />
-                          {user.phone}
+                      {user.phone && (
+                        <span className="flex items-center min-w-0">
+                          <Phone className="w-3 h-3 mr-1.5 shrink-0" />
+                          <span className="truncate">{user.phone}</span>
                         </span>
                       )}
-                      <span className="flex items-center">
-                        <Calendar className="w-3 h-3 mr-1" />
+                      <span className="flex items-center min-w-0">
+                        <Calendar className="w-3 h-3 mr-1.5 shrink-0" />
                         {new Date(user.createdAt).toLocaleDateString()}
                       </span>
-                      <span className="flex items-center">
-                        <CreditCard className="w-3 h-3 mr-1" />
+                      <span className="flex items-center min-w-0">
+                        <CreditCard className="w-3 h-3 mr-1.5 shrink-0" />
                         {user.orderCount} orders • ₹{user.totalSpent.toLocaleString()}
                       </span>
-                      <span className="flex items-center">
-                        <Wallet className="w-3 h-3 mr-1" />
+                      <span className="flex items-center min-w-0">
+                        <Wallet className="w-3 h-3 mr-1.5 shrink-0" />
                         ₹{(user.walletBalance ?? 0).toLocaleString('en-IN')}
                       </span>
                       {user.lastOrderDate && (
-                        <span className="text-xs">
+                        <span className="text-xs sm:col-span-2">
                           Last order: {new Date(user.lastOrderDate).toLocaleDateString()}
                         </span>
                       )}
@@ -470,9 +481,8 @@ export default function AdminUsersPage() {
                   </div>
                 </div>
 
-                <div className="flex items-center space-x-2">
-                 
-                  <Badge variant={user.isVerified ? "default" : "secondary"}>
+                <div className="flex items-center justify-between sm:justify-end gap-2 pl-9 sm:pl-0 border-t border-border/50 pt-3 sm:border-0 sm:pt-0">
+                  <Badge variant={user.isVerified ? "default" : "secondary"} className="hidden sm:inline-flex">
                     {user.isVerified ? 'Verified' : 'Unverified'}
                   </Badge>
 
@@ -543,14 +553,15 @@ export default function AdminUsersPage() {
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-between">
-          <div className="text-sm text-muted-foreground">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="text-sm text-muted-foreground text-center sm:text-left">
             Page {currentPage} of {totalPages}
           </div>
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center gap-2">
             <Button
               variant="outline"
               size="sm"
+              className="flex-1 sm:flex-none"
               onClick={() => setCurrentPage(currentPage - 1)}
               disabled={currentPage <= 1}
             >
@@ -559,6 +570,7 @@ export default function AdminUsersPage() {
             <Button
               variant="outline"
               size="sm"
+              className="flex-1 sm:flex-none"
               onClick={() => setCurrentPage(currentPage + 1)}
               disabled={currentPage >= totalPages}
             >
@@ -570,7 +582,7 @@ export default function AdminUsersPage() {
 
       {/* Edit User Dialog */}
       <Dialog open={!!selectedUser} onOpenChange={() => setSelectedUser(null)}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-2xl">
           <DialogHeader>
             <DialogTitle>Edit User Details</DialogTitle>
           </DialogHeader>
@@ -580,7 +592,7 @@ export default function AdminUsersPage() {
 
       {/* Adjust Wallet Balance Dialog */}
       <Dialog open={!!walletUser} onOpenChange={(open) => !open && setWalletUser(null)}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-md">
           <DialogHeader>
             <DialogTitle>Adjust Wallet Balance</DialogTitle>
           </DialogHeader>
@@ -595,7 +607,7 @@ export default function AdminUsersPage() {
       </Dialog>
       {/* Change Password Dialog */}
       <Dialog open={!!passwordUser} onOpenChange={(open) => !open && setPasswordUser(null)}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-md">
           <DialogHeader>
             <DialogTitle>Change Password</DialogTitle>
           </DialogHeader>
@@ -741,7 +753,7 @@ function EditUserForm({ user, onClose, onUpdate }: { user: User, onClose: () => 
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
           <label className="text-sm font-medium">Name</label>
           <Input

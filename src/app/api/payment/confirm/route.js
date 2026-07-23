@@ -9,6 +9,7 @@ const { resolveOrderExpiryOnPayment } = require('@/lib/advpsOrderExpiry');
 const AutoProvisioningService = require('@/services/autoProvisioningService');
 const WhatsAppService = require('@/services/whatsappService');
 import { enforceOrderAccess } from '@/lib/apiSecurity';
+import { chargeDeferredWalletForOrder, recoverPendingOrderPayment } from '@/lib/confirmPendingOrderPayment';
 
 function resolveGatewayMethod(paymentMethod, order) {
   const raw = String(paymentMethod || order?.paymentMethod || 'razorpay').toLowerCase();
@@ -141,6 +142,15 @@ export async function POST(request) {
       // ADVPS: expiry comes from upstream when service is linked; others use days-in-month
       const expiryDate = await resolveOrderExpiryOnPayment(order);
 
+      // Deduct-on-success: charge the deferred wallet portion now that Razorpay paid.
+      const walletCharge = await chargeDeferredWalletForOrder(order);
+      if (!walletCharge.ok) {
+        return NextResponse.json(
+          { success: false, message: 'Insufficient wallet balance to complete this order. Please top up your wallet and contact support.' },
+          { status: 400 }
+        );
+      }
+
       // Update order status and store payment details
       order.status = 'confirmed';
       order.transactionId = razorpay_payment_id;
@@ -187,6 +197,15 @@ export async function POST(request) {
 
         // ADVPS: expiry comes from upstream when service is linked; others use days-in-month
         const expiryDate = await resolveOrderExpiryOnPayment(order);
+
+        // Deduct-on-success: charge the deferred wallet portion now that Cashfree paid.
+        const walletCharge = await chargeDeferredWalletForOrder(order);
+        if (!walletCharge.ok) {
+          return NextResponse.json(
+            { success: false, message: 'Insufficient wallet balance to complete this order. Please top up your wallet and contact support.' },
+            { status: 400 }
+          );
+        }
 
         // Update order status and store payment details
         order.status = 'confirmed';

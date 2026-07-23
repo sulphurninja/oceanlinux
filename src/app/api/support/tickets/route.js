@@ -3,7 +3,8 @@ import SupportTicket from "@/models/supportTicketModel";
 import User from "@/models/userModel";
 import { getDataFromToken } from "@/helper/getDataFromToken";
 import EmailService from '../../../../lib/sendgrid';
-import NotificationService from '@/services/notificationService'; // Add this import
+import NotificationService from '@/services/notificationService';
+import { buildUserTicketFilter } from '@/lib/supportTicketQuery';
 
 function generateTicketId() {
     const timestamp = Date.now().toString(36);
@@ -119,9 +120,9 @@ export async function GET(request) {
             });
         }
 
-        const tickets = await SupportTicket.find({ userId })
+        const tickets = await SupportTicket.find(buildUserTicketFilter(userId))
             .select('ticketId subject category priority status createdAt updatedAt')
-            .sort({ createdAt: -1 })
+            .sort({ updatedAt: -1, createdAt: -1 })
             .lean();
 
         return new Response(JSON.stringify(tickets), {

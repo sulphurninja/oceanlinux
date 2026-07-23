@@ -11,6 +11,7 @@ export interface CartLinePricing {
   valid: boolean;
   reason?: string;
   productName?: string;
+  serverType?: string;
   unitOriginalPrice?: number;
   unitDiscount?: number;
   unitPrice?: number;

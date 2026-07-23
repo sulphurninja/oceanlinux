@@ -222,6 +222,17 @@ export async function POST(request) {
 
       const expiryDate = await resolveOrderExpiryOnPayment(order);
 
+      // Deduct-on-success: charge the deferred wallet portion now UPI paid.
+      const { chargeDeferredWalletForOrder } = await import('@/lib/confirmPendingOrderPayment');
+      const walletCharge = await chargeDeferredWalletForOrder(order);
+      if (!walletCharge.ok) {
+        console.error('[UPI Webhook] Gateway paid but wallet debit failed — order NOT confirmed');
+        return NextResponse.json(
+          { success: false, message: 'Wallet portion could not be debited; order not confirmed' },
+          { status: 400 }
+        );
+      }
+
       // Update order status
       order.status = 'confirmed';
       order.transactionId = verification.upi_txn_id || upi_txn_id || id;

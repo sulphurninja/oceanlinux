@@ -29,7 +29,21 @@ function normalizeResellerApiEntry(v) {
     email: typeof v?.email === 'string' ? v.email.trim() : '',
     password: typeof v?.password === 'string' ? v.password : '',
     useLiveStockApi,
+    couponCode: typeof v?.couponCode === 'string' ? v.couponCode.trim().toUpperCase() : '',
+    couponByMemory: normalizeResellerCouponByMemory(v?.couponByMemory),
   };
+}
+
+function normalizeResellerCouponByMemory(raw) {
+  if (!raw || typeof raw !== 'object') return {};
+  const plain = raw instanceof Map ? Object.fromEntries(raw) : raw;
+  const out = {};
+  for (const [key, value] of Object.entries(plain)) {
+    if (typeof value === 'string' && value.trim()) {
+      out[String(key).trim()] = value.trim().toUpperCase();
+    }
+  }
+  return out;
 }
 
 function asBool(v) {

@@ -9,6 +9,7 @@ const {
   resolvePriceIdsForMemory,
   resolveZoneIsoIdFromCatalog,
   autoResolveResellerPriceIds,
+  resolveEffectiveResellerPlanType,
   resolveResellerZoneCandidatesForPurchase,
   resolveExpectedZoneIds,
 } = require('@/lib/resellerApiStockConfig');
@@ -139,7 +140,7 @@ function buildRenewBody(vmId, order, stockCfg, priceIds) {
   return {
     vmId: Number(vmId),
     monthsToAdd: 1,
-    planType: stockCfg.planType || 'SHARED',
+    planType: resolveEffectiveResellerPlanType(stockCfg, priceIds),
     useWalletBalance: true,
     cpuPriceId: priceIds.cpuPriceId,
     ramPriceId: priceIds.ramPriceId,
@@ -177,13 +178,43 @@ function collectOverviewOrderIds(row) {
     .map(String);
 }
 
-function overviewRowMatchesPurchase(row, { resellerOrderId, resellerGroupId, resellerVmId } = {}) {
-  const vmId = extractOverviewVmId(row);
-  if (resellerVmId && vmId && String(vmId) === String(resellerVmId)) return true;
+/** Panel rows tagged MIG-* are migrated legacy VMs — never attach to a fresh purchase. */
+function isMigrationOverviewRow(row) {
+  return collectOverviewOrderIds(row).some((id) => /^MIG-/i.test(id));
+}
 
+/** Parse ms timestamp embedded in BULK-1784841176499-F414 or ORD-1784841179868-71A0 refs. */
+function extractTimestampFromPurchaseRef(ref) {
+  const s = String(ref || '');
+  const match = s.match(/(?:BULK|ORD)-(\d{10,})/i);
+  return match ? Number(match[1]) : null;
+}
+
+/** createVm groupId (BULK-*) often differs slightly from overview VM order ref (ORD-*). */
+function purchaseRefsAlign(leftRef, rightRef, windowMs = 120_000) {
+  const leftTs = extractTimestampFromPurchaseRef(leftRef);
+  const rightTs = extractTimestampFromPurchaseRef(rightRef);
+  if (leftTs && rightTs) return Math.abs(leftTs - rightTs) <= windowMs;
+  return false;
+}
+
+function overviewRowMatchesBulkGroup(row, resellerGroupId) {
+  if (!resellerGroupId) return false;
   const rowIds = collectOverviewOrderIds(row);
+  return rowIds.some(
+    (id) => id.includes(String(resellerGroupId)) || purchaseRefsAlign(resellerGroupId, id)
+  );
+}
+
+function overviewRowMatchesPurchase(row, { resellerOrderId, resellerGroupId, resellerVmId } = {}) {
+  if (isMigrationOverviewRow(row)) return false;
+
+  const vmId = extractOverviewVmId(row);
+  const rowIds = collectOverviewOrderIds(row);
+
+  if (resellerGroupId && overviewRowMatchesBulkGroup(row, resellerGroupId)) return true;
+
   if (resellerOrderId && rowIds.some((id) => id === String(resellerOrderId))) return true;
-  if (resellerGroupId && rowIds.some((id) => id.includes(String(resellerGroupId)))) return true;
 
   // createVm returns numeric id (1103) — overview row may expose it only on nested refs
   if (resellerOrderId && /^\d+$/.test(String(resellerOrderId))) {
@@ -191,7 +222,44 @@ function overviewRowMatchesPurchase(row, { resellerOrderId, resellerGroupId, res
     if (rowIds.some((id) => id.endsWith(needle) || id.includes(`-${needle}`))) return true;
   }
 
+  // Never trust bare vmId from create response — require bulk/order ref alignment when groupId exists
+  if (resellerVmId && vmId && String(vmId) === String(resellerVmId)) {
+    if (!resellerGroupId && !resellerOrderId) return true;
+    if (resellerGroupId && overviewRowMatchesBulkGroup(row, resellerGroupId)) return true;
+    if (resellerOrderId && rowIds.some((id) => id === String(resellerOrderId))) return true;
+    return false;
+  }
+
   return false;
+}
+
+/**
+ * Reject vmId returned by createVm when overview shows MIG-* or bulk group mismatch.
+ */
+async function validateCreatedVmId(api, vmId, { resellerGroupId, resellerOrderId, purchaseStartedAt } = {}) {
+  if (!vmId) return false;
+  const row = await resolveOverviewRowForVm(api, vmId);
+  if (row) {
+    if (isMigrationOverviewRow(row)) return false;
+    if (resellerGroupId && !overviewRowMatchesBulkGroup(row, resellerGroupId)) return false;
+    if (resellerOrderId) {
+      const rowIds = collectOverviewOrderIds(row);
+      const numeric = /^\d+$/.test(String(resellerOrderId));
+      const orderHit = rowIds.some((id) => {
+        if (id === String(resellerOrderId)) return true;
+        if (numeric) {
+          const needle = String(resellerOrderId);
+          return id.endsWith(needle) || id.includes(`-${needle}`);
+        }
+        return false;
+      });
+      if (!orderHit && resellerGroupId && !overviewRowMatchesBulkGroup(row, resellerGroupId)) return false;
+    }
+  }
+  if (purchaseStartedAt) {
+    return isRecentPanelVm(api, row || { virtualMachineId: vmId }, purchaseStartedAt);
+  }
+  return true;
 }
 
 async function getAssignedResellerVmIds(excludeOrderId = null) {
@@ -213,6 +281,7 @@ async function pickBestRecentCandidate(
   for (const row of candidates) {
     const vmId = extractOverviewVmId(row);
     if (!vmId || excludeVmIds.has(String(vmId))) continue;
+    if (isMigrationOverviewRow(row)) continue;
     if (!(await rowMatchesOrderLocation(api, row, locationCtx))) continue;
     try {
       const details = await api.getVmDetails(String(vmId));
@@ -249,6 +318,7 @@ async function resolveOverviewRowForVm(api, vmId, { maxPages = 5 } = {}) {
 async function isRecentPanelVm(api, row, purchaseStartedAt) {
   const vmId = extractOverviewVmId(row);
   if (!vmId || !purchaseStartedAt) return false;
+  if (isMigrationOverviewRow(row)) return false;
   try {
     const details = await api.getVmDetails(String(vmId));
     const created = details?.createdAt ? new Date(details.createdAt).getTime() : 0;
@@ -503,7 +573,7 @@ async function completeResellerPendingOrder(order, ipStock, { api: existingApi =
     : Date.now() - 600_000;
 
   let provisioned = null;
-  const ipLooksWrong =
+  let ipLooksWrong =
     order.ipAddress &&
     locationCtx.expectedIpPrefix &&
     !ipMatchesOrderedRange(order.ipAddress, locationCtx.expectedIpPrefix);
@@ -512,6 +582,27 @@ async function completeResellerPendingOrder(order, ipStock, { api: existingApi =
     console.warn(
       `[RESELLER-SYNC] Order ${order._id} has IP ${order.ipAddress} but product expects ${locationCtx.expectedIpPrefix}.* — re-resolving`
     );
+  }
+
+  if (order.resellerVmId && !ipLooksWrong) {
+    try {
+      const linkedRow = await resolveOverviewRowForVm(api, order.resellerVmId);
+      if (linkedRow && isMigrationOverviewRow(linkedRow)) {
+        console.warn(
+          `[RESELLER-SYNC] Order ${order._id} linked to migration VM ${order.resellerVmId} — re-resolving`
+        );
+        ipLooksWrong = true;
+      } else if (
+        order.resellerGroupId &&
+        linkedRow &&
+        !overviewRowMatchesBulkGroup(linkedRow, order.resellerGroupId)
+      ) {
+        console.warn(
+          `[RESELLER-SYNC] Order ${order._id} VM ${order.resellerVmId} does not match bulk group ${order.resellerGroupId} — re-resolving`
+        );
+        ipLooksWrong = true;
+      }
+    } catch (_) { /* fall through */ }
   }
 
   if (order.resellerVmId && !ipLooksWrong) {
@@ -713,6 +804,8 @@ module.exports = {
   resolveExpectedZoneId,
   buildResellerLocationContext,
   ipMatchesOrderedRange,
+  isMigrationOverviewRow,
+  validateCreatedVmId,
   waitForProvisionedVm,
   syncResellerVmCredentials,
   renewResellerPanelVm,

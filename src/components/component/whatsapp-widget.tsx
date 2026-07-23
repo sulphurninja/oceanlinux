@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { cn } from '@/lib/utils';
+import { floatingActionTooltip } from './floatingActionTooltip';
 
 interface WhatsAppWidgetProps {
   className?: string;
@@ -77,18 +78,9 @@ const WhatsAppWidget: React.FC<WhatsAppWidgetProps> = ({ className }) => {
       </button>
 
       {/* Tooltip */}
-      <div
-        className={cn(
-          "absolute bottom-16 right-0 px-3 py-2 bg-gray-900 dark:bg-gray-800 text-white text-sm rounded-lg shadow-lg",
-          "transition-all duration-200 transform whitespace-nowrap",
-          "before:content-[''] before:absolute before:top-full before:right-4 before:border-4 before:border-transparent before:border-t-gray-900 dark:before:border-t-gray-800",
-          isHovered
-            ? "opacity-100 translate-y-0 pointer-events-auto"
-            : "opacity-0 translate-y-2 pointer-events-none"
-        )}
-      >
+      <div className={floatingActionTooltip(isHovered)}>
         <span className="flex items-center gap-2">
-          <span className="inline-block w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+          <span className="inline-block w-2 h-2 bg-green-500 rounded-full animate-pulse shrink-0" />
           Chat with us on WhatsApp
         </span>
       </div>

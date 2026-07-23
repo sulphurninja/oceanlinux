@@ -45,6 +45,10 @@ const companyResellerApiSchema = new mongoose.Schema({
   password: { type: String, default: '' },
   /** When true, IP stock follows GET /api/users/zones (per-plan zoneId) or wallet fallback. */
   useLiveStockApi: { type: Boolean, default: false },
+  /** Default Hostheaven upstream coupon for auto-buy when stock has none set. */
+  couponCode: { type: String, default: '' },
+  /** Per-RAM panel coupons, e.g. { "4GB": "OCEAN199", "8GB": "WINPROMO" }. */
+  couponByMemory: { type: Map, of: String, default: undefined },
 }, { _id: false });
 
 /**

@@ -814,7 +814,7 @@ export default function Dashboard() {
                   { icon: Eye, label: 'View All Orders', action: handleViewAllOrders },
                   { icon: Download, label: 'Download Invoice', action: handleDownloadInvoice },
                   { icon: Settings, label: 'Account Settings', action: handleAccountSettings },
-                  { icon: LifeBuoy, label: 'Support', action: () => router.push('/support/tickets') },
+                  { icon: LifeBuoy, label: 'Raise Ticket', action: () => router.push('/dashboard/support/tickets') },
                 ].map(({ icon: Icon, label, action, accent }) => (
                   <Button
                     key={label}

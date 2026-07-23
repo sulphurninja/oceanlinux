@@ -9,6 +9,8 @@ import userWalletService from '@/services/userWalletService';
 import { priceCart } from '@/lib/cartPricing';
 import { createGatewayOrder, buildClientTxnId } from '@/lib/paymentGateways';
 import { confirmCheckoutFromWebhook } from '@/lib/paymentDispatch';
+const { defaultOsForProduct } = require('@/lib/orderOs');
+const { normalizeOsForServerType } = require('@/lib/companyInventory');
 
 const AutoProvisioningService = require('@/services/autoProvisioningService');
 
@@ -97,7 +99,11 @@ export async function POST(request) {
     slotIpPackageId: item.kind === 'slotip' ? item.slotIpPackageId : undefined,
     productName: lp.productName,
     memory: item.memory,
-    os: item.os || 'Ubuntu 22',
+    // Correct the OS by the stock's serverType so Windows/VPS plans never
+    // provision as Ubuntu (fixes stale cart lines saved before this).
+    os: item.kind === 'ipstock'
+      ? normalizeOsForServerType(item.os || defaultOsForProduct(lp.productName), lp.stock?.serverType)
+      : (item.os || 'Ubuntu 22'),
     quantity: item.quantity,
     unitOriginalPrice: lp.unitOriginalPrice,
     unitPrice: lp.unitPrice,
@@ -125,9 +131,12 @@ export async function POST(request) {
     customerPhone: user.phone || '',
   });
 
-  // Reserve wallet amount up-front. If this fails, abort the session.
+  // Deduct-on-success: only charge the wallet up-front when it FULLY covers the
+  // cart (no gateway step). For a mixed wallet+gateway checkout we DEFER the
+  // wallet debit until the gateway payment actually lands (confirmCheckoutFromWebhook),
+  // so the customer's wallet is never touched for a checkout they don't complete.
   let walletDebit = null;
-  if (walletApplied > 0) {
+  if (walletApplied > 0 && gatewayCharge === 0) {
     try {
       walletDebit = await userWalletService.debit(userId, walletApplied, {
         description: `Cart checkout #${session._id}`,

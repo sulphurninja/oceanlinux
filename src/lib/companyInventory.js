@@ -70,8 +70,18 @@ function getCompanyFulfillmentMode(stock) {
   return 'auto';
 }
 
-function usesCompanyInventoryFulfillment(stock) {
-  return !!(stock?.company && getCompanyFulfillmentMode(stock) === 'inventory');
+function usesCompanyInventoryFulfillment(stock, company) {
+  if (!stock?.company) return false;
+  // Live panel auto-buy (Hostheaven / Netbay) must not assign pre-saved inventory rows.
+  if (company?.resellerApi?.enabled && company.resellerApi.useLiveStockApi) {
+    const { stockHasResellerPanelPlans } = require('@/lib/ipStockAvailability');
+    if (stockHasResellerPanelPlans(stock)) return false;
+  }
+  if (company?.netbayApi?.enabled && company.netbayApi.useLiveStockApi) {
+    const { stockHasNetbayPlans } = require('@/lib/ipStockAvailability');
+    if (stockHasNetbayPlans(stock)) return false;
+  }
+  return getCompanyFulfillmentMode(stock) === 'inventory';
 }
 
 /** True only when company owner explicitly saved manual units (not live panel sync). */

@@ -212,6 +212,67 @@ function isStockPurchasable(stock: IPStock, memory?: string) {
   return stock.available !== false;
 }
 
+const MEMORY_TIER_ORDER = ['1GB', '2GB', '4GB', '6GB', '8GB', '12GB', '16GB', '32GB'];
+
+function normalizePlanTag(tag: string) {
+  return String(tag || '').trim().toLowerCase();
+}
+
+function stockTagsNormalized(stock: IPStock) {
+  return (stock.tags || []).map(normalizePlanTag);
+}
+
+function planNameLower(stock: IPStock) {
+  return String(stock.name || '').trim().toLowerCase();
+}
+
+/** Linux tab — serverType, tags, or name (many IP rows are tagged VPS but named Linux 4GB). */
+function isLinuxCategoryPlan(stock: IPStock) {
+  if (stock.serverType === 'Linux' || stock.serverType === 'Windows & Linux') return true;
+  const tags = stockTagsNormalized(stock);
+  if (tags.some((t) => t.includes('linux') || t.includes('ocean'))) return true;
+  const name = planNameLower(stock);
+  if (name.includes('linux') && !name.includes('windows vps')) return true;
+  return false;
+}
+
+function isVpsCategoryPlan(stock: IPStock) {
+  if (stock.serverType === 'VPS' || stock.serverType === 'Windows & Linux') return true;
+  const tags = stockTagsNormalized(stock);
+  if (tags.some((t) => t.includes('windows') || t === 'vps')) return true;
+  const name = planNameLower(stock);
+  if (name.includes('windows') || /\bvps\b/.test(name)) return true;
+  return false;
+}
+
+function matchesCategoryTab(stock: IPStock, tab: string) {
+  if (!tab || tab === 'all') return true;
+  if (tab === 'Linux') return isLinuxCategoryPlan(stock);
+  if (tab === 'VPS') return isVpsCategoryPlan(stock);
+  return stock.serverType === tab;
+}
+
+function stockMatchesSearch(stock: IPStock, query: string) {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  if (stock.name.toLowerCase().includes(q)) return true;
+  if (stock.description?.toLowerCase().includes(q)) return true;
+  if (stock.tags.some((tag) => tag.toLowerCase().includes(q))) return true;
+  if (Object.keys(stock.memoryOptions || {}).some((mem) => mem.toLowerCase().includes(q))) return true;
+  return false;
+}
+
+function sortMemoryOptionEntries(entries: [string, MemoryOptionDetails][]) {
+  return [...entries].sort((a, b) => {
+    const ai = MEMORY_TIER_ORDER.indexOf(a[0]);
+    const bi = MEMORY_TIER_ORDER.indexOf(b[0]);
+    if (ai !== -1 && bi !== -1) return ai - bi;
+    if (ai !== -1) return -1;
+    if (bi !== -1) return 1;
+    return (a[1].price || 0) - (b[1].price || 0);
+  });
+}
+
 interface SlotIPPackage {
   _id: string;
   name: string;
@@ -379,30 +440,16 @@ function IPStockContent() {
     loadPlans();
   }, []);
 
-  // NEW: Filter and sort logic
+  // Filter and sort logic
   const getFilteredAndSortedStocks = () => {
     let filtered = ipStocks.filter((stock) => !stock.hiddenFromStore);
 
-    // Filter by tab
-    if (activeTab && activeTab !== 'all') {
-      filtered = filtered.filter(stock => {
-        if (stock.serverType === 'Windows & Linux') {
-          return activeTab === 'Linux' || activeTab === 'VPS';
-        }
-        if (stock.tags.includes('ocean linux')) {
-          return activeTab === 'Linux' || activeTab === 'VPS';
-        }
-        return stock.serverType === activeTab;
-      });
+    if (activeTab && activeTab !== 'all' && activeTab !== 'SlotIP') {
+      filtered = filtered.filter((stock) => matchesCategoryTab(stock, activeTab));
     }
 
-    // Search filter
     if (searchTerm.trim()) {
-      filtered = filtered.filter(stock =>
-        stock.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        stock.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        stock.tags.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase()))
-      );
+      filtered = filtered.filter((stock) => stockMatchesSearch(stock, searchTerm));
     }
 
     // Price filter
@@ -457,23 +504,30 @@ function IPStockContent() {
     return filtered;
   };
 
-  // Use filtered stocks instead of original filteredIpStocks
   const filteredIpStocks = getFilteredAndSortedStocks();
 
-  // Get counts for each tab
-  const getCounts = () => {
-    const all = ipStocks.length;
-    const linux = ipStocks.filter(stock => 
-      stock.serverType === 'Linux' || stock.serverType === 'Windows & Linux' || stock.tags.includes('ocean linux')
-    ).length;
-    const vps = ipStocks.filter(stock => 
-      stock.serverType === 'VPS' || stock.serverType === 'Windows & Linux'
-    ).length;
-    const slot = slotPackages.length;
-    return { all, linux, vps, slot };
-  };
+  const visibleStocks = useMemo(
+    () => ipStocks.filter((stock) => !stock.hiddenFromStore),
+    [ipStocks]
+  );
 
-  const counts = getCounts();
+  const counts = useMemo(() => {
+    const linux = visibleStocks.filter((stock) => matchesCategoryTab(stock, 'Linux')).length;
+    const vps = visibleStocks.filter((stock) => matchesCategoryTab(stock, 'VPS')).length;
+    const slot = slotPackages.length;
+    return {
+      all: visibleStocks.length + slot,
+      linux,
+      vps,
+      slot,
+    };
+  }, [visibleStocks, slotPackages]);
+
+  const listedPlanCount = useMemo(() => {
+    if (activeTab === 'SlotIP') return slotPackages.length;
+    if (activeTab === 'all') return filteredIpStocks.length + slotPackages.length;
+    return filteredIpStocks.length;
+  }, [activeTab, filteredIpStocks.length, slotPackages.length]);
 
   // Group stocks by tags
   const groupStocksByTags = (stocks: IPStock[]) => {
@@ -1269,6 +1323,12 @@ function IPStockContent() {
               </div>
             </div>
 
+            <p className="text-xs text-white/45 mb-3 px-0.5">
+              Showing {listedPlanCount} plan{listedPlanCount === 1 ? '' : 's'}
+              {activeTab === 'Linux' ? ' · Linux category' : activeTab === 'VPS' ? ' · Windows VPS' : activeTab === 'SlotIP' ? ' · Premium proxies' : ''}
+              {(searchTerm || priceFilter !== 'all') ? ' (filtered)' : ''}
+            </p>
+
             {/* Plan listings */}
             <div>
               {/* Slot IP Section */}
@@ -1674,12 +1734,19 @@ function CompactServerPlanRow({
   const isNetbay = isNetbayLiveStock(stock);
   const isReseller = isResellerLiveStock(stock);
 
-  const memoryOptions = Object.entries(stock.memoryOptions || {})
-    .filter(([_, details]) => details.price !== null)
-    .sort(([, a], [, b]) => (a.price || 0) - (b.price || 0));
+  const memoryOptions = sortMemoryOptionEntries(
+    Object.entries(stock.memoryOptions || {}).filter(
+      ([memory]) => memory && !String(memory).startsWith('$')
+    )
+  );
 
+  const pricedMemoryOptions = memoryOptions.filter(
+    ([, details]) => details.price != null && Number(details.price) > 0
+  );
   const hasPromoCodes = stock.promoCodes && stock.promoCodes.length > 0;
-  const startingPrice = Math.min(...memoryOptions.map(([_, details]) => details.price || 0));
+  const startingPrice = pricedMemoryOptions.length
+    ? Math.min(...pricedMemoryOptions.map(([, details]) => details.price || 0))
+    : 0;
 
   return (
     <div className={cn(
@@ -1746,8 +1813,8 @@ function CompactServerPlanRow({
             {!inStock
               ? 'Currently unavailable — check back later'
               : showUnits
-              ? `${unitsLeft} unit${unitsLeft === 1 ? '' : 's'} left · ${memoryOptions.length} configuration${memoryOptions.length !== 1 ? 's' : ''}`
-              : `${memoryOptions.length} configuration${memoryOptions.length !== 1 ? 's' : ''} available`}
+              ? `${unitsLeft} unit${unitsLeft === 1 ? '' : 's'} left · ${pricedMemoryOptions.length} configuration${pricedMemoryOptions.length !== 1 ? 's' : ''}`
+              : `${pricedMemoryOptions.length} configuration${pricedMemoryOptions.length !== 1 ? 's' : ''} available`}
           </p>
         </div>
 
@@ -1775,9 +1842,9 @@ function CompactServerPlanRow({
             <p className="text-xs text-white/45">From</p>
             <p className={cn(
               "font-bold text-base md:text-lg",
-              inStock ? "text-emerald-300" : "text-white/35"
+              inStock && startingPrice > 0 ? "text-emerald-300" : "text-white/35"
             )}>
-              ₹{startingPrice}
+              {startingPrice > 0 ? `₹${startingPrice}` : '—'}
             </p>
           </div>
           <ChevronDown 
@@ -1793,14 +1860,15 @@ function CompactServerPlanRow({
       {isExpanded && (
         <div className="border-t border-white/10 bg-white/[0.02]">
           <div className="p-3 space-y-2">
-            {memoryOptions.length > 0 ? (
+            {pricedMemoryOptions.length > 0 ? (
               <>
                 <p className="text-xs font-medium text-white/45 uppercase tracking-wide mb-3">
                   Select Configuration
                 </p>
                 <div className="space-y-2">
-                  {memoryOptions.map(([memory, details]) => {
-                    const memoryInStock = isStockPurchasable(stock, memory);
+                  {pricedMemoryOptions.map(([memory, details]) => {
+                    const hasPrice = details.price != null && Number(details.price) > 0;
+                    const memoryInStock = hasPrice && isStockPurchasable(stock, memory);
                     return (
                     <div
                       key={memory}
@@ -1822,7 +1890,7 @@ function CompactServerPlanRow({
                           "font-bold text-base",
                           memoryInStock ? "text-emerald-300" : "text-white/35"
                         )}>
-                          ₹{details.price}
+                          {hasPrice ? `₹${details.price}` : 'Price N/A'}
                         </span>
                         <AddToCartButton
                           kind="ipstock"
@@ -1840,26 +1908,28 @@ function CompactServerPlanRow({
                             e.stopPropagation();
                             onBuyNow(stock.name, memory, details.price!, stock._id, undefined, memoryInStock);
                           }}
-                          disabled={!memoryInStock || verifyingPurchaseKey === `${stock._id}:${memory}`}
+                          disabled={!memoryInStock || !hasPrice || verifyingPurchaseKey === `${stock._id}:${memory}`}
                           className={cn(
                             "h-8 px-3 gap-1.5 border-0",
-                            memoryInStock
+                            memoryInStock && hasPrice
                               ? "premium-btn-primary"
                               : "bg-red-500/15 text-red-300 hover:bg-red-500/20 cursor-not-allowed"
                           )}
                         >
                           {verifyingPurchaseKey === `${stock._id}:${memory}` ? (
                             <Loader2 className="h-3 w-3 animate-spin" />
-                          ) : memoryInStock ? (
+                          ) : memoryInStock && hasPrice ? (
                             <Zap className="h-3 w-3" />
                           ) : (
                             <XCircle className="h-3 w-3" />
                           )}
                           {verifyingPurchaseKey === `${stock._id}:${memory}`
                             ? 'Checking…'
-                            : memoryInStock
+                            : memoryInStock && hasPrice
                               ? 'Buy Now'
-                              : 'Sold out'}
+                              : hasPrice
+                                ? 'Sold out'
+                                : 'No price'}
                         </Button>
                       </div>
                     </div>

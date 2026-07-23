@@ -569,8 +569,36 @@ class ResellerApi {
   }
 
   /**
+   * Validate an upstream panel coupon before VM purchase.
+   * Hostheaven/SomaniOne: POST body { code, orderAmount } → { valid, finalAmount, ... }.
+   */
+  async validateCoupon({ code, orderAmount }) {
+    const body = {
+      code: String(code || '').trim(),
+      orderAmount: Number(orderAmount),
+    };
+    const paths = [
+      '/api/coupons/validate',
+      '/api/billing/coupons/validate',
+      '/api/billing/coupon/validate',
+    ];
+    let lastErr = null;
+    for (const path of paths) {
+      try {
+        return await this._request(path, { method: 'POST', body });
+      } catch (err) {
+        lastErr = err;
+        if (err.status === 404) continue;
+        throw err;
+      }
+    }
+    throw lastErr || new ResellerApiError('Coupon validate endpoint not found');
+  }
+
+  /**
    * Provision a new VM (UserSide.pdf §4). Uses company wallet when
-   * useWalletBalance=true and gateway=WALLET.
+   * useWalletBalance=true and gateway=WALLET. Optional couponCode applies
+   * upstream panel discount (e.g. OCEAN199 → ₹1100 instead of ₹1300).
    */
   async createVm(body, { gateway = 'WALLET' } = {}) {
     const qs = new URLSearchParams({ gateway: String(gateway) });

@@ -11,7 +11,9 @@
  *   priceByMemory: {
  *     "4GB": { cpuPriceId, ramPriceId, diskPriceId, bandwidthPriceId, zoneIsoId? }
  *   },
- *   defaultOs: { Linux: { zoneIsoId: 4 }, Windows: { zoneIsoId: 2 } }
+ *   defaultOs: { Linux: { zoneIsoId: 4 }, Windows: { zoneIsoId: 2 } },
+ *   couponCode: "OCEAN199",
+ *   couponByMemory: { "4GB": "OCEAN199", "8GB": "WINPROMO" }
  * }
  */
 
@@ -51,6 +53,10 @@ function readResellerApiStockConfig(ipStock) {
     ? Object.fromEntries(cfg.defaultOs)
     : (cfg.defaultOs || {});
 
+  const couponByMemory = cfg.couponByMemory instanceof Map
+    ? Object.fromEntries(cfg.couponByMemory)
+    : (cfg.couponByMemory && typeof cfg.couponByMemory === 'object' ? cfg.couponByMemory : {});
+
   const zoneIds = normalizeResellerZoneIds(cfg);
   const zoneNames =
     cfg.zoneNames instanceof Map
@@ -65,7 +71,55 @@ function readResellerApiStockConfig(ipStock) {
     gateway: String(cfg.gateway || 'WALLET').toUpperCase(),
     priceByMemory,
     defaultOs,
+    couponCode: String(cfg.couponCode || '').trim(),
+    couponByMemory,
   };
+}
+
+function normalizeCouponByMemory(raw) {
+  if (!raw || typeof raw !== 'object') return {};
+  const plain = raw instanceof Map ? Object.fromEntries(raw) : raw;
+  const out = {};
+  for (const [key, value] of Object.entries(plain)) {
+    if (typeof value === 'string' && value.trim()) {
+      out[String(key).trim()] = value.trim().toUpperCase();
+    }
+  }
+  return out;
+}
+
+function normalizeCompanyCouponConfig(raw) {
+  if (typeof raw === 'string') {
+    return { couponCode: raw.trim().toUpperCase(), couponByMemory: {} };
+  }
+  if (!raw || typeof raw !== 'object') {
+    return { couponCode: '', couponByMemory: {} };
+  }
+  return {
+    couponCode: String(raw.couponCode || '').trim().toUpperCase(),
+    couponByMemory: normalizeCouponByMemory(raw.couponByMemory),
+  };
+}
+
+/** Hostheaven / panel upstream coupon for auto-buy (not OceanLinux customer promos). */
+function resolveCouponCodeForMemory(stockCfg, memory, companyCoupon = '') {
+  const company = normalizeCompanyCouponConfig(companyCoupon);
+
+  const fromStockMemory = resolveMemoryConfigEntry(stockCfg?.couponByMemory, memory);
+  if (typeof fromStockMemory === 'string' && fromStockMemory.trim()) return fromStockMemory.trim().toUpperCase();
+  if (fromStockMemory && typeof fromStockMemory === 'object' && fromStockMemory.code) {
+    return String(fromStockMemory.code).trim().toUpperCase();
+  }
+
+  const stockCode = String(stockCfg?.couponCode || '').trim().toUpperCase();
+  if (stockCode) return stockCode;
+
+  const fromCompanyMemory = resolveMemoryConfigEntry(company.couponByMemory, memory);
+  if (typeof fromCompanyMemory === 'string' && fromCompanyMemory.trim()) {
+    return fromCompanyMemory.trim().toUpperCase();
+  }
+
+  return company.couponCode;
 }
 
 function resolveExpectedZoneIds(ipStock) {
@@ -106,8 +160,8 @@ function parseMemoryGb(memory) {
   return m ? Number(m[1]) : 4;
 }
 
-function resolvePriceIdsForMemory(stockCfg, memory) {
-  if (!stockCfg?.priceByMemory) return null;
+function resolveMemoryConfigEntry(map, memory) {
+  if (!map || typeof map !== 'object') return null;
   const variations = [
     memory,
     String(memory || '').toLowerCase(),
@@ -116,13 +170,19 @@ function resolvePriceIdsForMemory(stockCfg, memory) {
   ].filter(Boolean);
 
   for (const key of variations) {
-    const hit = stockCfg.priceByMemory[key];
-    if (hit && typeof hit === 'object') return hit;
+    const hit = map[key];
+    if (hit != null && hit !== '') return hit;
   }
 
-  const entries = Object.entries(stockCfg.priceByMemory).filter(([, v]) => v && typeof v === 'object');
+  const entries = Object.entries(map).filter(([, v]) => v != null && v !== '');
   if (entries.length === 1) return entries[0][1];
   return null;
+}
+
+function resolvePriceIdsForMemory(stockCfg, memory) {
+  if (!stockCfg?.priceByMemory) return null;
+  const hit = resolveMemoryConfigEntry(stockCfg.priceByMemory, memory);
+  return hit && typeof hit === 'object' ? hit : null;
 }
 
 /**
@@ -134,30 +194,57 @@ function resolveZoneIsoIdFromCatalog(isos, { isWindows, orderOs } = {}) {
 
   const os = String(orderOs || '').toLowerCase();
   const pick = (pred) => list.find(pred);
+  const isoName = (i) => String(i.name || i.isoName || '');
+  const isoType = (i) => String(i.osType || '').toUpperCase();
 
   if (isWindows || os.includes('windows')) {
     return (
-      pick((i) => /2022|windows/i.test(String(i.name || i.isoName || ''))) ||
-      pick((i) => String(i.osType || '').toUpperCase().includes('WINDOWS'))
+      pick((i) => /windows.*2022|2022.*windows/i.test(isoName(i))) ||
+      pick((i) => isoType(i).includes('WINDOWS'))
     )?.id ?? null;
   }
   if (os.includes('centos')) {
-    return pick((i) => /centos/i.test(String(i.name || i.isoName || '')))?.id ?? null;
+    return pick((i) => /centos/i.test(isoName(i)))?.id ?? null;
   }
   if (os.includes('24')) {
-    return pick((i) => /ubuntu24|24/i.test(String(i.name || i.isoName || '')))?.id ?? null;
+    return (
+      pick((i) => /ubuntu\s*24|ubuntu24/i.test(isoName(i))) ||
+      pick((i) => isoType(i) === 'UBUNTU' && /24/.test(isoName(i)))
+    )?.id ?? null;
   }
+  // Ubuntu 22 — do NOT match bare "22" (false match on "Windows 2022")
   return (
-    pick((i) => /ubuntu22|22/i.test(String(i.name || i.isoName || ''))) ||
-    pick((i) => String(i.osType || '').toUpperCase() === 'UBUNTU')
-  )?.id ?? list[0]?.id ?? null;
+    pick((i) => /ubuntu\s*22|ubuntu22/i.test(isoName(i))) ||
+    pick((i) => isoType(i) === 'UBUNTU')
+  )?.id ?? null;
 }
 
 /**
  * When admin hasn't mapped price IDs, derive them from the live pricing catalog.
  */
-async function autoResolveResellerPriceIds(api, { memory, planType = 'SHARED' }) {
-  const gb = parseMemoryGb(memory);
+function labelGbFromCatalogEntry(entry) {
+  const m = String(entry?.label || '').match(/(\d+)\s*GB/i);
+  return m ? Number(m[1]) : 0;
+}
+
+function findRamEntryForGb(ramList, gb) {
+  if (!Array.isArray(ramList) || !ramList.length) return null;
+
+  const exactMb = ramList.find((x) => Number(x.ramMb) === gb * 1024);
+  if (exactMb) return exactMb;
+
+  const byLabel = ramList.find((x) => labelGbFromCatalogEntry(x) === gb);
+  if (byLabel) return byLabel;
+
+  const sorted = ramList.slice().sort((a, b) => Number(a.ramMb || 0) - Number(b.ramMb || 0));
+  return (
+    sorted.find((x) => labelGbFromCatalogEntry(x) >= gb) ||
+    sorted.find((x) => Number(x.ramMb || 0) >= gb * 1000) ||
+    null
+  );
+}
+
+async function resolvePriceIdsFromPlanCatalog(api, { gb, planType }) {
   const pt = String(planType || 'SHARED').toUpperCase();
   const [cpuList, ramList, diskList, bwList] = await Promise.all([
     api.getPricingCatalog(pt, 'cpu'),
@@ -166,31 +253,74 @@ async function autoResolveResellerPriceIds(api, { memory, planType = 'SHARED' })
     api.getPricingCatalog(pt, 'bandwidth'),
   ]);
 
-  const ramEntry =
-    ramList.find((x) => x.ramMb === gb * 1024) ||
-    ramList.find((x) => String(x.label) === String(gb)) ||
-    ramList.slice().sort((a, b) => a.ramMb - b.ramMb).find((x) => x.ramMb >= gb * 1024) ||
-    ramList[0];
+  const ramEntry = findRamEntryForGb(ramList, gb);
+  if (!ramEntry?.id) return null;
 
   const targetCores = Math.max(1, Math.min(8, Math.ceil(gb / 2)));
   const cpuEntry =
-    cpuList.find((x) => x.cores === targetCores) ||
-    cpuList.find((x) => x.cores === 2) ||
+    cpuList.find((x) => Number(x.cores) === targetCores) ||
+    cpuList.find((x) => Number(x.cores) >= targetCores) ||
+    cpuList
+      .slice()
+      .sort((a, b) => Number(a.cores || 0) - Number(b.cores || 0))
+      .find((x) => Number(x.cores || 0) >= targetCores) ||
     cpuList[0];
 
   const diskEntry = diskList[0];
   const bwEntry = bwList[0];
 
-  if (!ramEntry?.id || !cpuEntry?.id || !diskEntry?.id || !bwEntry?.id) {
-    throw new Error('Could not auto-resolve pricing IDs from upstream catalog');
-  }
+  if (!cpuEntry?.id || !diskEntry?.id || !bwEntry?.id) return null;
 
   return {
+    planType: pt,
     cpuPriceId: cpuEntry.id,
     ramPriceId: ramEntry.id,
     diskPriceId: diskEntry.id,
     bandwidthPriceId: bwEntry.id,
+    resolvedRamMb: ramEntry.ramMb,
+    resolvedRamLabel: ramEntry.label,
   };
+}
+
+async function autoResolveResellerPriceIds(api, { memory, planType = 'SHARED' }) {
+  const gb = parseMemoryGb(memory);
+  const preferred = String(planType || 'SHARED').toUpperCase();
+  const planCandidates = [preferred];
+  if (gb > 4 && !planCandidates.includes('DEDICATED')) planCandidates.push('DEDICATED');
+  if (gb <= 4 && !planCandidates.includes('SHARED')) planCandidates.push('SHARED');
+
+  let lastError = null;
+  for (const pt of planCandidates) {
+    try {
+      const hit = await resolvePriceIdsFromPlanCatalog(api, { gb, planType: pt });
+      if (!hit) continue;
+
+      const resolvedGb =
+        labelGbFromCatalogEntry({ label: hit.resolvedRamLabel }) ||
+        Math.round(Number(hit.resolvedRamMb || 0) / 1024);
+      if (resolvedGb > 0 && resolvedGb < gb) {
+        lastError = new Error(
+          `Panel ${pt} tier "${hit.resolvedRamLabel}" is below ordered ${gb}GB`
+        );
+        continue;
+      }
+
+      return hit;
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  throw (
+    lastError ||
+    new Error(
+      `No ${gb}GB RAM tier on reseller panel (tried plan types: ${planCandidates.join(', ')})`
+    )
+  );
+}
+
+function resolveEffectiveResellerPlanType(stockCfg, priceIds) {
+  return priceIds?.planType || stockCfg?.planType || 'SHARED';
 }
 
 function isResellerApiStock(ipStock, order) {
@@ -215,7 +345,12 @@ module.exports = {
   resolveResellerZoneCandidatesForPurchase,
   parseMemoryGb,
   resolvePriceIdsForMemory,
+  resolveMemoryConfigEntry,
+  resolveCouponCodeForMemory,
+  normalizeCompanyCouponConfig,
+  normalizeCouponByMemory,
   resolveZoneIsoIdFromCatalog,
   autoResolveResellerPriceIds,
+  resolveEffectiveResellerPlanType,
   isResellerApiStock,
 };

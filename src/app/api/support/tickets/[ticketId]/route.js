@@ -2,7 +2,8 @@ import connectDB from "@/lib/db";
 import SupportTicket from "@/models/supportTicketModel";
 import User from "@/models/userModel";
 import { getDataFromToken } from "@/helper/getDataFromToken";
-import NotificationService from '@/services/notificationService'; // Add this import
+import NotificationService from '@/services/notificationService';
+import { buildUserTicketFilter } from '@/lib/supportTicketQuery';
 
 export async function GET(request, { params }) {
     try {
@@ -18,7 +19,7 @@ export async function GET(request, { params }) {
 
         const ticket = await SupportTicket.findOne({
             ticketId: params.ticketId,
-            userId
+            ...buildUserTicketFilter(userId),
         }).lean();
 
         if (!ticket) {
@@ -65,7 +66,7 @@ export async function POST(request, { params }) {
         }
 
         const ticket = await SupportTicket.findOneAndUpdate(
-            { ticketId: params.ticketId, userId },
+            { ticketId: params.ticketId, ...buildUserTicketFilter(userId) },
             {
                 $push: {
                     messages: {

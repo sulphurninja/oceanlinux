@@ -2,17 +2,18 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Headset } from 'lucide-react';
+import { Ticket } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import WhatsAppWidget from './whatsapp-widget';
+import { floatingActionTooltip } from './floatingActionTooltip';
 
 const FloatingSupport = () => {
   const router = useRouter();
   const [isHovered, setIsHovered] = useState(false);
 
   const handleClick = () => {
-    router.push('/support/tickets');
+    router.push('/dashboard/support/tickets');
   };
 
   return (
@@ -34,10 +35,10 @@ const FloatingSupport = () => {
             isHovered && "h-16 w-16"
           )}
           size="icon"
-          aria-label="Get Support"
+          aria-label="Raise Ticket"
         >
           <div className="relative">
-            <Headset
+            <Ticket
               className={cn(
                 "h-6 w-6 text-white transition-all duration-300",
                 isHovered && "h-7 w-7"
@@ -50,17 +51,8 @@ const FloatingSupport = () => {
         </Button>
 
         {/* Tooltip */}
-        <div
-          className={cn(
-            "absolute bottom-16 right-0 px-3 py-2 bg-gray-900 dark:bg-gray-800 text-white text-sm rounded-lg shadow-lg",
-            "transition-all duration-200 transform whitespace-nowrap",
-            "before:content-[''] before:absolute before:top-full before:right-4 before:border-4 before:border-transparent before:border-t-gray-900 dark:before:border-t-gray-800",
-            isHovered
-              ? "opacity-100 translate-y-0 pointer-events-auto"
-              : "opacity-0 translate-y-2 pointer-events-none"
-          )}
-        >
-          Need Help? Contact Support
+        <div className={floatingActionTooltip(isHovered)}>
+          Raise Ticket
         </div>
       </div>
     </div>

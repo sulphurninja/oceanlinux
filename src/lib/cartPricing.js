@@ -41,7 +41,15 @@ export async function priceCartLine(item) {
     if (!stock) {
       return { valid: false, reason: 'Product no longer exists' };
     }
-    if (!isIpStockPurchasable(stock, quantity)) {
+    // Load the linked company so reseller/netbay live-stock plans are judged
+    // by their zone-based `available` flag rather than a manual stockCount
+    // (which stays 0 for live-stock plans and wrongly reads "out of stock").
+    let company = null;
+    if (stock.company) {
+      const Company = (await import('@/models/companyModel')).default;
+      company = await Company.findById(stock.company).select('netbayApi resellerApi').lean();
+    }
+    if (!isIpStockPurchasable(stock, quantity, company)) {
       return { valid: false, reason: 'Product is out of stock', stock };
     }
     const memory = item.memory;

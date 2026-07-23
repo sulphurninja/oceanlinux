@@ -45,7 +45,21 @@ function getCompanyResellerApiConfig(company) {
     resellerDomain,
     email,
     password,
+    couponCode: String(cfg.couponCode || '').trim().toUpperCase(),
+    couponByMemory: normalizeCouponByMemory(cfg.couponByMemory),
   };
+}
+
+function normalizeCouponByMemory(raw) {
+  if (!raw || typeof raw !== 'object') return {};
+  const plain = raw instanceof Map ? Object.fromEntries(raw) : raw;
+  const out = {};
+  for (const [key, value] of Object.entries(plain)) {
+    if (typeof value === 'string' && value.trim()) {
+      out[String(key).trim()] = value.trim().toUpperCase();
+    }
+  }
+  return out;
 }
 
 function hasCompanyResellerApi(company) {

@@ -3,6 +3,7 @@ import connectDB from '@/lib/db';
 import { getDataFromToken } from '@/helper/getDataFromToken';
 import Cart from '@/models/cartModel';
 import { priceCart, priceCartLine } from '@/lib/cartPricing';
+const { normalizeOsForServerType } = require('@/lib/companyInventory');
 
 function authError(err) {
   return NextResponse.json(
@@ -33,6 +34,7 @@ async function buildCartResponse(cart) {
         ? {
             valid: true,
             productName: line.priced.productName,
+            serverType: line.priced.stock?.serverType,
             unitOriginalPrice: line.priced.unitOriginalPrice,
             unitDiscount: line.priced.unitDiscount,
             unitPrice: line.priced.unitPrice,
@@ -109,6 +111,12 @@ export async function PATCH(request, { params }) {
   const priced = await priceCartLine(item.toObject ? item.toObject() : item);
   if (!priced.valid) {
     return NextResponse.json({ success: false, message: priced.reason }, { status: 400 });
+  }
+
+  // Clamp the OS to what this stock's serverType allows so a Windows/VPS
+  // plan can never be saved as Ubuntu (and vice-versa) from the cart editor.
+  if (item.kind === 'ipstock') {
+    item.os = normalizeOsForServerType(item.os, priced.stock?.serverType);
   }
 
   await cart.save();

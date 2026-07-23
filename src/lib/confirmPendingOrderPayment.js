@@ -206,6 +206,49 @@ export async function probeGatewayPayment(order) {
   return lastPending;
 }
 
+/**
+ * Deduct-on-success wallet charge. Charges the FULL intended wallet portion
+ * the moment gateway payment lands. Mutates `order` in place on success.
+ * Safe to call more than once (no-op once charged).
+ *
+ * Returns ok:false if the full wallet amount cannot be debited — callers must
+ * NOT confirm the order in that case (prevents VPS delivery without wallet pay).
+ */
+export async function chargeDeferredWalletForOrder(order) {
+  if (!order) return { ok: true, charged: 0 };
+  const walletExpected =
+    Number(order.walletDeduction?.amount) ||
+    Number(order.paymentDetails?.walletAmount) ||
+    0;
+  if (order.walletDeduction?.deducted === true || walletExpected <= 0) {
+    return { ok: true, charged: 0, alreadyCharged: order.walletDeduction?.deducted === true };
+  }
+
+  try {
+    const debit = await userWalletService.debit(order.user, walletExpected, {
+      description: `Wallet payment ${order.clientTxnId}`,
+      reference: `${order.clientTxnId}_walletpay`,
+      metadata: { orderId: String(order._id), reason: 'deduct_on_success' },
+    });
+    order.walletDeduction = {
+      deducted: true,
+      amount: walletExpected,
+      transactionId: debit?.walletTxnId,
+      timestamp: new Date(),
+    };
+    return { ok: true, charged: walletExpected };
+  } catch (err) {
+    console.error('[chargeDeferredWalletForOrder] wallet debit failed:', err.message);
+    return {
+      ok: false,
+      charged: 0,
+      shortfall: walletExpected,
+      reason: 'insufficient_wallet_balance',
+      error: err.message,
+    };
+  }
+}
+
 async function startProvisioningIfNeeded(order) {
   const freshOrder = await Order.findById(order._id);
   const alreadyProvisioning =
@@ -292,47 +335,26 @@ export async function confirmPendingOrderPayment(order, gatewayResult, opts = {}
     return { confirmed: false, paymentStatus: gatewayResult?.status || 'PENDING' };
   }
 
-  // Wallet cancel race: only re-debit when gateway confirms payment succeeded
-  const walletExpected =
-    Number(order.walletDeduction?.amount) ||
-    Number(order.paymentDetails?.walletAmount) ||
-    0;
-  const walletWasReleased =
-    order.paymentDetails?.unpaidReleased === true &&
-    order.walletDeduction?.deducted !== true &&
-    walletExpected > 0;
-
-  if (walletWasReleased) {
-    try {
-      const debit = await userWalletService.debit(order.user, walletExpected, {
-        description: `Buy-now wallet re-debit ${order.clientTxnId}`,
-        reference: `${order.clientTxnId}_redebit`,
-        metadata: { orderId: String(order._id), reason: 'payment_recovery' },
-      });
-      order.walletDeduction = {
-        deducted: true,
-        amount: walletExpected,
-        transactionId: debit?.walletTxnId,
-        timestamp: new Date(),
-      };
-    } catch (walletErr) {
-      console.error('[confirmPendingOrderPayment] wallet re-debit failed:', walletErr.message);
-      if (logger) {
-        logger.error('Gateway paid but wallet re-debit failed', walletErr);
-        if (ownLogger) {
-          await ownLogger.save({
-            success: false,
-            anomaly: true,
-            errorMessage: 'wallet_portion_unpaid',
-          });
-        }
+  // Deduct-on-success: charge the wallet portion only now that the gateway
+  // payment has actually landed. Covers deferred debits (mixed buy-now orders
+  // created with deducted:false) and cancel→recover races alike.
+  const walletCharge = await chargeDeferredWalletForOrder(order);
+  if (!walletCharge.ok) {
+    if (logger) {
+      logger.error('Gateway paid but wallet portion could not be debited', walletCharge);
+      if (ownLogger) {
+        await ownLogger.save({
+          success: false,
+          anomaly: true,
+          errorMessage: 'wallet_portion_unpaid',
+        });
       }
-      return {
-        confirmed: false,
-        reason: 'wallet_portion_unpaid',
-        paymentStatus: 'WALLET_REQUIRED',
-      };
     }
+    return {
+      confirmed: false,
+      reason: 'wallet_portion_unpaid',
+      paymentStatus: 'WALLET_REQUIRED',
+    };
   }
 
   const expiryDate = await resolveOrderExpiryOnPayment(order);

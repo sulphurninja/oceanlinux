@@ -17,6 +17,7 @@ const {
   readResellerApiStockConfig,
   resolvePriceIdsForMemory,
   autoResolveResellerPriceIds,
+  resolveEffectiveResellerPlanType,
   isResellerApiStock,
 } = require('@/lib/resellerApiStockConfig');
 const { usesResellerLiveStock } = require('@/lib/ipStockAvailability');
@@ -43,12 +44,26 @@ function stockHasResellerPanelPlans(stock) {
   return tags.includes('reseller-api') || tags.includes('primevps') || tags.includes('primevm');
 }
 
-function pickPrimaryMemory(memories) {
+function memoryOptionPrice(stock, memory) {
+  const mo = stock?.memoryOptions;
+  if (!mo) return null;
+  let entry = null;
+  if (typeof mo.get === 'function') entry = mo.get(memory);
+  else if (mo instanceof Map) entry = mo.get(memory);
+  else entry = mo[memory];
+  const price = entry?.price;
+  return price != null && Number(price) > 0 ? Number(price) : null;
+}
+
+function pickPrimaryMemory(stock, memories) {
+  const keys = memories || getIpStockMemoryKeys(stock);
+  const priced = keys.filter((m) => memoryOptionPrice(stock, m) != null);
   const preferred = ['2GB', '4GB', '8GB', '1GB', '16GB'];
+  const pool = priced.length ? priced : keys;
   for (const m of preferred) {
-    if (memories.includes(m)) return m;
+    if (pool.includes(m)) return m;
   }
-  return memories[0] || '';
+  return pool[0] || '';
 }
 
 async function getResellerApiForStock(stock) {
@@ -152,10 +167,11 @@ async function checkResellerZoneStock(api, { stockCfg, memory, zonesList = null 
  */
 async function checkResellerWalletStock(api, { stockCfg, memory }) {
   const priceIds = await resolvePriceIds(api, stockCfg, memory);
+  const planType = resolveEffectiveResellerPlanType(stockCfg, priceIds);
   const [wallet, pricing, activeZones, adminPool] = await Promise.all([
     api.getWallet(),
     api.estimateMonthlyVmPrice({
-      planType: stockCfg.planType,
+      planType,
       cpuPriceId: priceIds.cpuPriceId,
       ramPriceId: priceIds.ramPriceId,
       diskPriceId: priceIds.diskPriceId,
@@ -241,7 +257,7 @@ async function syncResellerIpStockRow(stock, { force = false, memoryOnly = null,
 
   const memoriesToCheck = memoryOnly
     ? [memoryOnly]
-    : [pickPrimaryMemory(memories)].filter(Boolean);
+    : [pickPrimaryMemory(stock, memories)].filter(Boolean);
 
   let resolvedZones = zonesList;
   if (stockCfg.zoneId != null && !resolvedZones) {
@@ -325,7 +341,11 @@ async function syncResellerIpStockRow(stock, { force = false, memoryOnly = null,
 
   if (!stock.availabilityManual) {
     updatePayload.available = shouldAvailable;
-    if (shouldAvailable && stock.autoHiddenFromStore) {
+    // Live panel stock: when region/zone is live, plan must show on the store.
+    if (shouldAvailable && usesResellerLiveStock(stock, company)) {
+      updatePayload.hiddenFromStore = false;
+      updatePayload.autoHiddenFromStore = false;
+    } else if (shouldAvailable && stock.autoHiddenFromStore) {
       updatePayload.hiddenFromStore = false;
       updatePayload.autoHiddenFromStore = false;
     }

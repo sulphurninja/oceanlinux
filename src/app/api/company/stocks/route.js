@@ -22,7 +22,12 @@ import Order from '@/models/orderModel';
 import { COMPANY_FILTER_VERSION } from '@/lib/companyOrders';
 import { buildCompanyValidityMismatchReport } from '@/lib/companyValidityMismatch';
 const { hasCompanyResellerApi, getCompanyResellerApiConfig, companyUsesResellerLiveStock } = require('@/lib/companyResellerApi');
+const {
+  applyResellerZonesToStockDocument,
+  serializeResellerZonesForClient,
+} = require('@/lib/resellerZoneConfig');
 const { syncResellerIpStockRow, stockHasResellerPanelPlans } = require('@/lib/resellerLiveStock');
+const ResellerApi = require('@/services/resellerApi');
 const {
   fetchResellerCredentialsByIp,
   syncAllInventoryExpiriesFromReseller,
@@ -96,6 +101,7 @@ function serializeStock(stock, companyDoc) {
     inventoryItems: hasInventory ? (stock.inventoryItems || []).map(serializeInventoryItem) : [],
     serverType: stock.serverType,
     tags: stock.tags || [],
+    resellerZones: serializeResellerZonesForClient(stock),
   };
 }
 
@@ -143,7 +149,7 @@ export async function PUT(request) {
 
   await connectDB();
   const body = await request.json();
-  const { stockId, stockCount, action, items, bulkLines, removeItemId, ipAddress, addToInventory, fulfillmentMode } = body;
+  const { stockId, stockCount, action, items, bulkLines, removeItemId, ipAddress, addToInventory, fulfillmentMode, zoneIds } = body;
 
   if (action === 'syncAllResellerExpiries') {
     const companyDoc = await Company.findById(company.id).select('resellerApi netbayApi name').lean();
@@ -174,7 +180,8 @@ export async function PUT(request) {
       serializedStocks,
       orders,
       new Date(),
-      panelExpiriesByIp
+      panelExpiriesByIp,
+      failed.map((f) => f.ipAddress)
     );
 
     return NextResponse.json({
@@ -224,7 +231,8 @@ export async function PUT(request) {
       const firstReseller = stocks.find((s) => stockHasResellerPanelPlans(s));
       if (firstReseller) {
         const ctx = await (async () => {
-          const ResellerApi = require('@/services/resellerApi');
+          const { syncResellerIpStockRow, stockHasResellerPanelPlans } = require('@/lib/resellerLiveStock');
+const ResellerApi = require('@/services/resellerApi');
           const cfg = getCompanyResellerApiConfig(companyDoc);
           return cfg ? new ResellerApi(cfg) : null;
         })();
@@ -273,6 +281,58 @@ export async function PUT(request) {
   if (!stock) return NextResponse.json({ error: 'Stock not found or not yours' }, { status: 404 });
 
   const companyDoc = await Company.findById(company.id).select('netbayApi resellerApi name').lean();
+
+  if (action === 'setResellerZones') {
+    if (!hasCompanyResellerApi(companyDoc)) {
+      return NextResponse.json(
+        { error: 'Reseller API is not enabled for your company.' },
+        { status: 403 }
+      );
+    }
+
+    const ids = Array.isArray(zoneIds)
+      ? zoneIds.map(Number).filter((n) => Number.isFinite(n))
+      : [];
+    if (!ids.length) {
+      return NextResponse.json({ error: 'Select at least one panel region' }, { status: 400 });
+    }
+
+    let zonesList = [];
+    try {
+      const api = new ResellerApi(getCompanyResellerApiConfig(companyDoc));
+      zonesList = await api.listZones();
+    } catch (err) {
+      return NextResponse.json(
+        { error: err.message || 'Failed to load panel regions' },
+        { status: 502 }
+      );
+    }
+
+    const panelZones = zonesList.map((z) => ({
+      id: z.id,
+      name: z.name,
+      status: z.status,
+      live: ResellerApi.isZoneStatusLive(z.status),
+    }));
+
+    applyResellerZonesToStockDocument(stock, ids, panelZones);
+    await stock.save();
+
+    if (companyUsesResellerLiveStock(companyDoc) && stockHasResellerPanelPlans(stock)) {
+      try {
+        await syncResellerIpStockRow(stock, { force: true, zonesList });
+      } catch (syncErr) {
+        console.warn('[company/stocks setResellerZones] live sync failed:', syncErr.message);
+      }
+    }
+
+    const fresh = await IPStock.findById(stockId).lean();
+    return NextResponse.json({
+      success: true,
+      message: 'Panel regions saved for this IP stock',
+      stock: serializeStock(fresh, companyDoc),
+    });
+  }
 
   if (action === 'setFulfillmentMode') {
     if (fulfillmentMode !== 'units' && fulfillmentMode !== 'inventory') {
@@ -441,7 +501,7 @@ export async function PUT(request) {
   }
 
   return NextResponse.json(
-    { error: 'Unknown action. Use setStockCount, setFulfillmentMode, addInventory, removeInventory, syncResellerCredentials, or syncAllResellerExpiries' },
+    { error: 'Unknown action. Use setStockCount, setFulfillmentMode, setResellerZones, addInventory, removeInventory, syncResellerCredentials, or syncAllResellerExpiries' },
     { status: 400 }
   );
 }

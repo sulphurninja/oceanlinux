@@ -397,7 +397,16 @@ function PaymentCallbackContent() {
             return pollOrderPayment(attempt + 1);
           }
 
-          if (data.paymentStatus === "FAILED" || data.paymentStatus === "FAILURE") {
+          // Any resolved, non-successful, non-pending status means the payment
+          // was not completed (failed / cancelled / dropped / amount mismatch).
+          // Release the order so any wallet money reserved for it is refunded.
+          const isTerminalFailure =
+            !stillPending &&
+            !isConfirmed &&
+            !!data.paymentStatus &&
+            !["PENDING", "CREATED", "ATTEMPTED"].includes(data.paymentStatus);
+
+          if (isTerminalFailure) {
             try {
               const cancelRes = await fetch('/api/payment/cancel', {
                 method: 'POST',

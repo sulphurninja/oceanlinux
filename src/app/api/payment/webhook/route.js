@@ -175,10 +175,21 @@ export async function POST(request) {
 
       const expiryDate = await resolveOrderExpiryOnPayment(order);
 
+      // Deduct-on-success: charge the deferred wallet portion now Cashfree paid.
+      const { chargeDeferredWalletForOrder } = await import('@/lib/confirmPendingOrderPayment');
+      const walletCharge = await chargeDeferredWalletForOrder(order);
+      if (!walletCharge.ok) {
+        console.error('[WEBHOOK] Gateway paid but wallet debit failed — order NOT confirmed');
+        return NextResponse.json(
+          { success: false, message: 'Wallet portion could not be debited; order not confirmed' },
+          { status: 400 }
+        );
+      }
+
       order.status = 'confirmed';
       order.transactionId = payment.payment.cf_payment_id;
       order.gatewayOrderId = payment.order.order_id; // Store Cashfree order ID
-      order.paymentMethod = 'cashfree';
+      order.paymentMethod = order.walletDeduction?.deducted ? 'wallet+cashfree' : 'cashfree';
       if (expiryDate) order.expiryDate = expiryDate;
 
       // Store additional payment info

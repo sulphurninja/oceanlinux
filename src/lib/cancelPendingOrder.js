@@ -1,5 +1,9 @@
 import userWalletService from '@/services/userWalletService';
 import Order from '@/models/orderModel';
+import {
+  probeGatewayPayment,
+  confirmPendingOrderPayment,
+} from '@/lib/confirmPendingOrderPayment';
 
 /**
  * Release a pending buy-now order when payment is abandoned or fails.
@@ -36,10 +40,13 @@ export async function cancelPendingBuyNowOrder(order, reason = 'cancelled') {
     return { success: false, reason: `cannot release status ${order.status}` };
   }
 
-  const walletAmount =
-    order.walletDeduction?.deducted
-      ? Number(order.walletDeduction.amount) || 0
-      : Number(order.paymentDetails?.walletAmount) || 0;
+  // Only refund money that was actually debited. With deduct-on-success the
+  // wallet stays untouched until payment lands, so an abandoned/cancelled
+  // order that never charged the wallet has nothing to return (refunding the
+  // intended amount here would credit money the customer never paid).
+  const walletAmount = order.walletDeduction?.deducted
+    ? Number(order.walletDeduction.amount) || 0
+    : 0;
 
   let refunded = 0;
   let refundError = null;
@@ -84,6 +91,82 @@ export async function cancelPendingBuyNowOrder(order, reason = 'cancelled') {
   await order.save();
 
   return { success: true, orderId: order._id, refunded };
+}
+
+/**
+ * Sweep abandoned single "Buy Now" orders that still hold a live wallet
+ * reservation. Cart checkouts are handled separately via CheckoutSession
+ * (see /api/cart/checkout/sweep). This closes the gap where a customer paid
+ * part of an order from their wallet, was sent to the payment gateway, then
+ * abandoned it (closed the tab, pressed back on the UPI page, dismissed the
+ * modal without the dismiss handler firing, etc.) — leaving the wallet money
+ * debited forever.
+ *
+ * Safety: before refunding we probe the gateway. If the customer actually
+ * paid, we confirm the order instead of refunding, so we never both deliver
+ * the product AND return the wallet money.
+ *
+ * Idempotent — orders already released (`unpaidReleased`) are skipped.
+ */
+export async function sweepAbandonedBuyNowOrders({ staleAfterMinutes = 30, limit = 200 } = {}) {
+  const minutes = Math.max(5, Number(staleAfterMinutes) || 30);
+  const cutoff = new Date(Date.now() - minutes * 60 * 1000);
+
+  const orders = await Order.find({
+    status: 'pending',
+    createdAt: { $lt: cutoff },
+    'walletDeduction.deducted': true,
+    'paymentDetails.unpaidReleased': { $ne: true },
+    // Cart-checkout orders are swept via their CheckoutSession, skip them here.
+    $and: [
+      { $or: [{ checkoutSessionId: { $exists: false } }, { checkoutSessionId: null }, { checkoutSessionId: '' }] },
+      { $or: [{ parentTxnId: { $exists: false } }, { parentTxnId: null }, { parentTxnId: '' }] },
+    ],
+  })
+    .sort({ createdAt: 1 })
+    .limit(limit);
+
+  const results = [];
+  for (const order of orders) {
+    try {
+      // Never refund a paid order — confirm it instead when the gateway says paid.
+      const probe = await probeGatewayPayment(order);
+      if (probe.success) {
+        const recovery = await confirmPendingOrderPayment(order, probe, { logSource: 'sweep-buynow' });
+        results.push({
+          orderId: String(order._id),
+          clientTxnId: order.clientTxnId,
+          action: recovery.confirmed ? 'recovered' : 'recover_failed',
+          refunded: 0,
+        });
+        continue;
+      }
+
+      const cancel = await cancelPendingBuyNowOrder(order, 'abandoned');
+      results.push({
+        orderId: String(order._id),
+        clientTxnId: order.clientTxnId,
+        action: cancel.success ? 'refunded' : 'refund_failed',
+        refunded: cancel.refunded || 0,
+        reason: cancel.reason,
+      });
+    } catch (err) {
+      console.error('[sweepAbandonedBuyNowOrders] failed for order', String(order._id), err.message);
+      results.push({
+        orderId: String(order._id),
+        clientTxnId: order.clientTxnId,
+        action: 'error',
+        error: err.message,
+      });
+    }
+  }
+
+  return {
+    cutoff: cutoff.toISOString(),
+    staleAfterMinutes: minutes,
+    swept: results.length,
+    results,
+  };
 }
 
 /**

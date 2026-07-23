@@ -53,7 +53,12 @@ declare global {
   }
 }
 
-const OS_OPTIONS = ['Ubuntu 22', 'CentOS 7', 'Windows 2022 64'];
+/** Windows / VPS stocks only run Windows; Linux stocks run Ubuntu / CentOS. */
+function osOptionsForLine(line: CartLine): string[] {
+  return line.pricing?.serverType === 'VPS'
+    ? ['Windows 2022 64']
+    : ['Ubuntu 22', 'CentOS 7'];
+}
 
 export default function CartPage() {
   const router = useRouter();
@@ -243,6 +248,28 @@ export default function CartPage() {
     }
   };
 
+  // Release a pending cart checkout when the user abandons the gateway so the
+  // reserved wallet money is returned immediately (not only by the 30-min sweep).
+  const cancelCartCheckout = async (clientTxnId: string) => {
+    if (!clientTxnId) return;
+    try {
+      const res = await fetch('/api/cart/checkout/cancel', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientTxnId }),
+      });
+      const result = await res.json().catch(() => ({}));
+      await loadAll();
+      fetchWalletSummary().catch(() => { });
+      if (result?.success) {
+        toast.info('Checkout cancelled. Wallet balance restored.');
+      }
+    } catch {
+      toast.error('Could not restore wallet — please refresh or contact support.');
+    }
+  };
+
   const openRazorpay = async (data: any) => {
     await openRazorpayModal({
       data,
@@ -274,10 +301,14 @@ export default function CartPage() {
           setCheckingOut(false);
         }
       },
-      onDismiss: () => setCheckingOut(false),
+      onDismiss: () => {
+        setCheckingOut(false);
+        cancelCartCheckout(data.clientTxnId);
+      },
       onFailed: () => {
         setCheckingOut(false);
-        toast.error('Payment failed. Please try again.');
+        cancelCartCheckout(data.clientTxnId);
+        toast.error('Payment failed. Wallet balance restored.');
       },
     });
   };
@@ -294,7 +325,14 @@ export default function CartPage() {
     });
     if (result?.error) {
       setCheckingOut(false);
+      await cancelCartCheckout(data.clientTxnId);
       throw new Error(result.error.message || 'Cashfree checkout failed');
+    }
+    if (!result?.paymentDetails) {
+      // User closed the Cashfree modal without paying — return the wallet money.
+      setCheckingOut(false);
+      await cancelCartCheckout(data.clientTxnId);
+      return;
     }
     if (result?.paymentDetails) {
       try {
@@ -438,7 +476,7 @@ export default function CartPage() {
                         <div className="min-w-0">
                           <label className="premium-field-label">Operating System</label>
                           <Select
-                            value={line.os || 'Ubuntu 22'}
+                            value={osOptionsForLine(line).includes(line.os) ? line.os : osOptionsForLine(line)[0]}
                             onValueChange={(value) => onOs(line, value)}
                             disabled={busyItem === line._id}
                           >
@@ -446,7 +484,7 @@ export default function CartPage() {
                               <SelectValue placeholder="Select OS" />
                             </SelectTrigger>
                             <SelectContent className={premiumSelectContent}>
-                              {OS_OPTIONS.map((o) => (
+                              {osOptionsForLine(line).map((o) => (
                                 <SelectItem key={o} value={o}>
                                   {o}
                                 </SelectItem>

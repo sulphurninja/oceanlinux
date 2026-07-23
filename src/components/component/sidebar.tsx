@@ -16,7 +16,6 @@ import {
   ShoppingBag,
   Settings,
   Lock,
-  HelpCircle,
   PanelLeftClose,
   PanelLeft,
   FileCode,
@@ -24,6 +23,7 @@ import {
   Cloud,
   Zap,
   ShoppingCart,
+  Ticket,
 } from 'lucide-react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { cn } from "@/lib/utils";
@@ -183,6 +183,11 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
         badge: cartCount > 0 ? String(cartCount > 99 ? '99+' : cartCount) : undefined,
       },
     ] : []),
+    {
+      href: '/dashboard/support/tickets',
+      label: 'Raise Ticket',
+      icon: Ticket,
+    },
     // Conditionally add Reseller Wallet
     ...(user?.userType === 'reseller' ? [
       {
@@ -223,6 +228,9 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
     }
     if (hrefPath === '/dashboard/ipStock') {
       return pathname === hrefPath && !currentSearchParams.get('category');
+    }
+    if (hrefPath === '/dashboard/support/tickets') {
+      return pathname === hrefPath || pathname.startsWith('/dashboard/support/tickets/');
     }
     return pathname === hrefPath;
   };
@@ -435,12 +443,13 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
               </Link>
             )}
             <Button
-              onClick={() => router.push('/support/tickets')}
+              onClick={() => router.push('/dashboard/support/tickets')}
               variant="ghost"
               size="icon"
               className="h-9 w-9 text-white/70 hover:text-white hover:bg-white/[0.05]"
+              title="Raise Ticket"
             >
-              <HelpCircle className="h-4 w-4" />
+              <Ticket className="h-4 w-4" />
             </Button>
             <ThemeToggle />
           </div>

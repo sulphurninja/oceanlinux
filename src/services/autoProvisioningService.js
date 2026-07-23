@@ -13,8 +13,10 @@ const { getCompanyResellerApiConfig } = require('@/lib/companyResellerApi');
 const {
   readResellerApiStockConfig,
   resolvePriceIdsForMemory,
+  resolveCouponCodeForMemory,
   resolveZoneIsoIdFromCatalog,
   autoResolveResellerPriceIds,
+  resolveEffectiveResellerPlanType,
   isResellerApiStock,
   resolveResellerZoneCandidatesForPurchase,
 } = require('@/lib/resellerApiStockConfig');
@@ -23,6 +25,7 @@ const {
   syncResellerVmCredentials,
   buildResellerLocationContext,
   ipMatchesOrderedRange,
+  validateCreatedVmId,
 } = require('@/lib/resellerApiOrderSync');
 const ResellerApi = require('@/services/resellerApi');
 const { pickNetbayExpiryDate } = require('@/lib/netbayOrderSync');
@@ -1623,12 +1626,18 @@ class AutoProvisioningService {
 
     if (!resellerVmId && !resellerOrderId) {
       let priceIds = resolvePriceIdsForMemory(stockCfg, order.memory);
+      let effectivePlanType = resolveEffectiveResellerPlanType(stockCfg, priceIds);
       if (!priceIds?.cpuPriceId) {
         L.line('[RESELLER-API] No per-memory price map — auto-resolving from catalog');
         priceIds = await autoResolveResellerPriceIds(api, {
           memory: order.memory,
           planType: stockCfg.planType,
         });
+        effectivePlanType = resolveEffectiveResellerPlanType(stockCfg, priceIds);
+        L.kv('[RESELLER-API] Resolved planType', effectivePlanType);
+        if (priceIds?.resolvedRamLabel) {
+          L.kv('[RESELLER-API] Resolved RAM tier', priceIds.resolvedRamLabel);
+        }
       }
 
       const zonesList = await api.listZones();
@@ -1688,7 +1697,7 @@ class AutoProvisioningService {
         const createBody = {
           zoneId: Number(zoneId),
           zoneIsoId: Number(zoneIsoId),
-          planType: stockCfg.planType || 'SHARED',
+          planType: effectivePlanType,
           cpuPriceId: Number(priceIds.cpuPriceId),
           ramPriceId: Number(priceIds.ramPriceId),
           diskPriceId: Number(priceIds.diskPriceId),
@@ -1697,6 +1706,52 @@ class AutoProvisioningService {
           quantity: 1,
           useWalletBalance: true,
         };
+
+        const upstreamCoupon = resolveCouponCodeForMemory(stockCfg, order.memory, {
+          couponCode: cfg.couponCode,
+          couponByMemory: cfg.couponByMemory,
+        });
+        if (upstreamCoupon) {
+          createBody.couponCode = upstreamCoupon;
+          try {
+            const pricing = await api.estimateMonthlyVmPrice({
+              planType: effectivePlanType,
+              cpuPriceId: priceIds.cpuPriceId,
+              ramPriceId: priceIds.ramPriceId,
+              diskPriceId: priceIds.diskPriceId,
+              bandwidthPriceId: priceIds.bandwidthPriceId,
+              months: 1,
+              quantity: 1,
+            });
+            const orderAmount = Number(pricing?.estimatedMonthly ?? 0);
+            if (orderAmount > 0) {
+              const couponCheck = await api.validateCoupon({
+                code: upstreamCoupon,
+                orderAmount,
+              });
+              const checkData =
+                couponCheck?.data && typeof couponCheck.data === 'object'
+                  ? couponCheck.data
+                  : couponCheck;
+              if (checkData?.valid === true) {
+                L.kv(
+                  '[RESELLER-API] Upstream coupon',
+                  `${upstreamCoupon} → ₹${checkData.finalAmount ?? '?'} (was ₹${checkData.originalAmount ?? orderAmount})`
+                );
+              } else {
+                L.line(
+                  `[RESELLER-API] Coupon ${upstreamCoupon} validate returned invalid — still sending on create`
+                );
+              }
+            } else {
+              L.kv('[RESELLER-API] Upstream coupon', upstreamCoupon);
+            }
+          } catch (couponErr) {
+            L.line(
+              `[RESELLER-API] Coupon pre-check skipped (${couponErr.message}) — create will use couponCode=${upstreamCoupon}`
+            );
+          }
+        }
 
         L.line(
           `[RESELLER-API] POST /api/users/vms/create zone ${zoneId} ${JSON.stringify(createBody)}`
@@ -1737,7 +1792,20 @@ class AutoProvisioningService {
         createRes?.vmId ??
         createRes?.virtualMachineId ??
         '';
-      if (createdVmId) resellerVmId = String(createdVmId);
+      if (createdVmId) {
+        const vmValid = await validateCreatedVmId(api, createdVmId, {
+          resellerGroupId: resellerGroupId || undefined,
+          resellerOrderId: resellerOrderId || undefined,
+          purchaseStartedAt,
+        });
+        if (vmValid) {
+          resellerVmId = String(createdVmId);
+        } else {
+          L.line(
+            `[RESELLER-API] Ignoring create vmId ${createdVmId} — migration VM or bulk group mismatch; polling overview`
+          );
+        }
+      }
 
       await Order.findByIdAndUpdate(order._id, {
         resellerOrderId: resellerOrderId ? String(resellerOrderId) : undefined,
@@ -1763,15 +1831,27 @@ class AutoProvisioningService {
       let provisioned = null;
 
       if (vmIdKnown) {
-        try {
-          const synced = await syncResellerVmCredentials(api, order, vmIdKnown);
-          ipAddress = synced.updates.ipAddress || ipAddress;
-          password = synced.updates.password || password;
-          username = synced.updates.username || username;
-          expiryDate = synced.updates.expiryDate || expiryDate;
-          provisioned = { vmId: vmIdKnown, ip: ipAddress, password, username, expiryDate };
-        } catch (err) {
-          L.line(`[RESELLER-API] Direct vm sync failed: ${err.message}`);
+        const vmValid = await validateCreatedVmId(api, vmIdKnown, {
+          resellerGroupId: order.resellerGroupId || resellerGroupId || undefined,
+          resellerOrderId: order.resellerOrderId || resellerOrderId || undefined,
+          purchaseStartedAt,
+        });
+        if (vmValid) {
+          try {
+            const synced = await syncResellerVmCredentials(api, order, vmIdKnown);
+            ipAddress = synced.updates.ipAddress || ipAddress;
+            password = synced.updates.password || password;
+            username = synced.updates.username || username;
+            expiryDate = synced.updates.expiryDate || expiryDate;
+            provisioned = { vmId: vmIdKnown, ip: ipAddress, password, username, expiryDate };
+          } catch (err) {
+            L.line(`[RESELLER-API] Direct vm sync failed: ${err.message}`);
+          }
+        } else {
+          L.line(
+            `[RESELLER-API] Stored vmId ${vmIdKnown} invalid for this purchase — polling overview for correct VM`
+          );
+          resellerVmId = '';
         }
       }
 

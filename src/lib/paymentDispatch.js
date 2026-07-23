@@ -418,6 +418,31 @@ export async function confirmCheckoutFromWebhook(session, { paymentMethod, trans
     return { success: false, reason: `session is ${session.status}` };
   }
 
+  // Deduct-on-success: charge the FULL wallet portion now that gateway paid.
+  // Do not confirm the session if the wallet cannot cover its share — prevents
+  // VPS delivery without the wallet portion being collected.
+  if (session.walletAmount > 0 && !session.walletTxnId) {
+    try {
+      const debit = await userWalletService.debit(session.user, session.walletAmount, {
+        description: `Cart checkout wallet payment #${session._id}`,
+        reference: String(session._id),
+        metadata: {
+          sessionId: String(session._id),
+          clientTxnId: session.clientTxnId,
+          reason: 'deduct_on_success',
+        },
+      });
+      session.walletTxnId = debit.walletTxnId;
+    } catch (err) {
+      console.error('[confirmCheckoutFromWebhook] wallet debit-on-success failed:', err.message);
+      return {
+        success: false,
+        reason: 'wallet_portion_unpaid',
+        error: err.message,
+      };
+    }
+  }
+
   // Mark session confirmed first (atomic-ish — orders update next).
   session.status = 'confirmed';
   session.confirmedAt = new Date();

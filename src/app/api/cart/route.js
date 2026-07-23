@@ -3,6 +3,8 @@ import connectDB from '@/lib/db';
 import { getDataFromToken } from '@/helper/getDataFromToken';
 import Cart from '@/models/cartModel';
 import { priceCart } from '@/lib/cartPricing';
+const { defaultOsForProduct } = require('@/lib/orderOs');
+const { normalizeOsForServerType } = require('@/lib/companyInventory');
 
 function authError(err) {
   return NextResponse.json(
@@ -50,6 +52,7 @@ async function buildCartResponse(cart) {
         ? {
             valid: true,
             productName: line.priced.productName,
+            serverType: stockDoc?.serverType,
             unitOriginalPrice: line.priced.unitOriginalPrice,
             unitDiscount: line.priced.unitDiscount,
             unitPrice: line.priced.unitPrice,
@@ -128,14 +131,14 @@ export async function POST(request) {
 
   const quantity = Math.max(1, Math.min(10, Number(body.quantity) || 1));
   const promoCode = (body.promoCode || '').trim();
-  const os = body.os || 'Ubuntu 22';
+  const explicitOs = typeof body.os === 'string' && body.os.trim() ? body.os.trim() : null;
 
   const candidate = {
     kind,
     ipStockId: kind === 'ipstock' ? body.ipStockId : undefined,
     slotIpPackageId: kind === 'slotip' ? body.slotIpPackageId : undefined,
     memory: kind === 'ipstock' ? (body.memory || '') : 'Slot IP',
-    os,
+    os: explicitOs || 'Ubuntu 22',
     quantity,
     promoCode,
   };
@@ -145,6 +148,15 @@ export async function POST(request) {
   const priced = await priceCartLine(candidate);
   if (!priced.valid) {
     return NextResponse.json({ success: false, message: priced.reason }, { status: 400 });
+  }
+
+  // Pick the right OS for this stock instead of always defaulting to Ubuntu.
+  // Windows / VPS plans (e.g. "Windows RDP") must default to Windows, and a
+  // user-picked OS is clamped to what the stock's serverType actually allows.
+  if (kind === 'ipstock') {
+    const serverType = priced.stock?.serverType;
+    const rawOs = explicitOs || defaultOsForProduct(priced.productName);
+    candidate.os = normalizeOsForServerType(rawOs, serverType);
   }
 
   const cart = await getOrCreateCart(userId);
@@ -160,7 +172,7 @@ export async function POST(request) {
   if (existing) {
     existing.quantity = Math.min(10, existing.quantity + quantity);
     if (promoCode) existing.promoCode = promoCode;
-    if (os) existing.os = os;
+    if (candidate.os) existing.os = candidate.os;
   } else {
     cart.items.push(candidate);
   }

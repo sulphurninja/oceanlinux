@@ -57,6 +57,9 @@ interface CompanyResellerApi {
   email: string;
   password: string;
   useLiveStockApi?: boolean;
+  /** Hostheaven upstream coupon on API auto-buy (fallback for other RAM sizes). */
+  couponCode?: string;
+  couponByMemory?: Record<string, string>;
 }
 
 interface CompanyNetbayApi {
@@ -109,6 +112,8 @@ const EMPTY_RESELLER_API = (): CompanyResellerApi => ({
   email: '',
   password: '',
   useLiveStockApi: false,
+  couponCode: '',
+  couponByMemory: {},
 });
 
 // Defaults pre-filled into the dialog when a company has no saved reseller
@@ -122,6 +127,8 @@ const RESELLER_API_DIALOG_DEFAULTS: CompanyResellerApi = {
   resellerDomain: 'vps.hostheaven.in',
   email: 'raftare3t5@gmail.com',
   password: 'Umesh@2113',
+  couponCode: 'OCEAN199',
+  couponByMemory: { '4GB': 'OCEAN199', '8GB': 'OCEAN199' },
 };
 
 const EMPTY_NETBAY_API = (): CompanyNetbayApi => ({
@@ -529,6 +536,8 @@ export default function CompaniesPage() {
         email: r?.email || '',
         password: r?.password || '',
         useLiveStockApi: r?.useLiveStockApi === true,
+        couponCode: r?.couponCode || '',
+        couponByMemory: { ...(r?.couponByMemory || {}) },
       });
     }
     setResellerTestResult(null);
@@ -546,6 +555,17 @@ export default function CompaniesPage() {
 
   const updateResellerField = <K extends keyof CompanyResellerApi>(key: K, value: CompanyResellerApi[K]) => {
     setResellerForm(prev => ({ ...prev, [key]: value }));
+    setResellerTestResult(null);
+  };
+
+  const updateResellerCouponForMemory = (memory: string, code: string) => {
+    setResellerForm((prev) => ({
+      ...prev,
+      couponByMemory: {
+        ...(prev.couponByMemory || {}),
+        [memory]: code.trim().toUpperCase(),
+      },
+    }));
     setResellerTestResult(null);
   };
 
@@ -1062,10 +1082,15 @@ export default function CompaniesPage() {
                         let host = r.baseUrl;
                         try { host = new URL(r.baseUrl).host; } catch { /* keep as-is */ }
                         const stockMode = r.useLiveStockApi ? 'API stock' : 'Manual stock';
+                        const c4 = r.couponByMemory?.['4GB'] || r.couponByMemory?.['4gb'];
+                        const c8 = r.couponByMemory?.['8GB'] || r.couponByMemory?.['8gb'];
+                        const panelCoupon = c4 || c8 || r.couponCode
+                          ? ` · ${[c4 ? `4GB:${c4}` : '', c8 ? `8GB:${c8}` : '', (!c4 && !c8 && r.couponCode) ? r.couponCode : ''].filter(Boolean).join(' ')}`
+                          : '';
                         return (
                           <Badge variant="outline" className="gap-1 text-blue-600 border-blue-200">
                             <Cloud className="h-3 w-3" />
-                            Reseller: {host} · {stockMode}
+                            Reseller: {host} · {stockMode}{panelCoupon}
                           </Badge>
                         );
                       }
@@ -1569,6 +1594,46 @@ export default function CompaniesPage() {
                     </button>
                   </div>
                 </div>
+              </div>
+
+              <div className="rounded-md border border-sky-200/70 bg-sky-50/50 dark:bg-sky-950/20 dark:border-sky-900/40 p-3 space-y-3">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="h-4 w-4 text-sky-600 shrink-0" />
+                  <Label className="text-sm font-medium">Panel coupon (auto-buy)</Label>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <Label className="text-xs">4GB coupon</Label>
+                    <Input
+                      placeholder="e.g. OCEAN199"
+                      value={resellerForm.couponByMemory?.['4GB'] || ''}
+                      onChange={(e) => updateResellerCouponForMemory('4GB', e.target.value)}
+                      className="mt-1 font-mono uppercase"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs">8GB coupon</Label>
+                    <Input
+                      placeholder="e.g. OCEAN8GB"
+                      value={resellerForm.couponByMemory?.['8GB'] || ''}
+                      onChange={(e) => updateResellerCouponForMemory('8GB', e.target.value)}
+                      className="mt-1 font-mono uppercase"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <Label className="text-xs">Fallback coupon (other sizes, optional)</Label>
+                  <Input
+                    placeholder="e.g. OCEAN199"
+                    value={resellerForm.couponCode || ''}
+                    onChange={(e) => updateResellerField('couponCode', e.target.value.toUpperCase())}
+                    className="mt-1 font-mono uppercase"
+                  />
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  Hostheaven wallet discount per RAM tier on API VM purchase
+                  (e.g. 4GB ₹1300 → ₹1100). Stock-level coupon overrides these if set on Manage IP Stock.
+                </p>
               </div>
 
               {resellerTestResult && (

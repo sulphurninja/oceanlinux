@@ -52,10 +52,18 @@ async function fulfillOrderInventory(order, options = {}) {
   }
 
   const stock = await IPStock.findById(order.ipStockId)
-    .select('company inventoryItems')
+    .select('company inventoryItems defaultConfigurations tags')
     .lean();
 
-  if (stock && usesCompanyInventoryFulfillment(stock)) {
+  let company = null;
+  if (stock?.company) {
+    const Company = require('@/models/companyModel').default;
+    company = await Company.findById(stock.company)
+      .select('resellerApi netbayApi')
+      .lean();
+  }
+
+  if (stock && usesCompanyInventoryFulfillment(stock, company)) {
     return allocateCompanyInventoryForOrder(order);
   }
 

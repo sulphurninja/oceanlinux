@@ -80,6 +80,8 @@ function readResellerApiConfig(stock: IPStock | null) {
         zoneNames: (cfg.zoneNames && typeof cfg.zoneNames === 'object') ? cfg.zoneNames : {},
         planType: cfg.planType || 'SHARED',
         gateway: cfg.gateway || 'WALLET',
+        couponCode: cfg.couponCode || '',
+        couponByMemory: (cfg.couponByMemory && typeof cfg.couponByMemory === 'object') ? cfg.couponByMemory : {},
         lastStockSync: cfg.lastStockSync || '',
         variantStock: (cfg.variantStock && typeof cfg.variantStock === 'object') ? cfg.variantStock : {},
     };
@@ -523,7 +525,14 @@ const ManageIpStock = () => {
     };
 
     const updateResellerApiConfig = (
-        next: Partial<{ zoneId: number | null; zoneName: string; planType: string; gateway: string }>
+        next: Partial<{
+            zoneId: number | null;
+            zoneName: string;
+            planType: string;
+            gateway: string;
+            couponCode: string;
+            couponByMemory: Record<string, string>;
+        }>
     ) => {
         if (!currentStock) return;
         const existing = readResellerApiConfig(currentStock);
@@ -532,15 +541,22 @@ const ManageIpStock = () => {
             zoneName: next.zoneName !== undefined ? next.zoneName : existing.zoneName,
             planType: next.planType ?? existing.planType,
             gateway: next.gateway ?? existing.gateway,
+            couponCode: next.couponCode !== undefined ? next.couponCode : existing.couponCode,
+            couponByMemory: next.couponByMemory !== undefined ? next.couponByMemory : existing.couponByMemory,
         };
         const prevBlock = (currentStock.defaultConfigurations?.resellerApi || {}) as Record<string, unknown>;
         const nextDefaults = { ...(currentStock.defaultConfigurations || {}) } as Record<string, unknown>;
+        const couponByMemory = Object.fromEntries(
+            Object.entries(merged.couponByMemory || {}).filter(([, v]) => String(v || '').trim())
+        );
         nextDefaults.resellerApi = {
             ...prevBlock,
             zoneId: merged.zoneId,
             zoneName: merged.zoneName || undefined,
             planType: merged.planType,
             gateway: merged.gateway,
+            couponCode: merged.couponCode?.trim() || undefined,
+            ...(Object.keys(couponByMemory).length ? { couponByMemory } : {}),
         };
         const tags = currentStock.tags.includes('reseller-api')
             ? currentStock.tags
@@ -592,6 +608,16 @@ const ManageIpStock = () => {
 
     const selectedResellerZoneIds = currentStock ? readResellerApiConfig(currentStock).zoneIds : [];
     const resellerCfgForDialog = currentStock ? readResellerApiConfig(currentStock) : null;
+
+    const updateStockResellerCouponForMemory = (memory: string, code: string) => {
+        if (!resellerCfgForDialog) return;
+        updateResellerApiConfig({
+            couponByMemory: {
+                ...(resellerCfgForDialog.couponByMemory || {}),
+                [memory]: code.trim().toUpperCase(),
+            },
+        });
+    };
 
     const selectedCompanyHasNetbay = (() => {
         if (!currentStock?.company) return false;
@@ -1267,6 +1293,38 @@ const ManageIpStock = () => {
                                             loading={panelZonesLoading}
                                             disabled={panelZonesLoading || panelZones.length === 0}
                                         />
+                                        <div className="space-y-2">
+                                            <Label className="text-xs">Hostheaven panel coupon (auto-buy)</Label>
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                                <div>
+                                                    <Label className="text-[11px] text-muted-foreground">4GB</Label>
+                                                    <Input
+                                                        type="text"
+                                                        placeholder="e.g. OCEAN199"
+                                                        className="mt-1 font-mono text-sm uppercase"
+                                                        value={resellerCfgForDialog?.couponByMemory?.['4GB'] || ''}
+                                                        onChange={(e) =>
+                                                            updateStockResellerCouponForMemory('4GB', e.target.value)
+                                                        }
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <Label className="text-[11px] text-muted-foreground">8GB</Label>
+                                                    <Input
+                                                        type="text"
+                                                        placeholder="e.g. OCEAN8GB"
+                                                        className="mt-1 font-mono text-sm uppercase"
+                                                        value={resellerCfgForDialog?.couponByMemory?.['8GB'] || ''}
+                                                        onChange={(e) =>
+                                                            updateStockResellerCouponForMemory('8GB', e.target.value)
+                                                        }
+                                                    />
+                                                </div>
+                                            </div>
+                                            <p className="text-[11px] text-muted-foreground">
+                                                Overrides company default. Leave blank to use company 4GB/8GB coupons.
+                                            </p>
+                                        </div>
                                         {selectedCompanyUsesResellerLiveStock && (
                                             <p className="text-[11px] text-muted-foreground">
                                                 Live stock ON — manual stock count hidden. Zone band on panel → Out of stock here automatically.

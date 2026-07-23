@@ -69,6 +69,8 @@ const IPStockFormWithParams = () => {
     const [netbayDefaultOsLinux, setNetbayDefaultOsLinux] = useState('');
     const [netbayDefaultOsWindows, setNetbayDefaultOsWindows] = useState('');
     const [resellerZoneIds, setResellerZoneIds] = useState<number[]>([]);
+    const [resellerCoupon4gb, setResellerCoupon4gb] = useState('');
+    const [resellerCoupon8gb, setResellerCoupon8gb] = useState('');
     const [panelZones, setPanelZones] = useState<PanelZone[]>([]);
     const [panelZonesLoading, setPanelZonesLoading] = useState(false);
     const [memorySizes, setMemorySizes] = useState<string[]>(DEFAULT_MEMORY_SIZES);
@@ -387,6 +389,12 @@ const IPStockFormWithParams = () => {
                 ...buildResellerZoneConfig(panelZones, resellerZoneIds),
                 planType: 'SHARED',
                 gateway: 'WALLET',
+                ...(() => {
+                    const couponByMemory: Record<string, string> = {};
+                    if (resellerCoupon4gb.trim()) couponByMemory['4GB'] = resellerCoupon4gb.trim().toUpperCase();
+                    if (resellerCoupon8gb.trim()) couponByMemory['8GB'] = resellerCoupon8gb.trim().toUpperCase();
+                    return Object.keys(couponByMemory).length ? { couponByMemory } : {};
+                })(),
             };
             if (!submitTags.includes('reseller-api')) submitTags.push('reseller-api');
         }
@@ -436,7 +444,9 @@ const IPStockFormWithParams = () => {
             setNetbayPlanIds(memoryRecord(DEFAULT_MEMORY_SIZES));
             setNetbayDefaultOsLinux('');
             setNetbayDefaultOsWindows('');
-            setResellerZoneId('');
+            setResellerZoneIds([]);
+            setResellerCoupon4gb('');
+            setResellerCoupon8gb('');
             setPanelZones([]);
 
             toast.success('IP Stock created successfully!');
@@ -644,6 +654,34 @@ const IPStockFormWithParams = () => {
                                         loading={panelZonesLoading}
                                         disabled={panelZonesLoading || panelZones.length === 0}
                                     />
+                                    <div className="space-y-2">
+                                        <Label className="text-xs">Hostheaven panel coupon (auto-buy)</Label>
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                            <div>
+                                                <Label className="text-[11px] text-muted-foreground">4GB</Label>
+                                                <Input
+                                                    type="text"
+                                                    placeholder="e.g. OCEAN199"
+                                                    className="mt-1 font-mono text-sm uppercase"
+                                                    value={resellerCoupon4gb}
+                                                    onChange={(e) => setResellerCoupon4gb(e.target.value.toUpperCase())}
+                                                />
+                                            </div>
+                                            <div>
+                                                <Label className="text-[11px] text-muted-foreground">8GB</Label>
+                                                <Input
+                                                    type="text"
+                                                    placeholder="e.g. OCEAN8GB"
+                                                    className="mt-1 font-mono text-sm uppercase"
+                                                    value={resellerCoupon8gb}
+                                                    onChange={(e) => setResellerCoupon8gb(e.target.value.toUpperCase())}
+                                                />
+                                            </div>
+                                        </div>
+                                        <p className="text-[11px] text-muted-foreground">
+                                            Optional — company default coupons apply if blank.
+                                        </p>
+                                    </div>
                                 </div>
                             )}
 

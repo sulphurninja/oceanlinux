@@ -108,6 +108,18 @@ function parsePanelExpiry(value: string | Date | null | undefined): Date | null 
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
+/** Extend list only for customers still within Ocean validity. */
+function hasActiveCustomerValidity(customerExpiry: Date) {
+  return getDaysUntilExpiry(customerExpiry) > 0;
+}
+
+function resolveSoldCustomerExpiry(
+  soldOrder: CompanyOrderLike | null,
+  saleDate: Date
+): Date {
+  return parsePanelExpiry(soldOrder?.expiryDate) || calculateCompanyExpiryDate(saleDate);
+}
+
 function buildOrderLookupMaps(orders: CompanyOrderLike[]) {
   const orderById = new Map(orders.map((o) => [String(o._id), o]));
   const orderByInventoryItemId = new Map(
@@ -215,10 +227,14 @@ export function buildCompanyValidityMismatchReport(
   stocks: CompanyStockLike[],
   orders: CompanyOrderLike[],
   referenceDate = new Date(),
-  panelExpiryByIp?: Record<string, string | Date | null>
+  panelExpiryByIp?: Record<string, string | Date | null>,
+  panelMissingIps?: Iterable<string>
 ): ValidityMismatchRow[] {
   const rows: ValidityMismatchRow[] = [];
   const seenIps = new Set<string>();
+  const missingPanel = new Set(
+    panelMissingIps ? [...panelMissingIps].map((ip) => cleanIp(ip)).filter(Boolean) : []
+  );
   const { orderById, orderByInventoryItemId } = buildOrderLookupMaps(orders);
   const supersededIps = buildSupersededInventoryIps(stocks, orders);
   const panelByIp = buildPanelExpiryByIp(stocks, panelExpiryByIp, orders);
@@ -241,6 +257,7 @@ export function buildCompanyValidityMismatchReport(
       // Linked order IP wins — inventory row can lag after manual IP edit.
       const ip = linkedOrder?.ipAddress ? cleanIp(linkedOrder.ipAddress) : inventoryIp;
       if (!ip || supersededIps.has(ip)) continue;
+      if (missingPanel.has(ip)) continue;
 
       const panelExpiry =
         panelByIp.get(ip) ||
@@ -281,7 +298,8 @@ export function buildCompanyValidityMismatchReport(
       const saleDate = new Date(saleBase);
       if (Number.isNaN(saleDate.getTime())) continue;
 
-      const customerExpiry = calculateCompanyExpiryDate(saleDate);
+      const customerExpiry = resolveSoldCustomerExpiry(soldOrder, saleDate);
+      if (!hasActiveCustomerValidity(customerExpiry)) continue;
       if (panelExpiry.getTime() >= customerExpiry.getTime()) continue;
 
       pushMismatchRow(rows, seenIps, {
@@ -306,6 +324,7 @@ export function buildCompanyValidityMismatchReport(
   for (const order of orders) {
     const ip = cleanIp(order.ipAddress);
     if (!ip) continue;
+    if (missingPanel.has(ip)) continue;
 
     const panelExpiry = panelByIp.get(ip);
     if (!panelExpiry) continue;
@@ -313,7 +332,8 @@ export function buildCompanyValidityMismatchReport(
     const saleDate = new Date(order.createdAt || referenceDate);
     if (Number.isNaN(saleDate.getTime())) continue;
 
-    const customerExpiry = calculateCompanyExpiryDate(saleDate);
+    const customerExpiry = resolveSoldCustomerExpiry(order, saleDate);
+    if (!hasActiveCustomerValidity(customerExpiry)) continue;
     if (panelExpiry.getTime() >= customerExpiry.getTime()) continue;
 
     const stock = order.ipStockId ? stockById.get(String(order.ipStockId)) : null;

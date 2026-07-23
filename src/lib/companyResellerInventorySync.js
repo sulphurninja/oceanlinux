@@ -128,7 +128,17 @@ async function syncAllInventoryExpiriesFromReseller(company, stockDocs) {
       try {
         const found = ipIndex.get(cleanIp);
         if (!found) {
-          throw new Error(`No VM found on Hostheaven for IP ${cleanIp}`);
+          if (item.expiryDate) {
+            item.expiryDate = null;
+            dirty = true;
+          }
+          failed.push({
+            stockId: String(stock._id),
+            itemId: String(item._id),
+            ipAddress: item.ipAddress,
+            error: `No VM found on Hostheaven for IP ${cleanIp}`,
+          });
+          continue;
         }
 
         let expiryDate = found.expiryDate;

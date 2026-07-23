@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 export default function RenewalLogsPage() {
@@ -17,22 +17,30 @@ export default function RenewalLogsPage() {
     const [autoRefresh, setAutoRefresh] = useState(false);
     const [selectedLog, setSelectedLog] = useState(null);
 
-    const fetchLogs = async () => {
+    const fetchLogs = useCallback(async (silent = false) => {
         try {
+            if (!silent) setLoading(true);
+
             const params = new URLSearchParams();
-            if (orderIdFilter) params.append('orderId', orderIdFilter);
+            if (orderIdFilter.trim()) params.append('orderId', orderIdFilter.trim());
             if (statusFilter !== 'all') params.append('success', statusFilter === 'success');
             if (providerFilter !== 'all') params.append('provider', providerFilter);
 
-            const response = await fetch(`/api/admin/renewal-logs?${params}`);
+            const response = await fetch(`/api/admin/renewal-logs?${params.toString()}`, {
+                credentials: 'include',
+            });
             const data = await response.json();
 
             if (data.success) {
-                setLogs(data.logs);
-                setSummary(data.summary);
+                setLogs(data.logs || []);
+                setSummary(data.summary || null);
                 setError(null);
+                setSelectedLog((prev) => {
+                    if (!prev) return null;
+                    return (data.logs || []).find((log) => log._id === prev._id) || null;
+                });
             } else {
-                setError(data.message);
+                setError(data.message || 'Failed to fetch renewal logs');
             }
         } catch (err) {
             setError('Failed to fetch renewal logs');
@@ -40,20 +48,20 @@ export default function RenewalLogsPage() {
         } finally {
             setLoading(false);
         }
-    };
-
-    useEffect(() => {
-        fetchLogs();
     }, [orderIdFilter, statusFilter, providerFilter]);
 
     useEffect(() => {
-        if (autoRefresh) {
-            const interval = setInterval(fetchLogs, 10000);
-            return () => clearInterval(interval);
-        }
-    }, [autoRefresh, orderIdFilter, statusFilter, providerFilter]);
+        fetchLogs();
+    }, [fetchLogs]);
+
+    useEffect(() => {
+        if (!autoRefresh) return;
+        const interval = setInterval(() => fetchLogs(true), 10000);
+        return () => clearInterval(interval);
+    }, [autoRefresh, fetchLogs]);
 
     const formatTimestamp = (date) => {
+        if (!date) return 'N/A';
         return new Date(date).toLocaleString('en-US', {
             year: 'numeric',
             month: 'short',
@@ -65,8 +73,8 @@ export default function RenewalLogsPage() {
     };
 
     const formatDuration = (ms) => {
-        if (!ms) return 'N/A';
-        if (ms < 1000) return `${ms}ms`;
+        if (ms == null || Number.isNaN(ms)) return 'N/A';
+        if (ms < 1000) return `${Math.round(ms)}ms`;
         return `${(ms / 1000).toFixed(2)}s`;
     };
 
@@ -85,6 +93,12 @@ export default function RenewalLogsPage() {
         }
     };
 
+    const getProviderErrorMessage = (providerError) => {
+        if (!providerError) return null;
+        if (typeof providerError === 'string') return providerError;
+        return providerError.message || JSON.stringify(providerError);
+    };
+
     const downloadLogs = () => {
         const dataStr = JSON.stringify(logs, null, 2);
         const dataBlob = new Blob([dataStr], { type: 'application/json' });
@@ -93,6 +107,7 @@ export default function RenewalLogsPage() {
         link.href = url;
         link.download = `renewal-logs-${new Date().toISOString()}.json`;
         link.click();
+        URL.revokeObjectURL(url);
     };
 
     return (
@@ -102,7 +117,7 @@ export default function RenewalLogsPage() {
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
                     <h1 className="text-xl sm:text-3xl font-bold text-white break-words">🔍 Renewal Debug Logs</h1>
                     <button
-                        onClick={() => router.push('/admin')}
+                        onClick={() => router.push('/admin/dashboard')}
                         className="w-full sm:w-auto shrink-0 px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition"
                     >
                         ← Back to Admin
@@ -181,7 +196,8 @@ export default function RenewalLogsPage() {
                             </button>
                             <button
                                 onClick={downloadLogs}
-                                className="w-full sm:w-auto shrink-0 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg transition"
+                                disabled={!logs.length}
+                                className="w-full sm:w-auto shrink-0 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition"
                                 title="Download logs as JSON"
                             >
                                 ⬇
@@ -234,7 +250,7 @@ export default function RenewalLogsPage() {
                                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3 text-xs">
                                         <div className="min-w-0 break-words">
                                             <span className="text-gray-500">Order:</span>{' '}
-                                            <span className="text-cyan-400">{log.orderId.toString().slice(-8)}</span>
+                                            <span className="text-cyan-400">{String(log.orderId || '').slice(-8) || 'N/A'}</span>
                                         </div>
                                         <div className="min-w-0 break-words">
                                             <span className="text-gray-500">Product:</span>{' '}
@@ -262,10 +278,10 @@ export default function RenewalLogsPage() {
                                                         <div key={idx} className="flex flex-col sm:flex-row sm:gap-3 gap-0.5 min-w-0">
                                                             <span className="text-gray-600 shrink-0">{formatTimestamp(entry.timestamp)}</span>
                                                             <span className={`font-bold shrink-0 ${getLevelColor(entry.level)}`}>
-                                                                [{entry.level.toUpperCase()}]
+                                                                [{(entry.level || 'info').toUpperCase()}]
                                                             </span>
                                                             <span className="text-gray-300 break-words min-w-0">{entry.message}</span>
-                                                            {entry.data && (
+                                                            {entry.data != null && (
                                                                 <span className="text-gray-500 break-all min-w-0">
                                                                     {JSON.stringify(entry.data)}
                                                                 </span>
@@ -288,18 +304,18 @@ export default function RenewalLogsPage() {
                                                         <span className={getStatusColor(log.providerApiResult.success)}>
                                                             {log.providerApiResult.success ? '✓ Success' : '✗ Failed'}
                                                         </span>
-                                                        {log.providerApiResult.apiDuration && (
+                                                        {log.providerApiResult.apiDuration != null && (
                                                             <span className="text-gray-500">
                                                                 ({formatDuration(log.providerApiResult.apiDuration)})
                                                             </span>
                                                         )}
                                                     </div>
-                                                    {log.providerApiResult.error && (
+                                                    {getProviderErrorMessage(log.providerApiResult.error) && (
                                                         <div className="text-red-400 mt-2 break-words">
-                                                            Error: {log.providerApiResult.error.message}
+                                                            Error: {getProviderErrorMessage(log.providerApiResult.error)}
                                                         </div>
                                                     )}
-                                                    {log.providerApiResult.result && (
+                                                    {log.providerApiResult.result != null && (
                                                         <pre className="text-gray-400 mt-2 text-xs overflow-x-auto max-w-full whitespace-pre-wrap break-words">
                                                             {JSON.stringify(log.providerApiResult.result, null, 2)}
                                                         </pre>

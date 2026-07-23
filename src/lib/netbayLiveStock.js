@@ -363,7 +363,10 @@ async function syncNetbayIpStockRow(stock, { force = false, sharedCheckCache = n
 
   if (!stock.availabilityManual) {
     updatePayload.available = shouldAvailable;
-    if (shouldAvailable && stock.autoHiddenFromStore) {
+    if (shouldAvailable && usesNetbayLiveStock(stock, company)) {
+      updatePayload.hiddenFromStore = false;
+      updatePayload.autoHiddenFromStore = false;
+    } else if (shouldAvailable && stock.autoHiddenFromStore) {
       updatePayload.hiddenFromStore = false;
       updatePayload.autoHiddenFromStore = false;
     }

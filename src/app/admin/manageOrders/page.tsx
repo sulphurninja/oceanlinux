@@ -276,6 +276,8 @@ const ManageOrders = () => {
     const [exportPreset, setExportPreset] = useState<'thisMonth' | 'lastMonth' | 'last30' | 'thisYear' | 'all' | 'custom'>('thisMonth');
     const [exportFrom, setExportFrom] = useState('');
     const [exportTo, setExportTo] = useState('');
+    /** Scale all CSV amounts to this % of actual paid sales (default 100 = full). */
+    const [exportSalesPercent, setExportSalesPercent] = useState('100');
     const [batchProvisioning, setBatchProvisioning] = useState(false);
     const [generatingCreds, setGeneratingCreds] = useState(false);
     const [updating, setUpdating] = useState(false);
@@ -947,14 +949,17 @@ const ManageOrders = () => {
 
         const r2 = (n: number) => Math.round(n * 100) / 100;
         const div = 1 + GST_RATE / 100; // prices are GST-inclusive
+        const salesPct = Math.min(100, Math.max(1, Number(exportSalesPercent) || 100));
+        const salesFactor = salesPct / 100;
+        const scaleAmount = (n: number) => r2(n * salesFactor);
 
         const rows = exportOrders.map((order) => {
                 const price = Number(order.price || 0);
                 const orig = Number(order.originalPrice ?? price);
-                const grossTaxable = r2(orig / div);
-                const taxableAmount = r2(price / div);
-                const discountTaxable = r2(Math.max(0, grossTaxable - taxableAmount));
-                const gst = r2(price - taxableAmount);
+                const grossTaxable = scaleAmount(r2(orig / div));
+                const taxableAmount = scaleAmount(r2(price / div));
+                const discountTaxable = scaleAmount(r2(Math.max(0, (orig / div) - (price / div))));
+                const gst = scaleAmount(r2(price - (price / div)));
 
                 const billing = order.user?.billingAddress || {};
                 const state = (billing.state || '').trim();
@@ -993,7 +998,8 @@ const ManageOrders = () => {
                     'CGST': cgst,
                     'SGST': sgst,
                     'IGST': igst,
-                    'Net Invoice Value': price,
+                    'Net Invoice Value': scaleAmount(price),
+                    ...(salesPct !== 100 ? { 'Report Sales %': salesPct } : {}),
                 };
             });
 
@@ -1014,12 +1020,17 @@ const ManageOrders = () => {
         const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
         const link = document.createElement('a');
         link.href = URL.createObjectURL(blob);
-        link.download = `gst-report_${format(range.from, 'yyyy-MM-dd')}_to_${format(range.to, 'yyyy-MM-dd')}.csv`;
+        const pctSuffix = salesPct !== 100 ? `_${salesPct}pct` : '';
+        link.download = `gst-report${pctSuffix}_${format(range.from, 'yyyy-MM-dd')}_to_${format(range.to, 'yyyy-MM-dd')}.csv`;
         link.click();
         URL.revokeObjectURL(link.href);
 
         setExportOpen(false);
-        toast.success(`Exported ${rows.length} invoice${rows.length > 1 ? 's' : ''} to GST report`);
+        toast.success(
+            salesPct === 100
+                ? `Exported ${rows.length} invoice${rows.length > 1 ? 's' : ''} to GST report`
+                : `Exported ${rows.length} invoice${rows.length > 1 ? 's' : ''} at ${salesPct}% of actual sales`
+        );
         } catch (error) {
             toast.error(error instanceof Error ? error.message : 'Failed to export GST report');
         }
@@ -2210,6 +2221,38 @@ const ManageOrders = () => {
                                 </div>
                             </div>
                         )}
+
+                        <div className="rounded-md border p-3 space-y-2">
+                            <Label htmlFor="export-sales-pct" className="text-sm font-medium">
+                                Reportable sales %
+                            </Label>
+                            <p className="text-xs text-muted-foreground">
+                                CSV amounts scale to this % of actual paid sales. Example: 80% → ₹1,000 sale shows as ₹800 taxable + GST on ₹800 only.
+                            </p>
+                            <div className="flex flex-wrap gap-2">
+                                {[100, 80, 70, 50].map((pct) => (
+                                    <Button
+                                        key={pct}
+                                        type="button"
+                                        size="sm"
+                                        variant={exportSalesPercent === String(pct) ? 'default' : 'outline'}
+                                        onClick={() => setExportSalesPercent(String(pct))}
+                                    >
+                                        {pct}%
+                                    </Button>
+                                ))}
+                            </div>
+                            <Input
+                                id="export-sales-pct"
+                                type="number"
+                                min={1}
+                                max={100}
+                                step={1}
+                                value={exportSalesPercent}
+                                onChange={(e) => setExportSalesPercent(e.target.value)}
+                                className="mt-1"
+                            />
+                        </div>
                     </div>
 
                     <DialogFooter className="gap-2 sm:gap-0">

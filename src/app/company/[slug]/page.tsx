@@ -19,7 +19,7 @@ import {
   Globe, KeyRound, Search, ArrowUpDown, CalendarDays, ClipboardList,
   Play, Square, RotateCcw, HardDriveIcon, CheckCircle, XCircle, Clock,
   MessageSquare, RefreshCw, IndianRupee, Terminal, MemoryStick, AlertTriangle, User,
-  ChevronDown, ChevronUp, Copy,
+  ChevronDown, ChevronUp, Copy, Cloud,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { COMPANY_FILTER_VERSION, isCompanyVisibleOrder } from '@/lib/companyOrders';
@@ -33,6 +33,7 @@ import {
 } from '@/lib/companyValidityMismatch';
 import { getCompanyValidityDays } from '@/lib/expiryHelper';
 import { OsIcon, humanizeOsLabel } from '@/components/os/OsIcon';
+import CompanyPanelZonesTab from '@/components/company/CompanyPanelZonesTab';
 
 function orderStatusBadgeProps(status: string): {
   variant: 'default' | 'secondary' | 'outline' | 'destructive';
@@ -130,6 +131,12 @@ interface Stock {
   inventoryItems?: InventoryItem[];
   serverType: string;
   tags: string[];
+  resellerZones?: {
+    configured?: boolean;
+    zoneId?: number | null;
+    zoneIds?: number[];
+    zoneName?: string | null;
+  };
 }
 
 const LINUX_OS_OPTIONS = ['Ubuntu 22', 'CentOS 7'] as const;
@@ -291,7 +298,7 @@ export default function CompanyDashboard() {
   const [actionRequests, setActionRequests] = useState<ActionRequest[]>([]);
   const [renewalRequests, setRenewalRequests] = useState<RenewalRequestDoc[]>([]);
   const [pendingRenewalCount, setPendingRenewalCount] = useState(0);
-  const [tab, setTab] = useState<'stocks' | 'orders' | 'requests' | 'renewals'>('stocks');
+  const [tab, setTab] = useState<'stocks' | 'panelZones' | 'orders' | 'requests' | 'renewals'>('stocks');
   const [savingStockId, setSavingStockId] = useState<string | null>(null);
   const [stockCountDrafts, setStockCountDrafts] = useState<Record<string, string>>({});
   const [inventoryBulkDrafts, setInventoryBulkDrafts] = useState<Record<string, string>>({});
@@ -992,6 +999,13 @@ export default function CompanyDashboard() {
         <div className="flex gap-2 mb-5 overflow-x-auto pb-1 scrollbar-hide">
           {([
             { id: 'stocks' as const, icon: <Server className="h-4 w-4" />, label: 'IP Stocks', count: stocks.length, badgeColor: '' },
+            ...(hasResellerSync ? [{
+              id: 'panelZones' as const,
+              icon: <Cloud className="h-4 w-4" />,
+              label: 'Panel Zones',
+              count: stocks.filter((s) => s.resellerZones?.configured).length,
+              badgeColor: '',
+            }] : []),
             { id: 'orders' as const, icon: <Package className="h-4 w-4" />, label: 'Orders', count: visibleOrders.length, badgeColor: '' },
             { id: 'requests' as const, icon: <ClipboardList className="h-4 w-4" />, label: 'Action Requests', count: null, badgeColor: '' },
             { id: 'renewals' as const, icon: <RefreshCw className="h-4 w-4" />, label: 'Renewals', count: pendingRenewalCount, badgeColor: pendingRenewalCount > 0 ? 'bg-amber-500 text-white' : '' },
@@ -1663,6 +1677,18 @@ export default function CompanyDashboard() {
               </Card>
             </aside>
           </div>
+        )}
+
+        {/* ── Panel Zones Tab ── */}
+        {tab === 'panelZones' && hasResellerSync && (
+          <CompanyPanelZonesTab
+            stocks={stocks}
+            resellerLabel={resellerLabel}
+            hasLiveStockSync={hasLiveStockSync}
+            onStockUpdated={(updated) => {
+              setStocks((prev) => prev.map((s) => (s._id === updated._id ? { ...s, ...updated } : s)));
+            }}
+          />
         )}
 
         {/* ── Orders Tab ── */}

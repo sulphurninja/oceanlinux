@@ -214,7 +214,12 @@ export async function POST(request) {
     }
     const gatewayCharge = Math.max(0, price - walletApplied);
 
-    if (walletApplied > 0) {
+    // Deduct-on-success: only charge the wallet up-front when it FULLY covers
+    // the price (no gateway step — the wallet debit itself IS the payment).
+    // For a partial wallet + gateway payment we DEFER the wallet debit until the
+    // gateway payment actually lands (see confirmPendingOrderPayment), so the
+    // customer's wallet is never touched for an order they don't complete.
+    if (walletApplied > 0 && gatewayCharge === 0) {
       try {
         walletDebit = await userWalletService.debit(userId, walletApplied, {
           description: `Buy now ${productName} - ${memory || 'Slot IP'}`,
@@ -409,7 +414,8 @@ export async function POST(request) {
           : actualPaymentMethod;
 
     if (gatewayCharge > 0 && !gatewayOrderId) {
-      await refundWalletReservation(userId, walletApplied, clientTxnId);
+      // Only refund if we actually debited (wallet-only never reaches here).
+      if (walletDebit) await refundWalletReservation(userId, walletApplied, clientTxnId);
       return NextResponse.json({ message: 'Failed to create payment order' }, { status: 500 });
     }
 
@@ -444,13 +450,21 @@ export async function POST(request) {
       },
     };
 
-    if (walletApplied > 0 && walletDebit) {
-      orderData.walletDeduction = {
-        deducted: true,
-        amount: walletApplied,
-        transactionId: walletDebit.walletTxnId,
-        timestamp: new Date(),
-      };
+    if (walletApplied > 0) {
+      // deducted:true only when we actually charged now (wallet-only path).
+      // For mixed wallet+gateway we record the intended amount with
+      // deducted:false so the confirm step charges it once payment lands.
+      orderData.walletDeduction = walletDebit
+        ? {
+            deducted: true,
+            amount: walletApplied,
+            transactionId: walletDebit.walletTxnId,
+            timestamp: new Date(),
+          }
+        : {
+            deducted: false,
+            amount: walletApplied,
+          };
     }
 
     if (gatewayCharge === 0) {
