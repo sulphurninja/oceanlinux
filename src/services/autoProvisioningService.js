@@ -299,6 +299,27 @@ class AutoProvisioningService {
     const hasAdvpsConfig = !!(ipStock?.defaultConfigurations?.advps ||
       ipStock?.defaultConfigurations?.get?.('advps'));
 
+    // Stale ADVPS block on Hostheaven/reseller rows must not beat panel auto-buy.
+    if (
+      hasAdvpsConfig &&
+      !taggedAdvps &&
+      !byProvider &&
+      !byNameEmoji &&
+      !byProductEmoji &&
+      isResellerApiStock(ipStock, order)
+    ) {
+      L.kv('ADVPS detection', {
+        taggedAdvps,
+        byProvider,
+        byNameEmoji,
+        hasAdvpsConfig,
+        byProductEmoji,
+        staleAdvpsOnResellerStock: true,
+        result: false,
+      });
+      return false;
+    }
+
     const isAdvps = taggedAdvps || byProvider || byNameEmoji || hasAdvpsConfig || byProductEmoji;
 
     L.kv('ADVPS detection', {
