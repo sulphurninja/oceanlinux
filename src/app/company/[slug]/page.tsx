@@ -19,7 +19,7 @@ import {
   Globe, KeyRound, Search, ArrowUpDown, CalendarDays, ClipboardList,
   Play, Square, RotateCcw, HardDriveIcon, CheckCircle, XCircle, Clock,
   MessageSquare, RefreshCw, IndianRupee, Terminal, MemoryStick, AlertTriangle, User,
-  ChevronDown, ChevronUp, Copy, Cloud,
+  ChevronDown, ChevronUp, Copy, Cloud, Tag,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { COMPANY_FILTER_VERSION, isCompanyVisibleOrder } from '@/lib/companyOrders';
@@ -34,6 +34,7 @@ import {
 import { getCompanyValidityDays } from '@/lib/expiryHelper';
 import { OsIcon, humanizeOsLabel } from '@/components/os/OsIcon';
 import CompanyPanelZonesTab from '@/components/company/CompanyPanelZonesTab';
+import CompanyBulkPromoTab from '@/components/company/CompanyBulkPromoTab';
 
 function orderStatusBadgeProps(status: string): {
   variant: 'default' | 'secondary' | 'outline' | 'destructive';
@@ -131,6 +132,12 @@ interface Stock {
   inventoryItems?: InventoryItem[];
   serverType: string;
   tags: string[];
+  promoCodes?: Array<{
+    code: string;
+    discount: number;
+    discountType?: 'percentage' | 'fixed';
+    isActive?: boolean;
+  }>;
   resellerZones?: {
     configured?: boolean;
     zoneId?: number | null;
@@ -298,7 +305,7 @@ export default function CompanyDashboard() {
   const [actionRequests, setActionRequests] = useState<ActionRequest[]>([]);
   const [renewalRequests, setRenewalRequests] = useState<RenewalRequestDoc[]>([]);
   const [pendingRenewalCount, setPendingRenewalCount] = useState(0);
-  const [tab, setTab] = useState<'stocks' | 'panelZones' | 'orders' | 'requests' | 'renewals'>('stocks');
+  const [tab, setTab] = useState<'stocks' | 'panelZones' | 'bulkPromos' | 'orders' | 'requests' | 'renewals'>('stocks');
   const [savingStockId, setSavingStockId] = useState<string | null>(null);
   const [stockCountDrafts, setStockCountDrafts] = useState<Record<string, string>>({});
   const [inventoryBulkDrafts, setInventoryBulkDrafts] = useState<Record<string, string>>({});
@@ -307,6 +314,7 @@ export default function CompanyDashboard() {
   >({});
   const [expandedStockId, setExpandedStockId] = useState<string | null>(null);
   const [hasResellerSync, setHasResellerSync] = useState(false);
+  const [hasPortalBulkPromos, setHasPortalBulkPromos] = useState(false);
   const [hasLiveStockSync, setHasLiveStockSync] = useState(false);
   const [resellerLabel, setResellerLabel] = useState('Hostheaven');
   const [syncingStockId, setSyncingStockId] = useState<string | null>(null);
@@ -400,6 +408,7 @@ export default function CompanyDashboard() {
       setStockCountDrafts(Object.fromEntries(rows.map(s => [s._id, String(s.stockCount ?? 0)])));
       if (!Array.isArray(payload)) {
         setHasResellerSync(!!payload.hasResellerSync);
+        setHasPortalBulkPromos(!!payload.hasPortalBulkPromos);
         setHasLiveStockSync(!!payload.hasLiveStockSync);
         setResellerLabel(payload.resellerLabel || 'Hostheaven');
       }
@@ -1004,6 +1013,13 @@ export default function CompanyDashboard() {
               icon: <Cloud className="h-4 w-4" />,
               label: 'Panel Zones',
               count: stocks.filter((s) => s.resellerZones?.configured).length,
+              badgeColor: '',
+            }] : []),
+            ...(hasPortalBulkPromos ? [{
+              id: 'bulkPromos' as const,
+              icon: <Tag className="h-4 w-4" />,
+              label: 'Bulk Promos',
+              count: stocks.filter((s) => (s.promoCodes?.length ?? 0) > 0).length,
               badgeColor: '',
             }] : []),
             { id: 'orders' as const, icon: <Package className="h-4 w-4" />, label: 'Orders', count: visibleOrders.length, badgeColor: '' },
@@ -1687,6 +1703,19 @@ export default function CompanyDashboard() {
             hasLiveStockSync={hasLiveStockSync}
             onStockUpdated={(updated) => {
               setStocks((prev) => prev.map((s) => (s._id === updated._id ? { ...s, ...updated } : s)));
+            }}
+          />
+        )}
+
+        {/* ── Bulk Promos Tab ── */}
+        {tab === 'bulkPromos' && hasPortalBulkPromos && (
+          <CompanyBulkPromoTab
+            stocks={stocks}
+            onStocksUpdated={(updatedStocks) => {
+              setStocks((prev) => {
+                const byId = new Map(updatedStocks.map((s) => [s._id, s]));
+                return prev.map((s) => (byId.has(s._id) ? { ...s, ...byId.get(s._id)! } : s));
+              });
             }}
           />
         )}

@@ -21,7 +21,7 @@ import {
 import Order from '@/models/orderModel';
 import { COMPANY_FILTER_VERSION } from '@/lib/companyOrders';
 import { buildCompanyValidityMismatchReport } from '@/lib/companyValidityMismatch';
-const { hasCompanyResellerApi, getCompanyResellerApiConfig, companyUsesResellerLiveStock } = require('@/lib/companyResellerApi');
+const { hasCompanyResellerApi, getCompanyResellerApiConfig, companyUsesResellerLiveStock, companyHasPortalBulkPromos } = require('@/lib/companyResellerApi');
 const {
   applyResellerZonesToStockDocument,
   serializeResellerZonesForClient,
@@ -83,6 +83,50 @@ function readLiveStockSummary(stock, companyDoc) {
   };
 }
 
+function serializePromoCodes(promoCodes) {
+  return (Array.isArray(promoCodes) ? promoCodes : []).map((p) => ({
+    code: String(p.code || '').trim().toUpperCase(),
+    discount: Number(p.discount) || 0,
+    discountType: p.discountType === 'percentage' ? 'percentage' : 'fixed',
+    isActive: p.isActive !== false,
+  }));
+}
+
+function normalizePromoEntries(rawPromos, legacyPromo) {
+  const list = Array.isArray(rawPromos) ? rawPromos : legacyPromo ? [legacyPromo] : [];
+  const out = [];
+  const seen = new Set();
+
+  for (const item of list) {
+    const code = String(item?.code || '').trim().toUpperCase();
+    if (!code) continue;
+    if (seen.has(code)) continue;
+
+    const discount = Number(item?.discount);
+    if (!Number.isFinite(discount) || discount < 0) continue;
+
+    const discountType = item?.discountType === 'percentage' ? 'percentage' : 'fixed';
+    if (discountType === 'percentage' && discount > 100) continue;
+
+    seen.add(code);
+    out.push({
+      code,
+      discount,
+      discountType,
+      isActive: item?.isActive !== false,
+      createdAt: new Date(),
+    });
+  }
+
+  return out;
+}
+
+function replacePromosOnStock(stock, promoEntries) {
+  if (!Array.isArray(promoEntries) || promoEntries.length === 0) return false;
+  stock.promoCodes = promoEntries.map((entry) => ({ ...entry }));
+  return true;
+}
+
 function serializeStock(stock, companyDoc) {
   const hasInventory = usesPreconfiguredInventory(stock);
   const fulfillmentMode = getCompanyFulfillmentMode(stock);
@@ -101,6 +145,7 @@ function serializeStock(stock, companyDoc) {
     inventoryItems: hasInventory ? (stock.inventoryItems || []).map(serializeInventoryItem) : [],
     serverType: stock.serverType,
     tags: stock.tags || [],
+    promoCodes: serializePromoCodes(stock.promoCodes),
     resellerZones: serializeResellerZonesForClient(stock),
   };
 }
@@ -125,10 +170,12 @@ export async function GET() {
     const resellerCfg = getCompanyResellerApiConfig(companyDoc);
     const hasResellerSync = !!resellerCfg;
     const hasLiveStockSync = companyUsesResellerLiveStock(companyDoc);
+    const hasPortalBulkPromos = companyHasPortalBulkPromos(companyDoc);
 
     return NextResponse.json({
       stocks: stocks.map((s) => serializeStock(s, companyDoc)),
       hasResellerSync,
+      hasPortalBulkPromos,
       hasLiveStockSync,
       resellerLabel: resellerCfg?.label || 'Hostheaven',
     }, {
@@ -149,7 +196,7 @@ export async function PUT(request) {
 
   await connectDB();
   const body = await request.json();
-  const { stockId, stockCount, action, items, bulkLines, removeItemId, ipAddress, addToInventory, fulfillmentMode, zoneIds } = body;
+  const { stockId, stockCount, action, items, bulkLines, removeItemId, ipAddress, addToInventory, fulfillmentMode, zoneIds, stockIds, promo, promos } = body;
 
   if (action === 'syncAllResellerExpiries') {
     const companyDoc = await Company.findById(company.id).select('resellerApi netbayApi name').lean();
@@ -196,6 +243,46 @@ export async function PUT(request) {
       mismatchIps: mismatches.map((m) => m.ipAddress),
       panelExpiriesByIp,
       stocks: serializedStocks,
+    });
+  }
+
+  if (action === 'bulkApplyPromo') {
+    const companyDoc = await Company.findById(company.id).select('resellerApi netbayApi name').lean();
+    if (!companyHasPortalBulkPromos(companyDoc)) {
+      return NextResponse.json(
+        { error: 'Bulk promos are not enabled for your company portal.' },
+        { status: 403 }
+      );
+    }
+    if (!Array.isArray(stockIds) || stockIds.length === 0) {
+      return NextResponse.json({ error: 'Select at least one IP stock' }, { status: 400 });
+    }
+
+    const entries = normalizePromoEntries(promos, promo);
+    if (!entries.length) {
+      return NextResponse.json({ error: 'Add at least one valid promo (code + discount)' }, { status: 400 });
+    }
+
+    const stocks = await IPStock.find({ _id: { $in: stockIds }, company: company.id });
+    if (!stocks.length) {
+      return NextResponse.json({ error: 'No matching stocks found for your company' }, { status: 404 });
+    }
+
+    let updatedCount = 0;
+    for (const stock of stocks) {
+      if (!replacePromosOnStock(stock, entries)) continue;
+      await stock.save();
+      updatedCount += 1;
+    }
+
+    const fresh = await IPStock.find({ _id: { $in: stocks.map((s) => s._id) } }).lean();
+    const codesLabel = entries.map((e) => e.code).join(', ');
+    return NextResponse.json({
+      success: true,
+      message: `${entries.length} promo(s) [${codesLabel}] applied to ${updatedCount} IP stock(s)`,
+      updatedCount,
+      promoCount: entries.length,
+      stocks: fresh.map((s) => serializeStock(s, companyDoc)),
     });
   }
 
@@ -501,7 +588,7 @@ const ResellerApi = require('@/services/resellerApi');
   }
 
   return NextResponse.json(
-    { error: 'Unknown action. Use setStockCount, setFulfillmentMode, setResellerZones, addInventory, removeInventory, syncResellerCredentials, or syncAllResellerExpiries' },
+    { error: 'Unknown action. Use setStockCount, setFulfillmentMode, setResellerZones, bulkApplyPromo, addInventory, removeInventory, syncResellerCredentials, or syncAllResellerExpiries' },
     { status: 400 }
   );
 }

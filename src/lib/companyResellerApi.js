@@ -66,6 +66,16 @@ function hasCompanyResellerApi(company) {
   return !!getCompanyResellerApiConfig(company);
 }
 
+/** Company portal slugs that must not see bulk promo management (e.g. SiteWorx). */
+const PORTAL_BULK_PROMO_BLOCKED_SLUGS = new Set(['siteworx']);
+
+function companyHasPortalBulkPromos(company) {
+  if (!company) return false;
+  const slug = String(company.slug || '').trim().toLowerCase();
+  if (slug && PORTAL_BULK_PROMO_BLOCKED_SLUGS.has(slug)) return false;
+  return hasCompanyResellerApi(company);
+}
+
 /** True when PrimeVPS / Hostheaven plans sync availability from panel wallet + pricing. */
 function companyUsesResellerLiveStock(company) {
   if (!company?.resellerApi?.enabled) return false;
@@ -76,5 +86,6 @@ module.exports = {
   RESELLER_API_DEFAULTS,
   getCompanyResellerApiConfig,
   hasCompanyResellerApi,
+  companyHasPortalBulkPromos,
   companyUsesResellerLiveStock,
 };

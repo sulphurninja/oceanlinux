@@ -226,8 +226,22 @@ function planNameLower(stock: IPStock) {
   return String(stock.name || '').trim().toLowerCase();
 }
 
+/** SmartVPS / Ocean Linux rows — show under All, Linux, and Windows tabs. */
+function isOceanLinuxCategoryPlan(stock: IPStock) {
+  return stockTagsNormalized(stock).some(
+    (t) => t === 'ocean linux' || t === 'oceanlinux' || t.includes('ocean linux'),
+  );
+}
+
+function formatTagGroupTitle(tag: string) {
+  const t = normalizePlanTag(tag);
+  if (t === 'ocean linux' || t === 'oceanlinux') return 'Ocean Linux';
+  return tag;
+}
+
 /** Linux tab — serverType, tags, or name (many IP rows are tagged VPS but named Linux 4GB). */
 function isLinuxCategoryPlan(stock: IPStock) {
+  if (isOceanLinuxCategoryPlan(stock)) return true;
   if (stock.serverType === 'Linux' || stock.serverType === 'Windows & Linux') return true;
   const tags = stockTagsNormalized(stock);
   if (tags.some((t) => t.includes('linux') || t.includes('ocean'))) return true;
@@ -237,6 +251,7 @@ function isLinuxCategoryPlan(stock: IPStock) {
 }
 
 function isVpsCategoryPlan(stock: IPStock) {
+  if (isOceanLinuxCategoryPlan(stock)) return true;
   if (stock.serverType === 'VPS' || stock.serverType === 'Windows & Linux') return true;
   const tags = stockTagsNormalized(stock);
   if (tags.some((t) => t.includes('windows') || t === 'vps')) return true;
@@ -1465,7 +1480,7 @@ function IPStockContent() {
                         <div key={tag} className="space-y-2">
                           <div className="flex items-center gap-2 px-1">
                             <div className="w-1 h-6 bg-emerald-400 rounded-full"></div>
-                            <h2 className="text-base font-semibold capitalize text-white">{tag} Plans</h2>
+                            <h2 className="text-base font-semibold capitalize text-white">{formatTagGroupTitle(tag)} Plans</h2>
                             <Badge variant="outline" className="text-[10px] border-white/15 bg-white/5 text-white/70 h-5 px-2">
                               {grouped[tag].length}
                             </Badge>
