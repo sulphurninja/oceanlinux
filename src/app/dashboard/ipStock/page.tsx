@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, Suspense, useMemo } from "react";
+import { useEffect, useState, Suspense, useMemo, memo, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
@@ -103,6 +103,7 @@ interface IPStock {
   description?: string;
   available: boolean;
   hiddenFromStore?: boolean;
+  inventoryAvailable?: number;
   defaultConfigurations?: Record<string, any>;
   stockCount?: number;
   availabilityManual?: boolean;
@@ -302,6 +303,25 @@ interface SlotIPPackage {
   promoCodes?: PromoCode[];
 }
 
+function groupStocksByTags(stocks: IPStock[]) {
+  const grouped: { [key: string]: IPStock[] } = {};
+  const untagged: IPStock[] = [];
+
+  stocks.forEach((stock) => {
+    if (!stock.tags || stock.tags.length === 0) {
+      untagged.push(stock);
+    } else {
+      const primaryTag = stock.tags[0];
+      if (!grouped[primaryTag]) {
+        grouped[primaryTag] = [];
+      }
+      grouped[primaryTag].push(stock);
+    }
+  });
+
+  return { grouped, untagged };
+}
+
 export default function IPStockPage() {
   return (
     <Suspense>
@@ -371,45 +391,42 @@ function IPStockContent() {
     }
   };
 
-  const loadPlans = async (options?: { silent?: boolean; forceAdvps?: boolean }) => {
+  const loadPlans = useCallback(async (options?: { silent?: boolean; forceAdvps?: boolean; waitForLiveSync?: boolean }) => {
     const silent = options?.silent ?? false;
     const forceAdvps = options?.forceAdvps ?? false;
-    try {
-      if (!silent) setIsLoading(true);
-      setIsRefreshingStock(true);
+    const waitForLiveSync = options?.waitForLiveSync ?? false;
 
-      console.log("[IP Stock] ADVPS refresh-stock (sync + live check)…");
+    const parseIpStockRows = (ipData: unknown): IPStock[] =>
+      (Array.isArray(ipData) ? ipData : []).filter((s) => !s.hiddenFromStore);
+
+    const reloadIpStocks = async () => {
+      const ipRes = await fetch("/api/ipstock", { cache: "no-store" });
+      if (!ipRes.ok) return;
+      const ipData = await ipRes.json();
+      setIpStocks(parseIpStockRows(ipData));
+    };
+
+    const syncLiveStockInBackground = async () => {
+      setIsRefreshingStock(true);
       try {
         const refreshUrl = forceAdvps
           ? "/api/advps/refresh-stock?force=1"
           : "/api/advps/refresh-stock";
-        const refreshRes = await fetch(refreshUrl, { cache: "no-store" });
-        const refreshBody = await refreshRes.json().catch(() => ({}));
-        if (refreshRes.ok) {
-          console.log("[IP Stock] ADVPS refresh OK", refreshBody);
-        } else {
-          console.warn("[IP Stock] ADVPS refresh failed", refreshRes.status, refreshBody);
-        }
+        await Promise.allSettled([
+          fetch(refreshUrl, { cache: "no-store" }),
+          fetch("/api/reseller-panel/refresh-stock", { cache: "no-store" }),
+          fetch("/api/smartvps/sync", { cache: "no-store" }),
+        ]);
+        await reloadIpStocks();
       } catch (e) {
-        console.warn("[IP Stock] ADVPS refresh error", e);
+        console.warn("[IP Stock] Live stock sync error", e);
+      } finally {
+        setIsRefreshingStock(false);
       }
+    };
 
-      console.log("[IP Stock] Reseller panel refresh-stock (wallet + pricing)…");
-      try {
-        const resellerRefreshRes = await fetch("/api/reseller-panel/refresh-stock", { cache: "no-store" });
-        const resellerRefreshBody = await resellerRefreshRes.json().catch(() => ({}));
-        if (resellerRefreshRes.ok) {
-          console.log("[IP Stock] Reseller refresh OK", resellerRefreshBody);
-        } else {
-          console.warn("[IP Stock] Reseller refresh failed", resellerRefreshRes.status, resellerRefreshBody);
-        }
-      } catch (e) {
-        console.warn("[IP Stock] Reseller refresh error", e);
-      }
-
-      // Netbay stock is synced on a schedule (cron) and at checkout — not on every page load
-      // to avoid hitting NetBay's 120 stock-checks / 10 min rate limit.
-      setIsRefreshingStock(false);
+    try {
+      if (!silent) setIsLoading(true);
 
       const [ipRes, slotRes] = await Promise.all([
         fetch("/api/ipstock", { cache: "no-store" }),
@@ -418,47 +435,41 @@ function IPStockContent() {
 
       const ipData = await ipRes.json();
       const slotData = await slotRes.json();
-      const ipRows: IPStock[] = (Array.isArray(ipData) ? ipData : []).filter(
-        (s) => !s.hiddenFromStore
-      );
+      const ipRows = parseIpStockRows(ipData);
 
       if (!ipRes.ok) {
         console.warn("[IP Stock] /api/ipstock HTTP", ipRes.status, ipData);
       } else {
-        const advpsRows = ipRows.filter((s) => /^⚡/.test(String(s.name || "").trimStart())).length;
         console.log("[IP Stock] Loaded IP stocks", {
           total: ipRows.length,
-          advpsRows,
           availableCount: ipRows.filter((s) => s.available).length,
         });
       }
 
       setIpStocks(ipRows);
-
-      const availableSlots = (slotData || []).filter(
-        (pkg: SlotIPPackage) => pkg.available && pkg.availableCount > 0
+      setSlotPackages(
+        (slotData || []).filter((pkg: SlotIPPackage) => pkg.available && pkg.availableCount > 0)
       );
-      setSlotPackages(availableSlots);
-
-      fetch("/api/smartvps/sync")
-        .then(() => console.log("[IPSTOCK] SmartVPS sync completed in background"))
-        .catch((err) => console.warn("[IPSTOCK] SmartVPS sync failed in background", err));
     } catch (error) {
       toast.error("Failed to load plans");
       console.error(error);
     } finally {
       if (!silent) setIsLoading(false);
-      setIsRefreshingStock(false);
     }
-  };
+
+    if (waitForLiveSync) {
+      await syncLiveStockInBackground();
+    } else {
+      void syncLiveStockInBackground();
+    }
+  }, []);
 
   // Refresh ADVPS + SmartVPS stock when user opens IP Stock
   useEffect(() => {
     loadPlans();
-  }, []);
+  }, [loadPlans]);
 
-  // Filter and sort logic
-  const getFilteredAndSortedStocks = () => {
+  const filteredIpStocks = useMemo(() => {
     let filtered = ipStocks.filter((stock) => !stock.hiddenFromStore);
 
     if (activeTab && activeTab !== 'all' && activeTab !== 'SlotIP') {
@@ -469,12 +480,11 @@ function IPStockContent() {
       filtered = filtered.filter((stock) => stockMatchesSearch(stock, searchTerm));
     }
 
-    // Price filter
     if (priceFilter !== 'all') {
-      filtered = filtered.filter(stock => {
+      filtered = filtered.filter((stock) => {
         const prices = Object.values(stock.memoryOptions)
-          .filter(option => option.price !== null)
-          .map(option => option.price!);
+          .filter((option) => option.price !== null)
+          .map((option) => option.price!);
 
         if (prices.length === 0) return false;
 
@@ -495,7 +505,6 @@ function IPStockContent() {
       });
     }
 
-    // Sort: in-stock first, then user-selected order
     filtered.sort((a, b) => {
       const aInStock = isStockPurchasable(a) ? 0 : 1;
       const bInStock = isStockPurchasable(b) ? 0 : 1;
@@ -503,13 +512,13 @@ function IPStockContent() {
 
       switch (sortBy) {
         case 'price-low': {
-          const aMinPrice = Math.min(...Object.values(a.memoryOptions).map(o => o.price || Infinity));
-          const bMinPrice = Math.min(...Object.values(b.memoryOptions).map(o => o.price || Infinity));
+          const aMinPrice = Math.min(...Object.values(a.memoryOptions).map((o) => o.price || Infinity));
+          const bMinPrice = Math.min(...Object.values(b.memoryOptions).map((o) => o.price || Infinity));
           return aMinPrice - bMinPrice;
         }
         case 'price-high': {
-          const aMaxPrice = Math.max(...Object.values(a.memoryOptions).map(o => o.price || 0));
-          const bMaxPrice = Math.max(...Object.values(b.memoryOptions).map(o => o.price || 0));
+          const aMaxPrice = Math.max(...Object.values(a.memoryOptions).map((o) => o.price || 0));
+          const bMaxPrice = Math.max(...Object.values(b.memoryOptions).map((o) => o.price || 0));
           return bMaxPrice - aMaxPrice;
         }
         case 'name':
@@ -519,9 +528,12 @@ function IPStockContent() {
     });
 
     return filtered;
-  };
+  }, [ipStocks, activeTab, searchTerm, priceFilter, sortBy]);
 
-  const filteredIpStocks = getFilteredAndSortedStocks();
+  const tagGroupedStocks = useMemo(
+    () => groupStocksByTags(filteredIpStocks),
+    [filteredIpStocks]
+  );
 
   const visibleStocks = useMemo(
     () => ipStocks.filter((stock) => !stock.hiddenFromStore),
@@ -546,26 +558,7 @@ function IPStockContent() {
     return filteredIpStocks.length;
   }, [activeTab, filteredIpStocks.length, slotPackages.length]);
 
-  // Group stocks by tags
-  const groupStocksByTags = (stocks: IPStock[]) => {
-    const grouped: { [key: string]: IPStock[] } = {};
-    const untagged: IPStock[] = [];
-
-    stocks.forEach(stock => {
-      if (!stock.tags || stock.tags.length === 0) {
-        untagged.push(stock);
-      } else {
-        // Use the first tag as the primary grouping tag
-        const primaryTag = stock.tags[0];
-        if (!grouped[primaryTag]) {
-          grouped[primaryTag] = [];
-        }
-        grouped[primaryTag].push(stock);
-      }
-    });
-
-    return { grouped, untagged };
-  };
+  // Group stocks by tags — computed in tagGroupedStocks useMemo above.
 
   useEffect(() => {
     if (!showDialog) return;
@@ -1310,7 +1303,7 @@ function IPStockContent() {
                     size="sm"
                     className="h-9 shrink-0 border-white/15 bg-white/[0.04] text-white/70 hover:text-white hover:bg-white/[0.08]"
                     disabled={isRefreshingStock}
-                    onClick={() => loadPlans({ silent: true, forceAdvps: true })}
+                    onClick={() => loadPlans({ silent: true, forceAdvps: true, waitForLiveSync: true })}
                     title="Refresh stock from ADVPS"
                   >
                     <RefreshCw className={cn("h-3.5 w-3.5", isRefreshingStock && "animate-spin")} />
@@ -1344,6 +1337,7 @@ function IPStockContent() {
               Showing {listedPlanCount} plan{listedPlanCount === 1 ? '' : 's'}
               {activeTab === 'Linux' ? ' · Linux category' : activeTab === 'VPS' ? ' · Windows VPS' : activeTab === 'SlotIP' ? ' · Premium proxies' : ''}
               {(searchTerm || priceFilter !== 'all') ? ' (filtered)' : ''}
+              {isRefreshingStock && !isLoading ? ' · updating live stock…' : ''}
             </p>
 
             {/* Plan listings */}
@@ -1473,7 +1467,7 @@ function IPStockContent() {
                 </Card>
               ) : (
                 (() => {
-                  const { grouped, untagged } = groupStocksByTags(filteredIpStocks);
+                  const { grouped, untagged } = tagGroupedStocks;
                   const tagKeys = Object.keys(grouped).sort();
 
                   return (
@@ -1734,7 +1728,7 @@ function IPStockContent() {
 }
 
 // Modern Compact List Row Component
-function CompactServerPlanRow({
+const CompactServerPlanRow = memo(function CompactServerPlanRow({
   stock,
   onBuyNow,
   verifyingPurchaseKey,
@@ -1973,4 +1967,4 @@ function CompactServerPlanRow({
       )}
     </div>
   );
-}
+});

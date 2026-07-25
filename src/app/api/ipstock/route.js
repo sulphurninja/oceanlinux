@@ -10,12 +10,57 @@ const { usesResellerLiveStock, stockHasResellerPanelPlans } = require('@/lib/ipS
 const { syncResellerIpStockRow } = require('@/lib/resellerLiveStock');
 const { getCompanyFulfillmentMode, countUnallocatedInventory, usesPreconfiguredInventory } = require('@/lib/companyInventory');
 
+function toPlainMap(value) {
+    if (!value) return {};
+    if (value instanceof Map) return Object.fromEntries(value);
+    return typeof value === 'object' ? value : {};
+}
+
+function slimVariantStock(variantStock) {
+    const raw = toPlainMap(variantStock);
+    const out = {};
+    for (const [memory, row] of Object.entries(raw)) {
+        if (!memory || String(memory).startsWith('$') || !row || typeof row !== 'object') continue;
+        out[memory] = {
+            available: row.available,
+            skipped: row.skipped,
+        };
+    }
+    return out;
+}
+
+/** Customer dashboard only needs stock flags — not full ADVPS/reseller catalog blobs. */
+function slimDefaultConfigurationsForStore(defaultConfigurations) {
+    const dc = toPlainMap(defaultConfigurations);
+    const slim = {};
+
+    if (dc.netbay && typeof dc.netbay === 'object') {
+        const planByMemory = {};
+        for (const [memory, planId] of Object.entries(toPlainMap(dc.netbay.planByMemory))) {
+            if (planId) planByMemory[memory] = true;
+        }
+        slim.netbay = {
+            planByMemory,
+            variantStock: slimVariantStock(dc.netbay.variantStock),
+        };
+    }
+
+    if (dc.resellerApi && typeof dc.resellerApi === 'object') {
+        slim.resellerApi = {
+            variantStock: slimVariantStock(dc.resellerApi.variantStock),
+        };
+    }
+
+    return slim;
+}
+
 function enrichIpStocksForStore(ipStocks) {
     return ipStocks.map((stock) => {
         const hasInventory = usesPreconfiguredInventory(stock);
-        const { inventoryItems, ...safeStock } = stock;
+        const { inventoryItems, defaultConfigurations, ...safeStock } = stock;
         return {
             ...safeStock,
+            defaultConfigurations: slimDefaultConfigurationsForStore(defaultConfigurations),
             inventoryAvailable: hasInventory ? countUnallocatedInventory(stock) : 0,
         };
     });
@@ -135,14 +180,22 @@ export async function GET(request) {
             searchParams.get('includeHidden') === 'true';
 
         let query = { hiddenFromStore: { $ne: true } };
+        let customerView = true;
         if (includeHidden) {
             const admin = await requireAdmin(request);
             if (admin) {
                 query = {};
+                customerView = false;
             }
         }
 
-        const ipStocks = await IPStock.find(query).lean().maxTimeMS(10000);
+        let dbQuery = IPStock.find(query).lean().maxTimeMS(10000);
+        if (customerView) {
+            dbQuery = dbQuery.select(
+                'name description available hiddenFromStore stockCount availabilityManual company serverType tags memoryOptions promoCodes defaultConfigurations inventoryItems.allocated'
+            );
+        }
+        const ipStocks = await dbQuery;
         console.log(`[IPSTOCK-API] Found ${ipStocks?.length || 0} IP stocks`);
 
         if (!ipStocks) {
@@ -153,7 +206,9 @@ export async function GET(request) {
             });
         }
 
-        const enriched = enrichIpStocksForStore(await enrichIpStocksWithProviderModes(ipStocks));
+        const enriched = customerView
+            ? enrichIpStocksForStore(await enrichIpStocksWithProviderModes(ipStocks))
+            : await enrichIpStocksWithProviderModes(ipStocks);
         const jsonResponse = JSON.stringify(enriched);
         console.log(`[IPSTOCK-API] Response size: ${jsonResponse.length} bytes`);
 
