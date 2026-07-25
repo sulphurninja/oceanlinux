@@ -105,6 +105,7 @@ interface IPStock {
   available: boolean;
   hiddenFromStore?: boolean;
   inventoryAvailable?: number;
+  usesPreconfiguredInventory?: boolean;
   defaultConfigurations?: Record<string, any>;
   stockCount?: number;
   availabilityManual?: boolean;
@@ -163,7 +164,12 @@ function getStockUnitsRemaining(stock: IPStock) {
   if (isNetbayLiveStock(stock) || isKurohostLiveStock(stock) || isResellerLiveStock(stock)) {
     return stock.available ? Number.POSITIVE_INFINITY : 0;
   }
-  if (isCompanyStock(stock)) return Math.max(0, stock.stockCount ?? 0);
+  if (isCompanyStock(stock)) {
+    if (stock.usesPreconfiguredInventory) {
+      return Math.max(0, stock.inventoryAvailable ?? 0);
+    }
+    return Math.max(0, stock.stockCount ?? 0);
+  }
   return stock.available ? Number.POSITIVE_INFINITY : 0;
 }
 
@@ -239,7 +245,12 @@ function isStockPurchasable(stock: IPStock, memory?: string) {
     if (stock.available) return true;
     return resellerVariantValues(stock).some((v) => v?.available === true);
   }
-  if (isCompanyStock(stock)) return getStockUnitsRemaining(stock) > 0;
+  if (isCompanyStock(stock)) {
+    if (stock.usesPreconfiguredInventory) {
+      return (stock.inventoryAvailable ?? 0) > 0;
+    }
+    return getStockUnitsRemaining(stock) > 0;
+  }
   return stock.available !== false;
 }
 

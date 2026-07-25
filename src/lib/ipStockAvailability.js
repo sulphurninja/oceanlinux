@@ -5,6 +5,7 @@ import {
   usesCompanyUnitFulfillment,
   countUnallocatedInventory,
   hasUnallocatedCompanyInventory,
+  usesPreconfiguredInventory,
 } from '@/lib/companyInventory';
 
 /** IP stock has Netbay plan IDs configured (automation), regardless of stock mode. */
@@ -82,6 +83,10 @@ export function usesStockCount(stock, company) {
 
 export function getIpStockRemaining(stock, company) {
   if (!stock) return 0;
+  // Saved VPS rows are the source of truth — never show stale stockCount when inventory is empty.
+  if (usesPreconfiguredInventory(stock)) {
+    return countUnallocatedInventory(stock);
+  }
   if (hasUnallocatedCompanyInventory(stock)) {
     return countUnallocatedInventory(stock);
   }

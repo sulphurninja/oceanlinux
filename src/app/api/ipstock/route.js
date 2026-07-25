@@ -70,7 +70,8 @@ function enrichIpStocksForStore(ipStocks) {
         return {
             ...safeStock,
             defaultConfigurations: slimDefaultConfigurationsForStore(defaultConfigurations),
-            inventoryAvailable: hasInventory ? countUnallocatedInventory(stock) : 0,
+            usesPreconfiguredInventory: hasInventory,
+            inventoryAvailable: hasInventory ? countUnallocatedInventory(stock) : undefined,
         };
     });
 }
