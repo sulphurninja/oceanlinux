@@ -8,6 +8,11 @@ const {
   ensureSmartVpsNotBusy: ensureSmartVpsNotBusyFromLib,
   executeSmartVpsRestart,
 } = require('@/lib/smartvpsPowerActions');
+const { sanitizeCustomerApiPayload, customerServiceErrorMessage } = require('@/lib/customerFacingErrors');
+
+function customerJson(body, status = 200, action = null) {
+  return NextResponse.json(sanitizeCustomerApiPayload(body, { action }), { status });
+}
 
 /** Restart waits for stop → offline → start; can exceed default serverless limits. */
 export const maxDuration = 180;
@@ -305,7 +310,7 @@ export async function GET(request) {
 
     if (!userId) {
       console.log('[SMARTVPS-ACTION][GET] No user ID found - unauthorized');
-      return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
+      return customerJson({ success: false, message: 'Unauthorized' }, 401, null);
     }
 
     const { searchParams } = new URL(request.url);
@@ -314,7 +319,7 @@ export async function GET(request) {
 
     if (!orderId) {
       console.log('[SMARTVPS-ACTION][GET] No orderId provided');
-      return NextResponse.json({ message: 'orderId is required' }, { status: 400 });
+      return customerJson({ success: false, message: 'Order ID is required' }, 400, 'sync');
     }
 
     const resolved = await resolveOrderForUserOrAdmin(request, orderId);
@@ -332,14 +337,14 @@ export async function GET(request) {
 
     if (!order) {
       console.log('[SMARTVPS-ACTION][GET] Order not found');
-      return NextResponse.json({ message: 'Order not found' }, { status: 404 });
+      return customerJson({ success: false, message: 'Order not found' }, 404, 'sync');
     }
 
     // For SmartVPS, we can use either the smartvpsServiceId or ipAddress as the identifier
     const serviceIdentifier = order.smartvpsServiceId || order.ipAddress;
     if (!serviceIdentifier) {
       console.log('[SMARTVPS-ACTION][GET] No SmartVPS service ID or IP address attached to order');
-      return NextResponse.json({ message: 'No SmartVPS service or IP address attached' }, { status: 400 });
+      return customerJson({ success: false, message: 'This server is still being set up. Please try again shortly.' }, 400, 'sync');
     }
 
     console.log('[SMARTVPS-ACTION][GET] Using service identifier:', serviceIdentifier);
@@ -445,17 +450,18 @@ export async function GET(request) {
     };
     console.log('[SMARTVPS-ACTION][GET] Returning response with sync info');
 
-    return NextResponse.json(response);
+    return customerJson(response, 200, 'sync');
   } catch (error) {
     console.error('[SMARTVPS-ACTION][GET] === ERROR ===');
     console.error('[SMARTVPS-ACTION][GET] Error type:', error.constructor.name);
     console.error('[SMARTVPS-ACTION][GET] Error message:', error.message);
     console.error('[SMARTVPS-ACTION][GET] Error stack:', error.stack);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return customerJson({ success: false, error: error.message }, 500, 'sync');
   }
 }
 
 export async function POST(request) {
+  let action = null;
   console.log('[SMARTVPS-ACTION][POST] === REQUEST START ===');
   console.log('[SMARTVPS-ACTION][POST] Request URL:', request.url);
   console.log('[SMARTVPS-ACTION][POST] Headers:', Object.fromEntries(request.headers.entries()));
@@ -469,18 +475,19 @@ export async function POST(request) {
 
     if (!userId) {
       console.log('[SMARTVPS-ACTION][POST] No user ID found - unauthorized');
-      return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
+      return customerJson({ success: false, message: 'Unauthorized' }, 401, action);
     }
 
     const requestBody = await request.json();
     console.log('[SMARTVPS-ACTION][POST] Request body:', requestBody);
 
-    const { orderId, action, payload } = requestBody;
+    const { orderId, payload } = requestBody;
+    action = requestBody.action;
     console.log('[SMARTVPS-ACTION][POST] Parsed params:', { orderId, action, payload });
 
     if (!orderId || !action) {
       console.log('[SMARTVPS-ACTION][POST] Missing required parameters');
-      return NextResponse.json({ message: 'orderId and action are required' }, { status: 400 });
+      return customerJson({ success: false, message: 'Order and action are required' }, 400, action);
     }
 
     const resolved = await resolveOrderForUserOrAdmin(request, orderId);
@@ -500,14 +507,14 @@ export async function POST(request) {
 
     if (!order) {
       console.log('[SMARTVPS-ACTION][POST] Order not found');
-      return NextResponse.json({ message: 'Order not found' }, { status: 404 });
+      return customerJson({ success: false, message: 'Order not found' }, 404, action);
     }
 
     // For SmartVPS, we can use either the smartvpsServiceId or ipAddress as the identifier
     const serviceIdentifier = order.smartvpsServiceId || order.ipAddress;
     if (!serviceIdentifier) {
       console.log('[SMARTVPS-ACTION][POST] No SmartVPS service ID or IP address attached to order');
-      return NextResponse.json({ message: 'No SmartVPS service or IP address attached' }, { status: 400 });
+      return customerJson({ success: false, message: 'This server is still being set up. Please try again shortly.' }, 400, action);
     }
 
     console.log('[SMARTVPS-ACTION][POST] Using service identifier:', serviceIdentifier);
@@ -750,7 +757,7 @@ export async function POST(request) {
       case 'changepassword':
         console.log('[SMARTVPS-ACTION][POST] Change password action requested');
         console.log('[SMARTVPS-ACTION][POST] SmartVPS does not support direct password change via API');
-        return NextResponse.json({ message: 'Password change not supported by SmartVPS API. Use format instead.' }, { status: 400 });
+        return customerJson({ success: false, message: 'Use Format Server to get a new password.' }, 400, 'changepassword');
 
       case 'templates':
         console.log('[SMARTVPS-ACTION][POST] Fetching templates for service:', serviceIdentifier);
@@ -849,11 +856,11 @@ export async function POST(request) {
           });
         } catch (error) {
           console.error('[SMARTVPS-ACTION][POST] Power status fetch error:', error.message);
-          return NextResponse.json({
+          return customerJson({
             success: false,
             error: error.message,
-            powerState: 'unknown'
-          });
+            powerState: 'unknown',
+          }, 200, 'status');
         }
 
       case 'sync':
@@ -878,7 +885,7 @@ export async function POST(request) {
           
           result = {
             synced: true,
-            message: 'SmartVPS status synced successfully',
+            message: 'Server status synced successfully',
             credentialsUpdated: !!(syncResult.username || syncResult.password || syncResult.os),
             lastSyncTime: syncResult.lastSyncTime
           };
@@ -886,14 +893,14 @@ export async function POST(request) {
           console.error('[SMARTVPS-ACTION][POST] Sync error:', syncError);
           result = {
             synced: false,
-            message: `Sync failed: ${syncError.message}`
+            message: customerServiceErrorMessage(syncError.message, { action: 'sync' }),
           };
         }
         break;
 
       default:
         console.log('[SMARTVPS-ACTION][POST] Unsupported action:', action);
-        return NextResponse.json({ message: 'Unsupported action' }, { status: 400 });
+        return customerJson({ success: false, message: 'This action is not supported for your server.' }, 400, action);
     }
 
     console.log('[SMARTVPS-ACTION][POST] Action completed, checking if sync is needed');
@@ -963,14 +970,14 @@ export async function POST(request) {
       result: result ? '[Result object present]' : null
     });
 
-    return NextResponse.json(response);
+    return customerJson(response, 200, action);
   } catch (error) {
     console.error('[SMARTVPS-ACTION][POST] === ERROR ===');
     console.error('[SMARTVPS-ACTION][POST] Error type:', error.constructor.name);
     console.error('[SMARTVPS-ACTION][POST] Error message:', error.message);
     console.error('[SMARTVPS-ACTION][POST] Error stack:', error.stack);
     console.error('[SMARTVPS-ACTION][POST] Error details:', error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return customerJson({ success: false, error: error.message, code: error.code || undefined }, 500, action);
   }
 }
 // Helper function to parse SmartVPS API responses

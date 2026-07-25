@@ -10,6 +10,7 @@ import {
   confirmRechargeFromWebhook,
   confirmCheckoutFromWebhook,
 } from '@/lib/paymentDispatch';
+const { customerApiCatchPayload } = require('@/lib/customerFacingErrors');
 const AutoProvisioningService = require('@/services/autoProvisioningService');
 const WhatsAppService = require('@/services/whatsappService');
 
@@ -354,7 +355,7 @@ export async function POST(request) {
   } catch (error) {
     console.error('[UPI Webhook] Error:', error);
     return NextResponse.json(
-      { success: false, message: 'Server error', error: error.message },
+      { success: false, message: 'Server error', ...customerApiCatchPayload(error.message) },
       { status: 500 }
     );
   }

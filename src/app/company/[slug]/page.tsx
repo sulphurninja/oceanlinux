@@ -22,6 +22,7 @@ import {
   ChevronDown, ChevronUp, Copy, Cloud, Tag,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { customerServiceErrorMessage } from '@/lib/customerFacingErrors';
 import { COMPANY_FILTER_VERSION, isCompanyVisibleOrder } from '@/lib/companyOrders';
 import {
   buildCompanyInventoryActivity,
@@ -357,6 +358,9 @@ export default function CompanyDashboard() {
   const [renewalProcessingLoading, setRenewalProcessingLoading] = useState(false);
   const [renewalStatusFilter, setRenewalStatusFilter] = useState<'pending' | 'approved' | 'rejected'>('pending');
 
+  const friendlyCompanyError = (raw: unknown, action?: string) =>
+    customerServiceErrorMessage(typeof raw === 'string' ? raw : String(raw || ''), { action });
+
   useEffect(() => { checkSession(); }, []);
 
   const checkSession = async () => {
@@ -390,7 +394,7 @@ export default function CompanyDashboard() {
         toast.success(`Welcome, ${data.name}`);
         loadData();
       } else {
-        toast.error(data.error || 'Invalid credentials');
+        toast.error(friendlyCompanyError(data.error, 'login') || 'Invalid credentials');
       }
     } catch { toast.error('Login failed'); }
     finally { setLoginLoading(false); }
@@ -414,7 +418,7 @@ export default function CompanyDashboard() {
       }
     } else {
       const errPayload = await stockRes.json().catch(() => ({}));
-      toast.error(errPayload.error || 'Failed to load IP stocks');
+      toast.error(friendlyCompanyError(errPayload.error, 'sync'));
     }
     if (orderRes.ok) {
       const data = await orderRes.json();
@@ -470,7 +474,7 @@ export default function CompanyDashboard() {
         setStockCountDrafts(prev => ({ ...prev, [stockId]: String(data.stock.stockCount) }));
         toast.success(stockCount > 0 ? `Stock set to ${stockCount}` : 'Marked out of stock');
       } else {
-        toast.error(data.error || 'Failed to update stock');
+        toast.error(friendlyCompanyError(data.error));
       }
     } catch {
       toast.error('Failed to update stock');
@@ -501,7 +505,7 @@ export default function CompanyDashboard() {
         toast.success(`Live stock synced — ${data.inStock}/${data.synced} in stock on panel`);
       }
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Live stock sync failed');
+      toast.error(friendlyCompanyError(err instanceof Error ? err.message : err, 'sync'));
     } finally {
       setSyncingLiveStock(false);
     }
@@ -570,7 +574,7 @@ export default function CompanyDashboard() {
         toast.success('Sab VPS OK — panel expiry customer validity se match hai');
       }
     } catch (err: any) {
-      toast.error(err.message || 'Sync all expiry failed');
+      toast.error(friendlyCompanyError(err.message, 'sync'));
     } finally {
       setSyncingAllExpiries(false);
     }
@@ -628,7 +632,7 @@ export default function CompanyDashboard() {
         toast.success(`Password synced from ${resellerLabel}${expiryHint}`);
       }
     } catch (err: any) {
-      toast.error(err.message || 'Hostheaven sync failed');
+      toast.error(friendlyCompanyError(err.message, 'sync'));
     } finally {
       setSyncingStockId(null);
     }
@@ -672,7 +676,7 @@ export default function CompanyDashboard() {
         }
         toast.success(`Added ${data.added} server(s) — auto-deliver on payment`);
       } else {
-        toast.error(data.error || 'Failed to add inventory');
+        toast.error(friendlyCompanyError(data.error));
       }
     } catch {
       toast.error('Failed to add inventory');
@@ -695,7 +699,7 @@ export default function CompanyDashboard() {
         setStockCountDrafts(prev => ({ ...prev, [stockId]: String(data.stock.stockCount) }));
         toast.success('Removed unused server from stock');
       } else {
-        toast.error(data.error || 'Cannot remove (may be already sold)');
+        toast.error(friendlyCompanyError(data.error));
       }
     } catch {
       toast.error('Failed to remove item');
@@ -747,7 +751,7 @@ export default function CompanyDashboard() {
         setEditOrder(null);
       } else {
         const data = await res.json();
-        toast.error(data.error || 'Failed to update');
+        toast.error(friendlyCompanyError(data.error));
       }
     } catch { toast.error('Failed to update'); }
     finally { setSaving(false); }
@@ -774,7 +778,7 @@ export default function CompanyDashboard() {
         loadActionRequests(requestStatusFilter);
       } else {
         const data = await res.json();
-        toast.error(data.error || 'Failed');
+        toast.error(friendlyCompanyError(data.error));
       }
     } catch { toast.error('Failed to process'); }
     finally { setProcessingLoading(false); }
@@ -807,7 +811,7 @@ export default function CompanyDashboard() {
         }
       } else {
         const data = await res.json();
-        toast.error(data.error || 'Failed');
+        toast.error(friendlyCompanyError(data.error));
       }
     } catch { toast.error('Failed to process'); }
     finally { setRenewalProcessingLoading(false); }

@@ -9,6 +9,7 @@ const { resolveOrderExpiryOnPayment } = require('@/lib/advpsOrderExpiry');
 const AutoProvisioningService = require('@/services/autoProvisioningService');
 const WhatsAppService = require('@/services/whatsappService');
 import { enforceOrderAccess } from '@/lib/apiSecurity';
+const { customerApiCatchPayload } = require('@/lib/customerFacingErrors');
 import { chargeDeferredWalletForOrder, recoverPendingOrderPayment } from '@/lib/confirmPendingOrderPayment';
 
 function resolveGatewayMethod(paymentMethod, order) {
@@ -306,7 +307,7 @@ export async function POST(request) {
   } catch (error) {
     console.error('Payment confirmation error:', error);
     return NextResponse.json(
-      { success: false, message: 'Server error', error: error.message },
+      { success: false, message: 'Server error', ...customerApiCatchPayload(error.message) },
       { status: 500 }
     );
   }

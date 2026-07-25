@@ -509,29 +509,34 @@ async function resolveAdvpsServiceIdForPower(api, order, { Order } = {}) {
 }
 
 function formatAdvpsActionError(error) {
+  const { customerServiceErrorMessage } = require('@/lib/customerFacingErrors');
   const msg = error?.message || 'ADVPS action failed';
   if (/IP address not allowed/i.test(msg)) {
     return {
-      message: 'ADVPS blocked this request. Whitelist your server public IP in ADVPS API settings.',
+      message: customerServiceErrorMessage(msg, { code: 'ADVPS_IP_BLOCKED' }),
       code: 'ADVPS_IP_BLOCKED',
       status: 403,
     };
   }
   if (error?.status === 404 || /not found|invalid service/i.test(msg)) {
     return {
-      message: 'ADVPS service not found. Sync the order or contact support to relink the service ID.',
+      message: customerServiceErrorMessage(msg, { code: 'ADVPS_SERVICE_NOT_FOUND' }),
       code: 'ADVPS_SERVICE_NOT_FOUND',
       status: 404,
     };
   }
-  if (error?.status === 429) {
+  if (error?.status === 429 || /rebuild limit/i.test(msg)) {
     return {
-      message: msg,
-      code: 'ADVPS_RATE_LIMIT',
+      message: customerServiceErrorMessage(msg, { code: 'ADVPS_REBUILD_LIMIT' }),
+      code: 'ADVPS_REBUILD_LIMIT',
       status: 429,
     };
   }
-  return { message: msg, code: 'ADVPS_ACTION_FAILED', status: error?.status || 500 };
+  return {
+    message: customerServiceErrorMessage(msg, { action: 'default' }),
+    code: 'ADVPS_ACTION_FAILED',
+    status: error?.status || 500,
+  };
 }
 
 /**

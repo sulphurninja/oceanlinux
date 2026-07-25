@@ -10,6 +10,7 @@ import { assignPanelCredentials } from '@/lib/panelCredentials';
 import { detectCompanyManagedRenewal, resolveRenewalProvider } from '@/lib/companyRenewal';
 import { isSlotIpOrder, SLOT_IP_NO_RENEWAL_MESSAGE } from '@/lib/slotIpOrder';
 import { resolveOrderRenewalPrice } from '@/lib/orderRenewalPricingServer';
+const { customerApiCatchPayload } = require('@/lib/customerFacingErrors');
 import { debitPendingRenewalWallet } from '@/lib/renewalWallet';
 import { enforceOrderAccess } from '@/lib/apiSecurity';
 const SmartVPSAPI = require('@/services/smartvpsApi');
@@ -827,7 +828,7 @@ export async function POST(request) {
     }
 
     return NextResponse.json(
-      { success: false, message: 'Server error', error: error.message },
+      { success: false, message: 'Server error', ...customerApiCatchPayload(error.message) },
       { status: 500 }
     );
   }

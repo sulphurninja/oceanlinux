@@ -56,6 +56,7 @@ import { ADVPS_REBUILD_LIMIT, getAdvpsRebuildUsage } from '@/lib/advpsRebuildLim
 import { isWithinRenewalWindow } from '@/lib/expiryHelper';
 import { getOrderRenewalPrice, getOrderRenewalPriceNote, getCurrentListPriceFromStock } from '@/lib/orderRenewalPricing';
 import { getCustomerProviderDisplayName } from '@/lib/customerProviderDisplay';
+import { customerServiceErrorMessage, customerProvisioningErrorMessage, customerSuccessMessage } from '@/lib/customerFacingErrors';
 import { useSessionAlert } from '@/components/session-alert';
 import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -314,6 +315,33 @@ const OrderDetails = () => {
   const goBack = () => router.push(returnTo);
   const { showAlert } = useSessionAlert();
   const { confirm, ConfirmDialog } = useConfirmDialog();
+  const [serviceErrorPopup, setServiceErrorPopup] = useState<{
+    open: boolean;
+    title: string;
+    message: string;
+  }>({ open: false, title: '', message: '' });
+
+  const showServiceError = (
+    raw: unknown,
+    opts?: { action?: string; code?: string; title?: string }
+  ) => {
+    const rawMessage =
+      typeof raw === 'string'
+        ? raw
+        : raw && typeof raw === 'object' && 'message' in (raw as object)
+          ? String((raw as { message?: string }).message || '')
+          : raw && typeof raw === 'object' && 'error' in (raw as object)
+            ? String((raw as { error?: string }).error || '')
+            : '';
+    setServiceErrorPopup({
+      open: true,
+      title: opts?.title || 'Could not complete action',
+      message: customerServiceErrorMessage(rawMessage, {
+        action: opts?.action,
+        code: opts?.code,
+      }),
+    });
+  };
 
   const [order, setOrder] = useState<Order | null>(null);
   const [ipStock, setIpStock] = useState<IPStock | null>(null);
@@ -439,7 +467,7 @@ const OrderDetails = () => {
               const paidUndelivered =
                 isOrderPaid(updated) && !hasOrderBeenDelivered(updated);
               if (!paidUndelivered) {
-                toast.error(updated.provisioningError || 'Provisioning failed. Check the order details.');
+                toast.error(customerProvisioningErrorMessage(updated.provisioningError));
               }
             }
           }
@@ -671,7 +699,7 @@ const OrderDetails = () => {
         throw new Error(templatesData.error || 'Failed to load templates');
       }
     } catch (err: any) {
-      setOsProgress(`Failed to load operating systems: ${err.message || 'unknown error'}`);
+      setOsProgress(customerServiceErrorMessage(err.message, { action: 'templates' }));
       setOsLoading(false);
     }
   };
@@ -706,8 +734,15 @@ const OrderDetails = () => {
       const data = await res.json();
 
       if (!data.success) {
-        const msg = data.message || data.error || 'Reinstall failed. Please try again.';
-        toast.error(msg, { duration: 10000 });
+        const msg = customerServiceErrorMessage(data.message || data.error, {
+          action: osMode === 'format' ? 'format' : 'reinstall',
+          code: data.code,
+        });
+        showServiceError(msg, {
+          action: osMode === 'format' ? 'format' : 'reinstall',
+          code: data.code,
+          title: osMode === 'format' ? 'Format failed' : 'Reinstall failed',
+        });
         setOsProgress(msg);
         setActionBusy(null);
         setOsLoading(false);
@@ -728,7 +763,14 @@ const OrderDetails = () => {
 
     } catch (err: any) {
       setActionBusy(null);
-      setOsProgress(`Error: ${err.message || 'unknown error'}`);
+      const msg = customerServiceErrorMessage(err.message, {
+        action: osMode === 'format' ? 'format' : 'reinstall',
+      });
+      showServiceError(msg, {
+        action: osMode === 'format' ? 'format' : 'reinstall',
+        title: osMode === 'format' ? 'Format failed' : 'Reinstall failed',
+      });
+      setOsProgress(msg);
       setTimeout(() => {
         setOsDialogOpen(false);
         setOsLoading(false);
@@ -781,7 +823,7 @@ const OrderDetails = () => {
         toast.success('Request submitted! Admin will review shortly.');
         await fetchPendingRequest();
       } else {
-        toast.error(data.message || 'Failed to submit request');
+        showServiceError(data.message || data.error, { action, title: 'Request failed' });
       }
     } catch (error) {
       console.error('[ORDER-DETAILS] Failed to request action:', error);
@@ -1028,7 +1070,7 @@ const OrderDetails = () => {
       }
 
       toast.info(
-        'Restart was sent to SmartVPS. Status may still be updating — use Refresh if it looks stale.',
+        'Restart was sent. Status may still be updating — use Refresh if it looks stale.',
         { duration: 6000 }
       );
       return null;
@@ -1110,15 +1152,12 @@ const OrderDetails = () => {
 
         // Show sync result — never pretend success when ADVPS API failed
         if (data.syncResult?.apiBlocked) {
-          toast.error(
-            'ADVPS API blocked this server (IP address not allowed). Whitelist your server IP in ADVPS API settings, then sync again.',
-            { duration: 10000 }
+          showServiceError(
+            'Server sync is temporarily unavailable. Please contact support for help.',
+            { action: 'sync', title: 'Sync unavailable' }
           );
         } else if (data.syncResult?.syncFailed || data.syncResult?.error) {
-          toast.error(
-            `ADVPS sync failed: ${data.syncResult.error || data.syncResult.statusError || 'Could not reach ADVPS API'}`,
-            { duration: 8000 }
-          );
+          showServiceError('Could not refresh server details.', { action: 'sync', title: 'Sync failed' });
         } else if (data.syncResult?.passwordStale && provider === 'advps') {
           setAdvpsPasswordIssue(true);
           toast.warning(
@@ -1138,22 +1177,26 @@ const OrderDetails = () => {
           } else if (hasCompanyJoyAutomation(ipStock) && isOrderCompanyAutomated(order, ipStock)) {
             toast.success(
               data.syncResult.expiryUpdated
-                ? `Synced from Joy: expiry updated (${changed})`
-                : `Synced from Joy: ${changed}`,
+                ? `Synced: expiry updated (${changed})`
+                : `Synced: ${changed}`,
               { duration: 6000 }
             );
           } else {
-            toast.success(`Synced from ADVPS: ${changed}`);
+            toast.success(`Synced: ${changed} updated`);
           }
         } else if (provider === 'advps') {
-          toast.success('Synced with ADVPS — credentials already up to date');
+          toast.success('Server credentials are already up to date');
         } else if (provider === 'netbay') {
           toast.success('Already up to date with your server');
         } else if (hasCompanyJoyAutomation(ipStock) && isOrderCompanyAutomated(order, ipStock)) {
-          toast.success('Already up to date with Joy');
+          toast.success('Already up to date with your server');
         }
       } else {
-        toast.error(data.error || data.message || 'Failed to load service details');
+        showServiceError(data.error || data.message, {
+          action: 'sync',
+          code: data.code,
+          title: 'Could not load server details',
+        });
       }
     } catch (error) {
       console.error('[ORDER-DETAILS] Failed to load service details:', error);
@@ -1185,7 +1228,9 @@ const OrderDetails = () => {
         // For power actions, show a more informative message
         if (['start', 'stop', 'restart'].includes(action)) {
           const actionLabel = action === 'start' ? 'Starting' : action === 'stop' ? 'Stopping' : 'Restarting';
-          const panelMsg = data.result?.message ? ` ${data.result.message}` : '';
+          const panelMsg = data.result?.message
+            ? ` ${customerSuccessMessage(data.result.message, '')}`
+            : '';
           const ipNote =
             action === 'start' && provider === 'advps' && data.result?.ipConfig?.ok && data.result?.ipConfig?.ip
               ? ` IP configured after start (${data.result.ipConfig.ip}).`
@@ -1244,18 +1289,23 @@ const OrderDetails = () => {
         }
       } else {
         if (action === 'generatepassword' && data.code === 'PASSWORD_ALREADY_EXISTS') {
-          toast.error(data.error || 'Use Format Server to get a new password.', { duration: 10000 });
-        } else if (provider === 'advps' && data.code === 'ADVPS_IP_BLOCKED') {
-          toast.error(
-            data.error || 'ADVPS blocked this request. Whitelist your OceanLinux server IP in ADVPS API settings.',
-            { duration: 10000 }
-          );
-        } else if (data.code === 'NETBAY_REBUILD_LIMIT') {
-          toast.error(data.message || data.error || 'Rebuild limit reached (3 per 24 hours).', {
-            duration: 12000,
+          showServiceError(data.error || data.message, {
+            action: 'generatepassword',
+            code: data.code,
+            title: 'Password not available',
+          });
+        } else if (data.code === 'NETBAY_REBUILD_LIMIT' || data.code === 'ADVPS_REBUILD_LIMIT') {
+          showServiceError(data.message || data.error, {
+            action,
+            code: data.code,
+            title: 'Reinstall limit reached',
           });
         } else {
-          toast.error(data.message || data.error || `Failed to execute "${action}"`);
+          showServiceError(data.message || data.error, {
+            action,
+            code: data.code,
+            title: 'Action failed',
+          });
         }
         // Refresh power state on error too
         if (['start', 'stop', 'restart', 'resetmac'].includes(action)) {
@@ -1263,7 +1313,7 @@ const OrderDetails = () => {
         }
       }
     } catch (e: any) {
-      toast.error(e.message || `Failed to execute "${action}"`);
+      showServiceError(e.message, { action, title: 'Action failed' });
       if (POWER_ACTIONS.has(action)) {
         await fetchServerPowerState({ force: true });
       }
@@ -1282,8 +1332,8 @@ const OrderDetails = () => {
       title: 'Generate New Password',
       description: (
         <div className="space-y-2">
-          <p>Generate a new login password from ADVPS? This calls ADVPS directly and saves the password here automatically.</p>
-          <p className="text-xs">If ADVPS has already generated a password for this server, use Format Server instead — it creates a fresh OS and new password.</p>
+          <p>Generate a new login password from your server panel? The new password will be saved here automatically.</p>
+          <p className="text-xs">If a password was already generated for this server, use Format Server instead — it creates a fresh OS and new password.</p>
         </div>
       ),
       confirmLabel: 'Generate Password',
@@ -1340,7 +1390,7 @@ const OrderDetails = () => {
     const ok = await confirm({
       title: 'Reset MAC Address',
       description: variant === 'advps'
-        ? 'Generate and apply a new MAC address on ADVPS? Without a MAC reset subscription this is limited to once per 24 hours. You may need to renew DHCP or adjust networking inside the VM.'
+        ? 'Generate and apply a new MAC address? Without a MAC reset subscription this is limited to once per 24 hours. You may need to renew DHCP or adjust networking inside the VM.'
         : 'Generate a new MAC address on the reseller panel? The VM will be stopped, the MAC updated, and then restarted. You may need to renew DHCP inside the guest OS.',
       confirmLabel: 'Reset MAC',
       destructive: true,
@@ -1447,9 +1497,11 @@ const OrderDetails = () => {
       } else {
         throw new Error('Failed to load templates');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('[FORMAT-DIALOG] Error loading templates:', error);
-      setFormatProgress('Failed to load operating systems. Please try again.');
+      const msg = customerServiceErrorMessage(error?.message, { action: 'templates' });
+      showServiceError(msg, { action: 'templates', title: 'Could not load operating systems' });
+      setFormatProgress('');
       setFormatLoading(false);
     }
   };
@@ -1492,7 +1544,9 @@ const OrderDetails = () => {
     } catch (error: any) {
       console.error('[FORMAT-DIALOG] Format error:', error);
       setActionBusy(null);
-      setFormatProgress(`Error: ${error.message}`);
+      const msg = customerServiceErrorMessage(error.message, { action: 'format' });
+      showServiceError(msg, { action: 'format', title: 'Format failed' });
+      setFormatProgress(msg);
       setTimeout(() => {
         setFormatDialogOpen(false);
         setFormatLoading(false);
@@ -2557,7 +2611,7 @@ const OrderDetails = () => {
                         <div className="flex-1 min-w-0">
                           <h3 className="font-semibold text-base mb-1">Setting up your server...</h3>
                           <p className="text-sm text-muted-foreground">
-                            Your ADVPS server is being started and credentials are being generated. This usually takes 1-3 minutes. This page will update automatically.
+                            Your server is being started and credentials are being generated. This usually takes 1-3 minutes. This page will update automatically.
                           </p>
                           <div className="flex items-center gap-3 mt-3">
                             <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -2592,7 +2646,7 @@ const OrderDetails = () => {
                               : 'Formatting your server...'}
                           </h3>
                           <p className="text-sm text-muted-foreground">
-                            SmartVPS is reinstalling the operating system. OS may still show the old version until finished — this usually takes 5–10 minutes. This page updates automatically.
+                            Your server is reinstalling the operating system. OS may still show the old version until finished — this usually takes 5–10 minutes. This page updates automatically.
                           </p>
                           <p className="text-xs text-muted-foreground mt-2">
                             Current OS on panel: <strong>{order.os || 'Unknown'}</strong> — will update when complete.
@@ -2963,7 +3017,7 @@ const OrderDetails = () => {
                               <Alert className="bg-amber-500/10 border-amber-500/25">
                                 <AlertTriangle className="h-4 w-4" />
                                 <AlertDescription className="text-xs">
-                                  The password here may not match your server. Use the button below to pull the current password from ADVPS automatically.
+                                  The password here may not match your server. Use the button below to pull the current password automatically.
                                 </AlertDescription>
                               </Alert>
                             )}
@@ -2982,7 +3036,7 @@ const OrderDetails = () => {
                               Generate New Password
                             </Button>
                             <p className="text-[11px] text-muted-foreground px-0.5">
-                              Password not working? This calls ADVPS and updates your login here — no admin needed. If ADVPS already generated one, use Format Server instead.
+                              Password not working? This updates your login here automatically — no admin needed. If a password was already generated, use Format Server instead.
                             </p>
                           </div>
                         )}
@@ -4281,6 +4335,33 @@ const OrderDetails = () => {
           </div>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog
+        open={serviceErrorPopup.open}
+        onOpenChange={(open) => setServiceErrorPopup((prev) => ({ ...prev, open }))}
+      >
+        <AlertDialogContent className="premium-dashboard-alert sm:max-w-md w-[calc(100vw-1.5rem)]">
+          <AlertDialogHeader className="premium-dashboard-dialog-header !border-0">
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-destructive" />
+              {serviceErrorPopup.title}
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2 text-sm text-muted-foreground">
+                <p>{serviceErrorPopup.message}</p>
+                <p className="text-xs">
+                  If this keeps happening, please raise a support ticket from your dashboard.
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="premium-dashboard-dialog-footer sm:justify-center">
+            <AlertDialogAction className="min-w-[120px] w-full sm:w-auto bg-emerald-500 hover:bg-emerald-400 text-emerald-950">
+              OK
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <ConfirmDialog />
     </div>

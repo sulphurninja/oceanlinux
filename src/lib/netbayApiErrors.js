@@ -1,6 +1,7 @@
 /**
  * Turn Netbay API failures into short, customer-safe messages (no stack traces).
  */
+const { customerServiceErrorMessage } = require('@/lib/customerFacingErrors');
 
 function tryParseJson(value) {
   if (typeof value !== 'string') return null;
@@ -96,7 +97,7 @@ function toUserFacingNetbayError(err) {
   }
 
   return {
-    message: raw,
+    message: customerServiceErrorMessage(raw, { code: 'NETBAY_API_ERROR' }),
     code: 'NETBAY_API_ERROR',
     status: typeof status === 'number' ? status : 500,
   };

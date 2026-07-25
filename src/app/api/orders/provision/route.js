@@ -3,6 +3,7 @@ import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 import { enforceAdmin, enforceOrderAccess, isCronAuthorized } from '@/lib/apiSecurity';
 const AutoProvisioningService = require('@/services/autoProvisioningService');
+const { customerApiCatchPayload } = require('@/lib/customerFacingErrors');
 
 export async function POST(request) {
   const isCron = isCronAuthorized(request);
@@ -132,7 +133,7 @@ export async function POST(request) {
   } catch (error) {
     console.error('Provisioning API error:', error);
     return NextResponse.json(
-      { message: 'Provisioning failed', error: error.message },
+      { message: 'Provisioning failed', ...customerApiCatchPayload(error.message, { action: 'provision' }) },
       { status: 500 }
     );
   }
@@ -178,7 +179,7 @@ export async function GET(request) {
   } catch (error) {
     console.error('Get provisioning status error:', error);
     return NextResponse.json(
-      { message: 'Failed to get provisioning status', error: error.message },
+      { message: 'Failed to get provisioning status', ...customerApiCatchPayload(error.message, { action: 'provision' }) },
       { status: 500 }
     );
   }

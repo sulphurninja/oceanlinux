@@ -11,6 +11,7 @@ import { createGatewayOrder, buildClientTxnId } from '@/lib/paymentGateways';
 import { confirmCheckoutFromWebhook } from '@/lib/paymentDispatch';
 const { defaultOsForProduct } = require('@/lib/orderOs');
 const { normalizeOsForServerType } = require('@/lib/companyInventory');
+const { customerApiCatchPayload } = require('@/lib/customerFacingErrors');
 
 const AutoProvisioningService = require('@/services/autoProvisioningService');
 
@@ -156,7 +157,7 @@ export async function POST(request) {
       session.failedAt = new Date();
       await session.save();
       return NextResponse.json(
-        { success: false, message: err.message || 'Wallet reservation failed' },
+        { success: false, message: 'Wallet reservation failed', ...customerApiCatchPayload(err.message) },
         { status: 400 }
       );
     }
@@ -221,7 +222,7 @@ export async function POST(request) {
     session.failedAt = new Date();
     await session.save();
     return NextResponse.json(
-      { success: false, message: err.message || 'Failed to create orders' },
+      { success: false, message: 'Failed to create orders', ...customerApiCatchPayload(err.message) },
       { status: 500 }
     );
   }
@@ -284,7 +285,7 @@ export async function POST(request) {
     session.failedAt = new Date();
     await session.save();
     return NextResponse.json(
-      { success: false, message: 'Failed to create gateway order', error: err.message },
+      { success: false, message: 'Failed to create gateway order', ...customerApiCatchPayload(err.message) },
       { status: 500 }
     );
   }

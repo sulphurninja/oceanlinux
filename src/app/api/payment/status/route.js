@@ -8,6 +8,7 @@ import {
   probeGatewayPayment,
 } from '@/lib/confirmPendingOrderPayment';
 import { enforceOrderAccess } from '@/lib/apiSecurity';
+const { customerApiCatchPayload } = require('@/lib/customerFacingErrors');
 import {
   findDispatchTarget,
   recoverPendingCheckoutSession,
@@ -436,7 +437,7 @@ export async function POST(request) {
   } catch (error) {
     console.error('Error in payment status API:', error);
     return NextResponse.json(
-      { message: 'Server error', error: error.message },
+      { message: 'Server error', ...customerApiCatchPayload(error.message) },
       { status: 500 }
     );
   } finally {

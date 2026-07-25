@@ -4,6 +4,7 @@ import { getDataFromToken } from '@/helper/getDataFromToken';
 import ServerActionRequest from '@/models/serverActionRequestModel';
 import Order from '@/models/orderModel';
 import User from '@/models/userModel';
+const { customerApiCatchPayload } = require('@/lib/customerFacingErrors');
 
 export async function POST(request) {
     await connectDB();
@@ -122,7 +123,7 @@ export async function POST(request) {
         }
 
         return NextResponse.json(
-            { success: false, message: 'Failed to create action request', error: error.message },
+            { success: false, message: 'Failed to create action request', ...customerApiCatchPayload(error.message) },
             { status: 500 }
         );
     }

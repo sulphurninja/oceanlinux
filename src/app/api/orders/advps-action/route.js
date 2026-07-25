@@ -24,11 +24,22 @@ const {
   configureAdvpsServiceIp,
 } = require('@/lib/advpsOrderSync');
 const { extractPasswordFromGenerateError } = require('@/lib/advpsPasswordFetch');
+const { sanitizeCustomerApiPayload, customerServiceErrorMessage } = require('@/lib/customerFacingErrors');
+
+function customerJson(body, status = 200, action = null) {
+  return NextResponse.json(sanitizeCustomerApiPayload(body, { action }), { status });
+}
 
 async function resolveServiceIdForOrder(api, order, orderId) {
   const resolved = await resolveAdvpsServiceIdForPower(api, order, { Order });
   if (!resolved.serviceId) {
-    return { error: resolved.error || 'No ADVPS service ID attached', status: 400 };
+    return {
+      error: customerServiceErrorMessage(resolved.error || 'No ADVPS service ID attached', {
+        action: 'sync',
+        code: 'ADVPS_SERVICE_NOT_FOUND',
+      }),
+      status: 400,
+    };
   }
 
   if (resolved.corrected) {
@@ -51,7 +62,7 @@ export async function GET(request) {
 
     const { searchParams } = new URL(request.url);
     const orderId = searchParams.get('orderId');
-    if (!orderId) return NextResponse.json({ message: 'orderId is required' }, { status: 400 });
+    if (!orderId) return customerJson({ success: false, message: 'Order ID is required' }, 400, 'sync');
 
     const access = await resolveOrderForUserOrAdmin(request, orderId);
     if (access.error) return access.error;
@@ -60,7 +71,7 @@ export async function GET(request) {
     const api = new AdvpsAPI();
     const resolved = await resolveServiceIdForOrder(api, order, orderId);
     if (resolved.error) {
-      return NextResponse.json({ message: resolved.error }, { status: resolved.status });
+      return customerJson({ success: false, message: resolved.error, error: resolved.error, code: 'ADVPS_SERVICE_NOT_FOUND' }, resolved.status, 'sync');
     }
     const serviceId = resolved.serviceId;
 
@@ -116,7 +127,7 @@ export async function GET(request) {
       await Order.findByIdAndUpdate(orderId, { lastSyncTime: sync.dbUpdates.lastSyncTime });
     }
 
-    return NextResponse.json({
+    return customerJson({
       success: !sync.syncFailed,
       serviceId,
       details,
@@ -128,28 +139,28 @@ export async function GET(request) {
         lastSyncTime: sync.dbUpdates.lastSyncTime,
         statusApiOk: sync.statusApiOk,
         purchaseApiOk: sync.purchaseApiOk,
-        statusError: sync.statusError,
-        purchaseError: sync.purchaseError,
         syncFailed: sync.syncFailed,
         apiBlocked: sync.apiBlocked,
         passwordStale: sync.passwordStale,
         passwordSource: sync.passwordSource,
         passwordFoundInApi: sync.passwordFoundInApi,
-        error: sync.error || null,
       },
     });
   } catch (error) {
     console.error('[ADVPS-ACTION][GET] Error:', error.message);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return customerJson({ success: false, error: error.message }, 500, 'sync');
   }
 }
 
 export async function POST(request) {
+  let action = null;
   try {
     await connectDB();
 
-    const { orderId, action, payload } = await request.json();
-    if (!orderId || !action) return NextResponse.json({ message: 'orderId and action are required' }, { status: 400 });
+    const body = await request.json();
+    action = body?.action || null;
+    const { orderId, payload } = body;
+    if (!orderId || !action) return customerJson({ success: false, message: 'Order and action are required' }, 400, action);
 
     const access = await resolveOrderForUserOrAdmin(request, orderId);
     if (access.error) return access.error;
@@ -158,7 +169,7 @@ export async function POST(request) {
     const api = new AdvpsAPI();
     const resolved = await resolveServiceIdForOrder(api, order, orderId);
     if (resolved.error) {
-      return NextResponse.json({ success: false, message: resolved.error, error: resolved.error }, { status: resolved.status });
+      return customerJson({ success: false, message: resolved.error, error: resolved.error, code: 'ADVPS_SERVICE_NOT_FOUND' }, resolved.status, action);
     }
     const serviceId = resolved.serviceId;
     let result;
@@ -213,18 +224,18 @@ export async function POST(request) {
         } catch (macErr) {
           const status = macErr?.status;
           if (status === 429) {
-            return NextResponse.json({
+            return customerJson({
               success: false,
               error: 'MAC reset is only allowed once every 24 hours without an active MAC reset subscription.',
               code: 'MAC_RESET_RATE_LIMIT',
-            }, { status: 429 });
+            }, 429, 'resetmac');
           }
           if (status === 404) {
-            return NextResponse.json({
+            return customerJson({
               success: false,
               error: 'Service not found or MAC reset is not supported for this assignment (VPS only).',
               code: 'MAC_RESET_NOT_APPLICABLE',
-            }, { status: 404 });
+            }, 404, 'resetmac');
           }
           throw macErr;
         }
@@ -245,7 +256,7 @@ export async function POST(request) {
             await Order.findByIdAndUpdate(orderId, { lastSyncTime: sync.dbUpdates.lastSyncTime });
           }
 
-          return NextResponse.json({
+          return customerJson({
             success: true,
             powerState,
             runningStatus: pickAdvpsRunningStatusRaw(d) || null,
@@ -255,9 +266,9 @@ export async function POST(request) {
             lastSync: new Date().toISOString(),
             credentialsUpdated: sync.credentialsUpdated,
             changes: sync.changes,
-          });
+          }, 200, 'status');
         } catch (err) {
-          return NextResponse.json({ success: false, error: err.message, powerState: 'unknown' });
+          return customerJson({ success: false, error: err.message, powerState: 'unknown' }, 200, 'status');
         }
       }
 
@@ -311,11 +322,11 @@ export async function POST(request) {
             break;
           }
           if (msg.includes('already exists') || msg.includes('Password already') || msg.includes('cannot be regenerated')) {
-            return NextResponse.json({
+            return customerJson({
               success: false,
-              error: 'ADVPS will not generate another password for this server. Use Format Server below — it will install a fresh OS and generate a new password automatically.',
+              error: 'Use Format Server to get a new password.',
               code: 'PASSWORD_ALREADY_EXISTS',
-            }, { status: 400 });
+            }, 400, 'generatepassword');
           }
           throw passErr;
         }
@@ -325,19 +336,20 @@ export async function POST(request) {
       case 'rebuild':
       case 'format': {
         const os = payload?.templateId || payload?.os;
-        if (!os) return NextResponse.json({ message: 'OS template is required for rebuild' }, { status: 400 });
+        if (!os) return customerJson({ success: false, message: 'Please select an operating system.' }, 400, 'format');
 
         const { count: currentCount } = getAdvpsRebuildUsage(order);
 
         if (currentCount >= ADVPS_REBUILD_LIMIT) {
-          return NextResponse.json({
+          return customerJson({
+            success: false,
             message: `Rebuild limit reached. ${getAdvpsRebuildLimitMessage()}`,
-            code: 'REBUILD_LIMIT_REACHED',
+            code: 'ADVPS_REBUILD_LIMIT',
             rebuildsUsed: currentCount,
             rebuildsRemaining: 0,
             rebuildLimit: ADVPS_REBUILD_LIMIT,
             resetsOn: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1).toISOString(),
-          }, { status: 429 });
+          }, 429, 'format');
         }
 
         const rebuildRes = await api.rebuild(serviceId, os);
@@ -423,10 +435,10 @@ export async function POST(request) {
           result = {
             synced: true,
             message: sync.credentialsUpdated
-              ? `ADVPS synced — updated: ${sync.changes.join(', ')}`
+              ? `Synced — updated: ${sync.changes.join(', ')}`
               : sync.passwordStale
-                ? 'ADVPS still has the old password on file. Use Generate New Password on your order page, or Format the server if that is unavailable.'
-                : 'ADVPS status synced (no credential changes)',
+                ? 'The password on file may be outdated. Use Generate New Password on your order page, or Format the server if that is unavailable.'
+                : 'Server status synced (no credential changes)',
             runningStatus: pickAdvpsRunningStatusRaw(d) || null,
             credentialsUpdated: sync.credentialsUpdated,
             changes: sync.changes,
@@ -435,22 +447,26 @@ export async function POST(request) {
             passwordSource: sync.passwordSource,
           };
         } catch (err) {
-          result = { synced: false, message: `Sync failed: ${err.message}` };
+          result = {
+            synced: false,
+            message: customerServiceErrorMessage(err.message, { action: 'sync' }),
+          };
         }
         break;
       }
 
       default:
-        return NextResponse.json({ message: 'Unsupported action' }, { status: 400 });
+        return customerJson({ success: false, message: 'This action is not supported for your server.' }, 400, action);
     }
 
-    return NextResponse.json({ success: true, action, result });
+    return customerJson({ success: true, action, result }, 200, action);
   } catch (error) {
     console.error('[ADVPS-ACTION][POST] Error:', error.message);
     const formatted = formatAdvpsActionError(error);
-    return NextResponse.json(
+    return customerJson(
       { success: false, error: formatted.message, message: formatted.message, code: formatted.code },
-      { status: formatted.status }
+      formatted.status,
+      action
     );
   }
 }

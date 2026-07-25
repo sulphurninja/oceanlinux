@@ -30,6 +30,11 @@ const { applyJoyMachineToOrderUpdates } = require('@/lib/joyOrderSync');
 const { runNetbayPostRebuildFlow } = require('@/lib/netbayPostRebuildFlow');
 const { applyNetbayServiceToOrderUpdates, resolveNetbayPowerState } = require('@/lib/netbayOrderSync');
 const { toUserFacingNetbayError } = require('@/lib/netbayApiErrors');
+const { sanitizeCustomerApiPayload, customerServiceErrorMessage } = require('@/lib/customerFacingErrors');
+
+function actionJson(body, status = 200, action = null) {
+  return NextResponse.json(sanitizeCustomerApiPayload(body, { action }), { status });
+}
 
 async function resolveOrderForAction(request, orderId) {
   // Internal bypass: trusted services (Hosthell) call via internal proxy with this header
@@ -512,10 +517,10 @@ export async function POST(request) {
       (order.serverDetails && order.serverDetails.rawDetails && order.serverDetails.rawDetails.ips);
 
     if (!isVPSOrder) {
-      return NextResponse.json({
+      return actionJson({
         success: false,
-        error: `This action is only available for VPS orders. Product name: ${order.productName}`
-      }, { status: 400 });
+        error: 'This action is only available for VPS orders.',
+      }, 400, action);
     }
 
     // Extract IP address from order details
@@ -547,10 +552,10 @@ export async function POST(request) {
     // requires an IP for VM lookup.
     const orderIsNetbay = order.provider === 'netbay' || !!order.netbayServiceId;
     if (!ipAddress && !orderIsNetbay) {
-      return NextResponse.json({
+      return actionJson({
         success: false,
-        error: `No IP address found for this VPS order. Available order fields: ${Object.keys(order).join(', ')}`
-      }, { status: 400 });
+        error: 'No IP address found for this VPS order. Please contact support.',
+      }, 400, action);
     }
 
     console.log(`[SERVICE-ACTION][POST] Using IP address: ${ipAddress || '(none — Netbay)'}`);
@@ -580,26 +585,26 @@ export async function POST(request) {
     if (isNetbay) {
       const supportedActions = new Set(['start', 'stop', 'restart', 'reboot', 'status', 'sync', 'reinstall', 'rebuild', 'templates']);
       if (!supportedActions.has(action)) {
-        return NextResponse.json({
+        return actionJson({
           success: false,
           error: `Action '${action}' is not supported for this server.`,
-        }, { status: 400 });
+        }, 400, action);
       }
 
       const { config: netbayCfg, companyName: netbayCompanyName } = await resolveCompanyNetbayApi(order);
       if (!netbayCfg) {
-        return NextResponse.json({
+        return actionJson({
           success: false,
           error: 'Server management is not available for this plan. Please contact support.',
-        }, { status: 503 });
+        }, 503, action);
       }
       // `templates` is a catalog lookup that doesn't require a service id —
       // every other Netbay action is service-bound.
       if (!order.netbayServiceId && action !== 'templates') {
-        return NextResponse.json({
+        return actionJson({
           success: false,
           error: 'This server is still being set up. Please try again in a minute.',
-        }, { status: 409 });
+        }, 409, action);
       }
 
       console.log(`[SERVICE-ACTION][POST] Routing via Netbay API (${netbayCfg.baseUrl}) for action=${action} (company=${netbayCompanyName || 'unknown'}, serviceId=${order.netbayServiceId})`);
@@ -608,10 +613,10 @@ export async function POST(request) {
       try {
         netbayApi = new NetbayApi(netbayCfg);
       } catch (apiErr) {
-        return NextResponse.json({
+        return actionJson({
           success: false,
-          error: `Server management is temporarily unavailable: ${apiErr.message}`,
-        }, { status: 500 });
+          error: apiErr.message || 'Server management is temporarily unavailable.',
+        }, 500, action);
       }
 
       try {
@@ -782,13 +787,13 @@ export async function POST(request) {
       } catch (netbayErr) {
         console.error(`[SERVICE-ACTION][POST] Netbay action '${action}' failed:`, netbayErr.message);
         const facing = toUserFacingNetbayError(netbayErr);
-        return NextResponse.json({
+        return actionJson({
           success: false,
           error: facing.message,
           message: facing.message,
           code: facing.code,
           nextAvailableAt: facing.nextAvailableAt || undefined,
-        }, { status: facing.status || 500 });
+        }, facing.status || 500, action);
       }
     }
 
@@ -802,16 +807,16 @@ export async function POST(request) {
       if (joyCfg) {
         const supportedActions = new Set(['start', 'stop', 'restart', 'reboot', 'status', 'sync']);
         if (!supportedActions.has(action)) {
-          return NextResponse.json({
+          return actionJson({
             success: false,
             error: `Action '${action}' is not available for this server.`,
-          }, { status: 400 });
+          }, 400, action);
         }
         if (!ipAddress) {
-          return NextResponse.json({
+          return actionJson({
             success: false,
             error: 'This server is still being set up. Please try again shortly.',
-          }, { status: 409 });
+          }, 409, action);
         }
 
         console.log(`[SERVICE-ACTION][POST] Routing via Joy API (${joyCfg.baseUrl}) for action=${action} (company=${joyCompanyName || 'unknown'}, ip=${ipAddress})`);
@@ -820,19 +825,19 @@ export async function POST(request) {
         try {
           joyApi = new JoyApi(joyCfg);
         } catch (apiErr) {
-          return NextResponse.json({
+          return actionJson({
             success: false,
-            error: `Server management is temporarily unavailable: ${apiErr.message}`,
-          }, { status: 500 });
+            error: apiErr.message || 'Server management is temporarily unavailable.',
+          }, 500, action);
         }
 
         try {
           const machine = await joyApi.findMachineByIp(ipAddress);
           if (!machine?.ihash) {
-            return NextResponse.json({
+            return actionJson({
               success: false,
-              error: `No machine found for IP ${ipAddress} on the Joy panel.`,
-            }, { status: 404 });
+              error: 'Server details could not be found. Please contact support.',
+            }, 404, action);
           }
           const ihash = machine.ihash;
 
@@ -887,11 +892,11 @@ export async function POST(request) {
           }
         } catch (joyErr) {
           console.error(`[SERVICE-ACTION][POST] Joy action '${action}' failed:`, joyErr.message);
-          return NextResponse.json({
+          return actionJson({
             success: false,
             error: joyErr.message || 'Joy action failed',
             code: joyErr.code || undefined,
-          }, { status: typeof joyErr.status === 'number' ? joyErr.status : 500 });
+          }, typeof joyErr.status === 'number' ? joyErr.status : 500, action);
         }
       }
     }
@@ -914,10 +919,10 @@ export async function POST(request) {
         if (resellerCfg) {
           const supportedActions = new Set(['start', 'stop', 'restart', 'reboot', 'status', 'sync', 'templates', 'reinstall', 'resetmac', 'changepassword', 'reconfigure-network']);
           if (!supportedActions.has(action)) {
-            return NextResponse.json({
+            return actionJson({
               success: false,
-              error: `Action '${action}' is not supported for this order via reseller API automation.`,
-            }, { status: 400 });
+              error: `Action '${action}' is not supported for this server.`,
+            }, 400, action);
           }
 
           console.log(`[SERVICE-ACTION][POST] Using reseller API automation (${resellerCfg.baseUrl}) for action=${action} (company=${resellerCompanyName || 'unknown'}, ip=${ipAddress})`);
@@ -926,10 +931,10 @@ export async function POST(request) {
           try {
             resellerApi = new ResellerApi(resellerCfg);
           } catch (apiErr) {
-            return NextResponse.json({
+            return actionJson({
               success: false,
-              error: `Reseller API configuration is invalid: ${apiErr.message}`,
-            }, { status: 500 });
+              error: apiErr.message || 'Server panel configuration is invalid.',
+            }, 500, action);
           }
 
           const findVm = async () => {
@@ -963,7 +968,7 @@ export async function POST(request) {
                 });
                 return NextResponse.json({
                   success: true,
-                  result: { success: true, message: 'Start command sent (reseller API)', apiResponse: apiRes, vmId },
+                  result: { success: true, message: 'Start command sent successfully', apiResponse: apiRes, vmId },
                 });
               }
               case 'stop': {
@@ -986,7 +991,7 @@ export async function POST(request) {
                   success: true,
                   result: {
                     success: true,
-                    message: apiRes?.message || 'Stop command sent (reseller API)',
+                    message: apiRes?.message || 'Stop command sent successfully',
                     taskId: apiRes?.task_id || null,
                     apiResponse: apiRes,
                     vmId,
@@ -1012,7 +1017,7 @@ export async function POST(request) {
                 });
                 return NextResponse.json({
                   success: true,
-                  result: { success: true, message: 'Restart command sent (reseller API)', apiResponse: apiRes, vmId },
+                  result: { success: true, message: 'Restart command sent successfully', apiResponse: apiRes, vmId },
                 });
               }
               case 'status':
@@ -1056,7 +1061,7 @@ export async function POST(request) {
               case 'reinstall': {
                 const chosenIsoId = templateId ?? payload?.templateId ?? payload?.isoId ?? body.isoId;
                 if (!chosenIsoId) {
-                  return NextResponse.json({ success: false, error: 'templateId (isoId) is required' }, { status: 400 });
+                  return actionJson({ success: false, error: 'Please select an operating system.' }, 400, 'reinstall');
                 }
                 const { vmId } = await findVm();
 
@@ -1109,7 +1114,7 @@ export async function POST(request) {
                     accepted: true,
                     vmId,
                     isoId: chosenIsoId,
-                    message: 'Rebuild submitted via reseller API. New password will appear shortly (auto-synced).',
+                    message: 'Rebuild submitted. New password will appear shortly (auto-synced).',
                     newOs: cls.osLabel || null,
                     newUsername: cls.username || null,
                     osFamily: cls.family || null,
@@ -1200,10 +1205,10 @@ export async function POST(request) {
           } catch (resellerErr) {
             console.error(`[SERVICE-ACTION][POST] Reseller-API action '${action}' failed:`, resellerErr.message);
             const status = typeof resellerErr.status === 'number' ? resellerErr.status : 500;
-            return NextResponse.json({
+            return actionJson({
               success: false,
               error: resellerErr.message || 'Reseller API action failed',
-            }, { status });
+            }, status, action);
           }
         }
       }
@@ -1212,10 +1217,10 @@ export async function POST(request) {
       if (companyVirtAccounts.length > 0) {
         const supportedActions = new Set(['start', 'stop', 'restart', 'status', 'sync', 'templates', 'reinstall']);
         if (!supportedActions.has(action)) {
-          return NextResponse.json({
+          return actionJson({
             success: false,
-            error: `Action '${action}' is not supported for this order via Virtualizor automation.`,
-          }, { status: 400 });
+            error: `Action '${action}' is not supported for this server.`,
+          }, 400, action);
         }
 
         console.log(`[SERVICE-ACTION][POST] Using ${companyVirtAccounts.length} company Virtualizor panel(s) for action=${action} (order.provider=${order.provider || 'unset'}, no hostycareServiceId)`);
@@ -1224,10 +1229,10 @@ export async function POST(request) {
         try {
           companyApi = new VirtualizorAPI({ accounts: toVirtualizorApiAccounts(companyVirtAccounts) });
         } catch (apiErr) {
-          return NextResponse.json({
+          return actionJson({
             success: false,
-            error: `Company Virtualizor configuration is invalid: ${apiErr.message}`,
-          }, { status: 500 });
+            error: apiErr.message || 'Server panel configuration is invalid.',
+          }, 500, action);
         }
 
         const hostname = guessHostnameFromOrder(order);
@@ -1249,19 +1254,19 @@ export async function POST(request) {
             case 'start': {
               const { vpsid } = await findVps();
               const apiRes = await companyApi.start(vpsid);
-              result = { success: true, message: 'Start command sent (Virtualizor)', apiResponse: apiRes };
+              result = { success: true, message: 'Start command sent successfully', apiResponse: apiRes };
               break;
             }
             case 'stop': {
               const { vpsid } = await findVps();
               const apiRes = await companyApi.stop(vpsid);
-              result = { success: true, message: 'Stop command sent (Virtualizor)', apiResponse: apiRes };
+              result = { success: true, message: 'Stop command sent successfully', apiResponse: apiRes };
               break;
             }
             case 'restart': {
               const { vpsid } = await findVps();
               const apiRes = await companyApi.restart(vpsid);
-              result = { success: true, message: 'Restart command sent (Virtualizor)', apiResponse: apiRes };
+              result = { success: true, message: 'Restart command sent successfully', apiResponse: apiRes };
               break;
             }
             case 'status':
@@ -1290,7 +1295,7 @@ export async function POST(request) {
               const chosenTemplateId = templateId ?? payload?.templateId;
               const providedPwd = newPassword ?? payload?.password;
               if (!chosenTemplateId) {
-                return NextResponse.json({ success: false, error: 'templateId is required' }, { status: 400 });
+                return actionJson({ success: false, error: 'Please select an operating system.' }, 400, 'reinstall');
               }
               const { vpsid } = await findVps();
               const pwd = providedPwd || generateSecurePassword();
@@ -1347,7 +1352,7 @@ export async function POST(request) {
                   accepted: true,
                   vpsId: vpsid,
                   templateId: chosenTemplateId,
-                  message: 'Reinstall submitted via company Virtualizor',
+                  message: 'Reinstall submitted successfully',
                   newPassword: pwd,
                   newOs: tplMeta?.name || null,
                   newUsername: osClass.username || null,
@@ -1375,10 +1380,10 @@ export async function POST(request) {
         } catch (virtErr) {
           console.error(`[SERVICE-ACTION][POST] Company-Virtualizor action '${action}' failed:`, virtErr.message);
           const status = typeof virtErr.status === 'number' ? virtErr.status : 500;
-          return NextResponse.json({
+          return actionJson({
             success: false,
             error: virtErr.message || 'Virtualizor action failed',
-          }, { status });
+          }, status, action);
         }
       }
     }
@@ -1404,7 +1409,7 @@ export async function POST(request) {
           const apiRes = await smartvpsApi.start(ipAddress);
           result = {
             success: true,
-            message: 'SmartVPS start command sent successfully',
+            message: 'Start command sent successfully',
             apiResponse: apiRes
           };
         } else if (hostycareApi && order.hostycareServiceId) {
@@ -1418,8 +1423,8 @@ export async function POST(request) {
         } else {
           throw new Error(
             order.hostycareServiceId
-              ? 'Hostycare API is not configured for this order. Check server logs for [HOSTYCARE] errors.'
-              : 'No valid API configured for this order (missing hostycareServiceId or provider)'
+              ? 'Server management is not configured for this order. Please contact support.'
+              : 'Server management is not available for this order. Please contact support.'
           );
         }
         break;
@@ -1431,7 +1436,7 @@ export async function POST(request) {
           const apiRes = await smartvpsApi.stop(ipAddress);
           result = {
             success: true,
-            message: 'SmartVPS stop command sent successfully',
+            message: 'Stop command sent successfully',
             apiResponse: apiRes
           };
         } else if (hostycareApi && order.hostycareServiceId) {
@@ -1445,8 +1450,8 @@ export async function POST(request) {
         } else {
           throw new Error(
             order.hostycareServiceId
-              ? 'Hostycare API is not configured for this order. Check server logs for [HOSTYCARE] errors.'
-              : 'No valid API configured for this order (missing hostycareServiceId or provider)'
+              ? 'Server management is not configured for this order. Please contact support.'
+              : 'Server management is not available for this order. Please contact support.'
           );
         }
         break;
@@ -1459,7 +1464,7 @@ export async function POST(request) {
           const apiRes = await executeSmartVpsRestart(smartvpsApi, ipAddress);
           result = {
             success: true,
-            message: apiRes.message || 'SmartVPS restart completed (stop + start)',
+            message: apiRes.message || 'Restart completed successfully',
             apiResponse: apiRes
           };
         } else if (hostycareApi && order.hostycareServiceId) {
@@ -1473,8 +1478,8 @@ export async function POST(request) {
         } else {
           throw new Error(
             order.hostycareServiceId
-              ? 'Hostycare API is not configured for this order. Check server logs for [HOSTYCARE] errors.'
-              : 'No valid API configured for this order (missing hostycareServiceId or provider)'
+              ? 'Server management is not configured for this order. Please contact support.'
+              : 'Server management is not available for this order. Please contact support.'
           );
         }
         break;
@@ -1511,12 +1516,12 @@ export async function POST(request) {
             });
           } catch (statusError) {
             console.error('[STATUS] SmartVPS error:', statusError);
-            return NextResponse.json({
+            return actionJson({
               success: false,
               error: statusError.message,
               powerState: 'unknown',
-              provider: 'smartvps'
-            });
+              provider: 'smartvps',
+            }, 200, 'status');
           }
         } else if (hostycareApi && order.hostycareServiceId) {
           console.log('[STATUS] Using Hostycare API with service ID:', order.hostycareServiceId);
@@ -1606,18 +1611,18 @@ export async function POST(request) {
               fallbackState = isReachable ? 'running' : 'stopped';
               console.log(`[STATUS] Fallback ping ${ipAddress.split(':')[0]}: ${isReachable ? 'online' : 'offline'}`);
             }
-            return NextResponse.json({
+            return actionJson({
               success: true,
               error: statusError.message,
               powerState: fallbackState
-            });
+            }, 200, 'status');
           }
         } else {
-          return NextResponse.json({
+          return actionJson({
             success: false,
-            error: 'No valid API configured for this order',
+            error: 'Server management is not available for this order.',
             powerState: 'unknown'
-          });
+          }, 400, 'status');
         }
         break;
 
@@ -1635,7 +1640,7 @@ export async function POST(request) {
 
           result = {
             success: true,
-            message: 'SmartVPS format command sent successfully',
+            message: 'Format command sent successfully',
             apiResponse: apiRes,
             ...(formatPass ? { newPassword: formatPass } : {}),
           };
@@ -1655,7 +1660,7 @@ export async function POST(request) {
           const apiRes = await smartvpsApi.changeOS(ipAddress, osType);
           result = {
             success: true,
-            message: `SmartVPS OS change to ${osType} sent successfully`,
+            message: 'OS change started successfully',
             apiResponse: apiRes
           };
         } else {
@@ -1704,7 +1709,7 @@ export async function POST(request) {
 
             result = {
               success: true,
-              message: 'SmartVPS status synced successfully',
+              message: 'Server status synced successfully',
               credentialsUpdated,
               powerState,
               provider: 'smartvps',
@@ -1714,8 +1719,8 @@ export async function POST(request) {
             console.error('[SYNC] SmartVPS sync error:', syncError);
             result = {
               success: false,
-              message: `Sync failed: ${syncError.message}`,
-              error: syncError.message
+              message: customerServiceErrorMessage(syncError.message, { action: 'sync' }),
+              error: syncError.message,
             };
           }
         } else if (hostycareApi && order.hostycareServiceId) {
@@ -1749,7 +1754,7 @@ export async function POST(request) {
 
         if (!virtualizorApi) {
           console.error(`[SERVICE-ACTION][POST] VirtualizorAPI not available for reinstall`);
-          return NextResponse.json({ success: false, error: 'Virtualizor required for reinstall' }, { status: 400 });
+          return actionJson({ success: false, error: 'Reinstall is not available for this server.' }, 400, 'reinstall');
         }
 
         // 🔁 Use values from the one parsed body
@@ -1761,7 +1766,7 @@ export async function POST(request) {
 
         if (!chosenTemplateId) {
           console.error(`[SERVICE-ACTION][POST] Template ID is required for reinstall`);
-          return NextResponse.json({ success: false, error: 'templateId is required' }, { status: 400 });
+          return actionJson({ success: false, error: 'Please select an operating system.' }, 400, 'reinstall');
         }
 
         try {
@@ -1773,15 +1778,11 @@ export async function POST(request) {
 
           if (!vpsResult) {
             console.error(`[SERVICE-ACTION][POST] No VPS found for IP ${ipAddress}`);
-            return NextResponse.json({
+            return actionJson({
               success: false,
-              error: `No VPS visible for IP ${ipAddress}. This could mean:
-              1. The IP is not assigned to any VPS across our Virtualizor panels
-              2. The VPS is on a different panel not configured
-              3. There's a connectivity issue with the Virtualizor panel
-
-              Please check if the IP ${ipAddress} is correct and the VPS is properly provisioned.`
-            }, { status: 404 });
+              error: 'Server details could not be found. Please contact support.',
+              code: 'VIRTUALIZOR_VPS_NOT_FOUND',
+            }, 404, 'reinstall');
           }
 
           const vpsid = typeof vpsResult === 'object' ? vpsResult.vpsid : vpsResult;
@@ -1859,15 +1860,10 @@ export async function POST(request) {
             }
           });
 
-          return NextResponse.json({
+          return actionJson({
             success: false,
-            error: `Reinstall failed: ${error.message}`,
-            details: {
-              ip: ipAddress,
-              templateId: chosenTemplateId,
-              errorType: error.name || 'Unknown'
-            }
-          }, { status: 500 });
+            error: error.message || 'Reinstall failed',
+          }, 500, 'reinstall');
         }
       }
 
@@ -1876,7 +1872,7 @@ export async function POST(request) {
 
         if (!virtualizorApi) {
           console.error(`[SERVICE-ACTION][POST] VirtualizorAPI not available for templates`);
-          return NextResponse.json({ success: false, error: 'Virtualizor not available for this provider' }, { status: 400 });
+          return actionJson({ success: false, error: 'Operating system list is not available for this server.' }, 400, 'templates');
         }
 
         try {
@@ -1888,7 +1884,11 @@ export async function POST(request) {
 
           if (!vpsResult) {
             console.error(`[SERVICE-ACTION][POST] No VPS found for IP ${ipAddress}`);
-            return NextResponse.json({ success: false, error: `No VPS visible for IP ${ipAddress}` }, { status: 404 });
+            return actionJson({
+              success: false,
+              error: 'Server details could not be found. Please contact support.',
+              code: 'VIRTUALIZOR_VPS_NOT_FOUND',
+            }, 404, 'templates');
           }
 
           const vpsid = typeof vpsResult === 'object' ? vpsResult.vpsid : vpsResult;
@@ -1944,20 +1944,16 @@ export async function POST(request) {
             stack: error.stack?.split('\n').slice(0, 5).join('\n')
           });
 
-          return NextResponse.json({
+          return actionJson({
             success: false,
-            error: `Failed to fetch templates: ${error.message}`,
-            details: {
-              ip: ipAddress,
-              errorType: error.name || 'Unknown'
-            }
-          }, { status: 500 });
+            error: error.message || 'Could not load operating systems',
+          }, 500, 'templates');
         }
       }
 
       default:
         console.error(`[SERVICE-ACTION][POST] Invalid action: ${action}`);
-        return NextResponse.json({ success: false, error: 'Invalid action' }, { status: 400 });
+        return actionJson({ success: false, error: 'Invalid action' }, 400, action);
     }
 
     // Log the action to the order
@@ -1973,7 +1969,7 @@ export async function POST(request) {
     });
 
     const finalOrder = await Order.findById(orderId).select('ipAddress username password os provisioningStatus lastSyncTime status').lean();
-    return NextResponse.json({ success: true, result, order: finalOrder });
+    return actionJson({ success: true, result, order: finalOrder }, 200, action);
 
   } catch (error) {
     console.error('[SERVICE-ACTION][POST] ===========================================');
@@ -1985,11 +1981,11 @@ export async function POST(request) {
     });
     console.error('[SERVICE-ACTION][POST] ===========================================');
 
-    return NextResponse.json({
+    return actionJson({
       success: false,
       error: error.message || 'Internal server error',
-      timestamp: new Date().toISOString()
-    }, { status: 500 });
+      timestamp: new Date().toISOString(),
+    }, 500, null);
   }
 }
 
@@ -2010,7 +2006,7 @@ export async function GET(request) {
     const { searchParams } = new URL(request.url);
     const orderId = searchParams.get('orderId');
     if (!orderId) {
-      return NextResponse.json({ success: false, error: 'Order ID is required' }, { status: 400 });
+      return actionJson({ success: false, error: 'Order ID is required' }, 400, 'sync');
     }
 
     await connectDB();
@@ -2081,10 +2077,10 @@ export async function GET(request) {
           });
         } catch (err) {
           console.error('[SERVICE-ACTION][GET] Netbay lookup failed:', err.message);
-          return NextResponse.json({
+          return actionJson({
             success: false,
             error: err.message || 'Could not load server status',
-          }, { status: typeof err.status === 'number' ? err.status : 500 });
+          }, typeof err.status === 'number' ? err.status : 500, 'sync');
         }
       }
     }
@@ -2094,20 +2090,20 @@ export async function GET(request) {
       const { config: joyCfg, companyName: joyCompanyName } = await resolveCompanyJoyApi(order);
       if (joyCfg) {
         if (!ipAddress) {
-          return NextResponse.json({
+          return actionJson({
             success: false,
-            error: 'No IP address on this order — cannot look up the machine on the Joy panel.',
-          }, { status: 400 });
+            error: 'This server is still being set up. Please try again shortly.',
+          }, 400, 'status');
         }
         console.log(`[SERVICE-ACTION][GET] Using Joy API for ${joyCompanyName || 'company'} (${joyCfg.baseUrl}, ip=${ipAddress})`);
         try {
           const joyApi = new JoyApi(joyCfg);
           const machine = await joyApi.findMachineByIp(ipAddress);
           if (!machine?.ihash) {
-            return NextResponse.json({
+            return actionJson({
               success: false,
-              error: `No machine found for IP ${ipAddress} on the Joy panel.`,
-            }, { status: 404 });
+              error: 'Server details could not be found. Please contact support.',
+            }, 404, 'status');
           }
           let powerState = 'unknown';
           let info = null;
@@ -2142,10 +2138,10 @@ export async function GET(request) {
           });
         } catch (err) {
           console.error('[SERVICE-ACTION][GET] Joy lookup failed:', err.message);
-          return NextResponse.json({
+          return actionJson({
             success: false,
-            error: err.message || 'Joy lookup failed',
-          }, { status: typeof err.status === 'number' ? err.status : 500 });
+            error: err.message || 'Could not load server status',
+          }, typeof err.status === 'number' ? err.status : 500, 'status');
         }
       }
     }
@@ -2160,10 +2156,10 @@ export async function GET(request) {
         const { config: resellerCfg, companyName: resellerCompanyName } = await resolveCompanyResellerApi(order);
         if (resellerCfg) {
           if (!ipAddress) {
-            return NextResponse.json({
+            return actionJson({
               success: false,
-              error: 'No IP address on this order — cannot look up VM on the reseller panel.',
-            }, { status: 400 });
+              error: 'This server is still being set up. Please try again shortly.',
+            }, 400, 'status');
           }
           console.log(`[SERVICE-ACTION][GET] Using reseller API automation for ${resellerCompanyName || 'company'} (${resellerCfg.baseUrl}, ip=${ipAddress})`);
 
@@ -2171,19 +2167,19 @@ export async function GET(request) {
           try {
             resellerApi = new ResellerApi(resellerCfg);
           } catch (apiErr) {
-            return NextResponse.json({
+            return actionJson({
               success: false,
-              error: `Reseller API configuration is invalid: ${apiErr.message}`,
-            }, { status: 500 });
+              error: apiErr.message || 'Server panel configuration is invalid.',
+            }, 500, action);
           }
 
           try {
             const found = await resellerApi.findVmByIp(ipAddress);
             if (!found) {
-              return NextResponse.json({
+              return actionJson({
                 success: false,
-                error: `No VM visible for IP ${ipAddress} on the company's reseller panel (${resellerCfg.baseUrl}).`,
-              }, { status: 404 });
+                error: 'Server details could not be found. Please contact support.',
+              }, 404, 'status');
             }
 
             const { powerState, rawStatus, source } = await resellerApi.resolveVmPowerState(
@@ -2218,10 +2214,10 @@ export async function GET(request) {
             });
           } catch (err) {
             console.error('[SERVICE-ACTION][GET] Reseller-API lookup failed:', err.message);
-            return NextResponse.json({
+            return actionJson({
               success: false,
-              error: err.message || 'Reseller API lookup failed',
-            }, { status: typeof err.status === 'number' ? err.status : 500 });
+              error: err.message || 'Could not load server status',
+            }, typeof err.status === 'number' ? err.status : 500, 'status');
           }
         }
       }
@@ -2234,10 +2230,10 @@ export async function GET(request) {
       const { accounts: companyVirtAccounts, companyName } = await resolveCompanyVirtualizorAccounts(order);
       if (companyVirtAccounts.length > 0) {
         if (!ipAddress) {
-          return NextResponse.json({
+          return actionJson({
             success: false,
-            error: 'No IP address on this order — cannot look up VPS on the company Virtualizor.',
-          }, { status: 400 });
+            error: 'No IP address on this order — cannot look up the server.',
+          }, 400, 'status');
         }
         console.log(`[SERVICE-ACTION][GET] Using ${companyVirtAccounts.length} company Virtualizor panel(s) for ${companyName || 'company'} (ip=${ipAddress})`);
 
@@ -2245,21 +2241,21 @@ export async function GET(request) {
         try {
           companyApi = new VirtualizorAPI({ accounts: toVirtualizorApiAccounts(companyVirtAccounts) });
         } catch (apiErr) {
-          return NextResponse.json({
+          return actionJson({
             success: false,
-            error: `Company Virtualizor configuration is invalid: ${apiErr.message}`,
-          }, { status: 500 });
+            error: apiErr.message || 'Server panel configuration is invalid.',
+          }, 500, action);
         }
 
         try {
           const hostname = guessHostnameFromOrder(order);
           const found = await companyApi.findVpsId({ ip: ipAddress, hostname });
           if (!found) {
-            const panelHostsLabel = companyVirtAccounts.map(a => a.host).join(', ');
-            return NextResponse.json({
+            return actionJson({
               success: false,
-              error: `No VPS visible for IP ${ipAddress} on any of the company's Virtualizor panels (${panelHostsLabel}).`,
-            }, { status: 404 });
+              error: `No server found for this order IP. Please contact support.`,
+              code: 'VIRTUALIZOR_VPS_NOT_FOUND',
+            }, 404, 'status');
           }
 
           const vpsid = typeof found === 'object' ? found.vpsid : found;
@@ -2287,10 +2283,10 @@ export async function GET(request) {
           });
         } catch (err) {
           console.error('[SERVICE-ACTION][GET] Company-Virtualizor lookup failed:', err.message);
-          return NextResponse.json({
+          return actionJson({
             success: false,
-            error: err.message || 'Company Virtualizor lookup failed',
-          }, { status: 500 });
+            error: err.message || 'Could not load server status',
+          }, 500, 'status');
         }
       }
     }
@@ -2328,24 +2324,24 @@ export async function GET(request) {
         });
       } catch (err) {
         console.error('[SERVICE-ACTION][GET] Hostycare lookup failed:', err.message);
-        return NextResponse.json({
+        return actionJson({
           success: false,
-          error: err.message || 'Hostycare lookup failed',
-        }, { status: 500 });
+          error: err.message || 'Could not load server status',
+        }, 500, 'sync');
       }
     }
 
     // 3) Nothing to query.
-    return NextResponse.json({
+    return actionJson({
       success: false,
-      error: 'No valid provider configured for this order (no company Virtualizor and no Hostycare service ID).',
-    }, { status: 400 });
+      error: 'Server management is not available for this order.',
+    }, 400, 'sync');
   } catch (error) {
     console.error('[SERVICE-ACTION][GET] Fatal error:', error);
-    return NextResponse.json({
+    return actionJson({
       success: false,
       error: error.message || 'Internal server error',
-    }, { status: 500 });
+    }, 500, null);
   }
 }
 

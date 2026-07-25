@@ -10,6 +10,7 @@ const WhatsAppService = require('@/services/whatsappService');
 import { assertIpStockPurchasable } from '@/lib/ipStockAvailability';
 import { refreshAndVerifyPurchase } from '@/lib/syncIpStockBeforePurchase';
 import { customerStockUnavailableMessage } from '@/lib/customerStockMessages';
+const { customerApiCatchPayload } = require('@/lib/customerFacingErrors');
 import { calculateExpiryDate } from '@/lib/expiryHelper';
 import { assignPanelCredentials } from '@/lib/panelCredentials';
 const { resolveOrderExpiryOnPayment } = require('@/lib/advpsOrderExpiry');
@@ -553,7 +554,7 @@ export async function POST(request) {
       await refundWalletReservation(userId, walletApplied, clientTxnId || 'unknown');
     }
     return NextResponse.json(
-      { message: 'Server error', error: error.message },
+      { message: 'Server error', ...customerApiCatchPayload(error.message) },
       { status: 500 }
     );
   }

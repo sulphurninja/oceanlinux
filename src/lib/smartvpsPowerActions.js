@@ -70,7 +70,9 @@ async function ensureSmartVpsNotBusy(api, serviceIdentifier) {
   const actionStatus = String(parsed.ActionStatus || '').toLowerCase();
 
   if (actionStatus === 'processing' || actionStatus === 'pending') {
-    throw new Error('Server is still processing a previous action. Please wait 5 minutes and try again.');
+    const err = new Error('Server is still processing a previous action. Please wait 5 minutes and try again.');
+    err.code = 'SMARTVPS_BUSY';
+    throw err;
   }
 
   // Do NOT block on ActionStatus=failed here — call the SmartVPS action API and

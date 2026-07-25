@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Loader2, ShoppingCart, Check } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { customerServiceErrorMessage } from '@/lib/customerFacingErrors';
 import { addToCart } from '@/lib/cartClient';
 
 /**
@@ -83,7 +84,7 @@ export default function AddToCartButton(props: Props) {
       onAdded?.();
       setTimeout(() => setDone(false), 1800);
     } catch (err: any) {
-      toast.error(err.message || 'Failed to add to cart');
+      toast.error(customerServiceErrorMessage(err.message, { action: 'provision' }) || 'Failed to add to cart');
     } finally {
       setBusy(false);
     }

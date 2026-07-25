@@ -13,6 +13,7 @@ import {
 } from '@/lib/expiryHelper';
 import { isSlotIpOrder, SLOT_IP_NO_RENEWAL_MESSAGE } from '@/lib/slotIpOrder';
 import { resolveOrderRenewalPrice } from '@/lib/orderRenewalPricingServer';
+const { customerApiCatchPayload } = require('@/lib/customerFacingErrors');
 
 async function refundRenewalWalletReservation(userId, amount, renewalTxnId) {
   if (!amount || amount <= 0) return;
@@ -308,7 +309,7 @@ export async function POST(request) {
       await refundRenewalWalletReservation(userId, walletApplied, renewalTxnId || 'unknown');
     }
     return NextResponse.json(
-      { message: 'Server error', error: error.message },
+      { message: 'Server error', ...customerApiCatchPayload(error.message) },
       { status: 500 }
     );
   }

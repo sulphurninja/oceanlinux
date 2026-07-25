@@ -4,6 +4,7 @@ import Order from '@/models/orderModel';
 import { resolveOrderForUserOrAdmin } from '@/lib/resolveOrderAccess';
 import { ensureOrderRenewalStockLink } from '@/lib/orderRenewalPricingServer';
 const { maybeSyncResellerOrderOnFetch } = require('@/lib/resellerApiOrderSync');
+const { sanitizeOrderForCustomer } = require('@/lib/customerFacingErrors');
 
 export async function GET(request, { params }) {
     try {
@@ -24,11 +25,12 @@ export async function GET(request, { params }) {
             }
         }
 
-        return NextResponse.json(order);
+        return NextResponse.json(sanitizeOrderForCustomer(order, { isAdmin: resolved.isAdmin }));
     } catch (error) {
         console.error('Error fetching order:', error);
+        const { customerServiceErrorMessage } = require('@/lib/customerFacingErrors');
         return NextResponse.json(
-            { message: 'Failed to fetch order', error: error.message },
+            { message: customerServiceErrorMessage(error.message) },
             { status: 500 }
         );
     }
