@@ -24,10 +24,14 @@ else
   BUILD_CMD="npm run build"
 fi
 
+echo "==> remove stray nested app (breaks typecheck on small EC2)..."
+rm -rf oceanlinux-orders
+
 echo "==> wipe old build..."
 rm -rf .next
 
-echo "==> build..."
+echo "==> build (typecheck can take 5-15 min on t2/t3.small — watch: free -h)..."
+export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=1536}"
 $BUILD_CMD
 
 echo "==> verify new company orders filter is in build..."
