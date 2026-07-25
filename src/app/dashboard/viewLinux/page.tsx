@@ -51,6 +51,7 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import { toast } from 'sonner';
+import { useSessionAlert } from '@/components/session-alert';
 import { premiumBadge, premiumBtnCredentials, premiumBtnOutline, premiumSelectContent } from '@/lib/premium-badges';
 import { getCustomerProviderDisplayNameFromOrder } from '@/lib/customerProviderDisplay';
 import { cn } from '@/lib/utils';
@@ -129,6 +130,7 @@ const ViewLinux = () => {
     const [activeTab, setActiveTab] = useState<string>('all');
 
     const router = useRouter();
+    const { showAlert } = useSessionAlert();
 
     useEffect(() => {
         fetchOrders();
@@ -162,12 +164,27 @@ const ViewLinux = () => {
 
         try {
             const response = await fetch('/api/orders/me', { cache: 'no-store', credentials: 'include' });
-            if (!response.ok) throw new Error('Failed to fetch orders');
+            if (response.status === 401) {
+                const data = await response.json().catch(() => ({}));
+                const code = data.code || '';
+                if (code === 'SESSION_EXPIRED' || String(data.message || '').toLowerCase().includes('expired')) {
+                    showAlert('session_expired');
+                } else {
+                    showAlert('action_requires_login', 'Please log in to view your servers.');
+                }
+                return;
+            }
+            if (!response.ok) {
+                throw new Error('Failed to fetch orders');
+            }
             const data = await response.json();
+            if (!Array.isArray(data)) {
+                throw new Error('Invalid orders response');
+            }
             setOrders(data);
         } catch (error) {
             console.error('Failed to fetch orders:', error);
-            router.push('/login');
+            toast.error('Could not load your servers. Please try again.');
         } finally {
             if (isRefresh) {
                 setRefreshing(false);

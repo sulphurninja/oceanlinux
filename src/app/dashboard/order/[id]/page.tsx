@@ -513,7 +513,11 @@ const OrderDetails = () => {
     setLoading(true);
     try {
       console.log('[ORDER-DETAILS] Fetching order:', orderId);
-      const response = await fetch(`/api/orders/${orderId}`, { cache: 'no-store' });
+      const response = await fetch(`/api/orders/${orderId}`, { cache: 'no-store', credentials: 'include' });
+      if (response.status === 401) {
+        showAlert('session_expired', 'Your session expired. Please log in again to view this server.');
+        return;
+      }
       if (!response.ok) throw new Error('Failed to fetch order');
       const orderData = await response.json();
       console.log('[ORDER-DETAILS] Order data received:', {
@@ -551,7 +555,6 @@ const OrderDetails = () => {
     } catch (error) {
       console.error('Failed to fetch order:', error);
       toast.error('Failed to load order details');
-      router.push(returnTo);
     } finally {
       setLoading(false);
     }
@@ -560,14 +563,17 @@ const OrderDetails = () => {
   const fetchOrder = async () => {
     setLoading(true);
     try {
-      const response = await fetch(`/api/orders/${orderId}`, { cache: 'no-store' });
+      const response = await fetch(`/api/orders/${orderId}`, { cache: 'no-store', credentials: 'include' });
+      if (response.status === 401) {
+        showAlert('session_expired', 'Your session expired. Please log in again to view this server.');
+        return;
+      }
       if (!response.ok) throw new Error('Failed to fetch order');
       const data = await response.json();
       setOrder(data);
     } catch (error) {
       console.error('Failed to fetch order:', error);
       toast.error('Failed to load order details');
-      router.push(returnTo);
     } finally {
       setLoading(false);
     }
