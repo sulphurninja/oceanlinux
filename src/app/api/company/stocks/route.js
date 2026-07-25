@@ -17,10 +17,14 @@ import {
   normalizeOsForServerType,
   resolveUsernameForOs,
   reconcileCompanyInventoryOrderIps,
+  looksLikeIpv4,
 } from '@/lib/companyInventory';
 import Order from '@/models/orderModel';
 import { COMPANY_FILTER_VERSION } from '@/lib/companyOrders';
 import { buildCompanyValidityMismatchReport } from '@/lib/companyValidityMismatch';
+
+export const maxDuration = 120;
+
 const { hasCompanyResellerApi, getCompanyResellerApiConfig, companyUsesResellerLiveStock, companyHasPortalBulkPromos } = require('@/lib/companyResellerApi');
 const {
   applyResellerZonesToStockDocument,
@@ -33,6 +37,7 @@ const {
   fetchResellerCredentialsByIp,
   syncAllInventoryExpiriesFromReseller,
 } = require('@/lib/companyResellerInventorySync');
+const { auditCompanyVpsReconciliation } = require('@/lib/hostheavenVmAudit');
 
 function serializeInventoryItem(item) {
   return {
@@ -234,6 +239,19 @@ export async function PUT(request) {
       panelExpiriesByIp,
       stocks: serializedStocks,
     });
+  }
+
+  if (action === 'auditVpsReconciliation') {
+    const companyDoc = await Company.findById(company.id).select('resellerApi netbayApi name').lean();
+    if (!hasCompanyResellerApi(companyDoc)) {
+      return NextResponse.json(
+        { error: 'Hostheaven sync is not enabled. Ask admin to enable Reseller API on your company.' },
+        { status: 403 }
+      );
+    }
+
+    const report = await auditCompanyVpsReconciliation(companyDoc);
+    return NextResponse.json({ success: true, ...report });
   }
 
   if (action === 'bulkApplyPromo') {
@@ -547,11 +565,22 @@ const ResellerApi = require('@/services/resellerApi');
     if (Array.isArray(items)) {
       for (const row of items) {
         if (!row?.ipAddress || !row?.password) continue;
+        const ip = String(row.ipAddress).trim();
+        const pass = String(row.password).trim();
+        if (!looksLikeIpv4(ip)) {
+          return NextResponse.json({ error: `Invalid IP address: ${ip}` }, { status: 400 });
+        }
+        if (looksLikeIpv4(pass)) {
+          return NextResponse.json(
+            { error: 'Password looks like an IP address — check ip, username, password columns' },
+            { status: 400 }
+          );
+        }
         const os = normalizeOsForServerType(row.os, stock.serverType);
         newItems.push({
-          ipAddress: String(row.ipAddress).trim(),
+          ipAddress: ip,
           username: resolveUsernameForOs(row.username, os),
-          password: String(row.password).trim(),
+          password: pass,
           os,
           expiryDate: row.expiryDate ? new Date(row.expiryDate) : null,
           addedAt: new Date(),
@@ -594,7 +623,7 @@ const ResellerApi = require('@/services/resellerApi');
   }
 
   return NextResponse.json(
-    { error: 'Unknown action. Use setStockCount, setFulfillmentMode, setResellerZones, bulkApplyPromo, addInventory, removeInventory, syncResellerCredentials, or syncAllResellerExpiries' },
+    { error: 'Unknown action. Use setStockCount, setFulfillmentMode, setResellerZones, bulkApplyPromo, addInventory, removeInventory, syncResellerCredentials, syncAllResellerExpiries, or auditVpsReconciliation' },
     { status: 400 }
   );
 }

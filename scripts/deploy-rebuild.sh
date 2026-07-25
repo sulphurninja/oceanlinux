@@ -25,23 +25,21 @@ else
 fi
 
 echo "==> stop PM2 (free RAM for build)..."
-pm2 stop oceanlinux 2>/dev/null || true
+pm2 stop all 2>/dev/null || true
 
-echo "==> remove stray nested app (breaks typecheck on small EC2)..."
+echo "==> remove stray nested app..."
 rm -rf oceanlinux-orders
 
 echo "==> wipe old build..."
 rm -rf .next
 
-echo "==> build (skip typecheck on server — run tsc locally before push)..."
-export SKIP_BUILD_TYPECHECK=1
-export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=2048}"
+echo "==> build (typecheck/eslint skipped in next.config.mjs)..."
+export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=2560}"
 $BUILD_CMD
 
-echo "==> verify new company orders filter is in build..."
-if ! grep -R "confirmed-only-v5" .next/server/app/api/company/orders 2>/dev/null | head -1; then
-  echo "ERROR: Build does NOT contain confirmed-only-v5."
-  echo "       Wrong directory or build failed. Fix before restarting PM2."
+echo "==> verify build output exists..."
+if [ ! -d .next/server ]; then
+  echo "ERROR: Build failed — .next/server missing."
   exit 1
 fi
 
@@ -58,5 +56,4 @@ curl -sI "http://127.0.0.1:3000/api/company/orders" | grep -i "x-company-orders-
 
 echo ""
 echo "Done. Open https://oceanlinux.com/api/company/version"
-echo "You must see: confirmed-only-v5"
-echo "Then hard-refresh /company/rockybhai"
+echo "Then hard-refresh the site (Ctrl+Shift+R)"

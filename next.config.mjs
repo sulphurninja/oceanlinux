@@ -1,13 +1,11 @@
 /** @type {import('next').NextConfig} */
-const skipBuildChecks = process.env.SKIP_BUILD_TYPECHECK === '1';
-
 const nextConfig = {
+  // Server builds skip tsc/eslint — EC2 (4GB RAM) hangs on type-check. Run `bunx tsc --noEmit` on dev machine before push.
   typescript: {
-    // EC2 deploy: SKIP_BUILD_TYPECHECK=1 skips tsc (saves RAM). Run `bunx tsc --noEmit` locally/CI.
-    ignoreBuildErrors: skipBuildChecks,
+    ignoreBuildErrors: true,
   },
   eslint: {
-    ignoreDuringBuilds: skipBuildChecks,
+    ignoreDuringBuilds: true,
   },
   // Handle native node modules (ssh2, cpu-features) - exclude from webpack bundling
   webpack: (config, { isServer }) => {

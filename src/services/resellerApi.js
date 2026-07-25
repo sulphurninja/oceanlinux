@@ -299,13 +299,23 @@ class ResellerApi {
 
   /** All IPs on an overview row (port stripped). */
   static extractOverviewRowIps(row) {
-    return [
+    const flat = [
       row?.ip,
       row?.ipAddress,
       row?.primaryIp,
       row?.mainIp,
-      ...(Array.isArray(row?.ips) ? row.ips : []),
-    ]
+      row?.publicIp,
+      row?.dedicatedIp,
+      row?.serverIp,
+      row?.assignedIp,
+    ];
+    const fromArray = Array.isArray(row?.ips) ? row.ips : [];
+    for (const item of fromArray) {
+      if (!item) continue;
+      if (typeof item === 'string') flat.push(item);
+      else flat.push(item?.ipAddress?.address || item?.address || item?.ip || item?.value);
+    }
+    return flat
       .filter(Boolean)
       .map((v) => String(v).split(':')[0].trim())
       .filter(Boolean);
@@ -320,21 +330,26 @@ class ResellerApi {
    * Fetch every overview page once and index VMs by IP.
    * Bulk expiry sync uses this instead of findVmByIp per inventory row (~14s each).
    */
-  async buildVmIpIndex({ maxPages = 50, pageSize = 50 } = {}) {
+  async buildVmIpIndex({ maxPages = 500, pageSize = 100 } = {}) {
     const byIp = new Map();
     let page = 0;
     let totalPages = 1;
 
-    while (page < Math.min(totalPages, maxPages)) {
+    while (page < totalPages && page < maxPages) {
       const data = await this.getOrderOverviewPage(page, pageSize);
       const orders = data?.orders || data?.content || data?.items || [];
-      totalPages = Number(data?.totalPages || data?.totalPage || 1) || 1;
+      totalPages = Number(data?.totalPages || data?.totalPage || data?.pages || 1) || 1;
 
       for (const row of orders) {
         const ips = ResellerApi.extractOverviewRowIps(row);
         if (ips.length === 0) continue;
-        const vmId = row?.virtualMachineId || row?.vmId || row?.id || row?.vmid;
-        if (vmId == null) continue;
+        const vmId =
+          row?.virtualMachineId ||
+          row?.vmId ||
+          row?.id ||
+          row?.vmid ||
+          row?.orderId ||
+          ips[0];
 
         const entry = {
           vmId: String(vmId),
@@ -350,7 +365,7 @@ class ResellerApi {
       }
 
       page++;
-      if (totalPages <= page) break;
+      if (!orders.length) break;
     }
 
     return byIp;

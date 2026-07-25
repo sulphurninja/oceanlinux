@@ -320,6 +320,19 @@ export default function CompanyDashboard() {
   const [resellerLabel, setResellerLabel] = useState('Hostheaven');
   const [syncingStockId, setSyncingStockId] = useState<string | null>(null);
   const [syncingAllExpiries, setSyncingAllExpiries] = useState(false);
+  const [syncingVpsAudit, setSyncingVpsAudit] = useState(false);
+  const [vpsAudit, setVpsAudit] = useState<{
+    panelTotal: number;
+    onPanelNotInOrdersCount: number;
+    onPanelNotInOrders: Array<{
+      ip: string;
+      vmId: string;
+      serverName: string;
+      expiryDate: string | null;
+      panelStatus: string;
+      inInventory: boolean;
+    }>;
+  } | null>(null);
   const [syncingLiveStock, setSyncingLiveStock] = useState(false);
   const [lastSyncFailed, setLastSyncFailed] = useState<Array<{ ipAddress: string; error: string }>>([]);
   const [panelExpiryByIp, setPanelExpiryByIp] = useState<Record<string, string>>({});
@@ -577,6 +590,35 @@ export default function CompanyDashboard() {
       toast.error(friendlyCompanyError(err.message, 'sync'));
     } finally {
       setSyncingAllExpiries(false);
+    }
+  };
+
+  const syncAllVpsAudit = async () => {
+    setSyncingVpsAudit(true);
+    try {
+      const res = await fetch('/api/company/stocks', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'auditVpsReconciliation' }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'VPS compare failed');
+      }
+      setVpsAudit({
+        panelTotal: data.panelTotal,
+        onPanelNotInOrdersCount: data.onPanelNotInOrdersCount,
+        onPanelNotInOrders: data.onPanelNotInOrders || [],
+      });
+      if (data.onPanelNotInOrdersCount === 0) {
+        toast.success(`Koi extra VPS nahi — Hostheaven ki har VM kisi order se linked hai`);
+      } else {
+        toast.warning(`${data.onPanelNotInOrdersCount} VPS Hostheaven par hain lekin kisi order mein nahi`);
+      }
+    } catch (err: unknown) {
+      toast.error(friendlyCompanyError(err instanceof Error ? err.message : err, 'sync'));
+    } finally {
+      setSyncingVpsAudit(false);
     }
   };
 
@@ -1077,6 +1119,83 @@ export default function CompanyDashboard() {
                   )}
                 </Button>
               </div>
+            )}
+            {hasResellerSync && (
+              <Card className="xl:col-span-2 border-2 border-amber-500/50 bg-amber-50/30 dark:bg-amber-950/10">
+                <CardHeader className="pb-2">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <CardTitle className="text-base flex items-center gap-2 text-amber-900 dark:text-amber-100">
+                        <AlertTriangle className="h-5 w-5" />
+                        Hostheaven par hai · order mein NAHI
+                      </CardTitle>
+                      <CardDescription className="text-xs mt-1">
+                        Hostheaven website par VM hai lekin OceanLinux ke <strong>kisi bhi order</strong> mein IP nahi (inventory mein ho to bhi dikhega).
+                      </CardDescription>
+                    </div>
+                    <Button
+                      type="button"
+                      className="shrink-0 bg-amber-600 hover:bg-amber-700"
+                      onClick={syncAllVpsAudit}
+                      disabled={syncingVpsAudit}
+                    >
+                      {syncingVpsAudit ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <>
+                          <RefreshCw className="h-4 w-4 mr-1.5" />
+                          Check Hostheaven extra VPS
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {!vpsAudit ? (
+                    <p className="text-sm text-muted-foreground">
+                      Button dabao — list aayegi jin VPS ka Hostheaven par bill chal raha hai par OceanLinux par record nahi.
+                    </p>
+                  ) : vpsAudit.onPanelNotInOrdersCount === 0 ? (
+                    <p className="text-sm text-emerald-700 dark:text-emerald-300 font-medium">
+                      ✓ Koi extra VPS nahi — Hostheaven ki har VM kisi order se linked hai ({vpsAudit.panelTotal} panel VMs checked).
+                    </p>
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-sm font-semibold text-amber-900 dark:text-amber-100">
+                          {vpsAudit.onPanelNotInOrdersCount} VPS — Hostheaven par hai, order mein nahi
+                        </p>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() =>
+                            copyText(
+                              vpsAudit.onPanelNotInOrders.map((r) => r.ip).join('\n'),
+                              'IP list copy ho gayi'
+                            )
+                          }
+                        >
+                          <Copy className="h-4 w-4 mr-1" />
+                          Copy all IPs
+                        </Button>
+                      </div>
+                      <div className="max-h-64 overflow-y-auto rounded-md border bg-background divide-y">
+                        {vpsAudit.onPanelNotInOrders.map((row) => (
+                          <div key={row.ip} className="px-3 py-2 text-sm">
+                            <p className="font-mono font-semibold">{row.ip}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {row.serverName || 'VM'}
+                              {row.expiryDate ? ` · expiry ${new Date(row.expiryDate).toLocaleDateString()}` : ''}
+                              {row.inInventory ? ' · inventory mein hai, order nahi' : ' · order bhi nahi, inventory bhi nahi'}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
             )}
             <div className="space-y-2 min-w-0">
             {stocks.length === 0 ? (
@@ -1709,6 +1828,7 @@ export default function CompanyDashboard() {
                   )}
                 </CardContent>
               </Card>
+
             </aside>
           </div>
         )}

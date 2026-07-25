@@ -249,6 +249,22 @@ export default function CompaniesPage() {
   const [resellerSaving, setResellerSaving] = useState(false);
   const [resellerTesting, setResellerTesting] = useState(false);
   const [resellerTestResult, setResellerTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [resellerAuditing, setResellerAuditing] = useState(false);
+  const [resellerAuditOpen, setResellerAuditOpen] = useState(false);
+  const [resellerAuditData, setResellerAuditData] = useState<{
+    hostheavenTotalVms: number;
+    oceanlinuxOrdersWithIp: number;
+    untrackedInOrdersCount: number;
+    untrackedInOrders: Array<{
+      ip: string;
+      vmId: string;
+      serverName: string;
+      expiryDate: string | null;
+      panelStatus: string;
+      inCompanyInventory: boolean;
+      inventoryStock: string | null;
+    }>;
+  } | null>(null);
   const [showResellerPassword, setShowResellerPassword] = useState(false);
 
   // Netbay API dialog state
@@ -628,6 +644,31 @@ export default function CompaniesPage() {
       setResellerTestResult({ success: false, message: err?.message || 'Request failed' });
     } finally {
       setResellerTesting(false);
+    }
+  };
+
+  const handleAuditResellerVms = async () => {
+    if (!resellerCompany) return;
+    setResellerAuditing(true);
+    setResellerAuditData(null);
+    try {
+      const res = await fetch(`/api/admin/companies/${resellerCompany._id}/reseller-vm-audit`);
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        toast.error(data.error || 'Hostheaven audit failed');
+        return;
+      }
+      setResellerAuditData(data);
+      setResellerAuditOpen(true);
+      toast.success(
+        data.untrackedInOrdersCount === 0
+          ? 'All panel VMs are linked to orders'
+          : `${data.untrackedInOrdersCount} VM(s) on Hostheaven with no order`
+      );
+    } catch (err: any) {
+      toast.error(err?.message || 'Audit request failed');
+    } finally {
+      setResellerAuditing(false);
     }
   };
 
@@ -1847,11 +1888,21 @@ export default function CompaniesPage() {
                   variant="outline"
                   size="sm"
                   onClick={handleTestResellerApi}
-                  disabled={resellerTesting || resellerSaving}
+                  disabled={resellerTesting || resellerSaving || resellerAuditing}
                   className="gap-2"
                 >
                   {resellerTesting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
                   Test Login
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleAuditResellerVms}
+                  disabled={resellerAuditing || resellerSaving || resellerTesting}
+                  className="gap-2"
+                >
+                  {resellerAuditing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Server className="h-4 w-4" />}
+                  Untracked VMs
                 </Button>
                 {resellerCompany.resellerApi && (
                   <Button
@@ -1876,6 +1927,88 @@ export default function CompaniesPage() {
               {resellerSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
               Save
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={resellerAuditOpen} onOpenChange={setResellerAuditOpen}>
+        <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Server className="h-5 w-5" />
+              Hostheaven VMs — not in any order
+            </DialogTitle>
+          </DialogHeader>
+          {resellerAuditData && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm">
+                <div className="rounded-md border p-2">
+                  <p className="text-muted-foreground text-xs">Panel total</p>
+                  <p className="font-semibold">{resellerAuditData.hostheavenTotalVms}</p>
+                </div>
+                <div className="rounded-md border p-2">
+                  <p className="text-muted-foreground text-xs">Orders with IP</p>
+                  <p className="font-semibold">{resellerAuditData.oceanlinuxOrdersWithIp}</p>
+                </div>
+                <div className="rounded-md border p-2 col-span-2">
+                  <p className="text-muted-foreground text-xs">Untracked (panel only)</p>
+                  <p className="font-semibold text-amber-600">{resellerAuditData.untrackedInOrdersCount}</p>
+                </div>
+              </div>
+              {resellerAuditData.untrackedInOrdersCount === 0 ? (
+                <p className="text-sm text-emerald-600">Every Hostheaven VM has a matching OceanLinux order IP.</p>
+              ) : (
+                <>
+                  <div className="flex justify-end">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        const text = resellerAuditData.untrackedInOrders.map((r) => r.ip).join('\n');
+                        void navigator.clipboard.writeText(text);
+                        toast.success('IP list copied');
+                      }}
+                    >
+                      <Copy className="h-4 w-4 mr-1" />
+                      Copy all IPs
+                    </Button>
+                  </div>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>IP</TableHead>
+                        <TableHead>VM ID</TableHead>
+                        <TableHead>Server</TableHead>
+                        <TableHead>Expiry</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Inventory</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {resellerAuditData.untrackedInOrders.map((row) => (
+                        <TableRow key={row.ip}>
+                          <TableCell className="font-mono text-xs">{row.ip}</TableCell>
+                          <TableCell className="font-mono text-xs">{row.vmId}</TableCell>
+                          <TableCell className="text-xs">{row.serverName || '—'}</TableCell>
+                          <TableCell className="text-xs">
+                            {row.expiryDate ? new Date(row.expiryDate).toLocaleDateString() : '—'}
+                          </TableCell>
+                          <TableCell className="text-xs">{row.panelStatus || '—'}</TableCell>
+                          <TableCell className="text-xs">
+                            {row.inCompanyInventory
+                              ? `Yes (${row.inventoryStock || 'stock'})`
+                              : 'No'}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setResellerAuditOpen(false)}>Close</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

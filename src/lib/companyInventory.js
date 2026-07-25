@@ -200,6 +200,18 @@ function parseInventoryBulkLines(text, serverType = 'Linux') {
       errors.push({ line: i + 1, content: line, reason: 'Missing ip or password' });
       continue;
     }
+    if (!looksLikeIpv4(ipAddress)) {
+      errors.push({ line: i + 1, content: line, reason: 'First column must be a valid IP address' });
+      continue;
+    }
+    if (looksLikeIpv4(password)) {
+      errors.push({
+        line: i + 1,
+        content: line,
+        reason: 'Password looks like an IP address — check bulk paste columns (ip,user,pass,os)',
+      });
+      continue;
+    }
     const os = normalizeOsForServerType(osPart, serverType);
     items.push({
       ipAddress,
@@ -223,7 +235,7 @@ async function syncStockCountFromInventory(stockId) {
   let company = null;
   if (stock.company) {
     const Company = require('@/models/companyModel').default;
-    company = await Company.findById(stock.company).select('resellerApi netbayApi').lean();
+    company = await Company.findById(stock.company).select('resellerApi netbayApi kurohostApi').lean();
   }
 
   const remaining = countUnallocatedInventory(stock);
@@ -232,8 +244,10 @@ async function syncStockCountFromInventory(stockId) {
   const {
     usesResellerLiveStock,
     usesNetbayLiveStock,
+    usesKurohostLiveStock,
     stockHasResellerPanelPlans,
     stockHasNetbayPlans,
+    stockHasKurohostPlans,
   } = require('@/lib/ipStockAvailability');
 
   const hybridLive =
@@ -259,6 +273,16 @@ async function syncStockCountFromInventory(stockId) {
 
 function cleanInventoryIp(ipAddress) {
   return String(ipAddress || '').split(':')[0].trim();
+}
+
+/** IPv4 check — used to reject bulk paste mistakes (password column = another IP). */
+function looksLikeIpv4(value) {
+  const s = cleanInventoryIp(value);
+  if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(s)) return false;
+  return s.split('.').every((part) => {
+    const n = Number(part);
+    return Number.isInteger(n) && n >= 0 && n <= 255;
+  });
 }
 
 /**
@@ -436,7 +460,15 @@ async function allocateCompanyInventoryForOrder(order) {
     order.inventoryDecremented = true;
     await order.save();
 
-    await syncStockCountFromInventory(order.ipStockId);
+    try {
+      await syncStockCountFromInventory(order.ipStockId);
+    } catch (syncErr) {
+      // IP/credentials are already on the order — stock count sync must not fail delivery.
+      console.error(
+        `[companyInventory] syncStockCountFromInventory failed for order ${order._id}:`,
+        syncErr.message
+      );
+    }
 
     return { allocated: true, ipAddress: item.ipAddress };
   } catch (err) {
@@ -472,4 +504,5 @@ module.exports = {
   syncCompanyInventoryAfterOrderUpdate,
   reconcileCompanyInventoryOrderIps,
   cleanInventoryIp,
+  looksLikeIpv4,
 };
