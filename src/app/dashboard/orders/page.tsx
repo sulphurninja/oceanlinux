@@ -1,6 +1,7 @@
 'use client'
 
 import { premiumBadge } from '@/lib/premium-badges';
+import { dashboardFetch } from '@/lib/dashboardFetch';
 import { getCustomerProviderDisplayNameFromOrder } from '@/lib/customerProviderDisplay';
 import { OsIcon, humanizeOsLabel } from '@/components/os/OsIcon';
 
@@ -164,7 +165,7 @@ const OrderHistory = () => {
     const fetchOrders = async () => {
         setLoading(true);
         try {
-            const response = await fetch('/api/orders/me', { cache: 'no-store', credentials: 'include' });
+            const response = await dashboardFetch('/api/orders/me', { cache: 'no-store', credentials: 'include' });
             if (response.status === 401) {
                 const data = await response.json().catch(() => ({}));
                 const code = data.code || '';
@@ -337,7 +338,7 @@ const OrderHistory = () => {
     const handleDownloadInvoice = async (orderId: string) => {
         setDownloadingInvoiceId(orderId);
         try {
-            const res = await fetch(`/api/invoice/download?orderId=${orderId}`);
+            const res = await dashboardFetch(`/api/invoice/download?orderId=${orderId}`);
             if (!res.ok) throw new Error('Failed to download invoice');
             const blob = await res.blob();
             const url = window.URL.createObjectURL(blob);
@@ -450,7 +451,7 @@ const OrderHistory = () => {
                         {/* Enhanced Tab Navigation with Counts */}
                         <div className="flex justify-center overflow-x-auto scrollbar-hide">
                             <TabsList className="grid grid-cols-3 md:grid-cols-5 h-fit w-fit min-w-0">
-                                <TabsTrigger value="all" classsName="flex items-center gap-1 px-2 sm:px-3 py-2 text-xs sm:text-sm whitespace-nowrap">
+                                <TabsTrigger value="all" className="flex items-center gap-1 px-2 sm:px-3 py-2 text-xs sm:text-sm whitespace-nowrap">
                                     <Receipt className="h-3 w-3 sm:h-4 sm:w-4" />
                                     <span>All</span>
                                     <Badge variant="secondary" className="ml-0.5 text-xs h-4 px-1">

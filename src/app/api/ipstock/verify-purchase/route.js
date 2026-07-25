@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getDataFromToken } from '@/helper/getDataFromToken';
 import { refreshAndVerifyPurchase } from '@/lib/syncIpStockBeforePurchase';
 import { customerStockUnavailableMessage } from '@/lib/customerStockMessages';
+import { enforceUserActionRateLimit } from '@/lib/rateLimit';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -18,6 +19,9 @@ export async function POST(request) {
     if (!userId) {
       return NextResponse.json({ ok: false, message: 'Unauthorized' }, { status: 401 });
     }
+
+    const rateLimited = enforceUserActionRateLimit(request);
+    if (rateLimited) return rateLimited;
 
     const body = await request.json();
     const { ipStockId, memory } = body || {};

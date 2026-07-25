@@ -11,6 +11,7 @@ import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import IPStock from '@/models/ipStockModel';
 import { storeAutoUnhideUpdate } from '@/lib/ipStockAvailability';
+import { enforceCronOrLoggedInUser } from '@/lib/apiSecurity';
 
 const SmartVpsAPI = require('@/services/smartvpsApi');
 
@@ -213,7 +214,15 @@ async function runSync(req: Request) {
   });
 }
 
+function authorizeSync(req: Request) {
+  const authDenied = enforceCronOrLoggedInUser(req as any);
+  if (authDenied) return authDenied;
+  return null;
+}
+
 export async function GET(req: Request) {
+  const denied = authorizeSync(req);
+  if (denied) return denied;
   try { return await runSync(req); }
   catch (e: any) {
     console.error('[SVPS-SYNC GET] error:', e);
@@ -222,6 +231,8 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  const denied = authorizeSync(req);
+  if (denied) return denied;
   try { return await runSync(req); }
   catch (e: any) {
     console.error('[SVPS-SYNC POST] error:', e);

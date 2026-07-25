@@ -25,7 +25,6 @@ export async function GET() {
         $group: {
           _id: '$productName',
           orderCount: { $sum: 1 },
-          totalRevenue: { $sum: '$price' },
           avgPrice: { $avg: '$price' }
         }
       },
@@ -46,12 +45,11 @@ export async function GET() {
       });
     }
 
-    // Format the response
+    // Public endpoint — never expose totalRevenue (competitor / ops intel).
     const formattedPlans = popularProducts.map((product, index) => ({
       name: product._id,
       orderCount: product.orderCount,
       avgPrice: Math.round(product.avgPrice),
-      totalRevenue: product.totalRevenue,
       rank: index + 1
     }));
 

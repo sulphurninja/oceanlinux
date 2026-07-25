@@ -14,10 +14,20 @@ export async function POST(request, { params }) {
     try {
         const { amount, description, type } = body;
 
+        // Unvalidated parseFloat lets a typo (or 'abc') write NaN into the
+        // balance, and a negative value silently drains the wallet.
+        const parsedAmount = parseFloat(amount);
+        if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+            return NextResponse.json(
+                { success: false, message: 'Amount must be a positive number' },
+                { status: 400 }
+            );
+        }
+
         if (type === 'recharge') {
             const result = await ResellerWalletService.recharge(
                 id,
-                parseFloat(amount),
+                parsedAmount,
                 description || 'Manual recharge by admin',
                 { source: 'admin_panel' }
             );

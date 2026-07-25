@@ -64,6 +64,7 @@ import {
 } from "@/components/ui/select";
 import { toast } from 'sonner';
 import { useSessionAlert } from '@/components/session-alert';
+import { dashboardFetch } from '@/lib/dashboardFetch';
 import { cn } from '@/lib/utils';
 import { useTheme } from 'next-themes';
 import RealActivityFeed from '@/components/real-activity-feed';
@@ -221,7 +222,7 @@ const MyAccount = () => {
     const fetchUserData = async () => {
         try {
             setLoading(true);
-            const response = await fetch('/api/users/me', { cache: 'no-store', credentials: 'include' });
+            const response = await dashboardFetch('/api/users/me', { cache: 'no-store', credentials: 'include' });
             if (response.status === 401) {
                 const authData = await response.json().catch(() => ({}));
                 const code = authData.code || '';
@@ -302,7 +303,7 @@ const MyAccount = () => {
 
     const fetchRealActivity = async () => {
         try {
-            const response = await fetch('/api/users/activity');
+            const response = await dashboardFetch('/api/users/activity');
             if (response.ok) {
                 const data = await response.json();
                 return data.activities;
@@ -315,7 +316,7 @@ const MyAccount = () => {
     };
 
     // Safe helper functions to prevent undefined errors
-    const safeUpdateNotifications = (key: keyof UserProfile['preferences']['notifications'], value: boolean) => {
+    const safeUpdateNotifications = (key: keyof NonNullable<UserProfile['preferences']>['notifications'], value: boolean) => {
         setUser(prev => ({
             ...prev,
             preferences: {
@@ -352,7 +353,7 @@ const MyAccount = () => {
     const handleProfileUpdate = async () => {
         try {
             setSaving(true);
-            const response = await fetch('/api/users/update', {
+            const response = await dashboardFetch('/api/users/update', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(user)
@@ -391,7 +392,7 @@ const MyAccount = () => {
     // Function to save theme preference immediately
     const savethemePreference = async (themeValue: string) => {
         try {
-            await fetch('/api/users/update', {
+            await dashboardFetch('/api/users/update', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -428,14 +429,14 @@ const MyAccount = () => {
             return;
         }
 
-        if (security.newPassword.length < 6) {
-            toast.error('Password must be at least 6 characters long');
+        if (security.newPassword.length < 8) {
+            toast.error('Password must be at least 8 characters long');
             return;
         }
 
         try {
             setSaving(true);
-            const response = await fetch('/api/user/update-settings', {
+            const response = await dashboardFetch('/api/user/update-settings', {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -484,7 +485,7 @@ const MyAccount = () => {
         setEmailChangePending(true);
 
         try {
-            const response = await fetch('/api/users/update-email', {
+            const response = await dashboardFetch('/api/users/update-email', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ newEmail })
@@ -518,7 +519,7 @@ const MyAccount = () => {
         setEmailChangePending(true);
 
         try {
-            const response = await fetch('/api/users/update-email', {
+            const response = await dashboardFetch('/api/users/update-email', {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ verificationCode })

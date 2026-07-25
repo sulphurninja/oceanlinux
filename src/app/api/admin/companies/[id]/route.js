@@ -66,6 +66,21 @@ function normalizeNetbayApiEntry(v) {
   };
 }
 
+function normalizeKurohostApiEntry(v) {
+  if (v === null) return null;
+  const enabled = asBool(v?.enabled);
+  const useLiveStockApi = enabled && asBool(v?.useLiveStockApi);
+  return {
+    enabled,
+    label: typeof v?.label === 'string' ? v.label.trim() : '',
+    baseUrl: typeof v?.baseUrl === 'string'
+      ? v.baseUrl.trim().replace(/\/+$/, '')
+      : '',
+    apiKey: typeof v?.apiKey === 'string' ? v.apiKey.trim() : '',
+    useLiveStockApi,
+  };
+}
+
 function normalizeJoyApiEntry(v) {
   if (v === null) return null;
   return {
@@ -113,6 +128,12 @@ function pickAllowedUpdates(body) {
       : normalizeNetbayApiEntry(body.netbayApi);
   }
 
+  if (Object.prototype.hasOwnProperty.call(body || {}, 'kurohostApi')) {
+    out.kurohostApi = body.kurohostApi === null
+      ? null
+      : normalizeKurohostApiEntry(body.kurohostApi);
+  }
+
   // Joy Services instances API (manage-only). Same null/object/omit semantics.
   if (Object.prototype.hasOwnProperty.call(body || {}, 'joyApi')) {
     out.joyApi = body.joyApi === null
@@ -154,6 +175,14 @@ export async function PUT(request, { params }) {
       { $set: { netbayApi: updates.netbayApi } }
     );
     delete updates.netbayApi;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(updates, 'kurohostApi')) {
+    await Company.collection.updateOne(
+      { _id: company._id },
+      { $set: { kurohostApi: updates.kurohostApi } }
+    );
+    delete updates.kurohostApi;
   }
 
   if (Object.prototype.hasOwnProperty.call(updates, 'joyApi')) {

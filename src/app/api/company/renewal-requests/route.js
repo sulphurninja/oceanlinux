@@ -1,32 +1,23 @@
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
+import { resolveCompanySession } from '@/lib/companySession';
 import connectDB from '@/lib/db';
 import RenewalRequest from '@/models/renewalRequestModel';
 import Order from '@/models/orderModel';
 import { calculateCompanyRenewalExpiryDate } from '@/lib/expiryHelper';
 import { isSlotIpOrder, SLOT_IP_NO_RENEWAL_MESSAGE } from '@/lib/slotIpOrder';
+import { toObjectIdString } from '@/lib/queryIds';
 const { getAdvpsRebuildResetFields, isAdvpsOrder } = require('@/lib/advpsRebuildLimit');
 const { notifyRenewalCompleted } = require('@/lib/renewalNotifications');
 const { executeResellerPanelUpstreamRenewal } = require('@/lib/resellerPanelRenewal');
 const { resolveProviderFromOrder } = require('@/lib/orderAnnouncementTarget');
-
-async function getCompanySession() {
-  const cookieStore = await cookies();
-  const session = cookieStore.get('company_session')?.value;
-  if (!session) return null;
-  try {
-    return JSON.parse(session);
-  } catch {
-    return null;
-  }
-}
+const { isKurohostOrder, executeKurohostRenewalOnApprove } = require('@/lib/kurohostRenewal');
 
 /**
  * GET /api/company/renewal-requests?status=pending|approved|rejected
  * Returns the company's renewal queue. Defaults to `pending`.
  */
 export async function GET(request) {
-  const company = await getCompanySession();
+  const company = await resolveCompanySession();
   if (!company) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   await connectDB();
@@ -60,19 +51,20 @@ export async function GET(request) {
  * here — operations team handles those manually via the gateway dashboard.
  */
 export async function POST(request) {
-  const company = await getCompanySession();
+  const company = await resolveCompanySession();
   if (!company) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   await connectDB();
 
   const { requestId, action, adminNotes } = await request.json();
 
-  if (!requestId || !['approve', 'reject'].includes(action)) {
+  const safeRequestId = toObjectIdString(requestId);
+  if (!safeRequestId || !['approve', 'reject'].includes(action)) {
     return NextResponse.json({ error: 'Invalid request' }, { status: 400 });
   }
 
   const renewalReq = await RenewalRequest.findOne({
-    _id: requestId,
+    _id: safeRequestId,
     companyId: company.id,
     status: 'pending',
   });
@@ -107,6 +99,13 @@ export async function POST(request) {
       providerRenewalResult = panelRenew.result || { error: panelRenew.error };
       if (panelRenew.success && panelRenew.newExpiryDate) {
         newExpiry = panelRenew.newExpiryDate;
+      }
+    } else if (isKurohostOrder(order)) {
+      const kuroRenew = await executeKurohostRenewalOnApprove(order, { Order });
+      providerRenewalSuccess = kuroRenew.success;
+      providerRenewalResult = kuroRenew;
+      if (!kuroRenew.success && !kuroRenew.skipped) {
+        console.warn('[COMPANY-RENEWAL] KuroHost post-approve action failed:', kuroRenew.message);
       }
     }
 
@@ -155,9 +154,14 @@ export async function POST(request) {
 
     return NextResponse.json({
       success: true,
-      message: 'Renewal approved — order has been extended.',
+      message: isKurohostOrder(order)
+        ? providerRenewalSuccess
+          ? 'Renewal approved — site expiry extended and KuroHost VM started/synced.'
+          : 'Renewal approved — site expiry extended. KuroHost action had issues; check providerRenewalResult.'
+        : 'Renewal approved — order has been extended.',
       orderId: String(order._id),
       newExpiryDate: newExpiry,
+      kurohostRenewal: isKurohostOrder(order) ? providerRenewalResult : undefined,
     });
   }
 

@@ -26,8 +26,8 @@ export async function POST(request) {
             });
         }
 
-        if (!newPassword || String(newPassword).length < 6) {
-            return new Response(JSON.stringify({ message: 'New password must be at least 6 characters' }), {
+        if (!newPassword || String(newPassword).length < 8) {
+            return new Response(JSON.stringify({ message: 'New password must be at least 8 characters' }), {
                 status: 400,
                 headers: { 'Content-Type': 'application/json' }
             });

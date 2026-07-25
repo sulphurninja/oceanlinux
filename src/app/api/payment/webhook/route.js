@@ -169,6 +169,18 @@ export async function POST(request) {
       console.log(`   - Product Name: ${order.productName}`);
       console.log(`   - Memory: ${order.memory}`);
 
+      // Cashfree retries webhooks. Without this the retry would re-run the
+      // deferred wallet charge, re-assign panel credentials and re-notify the
+      // customer. Mirrors the same guard in /api/payment/confirm.
+      if (order.status === 'confirmed' || order.status === 'active') {
+        console.log(`[WEBHOOK] ↩️ Order ${order._id} already ${order.status} — ignoring duplicate webhook`);
+        return NextResponse.json({
+          success: true,
+          message: 'Order already confirmed',
+          alreadyProcessed: true,
+        });
+      }
+
       // Update order status
       const orderUpdateStart = Date.now();
       console.log(`[WEBHOOK] 📝 UPDATING ORDER STATUS...`);
@@ -698,8 +710,15 @@ async function handleRenewalWebhook(renewalTxnId, payment, webhookStartTime) {
       processedViaWebhook: true
     };
 
-    // Update order
-    const updatedOrder = await Order.findByIdAndUpdate(order._id, {
+    // Claim this renewal atomically — this webhook races the client-side
+    // renew-confirm call, and both extending the expiry would give away a free
+    // renewal period for a single payment.
+    const renewalClaim = { _id: order._id };
+    if (renewalTxnId) {
+      renewalClaim['renewalPayments.renewalTxnId'] = { $ne: renewalTxnId };
+    }
+
+    const updatedOrder = await Order.findOneAndUpdate(renewalClaim, {
       expiryDate: newExpiryDate,
       lastAction: 'renew',
       lastActionTime: new Date(),
@@ -718,6 +737,17 @@ async function handleRenewalWebhook(renewalTxnId, payment, webhookStartTime) {
       $push: { renewalPayments: renewalPayment },
       $unset: { pendingRenewal: 1 } // Clear pending renewal
     }, { new: true });
+
+    if (!updatedOrder) {
+      console.log(`[WEBHOOK-RENEWAL] ⚠️ Renewal ${renewalTxnId} already applied — skipping duplicate extension`);
+      await logger.finalize(true, order.expiryDate);
+      return NextResponse.json({
+        success: true,
+        message: 'Renewal already processed',
+        alreadyProcessed: true,
+        orderId: order._id,
+      });
+    }
 
     const totalTime = Date.now() - webhookStartTime;
     console.log(`[WEBHOOK-RENEWAL] ✅ Renewal completed successfully in ${totalTime}ms`);

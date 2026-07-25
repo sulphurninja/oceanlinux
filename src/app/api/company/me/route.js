@@ -1,18 +1,12 @@
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
+import { resolveCompanySession } from '@/lib/companySession';
 
 export async function GET() {
-  const cookieStore = await cookies();
-  const session = cookieStore.get('company_session')?.value;
+  const company = await resolveCompanySession();
 
-  if (!session) {
+  if (!company) {
     return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
   }
 
-  try {
-    const data = JSON.parse(session);
-    return NextResponse.json(data);
-  } catch {
-    return NextResponse.json({ error: 'Invalid session' }, { status: 401 });
-  }
+  return NextResponse.json(company);
 }

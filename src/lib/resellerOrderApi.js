@@ -182,9 +182,8 @@ export async function createResellerOrder(reseller, body) {
     ipStockId: String(product._id),
     clientTxnId,
     gatewayOrderId: clientTxnId,
-    transactionId: clientTxnId,
     paymentMethod: 'reseller_wallet',
-    status: 'confirmed',
+    status: 'pending',
     os,
     customerEmail: userEmail || undefined,
     expiryDate,
@@ -193,7 +192,6 @@ export async function createResellerOrder(reseller, body) {
       walletAmount: finalPrice,
       purchasedViaResellerApi: true,
       resellerId: String(reseller._id),
-      confirmedAt: new Date(),
     },
     apiMetadata: {
       endUserEmail: userEmail || '',
@@ -222,8 +220,15 @@ export async function createResellerOrder(reseller, body) {
     };
   }
 
-  await assignPanelCredentials(order);
+  order.transactionId = clientTxnId;
+  order.status = 'confirmed';
+  order.paymentDetails = {
+    ...(order.paymentDetails || {}),
+    confirmedAt: new Date(),
+  };
   await order.save();
+
+  await assignPanelCredentials(order);
   await fulfillOrderInventory(order);
 
   try {

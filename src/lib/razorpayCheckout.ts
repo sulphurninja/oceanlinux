@@ -6,7 +6,9 @@ declare global {
 
 const PAYMENT_GATEWAY_ACTIVE_CLASS = 'payment-gateway-active';
 
-let lockWatchInterval: ReturnType<typeof setInterval> | null = null;
+// Browser timer id. Not ReturnType<typeof setInterval>, because @types/node is in
+// scope here and would resolve that to Node's Timeout instead of a number.
+let lockWatchInterval: number | null = null;
 
 export function formatRazorpayContact(phone?: string) {
   if (!phone) return '';

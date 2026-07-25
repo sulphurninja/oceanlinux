@@ -210,6 +210,11 @@ export async function POST(request) {
 
 // GET endpoint - simplified query to match POST logic
 export async function GET(request) {
+  if (!isCronAuthorized(request)) {
+    const denied = await enforceAdmin(request);
+    if (denied) return denied;
+  }
+
   await connectDB();
 
   try {

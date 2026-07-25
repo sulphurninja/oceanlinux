@@ -42,6 +42,15 @@ export function enforceCronSecret(request) {
   return null;
 }
 
+/** Cron secret OR logged-in customer (production). Dev allows anonymous refresh. */
+export function enforceCronOrLoggedInUser(request) {
+  if (isCronAuthorized(request)) return null;
+  const userId = getDataFromTokenSafe(request);
+  if (userId) return null;
+  if (process.env.NODE_ENV !== 'production') return null;
+  return NextResponse.json({ success: false, message: 'Authentication required' }, { status: 401 });
+}
+
 /** Block dangerous test/dev routes in production unless CRON_SECRET provided. */
 export function blockUnlessDevOrCron(request) {
   if (process.env.NODE_ENV !== 'production') return null;

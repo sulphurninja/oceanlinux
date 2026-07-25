@@ -1,8 +1,12 @@
 import { NextResponse } from 'next/server';
 import { runAdvpsStockCheck } from '@/lib/advpsStockCheck';
+import { enforceCronSecret, enforceCronOrLoggedInUser } from '@/lib/apiSecurity';
 
 /** Refresh ADVPS-backed IPStock rows from live api.advps.org stock. */
-export async function GET() {
+export async function GET(request) {
+  const authDenied = enforceCronOrLoggedInUser(request);
+  if (authDenied) return authDenied;
+
   try {
     const body = await runAdvpsStockCheck();
     return NextResponse.json(body);
@@ -15,6 +19,6 @@ export async function GET() {
   }
 }
 
-export async function POST() {
-  return GET();
+export async function POST(request) {
+  return GET(request);
 }

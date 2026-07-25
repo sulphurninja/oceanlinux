@@ -1,17 +1,16 @@
 import connectDB from "@/lib/db";
 import Order from "@/models/orderModel";
 import User from "@/models/userModel";
-import { getDataFromToken } from "@/helper/getDataFromToken";
+import { requireAdmin } from "@/lib/adminAuth";
 import { NextResponse } from 'next/server';
 
 export async function GET(request, { params }) {
     try {
         await connectDB();
 
-        // Check if user is admin
-        const adminId = getDataFromToken(request);
-        if (!adminId) {
-            return NextResponse.json({ message: 'Authentication required' }, { status: 401 });
+        const admin = await requireAdmin(request);
+        if (!admin) {
+            return NextResponse.json({ message: 'Admin access required' }, { status: 403 });
         }
 
         const order = await Order.findOne({
@@ -28,8 +27,11 @@ export async function GET(request, { params }) {
             return NextResponse.json({ message: 'User not found' }, { status: 404 });
         }
 
-        // Redirect to the invoice generation endpoint with transaction ID
-        const invoiceUrl = `/api/invoices/generate?txId=${order.transactionId}&key=${process.env.INVOICE_ADMIN_KEY || ''}`;
+        if (!order.transactionId) {
+            return NextResponse.json({ message: 'Order has no transaction ID for invoice' }, { status: 400 });
+        }
+
+        const invoiceUrl = `/api/invoices/generate?txId=${encodeURIComponent(order.transactionId)}`;
 
         return NextResponse.redirect(new URL(invoiceUrl, request.url));
 

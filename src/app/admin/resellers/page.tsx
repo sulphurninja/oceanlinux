@@ -26,8 +26,20 @@ import {
 import Link from 'next/link';
 import { toast } from 'sonner';
 
+interface Reseller {
+    _id: string;
+    businessName?: string;
+    email?: string;
+    phone?: string;
+    status: string;
+    isVerified?: boolean;
+    createdAt: string;
+    wallet?: { balance?: number };
+    stats?: { totalOrders?: number };
+}
+
 export default function ResellersPage() {
-    const [resellers, setResellers] = useState([]);
+    const [resellers, setResellers] = useState<Reseller[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState('');
 
@@ -58,7 +70,7 @@ export default function ResellersPage() {
         reseller.email?.toLowerCase().includes(searchQuery.toLowerCase())
     );
 
-    const getStatusBadge = (status) => {
+    const getStatusBadge = (status: string) => {
         switch (status) {
             case 'active':
                 return <Badge className="bg-green-500 hover:bg-green-600">Active</Badge>;
@@ -142,7 +154,7 @@ export default function ResellersPage() {
                                             <TableCell>
                                                 <div className="flex items-center gap-1 font-medium">
                                                     <span>₹{reseller.wallet?.balance?.toLocaleString()}</span>
-                                                    {reseller.wallet?.balance < 1000 && (
+                                                    {(reseller.wallet?.balance ?? 0) < 1000 && (
                                                         <span className="h-2 w-2 rounded-full bg-red-500" title="Low Balance" />
                                                     )}
                                                 </div>

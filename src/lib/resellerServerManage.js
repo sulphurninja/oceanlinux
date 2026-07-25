@@ -19,9 +19,11 @@ const SmartVpsAPI = require('@/services/smartvpsApi');
 const HostycareAPI = require('@/services/hostycareApi');
 const AdvpsAPI = require('@/services/advpsApi');
 const NetbayApi = require('@/services/netbayApi');
+const KurohostApi = require('@/services/kurohostApi');
 const JoyApi = require('@/services/joyApi');
 const ResellerApi = require('@/services/resellerApi');
 const { getCompanyJoyApiConfig } = require('@/lib/companyJoyApi');
+const { getCompanyKurohostApiConfig } = require('@/lib/companyKurohostApi');
 const { getCompanyResellerApiConfig } = require('@/lib/companyResellerApi');
 const { syncResellerVmCredentials } = require('@/lib/resellerApiOrderSync');
 const { applyJoyMachineToOrderUpdates } = require('@/lib/joyOrderSync');
@@ -45,6 +47,7 @@ const {
   configureAdvpsServiceIp,
 } = require('@/lib/advpsOrderSync');
 const { toUserFacingNetbayError } = require('@/lib/netbayApiErrors');
+const { runKurohostPostReinstallFlow } = require('@/lib/kurohostPostReinstallFlow');
 
 export const UNIVERSAL_ACTIONS = ['start', 'stop', 'restart', 'status', 'sync', 'reinstall', 'changeos'];
 
@@ -80,6 +83,13 @@ const PROVIDER_CAPABILITIES = {
     changeosRequiresOs: false,
     osOptions: ['ubuntu', 'centos', 'windows'],
     notes: 'reinstall/changeos trigger Netbay rebuild. osType optional.',
+  },
+  kurohost: {
+    supported: ['start', 'stop', 'restart', 'status', 'sync', 'reinstall'],
+    reinstallRequiresOs: true,
+    changeosRequiresOs: false,
+    osOptions: [],
+    notes: 'KuroHost Cloud — power actions, OS reinstall (RUNNING/STOPPED), status sync.',
   },
   company: {
     supported: ['start', 'stop', 'restart', 'status', 'sync', 'reinstall'],
@@ -146,6 +156,8 @@ function hasNativeServiceId(order, provider) {
       return !!order.hostycareServiceId;
     case 'netbay':
       return !!order.netbayServiceId;
+    case 'kurohost':
+      return !!order.kurohostInstanceId;
     case 'reseller-api':
       return !!order.resellerVmId;
     default:
@@ -171,6 +183,7 @@ export function resolveResellerManageProvider(order, ipStock = null) {
   if (upstream === 'oceanlinux' && (order.smartvpsServiceId || order.ipAddress)) return 'smartvps';
   if (upstream === 'oceanlinux' && order.advpsServiceId) return 'advps';
   if (upstream === 'oceanlinux' && order.netbayServiceId) return 'netbay';
+  if (upstream === 'oceanlinux' && order.kurohostInstanceId) return 'kurohost';
 
   return upstream in PROVIDER_CAPABILITIES ? upstream : 'oceanlinux';
 }
@@ -180,7 +193,7 @@ export function getResellerManagementCapabilities(order, ipStock = null) {
   const caps = PROVIDER_CAPABILITIES[provider] || PROVIDER_CAPABILITIES.oceanlinux;
   const ip = getOrderIp(order);
   const provisioned =
-    provider === 'advps' || provider === 'netbay'
+    provider === 'advps' || provider === 'netbay' || provider === 'kurohost'
       ? hasNativeServiceId(order, provider)
       : !!ip || hasNativeServiceId(order, provider);
 
@@ -203,7 +216,7 @@ export async function loadOrderIpStock(order) {
   if (!stock?.company) return stock;
 
   const company = await Company.findById(stock.company)
-    .select('virtualizors virtualizor resellerApi netbayApi joyApi name')
+    .select('virtualizors virtualizor resellerApi netbayApi kurohostApi joyApi name')
     .lean();
 
   let companyAutomation = null;
@@ -213,6 +226,7 @@ export async function loadOrderIpStock(order) {
       !!company.virtualizor?.host;
     const hasResellerApi = company.resellerApi?.enabled;
     const hasNetbay = company.netbayApi?.enabled;
+    const hasKurohost = !!getCompanyKurohostApiConfig(company);
     const hasJoy = !!getCompanyJoyApiConfig(company);
     if (hasVirtualizor) {
       companyAutomation = { enabled: true, provider: 'virtualizor' };
@@ -220,6 +234,8 @@ export async function loadOrderIpStock(order) {
       companyAutomation = { enabled: true, provider: 'reseller-api' };
     } else if (hasNetbay) {
       companyAutomation = { enabled: true, provider: 'netbay' };
+    } else if (hasKurohost) {
+      companyAutomation = { enabled: true, provider: 'kurohost' };
     } else if (hasJoy) {
       companyAutomation = { enabled: true, provider: 'joy' };
     }
@@ -507,6 +523,81 @@ async function runNetbay(order, orderId, action, osType, ipStock) {
   }
 }
 
+async function runKurohost(order, orderId, action, _osType, ipStock) {
+  if (!order.kurohostInstanceId) {
+    return { success: false, message: 'Server is not provisioned yet. Please try again shortly.' };
+  }
+  const cfg = getCompanyKurohostApiConfig(ipStock?.company);
+  if (!cfg) {
+    return { success: false, message: 'Server management is not available for this product.' };
+  }
+
+  const api = new KurohostApi(cfg);
+  const iid = order.kurohostInstanceId;
+
+  switch (action) {
+    case 'start':
+      await api.startInstance(iid);
+      await Order.findByIdAndUpdate(orderId, { lastAction: 'start', lastActionTime: new Date() });
+      return { success: true, message: 'Start command sent', data: { powerState: 'starting' } };
+    case 'stop':
+      await api.stopInstance(iid);
+      await Order.findByIdAndUpdate(orderId, { lastAction: 'stop', lastActionTime: new Date() });
+      return { success: true, message: 'Stop command sent', data: { powerState: 'stopped' } };
+    case 'restart':
+      await api.rebootInstance(iid);
+      await Order.findByIdAndUpdate(orderId, { lastAction: 'restart', lastActionTime: new Date() });
+      return { success: true, message: 'Restart command sent', data: {} };
+    case 'status':
+    case 'sync': {
+      const detailRes = await api.getInstance(iid);
+      const inst = KurohostApi.unwrapInstance(detailRes);
+      const powerState = KurohostApi.mapPowerState(inst?.status);
+      await Order.findByIdAndUpdate(orderId, { lastSyncTime: new Date() });
+      return { success: true, message: 'Status retrieved', data: { powerState, instance: inst } };
+    }
+    case 'reinstall': {
+      const osTemplateId = String(_osType || '').trim();
+      if (!osTemplateId) {
+        return missingOsType(action, PROVIDER_CAPABILITIES.kurohost);
+      }
+      const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789@#&$';
+      let newPassword = '';
+      for (let i = 0; i < 20; i++) {
+        newPassword += chars[Math.floor(Math.random() * chars.length)];
+      }
+      const apiRes = await api.reinstallInstance(iid, { osTemplateId, password: newPassword });
+      const jobId = apiRes?.job?.id || null;
+      await Order.findByIdAndUpdate(orderId, {
+        lastAction: 'reinstall',
+        lastActionTime: new Date(),
+        provisioningStatus: 'provisioning',
+        provisioningError: 'Reinstall in progress — fetching new password…',
+        password: newPassword,
+        username: 'root',
+        ...(jobId ? { kurohostJobId: jobId } : {}),
+      });
+      void runKurohostPostReinstallFlow({
+        api,
+        Order,
+        orderId,
+        instanceId: iid,
+        jobId,
+        generatedPassword: newPassword,
+      }).catch((err) => {
+        console.error('[RESELLER-MANAGE-KUROHOST] Post-reinstall sync failed:', err.message);
+      });
+      return {
+        success: true,
+        message: 'Reinstall submitted — new password will sync automatically',
+        data: { instanceId: iid, jobId, osTemplateId },
+      };
+    }
+    default:
+      return actionNotSupported(action, PROVIDER_CAPABILITIES.kurohost);
+  }
+}
+
 async function runJoy(order, orderId, action, _osType, ipStock) {
   const cfg = getCompanyJoyApiConfig(ipStock?.company);
   if (!cfg) {
@@ -675,6 +766,7 @@ const PROVIDER_RUNNERS = {
   smartvps: (order, orderId, action, osType) => runSmartvps(order, orderId, action, osType),
   hostycare: (order, orderId, action) => runHostycare(order, orderId, action),
   netbay: (order, orderId, action, osType, ipStock) => runNetbay(order, orderId, action, osType, ipStock),
+  kurohost: (order, orderId, action, osType, ipStock) => runKurohost(order, orderId, action, osType, ipStock),
   joy: (order, orderId, action, osType, ipStock) => runJoy(order, orderId, action, osType, ipStock),
   'reseller-api': (order, orderId, action, osType, ipStock) => runResellerApi(order, orderId, action, osType, ipStock),
   company: (order, orderId, action) => runCompanyAutomation(order, orderId, action),

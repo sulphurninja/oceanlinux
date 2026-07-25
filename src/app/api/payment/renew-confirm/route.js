@@ -13,6 +13,8 @@ import { resolveOrderRenewalPrice } from '@/lib/orderRenewalPricingServer';
 const { customerApiCatchPayload } = require('@/lib/customerFacingErrors');
 import { debitPendingRenewalWallet } from '@/lib/renewalWallet';
 import { enforceOrderAccess } from '@/lib/apiSecurity';
+import { enforcePaymentRateLimit } from '@/lib/rateLimit';
+import { verifyRazorpaySignature } from '@/lib/paymentGateways';
 const SmartVPSAPI = require('@/services/smartvpsApi');
 const AdvpsAPI = require('@/services/advpsApi');
 const RenewalLogger = require('@/services/renewalLogger');
@@ -33,6 +35,9 @@ Cashfree.XEnvironment = process.env.CASHFREE_ENVIRONMENT === 'SANDBOX'
   : Cashfree.Environment.PRODUCTION;
 
 export async function POST(request) {
+  const rateLimited = enforcePaymentRateLimit(request);
+  if (rateLimited) return rateLimited;
+
   await connectDB();
 
   console.log("========== RENEWAL PAYMENT CONFIRMATION API ==========");
@@ -177,11 +182,15 @@ export async function POST(request) {
         );
       }
 
-      // Use razorpay order ID from request, or fall back to pendingRenewal.gatewayOrderId
-      const orderIdForSignature = razorpayOrderId || order.pendingRenewal?.gatewayOrderId;
+      // Always bind to the Razorpay order we created server-side for this
+      // renewal. Preferring a client-supplied order id would let a valid
+      // signature from any cheaper payment settle this renewal for free.
+      const orderIdForSignature = order.pendingRenewal?.gatewayOrderId;
 
       if (!orderIdForSignature) {
-        console.error('[RENEWAL-CONFIRM] ❌ Missing Razorpay order ID for signature verification');
+        console.error('[RENEWAL-CONFIRM] ❌ Missing stored Razorpay order ID for signature verification');
+        logger.logError('Missing stored Razorpay order ID');
+        await logger.finalize(false, null, 'Missing stored Razorpay order ID');
         return NextResponse.json(
           { success: false, message: 'Missing Razorpay order ID' },
           { status: 400 }
@@ -190,13 +199,14 @@ export async function POST(request) {
 
       console.log('[RENEWAL-CONFIRM] Using Razorpay order ID for signature:', orderIdForSignature);
 
-      // Verify Razorpay signature using the correct order_id|payment_id format
-      const generatedSignature = crypto
-        .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
-        .update(`${orderIdForSignature}|${razorpayPaymentId}`)
-        .digest('hex');
+      const renewalSignatureOk = verifyRazorpaySignature({
+        razorpay_order_id: razorpayOrderId || orderIdForSignature,
+        razorpay_payment_id: razorpayPaymentId,
+        razorpay_signature: razorpaySignature,
+        expectedOrderId: orderIdForSignature,
+      });
 
-      if (generatedSignature === razorpaySignature) {
+      if (renewalSignatureOk) {
         console.log('[RENEWAL-CONFIRM] ✅ Razorpay signature verified');
         logger.logSuccess('Razorpay payment verified');
         payment_id = razorpayPaymentId;
@@ -215,12 +225,21 @@ export async function POST(request) {
       }
     } else if (!paymentVerified && gatewayPaymentMethod === 'upi') {
       const { verifyUPIPayment } = await import('@/lib/confirmPendingOrderPayment');
+      const { paymentAmountsMatch, expectedRenewalGatewayAmount } = await import('@/lib/paymentAmountValidation');
       const upiCheck = await verifyUPIPayment(renewalTxnId);
       if (!upiCheck.verified) {
         console.error('[RENEWAL-CONFIRM] UPI payment not verified:', upiCheck);
         await logger.finalize(false, null, 'UPI payment not verified');
         return NextResponse.json(
           { success: false, message: 'UPI payment not verified. Please wait for confirmation or contact support.' },
+          { status: 400 }
+        );
+      }
+      const expectedGateway = expectedRenewalGatewayAmount(order);
+      if (!paymentAmountsMatch(upiCheck.amount, expectedGateway)) {
+        await logger.finalize(false, null, 'UPI amount mismatch');
+        return NextResponse.json(
+          { success: false, message: 'Payment amount does not match renewal price.' },
           { status: 400 }
         );
       }
@@ -719,7 +738,15 @@ export async function POST(request) {
 
     // Update the order with new expiry date and payment info
     // IMPORTANT: Update main payment fields  to reflect the latest renewal transaction
-    const updatedOrder = await Order.findByIdAndUpdate(orderId, {
+    // Claim this renewal atomically. The idempotency check above is a
+    // read-then-write, so a confirm racing the webhook could otherwise push two
+    // renewal records and extend the expiry twice for a single payment.
+    const renewalClaim = { _id: orderId };
+    if (renewalTxnId) {
+      renewalClaim['renewalPayments.renewalTxnId'] = { $ne: renewalTxnId };
+    }
+
+    const updatedOrder = await Order.findOneAndUpdate(renewalClaim, {
       expiryDate: newExpiryDate,
       lastAction: 'renew',
       lastActionTime: new Date(),
@@ -741,6 +768,24 @@ export async function POST(request) {
     }, { new: true });
 
     if (!updatedOrder) {
+      // Lost the race: another confirm/webhook already applied this renewal.
+      const current = await Order.findById(orderId).lean();
+      const existingRenewal = renewalTxnId
+        ? current?.renewalPayments?.find((rp) => rp.renewalTxnId === renewalTxnId)
+        : null;
+
+      if (existingRenewal) {
+        console.log(`[RENEWAL-CONFIRM] ⚠️ Renewal already applied concurrently: ${renewalTxnId}`);
+        await logger.finalize(true, existingRenewal.newExpiry || current.expiryDate);
+        return NextResponse.json({
+          success: true,
+          message: 'Renewal was already processed',
+          alreadyProcessed: true,
+          orderId: order._id,
+          newExpiryDate: existingRenewal.newExpiry || current.expiryDate,
+        });
+      }
+
       console.error('[RENEWAL-CONFIRM] Failed to update order in database');
       return NextResponse.json({
         success: false,

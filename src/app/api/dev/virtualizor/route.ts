@@ -1,19 +1,13 @@
 export const runtime = "nodejs"; // ensure Node runtime
 
 import { NextRequest, NextResponse } from "next/server";
-import { VirtualizorAPI } from "@/services/virtualizorApi"; // named import that DEFINITELY has findVpsId
-
-function requireAdmin(req: NextRequest) {
-  const sent = req.headers.get("x-admin-token") || "";
-  const need = process.env.HOSTYCARE_INSPECT_TOKEN || "";
-  return !!need && sent === need;
-}
+import { VirtualizorAPI } from "@/services/virtualizorApi";
+import { blockUnlessDevOrCron } from "@/lib/apiSecurity";
 
 export async function POST(req: NextRequest) {
   try {
-    // if (!requireAdmin(req)) {
-    //   return NextResponse.json({ message: "Forbidden" }, { status: 403 });
-    // }
+    const blocked = blockUnlessDevOrCron(req);
+    if (blocked) return blocked;
 
     const body = await req.json();
     const { action } = body || {};

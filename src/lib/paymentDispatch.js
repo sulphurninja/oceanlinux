@@ -8,6 +8,10 @@ import { fulfillOrderInventory } from '@/lib/fulfillOrderInventory';
 import { verifyCashfreePayment, verifyUPIPayment } from '@/lib/paymentGateways';
 import { getRazorpayClient } from '@/lib/razorpayClient';
 const { resolveOrderExpiryOnPayment } = require('@/lib/advpsOrderExpiry');
+import {
+  paymentAmountsMatch,
+  expectedGatewayAmountFromSession,
+} from '@/lib/paymentAmountValidation';
 
 const AutoProvisioningService = require('@/services/autoProvisioningService');
 
@@ -60,6 +64,11 @@ export async function probeCheckoutSessionPayment(session) {
     if (!result.verified) {
       return { verified: false, gateway: 'cashfree', reason: result.error || 'not paid' };
     }
+    const paidAmount = result.payment?.payment_amount;
+    const expected = expectedGatewayAmountFromSession(session);
+    if (!paymentAmountsMatch(paidAmount, expected)) {
+      return { verified: false, gateway: 'cashfree', reason: 'amount mismatch' };
+    }
     return {
       verified: true,
       gateway: 'cashfree',
@@ -110,6 +119,11 @@ export async function probeCheckoutSessionPayment(session) {
       if (razorpayOrder.status === 'paid') {
         const payments = await razorpay.orders.fetchPayments(razorpayOrderId);
         const captured = payments.items?.find((p) => p.status === 'captured');
+        const paidInr = Number(captured?.amount ?? razorpayOrder.amount) / 100;
+        const expected = expectedGatewayAmountFromSession(session);
+        if (!paymentAmountsMatch(paidInr, expected)) {
+          return { verified: false, gateway: 'razorpay', reason: 'amount mismatch' };
+        }
         return {
           verified: true,
           gateway: 'razorpay',
@@ -126,6 +140,11 @@ export async function probeCheckoutSessionPayment(session) {
         const payments = await razorpay.orders.fetchPayments(razorpayOrderId);
         const captured = payments.items?.find((p) => p.status === 'captured');
         if (captured) {
+          const paidInr = Number(captured.amount) / 100;
+          const expected = expectedGatewayAmountFromSession(session);
+          if (!paymentAmountsMatch(paidInr, expected)) {
+            return { verified: false, gateway: 'razorpay', reason: 'amount mismatch' };
+          }
           return {
             verified: true,
             gateway: 'razorpay',
@@ -332,6 +351,7 @@ export async function recoverPendingCheckoutSession(session, { maxAttempts = 1, 
         paymentMethod: lastProbe.gateway,
         transactionId: lastProbe.transactionId,
         paymentDetails: lastProbe.paymentDetails,
+        allowRecovery: ['failed', 'cancelled'].includes(fresh.status),
       });
     }
   }
@@ -352,31 +372,113 @@ export async function recoverPendingCheckoutSession(session, { maxAttempts = 1, 
 export async function confirmRechargeFromWebhook(recharge, { paymentMethod, transactionId, paymentDetails } = {}) {
   if (!recharge) return { success: false, reason: 'recharge missing' };
 
-  if (recharge.status === 'confirmed') {
-    const newBalance = await userWalletService.getBalance(recharge.user);
-    return { success: true, alreadyProcessed: true, rechargeId: recharge._id, newBalance };
+  const existing = await WalletRecharge.findById(recharge._id);
+  if (!existing) return { success: false, reason: 'recharge missing' };
+  if (existing.status === 'confirmed') {
+    const newBalance = await userWalletService.getBalance(existing.user);
+    return { success: true, alreadyProcessed: true, rechargeId: existing._id, newBalance };
   }
 
+  // Crash between credit() and status=confirmed leaves walletTxnId empty but
+  // the wallet txn (reference = rechargeId) already exists. Heal that first.
+  if (existing.walletTxnId || await userWalletService.findTxnByReference(existing.user, existing._id)) {
+    const prior = existing.walletTxnId
+      ? null
+      : await userWalletService.findTxnByReference(existing.user, existing._id);
+    existing.status = 'confirmed';
+    existing.creditedAt = existing.creditedAt || new Date();
+    if (!existing.walletTxnId && prior?._id) {
+      existing.walletTxnId = String(prior._id);
+    }
+    await existing.save();
+    const newBalance = await userWalletService.getBalance(existing.user);
+    return {
+      success: true,
+      alreadyProcessed: true,
+      rechargeId: existing._id,
+      newBalance,
+      walletTxnId: existing.walletTxnId,
+    };
+  }
+
+  const claimed = await WalletRecharge.findOneAndUpdate(
+    { _id: recharge._id, status: 'pending' },
+    { $set: { status: 'processing' } },
+    { new: true }
+  );
+  if (!claimed) {
+    const fresh = await WalletRecharge.findById(recharge._id);
+    if (fresh?.status === 'confirmed') {
+      const newBalance = await userWalletService.getBalance(fresh.user);
+      return { success: true, alreadyProcessed: true, rechargeId: fresh._id, newBalance };
+    }
+    // Another worker is mid-credit, or a stuck processing row already credited.
+    if (fresh?.walletTxnId || await userWalletService.findTxnByReference(fresh?.user, fresh?._id)) {
+      const prior = fresh.walletTxnId
+        ? null
+        : await userWalletService.findTxnByReference(fresh.user, fresh._id);
+      fresh.status = 'confirmed';
+      fresh.creditedAt = fresh.creditedAt || new Date();
+      if (!fresh.walletTxnId && prior?._id) fresh.walletTxnId = String(prior._id);
+      await fresh.save();
+      const newBalance = await userWalletService.getBalance(fresh.user);
+      return {
+        success: true,
+        alreadyProcessed: true,
+        rechargeId: fresh._id,
+        newBalance,
+        walletTxnId: fresh.walletTxnId,
+      };
+    }
+    return { success: false, reason: 'recharge not pending' };
+  }
+
+  recharge = claimed;
   if (paymentMethod) recharge.paymentMethod = paymentMethod;
   if (transactionId) recharge.transactionId = transactionId;
   if (paymentDetails) recharge.paymentDetails = { ...(recharge.paymentDetails || {}), ...paymentDetails };
 
+  const verifiedAmount =
+    Number(paymentDetails?.payment_amount) ||
+    Number(paymentDetails?.verifiedAmount) ||
+    Number(recharge.amount);
+
+  if (!paymentAmountsMatch(verifiedAmount, recharge.amount)) {
+    recharge.status = 'pending';
+    await recharge.save();
+    return { success: false, reason: 'amount mismatch' };
+  }
+
+  const creditAmount = Math.min(Number(recharge.amount), Number(verifiedAmount));
+
+  // Final race guard: if we were reset from processing→pending after a credit
+  // already landed, do not credit again.
+  const alreadyCredited = await userWalletService.findTxnByReference(recharge.user, recharge._id);
   let creditResult;
-  try {
-    creditResult = await userWalletService.credit(recharge.user, recharge.amount, {
-      type: 'credit',
-      description: `Wallet top-up #${recharge._id}`,
-      reference: String(recharge._id),
-      metadata: {
-        rechargeId: recharge._id,
-        clientTxnId: recharge.clientTxnId,
-        paymentMethod: recharge.paymentMethod,
-        transactionId: recharge.transactionId,
-      },
-    });
-  } catch (err) {
-    console.error('[paymentDispatch] credit wallet failed:', err);
-    return { success: false, error: err.message };
+  if (alreadyCredited) {
+    creditResult = {
+      walletTxnId: String(alreadyCredited._id),
+      balanceAfter: await userWalletService.getBalance(recharge.user),
+    };
+  } else {
+    try {
+      creditResult = await userWalletService.credit(recharge.user, creditAmount, {
+        type: 'credit',
+        description: `Wallet top-up #${recharge._id}`,
+        reference: String(recharge._id),
+        metadata: {
+          rechargeId: recharge._id,
+          clientTxnId: recharge.clientTxnId,
+          paymentMethod: recharge.paymentMethod,
+          transactionId: recharge.transactionId,
+        },
+      });
+    } catch (err) {
+      console.error('[paymentDispatch] credit wallet failed:', err);
+      recharge.status = 'pending';
+      await recharge.save();
+      return { success: false, error: err.message };
+    }
   }
 
   recharge.status = 'confirmed';
@@ -408,15 +510,44 @@ export async function confirmRechargeFromWebhook(recharge, { paymentMethod, tran
  * @param {string} [args.transactionId]
  * @param {object} [args.paymentDetails]
  */
-export async function confirmCheckoutFromWebhook(session, { paymentMethod, transactionId, paymentDetails } = {}) {
+export async function confirmCheckoutFromWebhook(session, { paymentMethod, transactionId, paymentDetails, allowRecovery = false } = {}) {
   if (!session) return { success: false, reason: 'session missing' };
+
+  let fresh = await CheckoutSession.findById(session._id);
+  if (!fresh) return { success: false, reason: 'session missing' };
+  session = fresh;
 
   if (session.status === 'confirmed') {
     return { success: true, alreadyProcessed: true, sessionId: session._id };
   }
+
   if (session.status === 'failed' || session.status === 'cancelled') {
-    return { success: false, reason: `session is ${session.status}` };
+    if (!allowRecovery) {
+      return { success: false, reason: `session is ${session.status}` };
+    }
+    await CheckoutSession.updateOne(
+      { _id: session._id, status: { $in: ['failed', 'cancelled'] } },
+      { $set: { status: 'pending', failureReason: null, failedAt: null } }
+    );
+    session = await CheckoutSession.findById(session._id);
+    if (!session || session.status !== 'pending') {
+      return { success: false, reason: 'session recovery failed' };
+    }
   }
+
+  const claimed = await CheckoutSession.findOneAndUpdate(
+    { _id: session._id, status: 'pending' },
+    { $set: { status: 'processing' } },
+    { new: true }
+  );
+  if (!claimed) {
+    const again = await CheckoutSession.findById(session._id);
+    if (again?.status === 'confirmed') {
+      return { success: true, alreadyProcessed: true, sessionId: again._id };
+    }
+    return { success: false, reason: 'session not available for confirmation' };
+  }
+  session = claimed;
 
   // Deduct-on-success: charge the FULL wallet portion now that gateway paid.
   // Do not confirm the session if the wallet cannot cover its share — prevents
@@ -435,6 +566,8 @@ export async function confirmCheckoutFromWebhook(session, { paymentMethod, trans
       session.walletTxnId = debit.walletTxnId;
     } catch (err) {
       console.error('[confirmCheckoutFromWebhook] wallet debit-on-success failed:', err.message);
+      session.status = 'pending';
+      await session.save();
       return {
         success: false,
         reason: 'wallet_portion_unpaid',
@@ -547,9 +680,26 @@ export async function confirmCheckoutFromWebhook(session, { paymentMethod, trans
 export async function refundAndFailCheckoutSession(session, reason = 'cancelled') {
   if (!session) return { success: false };
 
+  const fresh = await CheckoutSession.findById(session._id);
+  if (!fresh) return { success: false, reason: 'session missing' };
+  session = fresh;
+
   if (session.status === 'confirmed') {
     return { success: false, reason: 'already confirmed' };
   }
+
+  if (session.status !== 'confirmed') {
+    const probe = await probeCheckoutSessionPayment(session);
+    if (probe.verified) {
+      return confirmCheckoutFromWebhook(session, {
+        paymentMethod: probe.gateway,
+        transactionId: probe.transactionId,
+        paymentDetails: probe.paymentDetails,
+        allowRecovery: true,
+      });
+    }
+  }
+
   if (session.status === 'failed' || session.status === 'cancelled') {
     return { success: true, alreadyProcessed: true };
   }

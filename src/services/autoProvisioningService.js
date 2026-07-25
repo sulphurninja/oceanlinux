@@ -4,11 +4,18 @@ const HostycareAPI = require('./hostycareApi');
 const SmartVpsAPI = require('./smartvpsApi');              // SmartVPS client (with its own logging)
 const AdvpsAPI = require('./advpsApi');
 const NetbayApi = require('./netbayApi');
+const KurohostApi = require('./kurohostApi');
 const connectDB = require('@/lib/db').default;
 const Order = require('@/models/orderModel').default;
 const IPStock = require('@/models/ipStockModel');
 const Company = require('@/models/companyModel').default;
 const { getCompanyNetbayApiConfig } = require('@/lib/companyNetbayApi');
+const { getCompanyKurohostApiConfig } = require('@/lib/companyKurohostApi');
+const {
+  readKurohostStockConfig,
+  resolveKurohostFlavorId,
+  resolveKurohostOsTemplateId,
+} = require('@/lib/kurohostStockConfig');
 const { getCompanyResellerApiConfig } = require('@/lib/companyResellerApi');
 const {
   readResellerApiStockConfig,
@@ -86,6 +93,48 @@ class AutoProvisioningService {
     });
 
     return isNetbay;
+  }
+
+  isKurohostStock(ipStock, order) {
+    const tags = Array.isArray(ipStock?.tags) ? ipStock.tags : [];
+    const provider = (ipStock?.provider || '').toString().toLowerCase();
+
+    const hasKurohostConfig = !!(ipStock?.defaultConfigurations?.kurohost ||
+      ipStock?.defaultConfigurations?.get?.('kurohost'));
+    const taggedKurohost = tags.some(t => String(t).toLowerCase() === 'kurohost');
+    const byProvider = provider === 'kurohost';
+    const byOrder = !!order?.kurohostInstanceId || order?.provider === 'kurohost';
+
+    const isKurohost = hasKurohostConfig || taggedKurohost || byProvider || byOrder;
+
+    L.kv('KuroHost detection', {
+      hasKurohostConfig, taggedKurohost, byProvider, byOrder, result: isKurohost,
+    });
+
+    return isKurohost;
+  }
+
+  async resolveKurohostConfigForStock(ipStock) {
+    if (!ipStock?.company) {
+      L.line('[KUROHOST] IPStock has no company link — cannot resolve API credentials');
+      return null;
+    }
+    try {
+      const company = await Company.findById(ipStock.company).select('kurohostApi name').lean();
+      if (!company) {
+        L.line(`[KUROHOST] Company ${ipStock.company} not found`);
+        return null;
+      }
+      const cfg = getCompanyKurohostApiConfig(company);
+      if (!cfg) {
+        L.line(`[KUROHOST] Company "${company.name}" has no enabled/complete KuroHost API config`);
+        return null;
+      }
+      return { ...cfg, companyName: company.name };
+    } catch (err) {
+      L.line(`[KUROHOST] Failed to load company config: ${err.message}`);
+      return null;
+    }
   }
 
   /**
@@ -972,9 +1021,10 @@ class AutoProvisioningService {
 
       const advps = this.isAdvpsStock(ipStock, order);
       const netbay = !advps && this.isNetbayStock(ipStock, order);
-      const resellerPanel = !advps && !netbay && isResellerApiStock(ipStock, order);
-      const smartVps = !advps && !netbay && !resellerPanel && this.isSmartVpsStock(ipStock, order);
-      const providerName = advps ? 'ADVPS' : netbay ? 'Netbay' : resellerPanel ? 'ResellerPanel' : smartVps ? 'SmartVPS' : 'Hostycare';
+      const kurohost = !advps && !netbay && this.isKurohostStock(ipStock, order);
+      const resellerPanel = !advps && !netbay && !kurohost && isResellerApiStock(ipStock, order);
+      const smartVps = !advps && !netbay && !kurohost && !resellerPanel && this.isSmartVpsStock(ipStock, order);
+      const providerName = advps ? 'ADVPS' : netbay ? 'Netbay' : kurohost ? 'KuroHost' : resellerPanel ? 'ResellerPanel' : smartVps ? 'SmartVPS' : 'Hostycare';
       L.line(`➡ Provider route selected: ${providerName}`);
 
       // Branch
@@ -982,6 +1032,8 @@ class AutoProvisioningService {
         return await this.provisionViaAdvps(order, ipStock, startTime);
       } else if (netbay) {
         return await this.provisionViaNetbay(order, ipStock, startTime);
+      } else if (kurohost) {
+        return await this.provisionViaKurohost(order, ipStock, startTime);
       } else if (resellerPanel) {
         return await this.provisionViaResellerApi(order, ipStock, startTime);
       } else if (smartVps) {
@@ -1578,6 +1630,160 @@ class AutoProvisioningService {
       productId: planId || null,
       totalTime,
       ...(fullyProvisioned ? {} : { error: `Netbay service ${netbayServiceId} pending IP/credentials` }),
+    };
+  }
+
+  // --- KUROHOST PATH ---------------------------------------------------------
+  async provisionViaKurohost(order, ipStock, startTime) {
+    L.head(`KUROHOST PATH — order ${order._id}`);
+
+    await Order.findByIdAndUpdate(order._id, {
+      provisioningStatus: 'provisioning',
+      provisioningError: '',
+      autoProvisioned: true,
+      lastProvisionAttempt: new Date(),
+      provider: 'kurohost',
+    });
+
+    const cfg = await this.resolveKurohostConfigForStock(ipStock);
+    if (!cfg) {
+      throw new Error('KuroHost API is not configured for this company. Enable it under /admin/companies.');
+    }
+
+    const api = new KurohostApi(cfg);
+    L.kv('[KUROHOST] Using company', cfg.companyName);
+
+    const stockCfg = readKurohostStockConfig(ipStock);
+    L.kv('[KUROHOST] Stock config', stockCfg);
+
+    const ram = order.memory || order.ram || order.planMemory || '';
+    const isWindowsProduct = this.isWindowsOrder(order, ipStock);
+
+    let kurohostInstanceId = order.kurohostInstanceId || '';
+    let kurohostJobId = order.kurohostJobId || '';
+    let cloudZoneId = order.kurohostZoneId || stockCfg.cloudZoneId || '';
+    let cloudFlavorId = order.kurohostFlavorId || '';
+
+    if (!cloudZoneId) {
+      throw new Error('KuroHost cloudZoneId is missing. Set it in /admin/manageIpStock under KuroHost Configuration.');
+    }
+
+    if (!kurohostInstanceId) {
+      cloudFlavorId = cloudFlavorId || resolveKurohostFlavorId(stockCfg, ram);
+      if (!cloudFlavorId) {
+        throw new Error(`No KuroHost flavor mapped for RAM "${ram}". Configure flavorByMemory in manageIpStock.`);
+      }
+
+      let osTemplateId = resolveKurohostOsTemplateId(stockCfg, {
+        memory: ram,
+        isWindows: isWindowsProduct,
+      });
+
+      if (!osTemplateId) {
+        const osRes = await api.listOsTemplates({ cloudZoneId });
+        const templates = osRes?.items || [];
+        osTemplateId = KurohostApi.resolveOsTemplateId(templates, {
+          preferredName: isWindowsProduct ? 'Windows' : 'Ubuntu',
+          isWindows: isWindowsProduct,
+        });
+      }
+
+      if (!osTemplateId) {
+        throw new Error('Could not resolve a KuroHost OS template. Set defaultOs or osTemplateByMemory in manageIpStock.');
+      }
+
+      L.kv('[KUROHOST] create payload', { cloudZoneId, cloudFlavorId, osTemplateId });
+
+      const createRes = await api.createInstance({
+        cloudZoneId,
+        cloudFlavorId,
+        osTemplateId,
+        name: `ol-${String(order._id).slice(-8)}`,
+        hostname: `vm-${String(order._id).slice(-8)}`,
+      });
+
+      const instance = KurohostApi.unwrapInstance(createRes);
+      kurohostInstanceId = instance?.id || createRes?.instance?.id || '';
+      kurohostJobId = createRes?.job?.id || instance?.jobId || '';
+
+      if (!kurohostInstanceId) {
+        throw new Error(`KuroHost create did not return an instance id. Response: ${JSON.stringify(createRes).slice(0, 400)}`);
+      }
+
+      await Order.findByIdAndUpdate(order._id, {
+        kurohostInstanceId,
+        kurohostJobId: kurohostJobId || undefined,
+        kurohostZoneId: cloudZoneId,
+        kurohostFlavorId: cloudFlavorId,
+        provider: 'kurohost',
+        autoProvisioned: true,
+      });
+    } else {
+      L.line(`[KUROHOST] Resuming — instanceId=${kurohostInstanceId}, jobId=${kurohostJobId || 'n/a'}`);
+    }
+
+    if (kurohostJobId) {
+      L.line(`[KUROHOST] Polling job ${kurohostJobId}...`);
+      try {
+        await api.waitForJob(kurohostJobId, {
+          maxWaitMs: 300_000,
+          pollIntervalMs: 5_000,
+        });
+      } catch (jobErr) {
+        L.line(`[KUROHOST] Job poll warning: ${jobErr.message}`);
+      }
+    }
+
+    let ipAddress = '';
+    let username = isWindowsProduct ? 'Administrator' : 'root';
+    let password = order.password || '';
+
+    try {
+      const detailRes = await api.getInstance(kurohostInstanceId);
+      const inst = KurohostApi.unwrapInstance(detailRes);
+      ipAddress = KurohostApi.extractInstanceIp(inst) || '';
+      const creds = KurohostApi.extractCredentials(inst);
+      if (creds.username) username = creds.username;
+      if (creds.password) password = creds.password;
+    } catch (detailErr) {
+      L.line(`[KUROHOST] getInstance failed: ${detailErr.message}`);
+    }
+
+    const fullyProvisioned = !!(ipAddress && kurohostInstanceId);
+    const updateData = {
+      status: fullyProvisioned ? 'active' : 'confirmed',
+      provisioningStatus: fullyProvisioned ? 'active' : 'provisioning',
+      provisioningError: fullyProvisioned ? '' : `PENDING: instance created, awaiting ${!ipAddress ? 'IP assignment' : 'credentials'}. Will retry automatically.`,
+      provider: 'kurohost',
+      kurohostInstanceId,
+      kurohostJobId: kurohostJobId || undefined,
+      kurohostZoneId: cloudZoneId || undefined,
+      kurohostFlavorId: cloudFlavorId || undefined,
+      username,
+      password: password || order.password || '',
+      ipAddress: ipAddress || order.ipAddress || '',
+      autoProvisioned: true,
+      lastSyncTime: new Date(),
+    };
+
+    if (ipAddress) updateData.ipAddress = ipAddress;
+
+    await Order.findByIdAndUpdate(order._id, updateData);
+
+    const totalTime = Date.now() - startTime;
+    console.log(`[KUROHOST] ✅ PROVISIONING ${fullyProvisioned ? 'COMPLETED' : 'PENDING — cron will check'}`);
+    console.log(`   - Order ID: ${order._id}`);
+    console.log(`   - KuroHost Instance: ${kurohostInstanceId}`);
+    console.log(`   - IP: ${ipAddress || 'pending'}`);
+
+    return {
+      success: fullyProvisioned,
+      kurohostPending: !fullyProvisioned,
+      instanceId: kurohostInstanceId,
+      ipAddress: ipAddress || null,
+      credentials: { username, password },
+      totalTime,
+      ...(fullyProvisioned ? {} : { error: `KuroHost instance ${kurohostInstanceId} pending IP/credentials` }),
     };
   }
 

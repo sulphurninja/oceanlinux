@@ -2,7 +2,8 @@ import { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import connectDB from '@/lib/db';
 import KnowledgeBase from '@/models/knowledgeBaseModel';
-import ArticleContent from './ArticleContent';
+import type { LeanDoc } from '@/types/lean';
+import ArticleContent, { type Article, type RelatedArticle } from './ArticleContent';
 
 interface Props {
   params: { slug: string };
@@ -15,7 +16,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     const article = await KnowledgeBase.findOne({
       slug: params.slug,
       published: true
-    }).populate('author', 'name').lean();
+    }).populate('author', 'name').lean<LeanDoc>();
 
     if (!article) {
       return {
@@ -86,7 +87,7 @@ export default async function ArticlePage({ params }: Props) {
       { slug: params.slug, published: true },
       { $inc: { views: 1 } },
       { new: true }
-    ).populate('author', 'name email').lean();
+    ).populate('author', 'name email').lean<LeanDoc>();
 
     if (!article) {
       notFound();
@@ -104,9 +105,10 @@ export default async function ArticlePage({ params }: Props) {
     .select('title slug excerpt category readTime views createdAt')
     .sort({ views: -1 })
     .limit(4)
-    .lean();
+    .lean<LeanDoc[]>();
 
-    // Convert ObjectId to string for client component
+    // Convert ObjectId to string for client component. The knowledge base schema
+    // is plain JS, so these shapes can only be asserted, not verified.
     const serializedArticle = {
       ...article,
       _id: article._id.toString(),
@@ -114,12 +116,12 @@ export default async function ArticlePage({ params }: Props) {
         ...article.author,
         _id: article.author._id.toString()
       } : null
-    };
+    } as Article;
 
     const serializedRelatedArticles = relatedArticles.map(article => ({
       ...article,
       _id: article._id.toString()
-    }));
+    })) as RelatedArticle[];
 
     return (
       <ArticleContent
@@ -139,7 +141,7 @@ export async function generateStaticParams() {
     await connectDB();
     const articles = await KnowledgeBase.find({ published: true })
       .select('slug')
-      .lean();
+      .lean<LeanDoc[]>();
 
     return articles.map(article => ({
       slug: article.slug

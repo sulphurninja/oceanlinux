@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Avatar, AvatarFallback, AvatarInitials } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   Search,
   Filter,
@@ -626,8 +626,8 @@ function ChangePasswordForm({ user, onClose }: { user: User; onClose: () => void
   const [confirmPassword, setConfirmPassword] = useState('');
 
   const handleSave = async () => {
-    if (newPassword.trim().length < 6) {
-      toast.error('Password must be at least 6 characters');
+    if (newPassword.trim().length < 8) {
+      toast.error('Password must be at least 8 characters');
       return;
     }
     if (newPassword !== confirmPassword) {

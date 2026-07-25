@@ -87,6 +87,9 @@ export async function POST(request) {
  * GET endpoint to preview which orders would be updated
  */
 export async function GET(request) {
+  const denied = await enforceAdmin(request);
+  if (denied) return denied;
+
   try {
     await connectDB();
 

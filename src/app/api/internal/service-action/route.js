@@ -1,11 +1,9 @@
 import { NextResponse } from 'next/server';
 import { POST as serviceActionPost, GET as serviceActionGet } from '@/app/api/orders/service-action/route';
+import { internalKeyMatches } from '@/lib/internalApiKey';
 
 function validateInternalKey(request) {
-  const key = request.headers.get('x-internal-key');
-  const expected = process.env.INTERNAL_API_KEY;
-  if (!expected || !key || key !== expected) return false;
-  return true;
+  return internalKeyMatches(request.headers.get('x-internal-key'));
 }
 
 /**

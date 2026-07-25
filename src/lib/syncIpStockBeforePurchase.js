@@ -16,6 +16,7 @@ import {
   isIpStockHiddenFromStore,
   usesNetbayLiveStock,
   usesResellerLiveStock,
+  usesKurohostLiveStock,
   storeAutoUnhideUpdate,
 } from '@/lib/ipStockAvailability';
 import { customerStockUnavailableMessage } from '@/lib/customerStockMessages';
@@ -26,6 +27,13 @@ const {
   syncNetbayIpStockRow,
   verifyNetbayMemoryInStock,
 } = require('@/lib/netbayLiveStock');
+
+const {
+  isKurohostIpStock,
+  syncKurohostIpStockRow,
+  verifyKurohostMemoryInStock,
+  isKurohostVariantInStock,
+} = require('@/lib/kurohostLiveStock');
 
 const {
   isResellerIpStock,
@@ -183,6 +191,7 @@ export async function refreshAndVerifyIpStockPurchase(ipStockId, memory) {
 
   let company = await loadCompanyForStock(stock);
   const netbayLive = isNetbayIpStock(stock) && usesNetbayLiveStock(stock, company);
+  const kurohostLive = isKurohostIpStock(stock) && usesKurohostLiveStock(stock, company);
   const resellerLive = isResellerIpStock(stock) && usesResellerLiveStock(stock, company);
 
   try {
@@ -192,6 +201,8 @@ export async function refreshAndVerifyIpStockPurchase(ipStockId, memory) {
       stock = await syncSmartVpsIpStockRow(stock);
     } else if (netbayLive) {
       stock = await syncNetbayIpStockRow(stock, { force: true, memoryOnly: memory || null });
+    } else if (kurohostLive) {
+      stock = await syncKurohostIpStockRow(stock, { force: true, memoryOnly: memory || null });
     } else if (resellerLive) {
       stock = await syncResellerIpStockRow(stock, { force: true, memoryOnly: memory || null });
     } else {
@@ -264,6 +275,21 @@ export async function refreshAndVerifyIpStockPurchase(ipStockId, memory) {
     }
   }
 
+  if (kurohostLive && memory && !isKurohostVariantInStock(stock, memory, company)) {
+    const liveVerify = await verifyKurohostMemoryInStock(stock, memory);
+    if (!liveVerify.ok) {
+      return {
+        ok: false,
+        message: customerStockUnavailableMessage(
+          liveVerify.message ||
+            `${memory} is unavailable in this KuroHost zone. Please refresh and pick another plan.`
+        ),
+        stock: stock.toObject?.() || stock,
+        synced: true,
+      };
+    }
+  }
+
   if (resellerLive && memory && !isResellerVariantInStock(stock, memory, company)) {
     const liveVerify = await verifyResellerMemoryInStock(stock, memory);
     if (!liveVerify.ok) {
@@ -283,7 +309,7 @@ export async function refreshAndVerifyIpStockPurchase(ipStockId, memory) {
     ok: true,
     message: 'In stock',
     stock: stock.toObject?.() || stock,
-    synced: isAdvpsPlan(stock) || isSmartVpsPlan(stock) || netbayLive || resellerLive,
+    synced: isAdvpsPlan(stock) || isSmartVpsPlan(stock) || netbayLive || kurohostLive || resellerLive,
   };
 }
 

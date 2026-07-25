@@ -1,8 +1,12 @@
 // Test endpoint to see SmartVPS ipstock response
 const SmartVpsAPI = require('@/services/smartvpsApi');
+const { blockUnlessDevOrCron } = require('@/lib/apiSecurity');
 
-export async function GET() {
+export async function GET(request) {
     try {
+        const blocked = blockUnlessDevOrCron(request);
+        if (blocked) return blocked;
+
         console.log('[TEST-IPSTOCK] Calling SmartVPS ipstock API...');
 
         const smartvps = new SmartVpsAPI();

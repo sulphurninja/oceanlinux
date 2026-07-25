@@ -66,7 +66,7 @@ const checkoutSessionSchema = new mongoose.Schema({
 
   status: {
     type: String,
-    enum: ['pending', 'confirmed', 'failed', 'cancelled'],
+    enum: ['pending', 'processing', 'confirmed', 'failed', 'cancelled'],
     default: 'pending',
     index: true,
   },

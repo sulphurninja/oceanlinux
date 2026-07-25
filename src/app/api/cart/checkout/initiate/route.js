@@ -7,8 +7,10 @@ import Order from '@/models/orderModel';
 import CheckoutSession from '@/models/checkoutSessionModel';
 import userWalletService from '@/services/userWalletService';
 import { priceCart } from '@/lib/cartPricing';
+import { refreshAndVerifyPurchase } from '@/lib/syncIpStockBeforePurchase';
 import { createGatewayOrder, buildClientTxnId } from '@/lib/paymentGateways';
 import { confirmCheckoutFromWebhook } from '@/lib/paymentDispatch';
+import { enforcePaymentRateLimit } from '@/lib/rateLimit';
 const { defaultOsForProduct } = require('@/lib/orderOs');
 const { normalizeOsForServerType } = require('@/lib/companyInventory');
 const { customerApiCatchPayload } = require('@/lib/customerFacingErrors');
@@ -49,6 +51,9 @@ export async function POST(request) {
   const user = await User.findById(userId);
   if (!user) return NextResponse.json({ success: false, message: 'User not found' }, { status: 404 });
 
+  const rateLimited = enforcePaymentRateLimit(request);
+  if (rateLimited) return rateLimited;
+
   let body;
   try {
     body = await request.json();
@@ -79,6 +84,23 @@ export async function POST(request) {
       })),
     }, { status: 400 });
   }
+
+  for (const line of priced.lines) {
+    if (!line.priced.valid) continue;
+    const item = line.item;
+    const live = await refreshAndVerifyPurchase({
+      ipStockId: item.ipStockId,
+      memory: item.memory,
+      slotIpPackageId: item.slotIpPackageId,
+    });
+    if (!live.ok) {
+      return NextResponse.json({
+        success: false,
+        message: live.message || 'An item in your cart is no longer available',
+      }, { status: 409 });
+    }
+  }
+
   if (priced.total <= 0) {
     return NextResponse.json({ success: false, message: 'Cart total must be greater than zero' }, { status: 400 });
   }

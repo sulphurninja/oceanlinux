@@ -2,9 +2,13 @@
 export const runtime = 'nodejs';
 
 import { NextResponse } from 'next/server'
+import { blockUnlessDevOrCron } from '@/lib/apiSecurity';
 const SmartVpsAPI = require('@/services/smartvpsApi')
 
-export async function GET() {
+export async function GET(request: Request) {
+  const blocked = blockUnlessDevOrCron(request as any);
+  if (blocked) return blocked;
+
   try {
     const api = new SmartVpsAPI();
     const r = await api.ipstock();

@@ -62,6 +62,7 @@ import {
     AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { toast } from 'sonner';
+import { dashboardFetch } from '@/lib/dashboardFetch';
 import { cn } from '@/lib/utils';
 
 interface Notification {
@@ -123,7 +124,7 @@ const NotificationsPage = () => {
                 ...(filters.search && { search: filters.search })
             });
 
-            const response = await fetch(`/api/notifications?${queryParams}`);
+            const response = await dashboardFetch(`/api/notifications?${queryParams}`);
             if (response.ok) {
                 const data = await response.json();
                 setNotifications(data.notifications);
@@ -143,7 +144,7 @@ const NotificationsPage = () => {
     const markAsRead = async (notificationIds: string[] = []) => {
         try {
             setUpdating(true);
-            const response = await fetch('/api/notifications', {
+            const response = await dashboardFetch('/api/notifications', {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ notificationIds })
@@ -167,7 +168,7 @@ const NotificationsPage = () => {
     const deleteNotifications = async (notificationIds: string[]) => {
         try {
             setUpdating(true);
-            const response = await fetch('/api/notifications', {
+            const response = await dashboardFetch('/api/notifications', {
                 method: 'DELETE',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ notificationIds })

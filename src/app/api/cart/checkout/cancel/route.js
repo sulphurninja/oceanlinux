@@ -3,6 +3,7 @@ import connectDB from '@/lib/db';
 import { getDataFromToken } from '@/helper/getDataFromToken';
 import CheckoutSession from '@/models/checkoutSessionModel';
 import { refundAndFailCheckoutSession } from '@/lib/paymentDispatch';
+import { enforcePaymentRateLimit } from '@/lib/rateLimit';
 
 /**
  * POST /api/cart/checkout/cancel
@@ -14,6 +15,9 @@ import { refundAndFailCheckoutSession } from '@/lib/paymentDispatch';
  * Idempotent.
  */
 export async function POST(request) {
+  const rateLimited = enforcePaymentRateLimit(request);
+  if (rateLimited) return rateLimited;
+
   await connectDB();
 
   let userId;

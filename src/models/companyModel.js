@@ -72,6 +72,20 @@ const companyNetbayApiSchema = new mongoose.Schema({
 }, { _id: false });
 
 /**
+ * KuroHost Cloud Platform API (https://kurohost.com/cloud/docs).
+ * PAYG VM control plane — create instances, power actions, terminate.
+ * Auth: Bearer kuro_<secret> (single API key, no secret pair).
+ */
+const companyKurohostApiSchema = new mongoose.Schema({
+  enabled: { type: Boolean, default: false },
+  label: { type: String, default: '' },
+  baseUrl: { type: String, default: '' }, // e.g. https://kurohost.com/api/cloud/v1
+  apiKey: { type: String, default: '' },   // Bearer kuro_…
+  /** Reserved — KuroHost has no stock API yet; manual stockCount when false. */
+  useLiveStockApi: { type: Boolean, default: false },
+}, { _id: false });
+
+/**
  * Joy Services instances API (https://docs.joy.services/instance-api/).
  * MANAGE-ONLY: this API exposes dashboard/account/machine info and power
  * actions (start/stop/reboot/pause/hibernate) — there is NO buy/create/provision
@@ -98,6 +112,7 @@ const companySchema = new mongoose.Schema({
   virtualizor: { type: legacyCompanyVirtualizorSchema, default: null }, // deprecated
   resellerApi: { type: companyResellerApiSchema, default: null },
   netbayApi: { type: companyNetbayApiSchema, default: null },
+  kurohostApi: { type: companyKurohostApiSchema, default: null },
   joyApi: { type: companyJoyApiSchema, default: null },
 }, { timestamps: true });
 
@@ -107,6 +122,7 @@ companySchema.index({ slug: 1 });
 if (
   mongoose.models.Company &&
   (!mongoose.models.Company.schema.paths['netbayApi.useLiveStockApi'] ||
+    !mongoose.models.Company.schema.paths['kurohostApi.apiKey'] ||
     !mongoose.models.Company.schema.paths['joyApi.apiToken'] ||
     !mongoose.models.Company.schema.paths['resellerApi.useLiveStockApi'])
 ) {

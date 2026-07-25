@@ -37,7 +37,12 @@ function resolvePostLoginPath(userType: string | undefined, returnToParam?: stri
 
 export function GoogleAuthProvider({ children }: { children: ReactNode }) {
   if (!GOOGLE_CLIENT_ID) return <>{children}</>;
-  return <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>{children}</GoogleOAuthProvider>;
+  // `locale` belongs on the provider — passing it to <GoogleLogin> does nothing.
+  return (
+    <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID} locale="en">
+      {children}
+    </GoogleOAuthProvider>
+  );
 }
 
 type GoogleSignInButtonProps = {
@@ -127,13 +132,12 @@ export function GoogleSignInButton({
     >
       <GoogleLogin
         onSuccess={handleSuccess}
-        onError={() => onError?.('Google Sign-In was cancelled or failed.')}
+        onError={() => { onError?.('Google Sign-In was cancelled or failed.'); }}
         theme="outline"
         size="large"
         shape="rectangular"
         text={mode === 'signup' ? 'signup_with' : 'continue_with'}
         width={buttonWidth}
-        locale="en"
         useOneTap={false}
       />
     </div>

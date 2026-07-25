@@ -17,10 +17,14 @@ export async function GET(request) {
         const format = searchParams.get('format') || 'json';
         const includeOrders = searchParams.get('includeOrders') === 'true';
 
+        // Hard cap so one click can never try to serialise the whole database.
+        const MAX_EXPORT_ROWS = 5000;
+
         let usersData;
 
         if (includeOrders) {
             usersData = await User.aggregate([
+                { $limit: MAX_EXPORT_ROWS },
                 {
                     $lookup: {
                         from: 'orders',
@@ -43,10 +47,19 @@ export async function GET(request) {
                         }
                     }
                 },
-                { $project: { password: 0 } }
+                // A downloadable file must never carry live server credentials —
+                // the nested orders would otherwise include every customer's
+                // VPS root and panel password.
+                {
+                    $project: {
+                        password: 0,
+                        'orders.password': 0,
+                        'orders.panelPassword': 0,
+                    }
+                }
             ]);
         } else {
-            usersData = await User.find({}, { password: 0 }).lean();
+            usersData = await User.find({}, { password: 0 }).limit(MAX_EXPORT_ROWS).lean();
         }
 
         if (format === 'csv') {

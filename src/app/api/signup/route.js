@@ -7,8 +7,17 @@ import { NextRequest, NextResponse } from 'next/server';
 import EmailService from '../../../lib/sendgrid';
 import { hashUserPassword } from '@/lib/userPassword';
 import { findUserByEmail, normalizeEmail } from '@/lib/userEmail';
+import { enforceRateLimit } from '@/lib/rateLimit';
 
 export async function POST(request) {
+    const rateLimited = enforceRateLimit(request, {
+        max: 5,
+        windowMs: 10 * 60_000,
+        scope: 'ip',
+        message: 'Too many signup attempts. Please wait a few minutes and try again.',
+    });
+    if (rateLimited) return rateLimited;
+
     try {
         await connectDB();
 

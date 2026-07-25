@@ -23,7 +23,13 @@ export function getAdminPanelPassword(): string | undefined {
   return value || undefined;
 }
 
-/** Middleware (Edge) may not load .env — verify cookie when secret exists, else format-only. */
+/**
+ * Middleware (Edge) gate check.
+ *
+ * Production fails closed: without ADMIN_PANEL_PASSWORD no cookie is accepted,
+ * otherwise any 64-hex value would unlock the admin pages. Local dev keeps a
+ * format-only fallback because .env is not always loaded in the Edge runtime.
+ */
 export async function isAdminGateSessionValidForMiddleware(
   request: CookieRequest
 ): Promise<boolean> {
@@ -35,7 +41,7 @@ export async function isAdminGateSessionValidForMiddleware(
     return verifyAdminGateCookie(token);
   }
 
-  // Edge fallback: cookie set by Node /api/admin/gate after real password check
+  if (process.env.NODE_ENV === 'production') return false;
   return /^[a-f0-9]{64}$/i.test(token);
 }
 

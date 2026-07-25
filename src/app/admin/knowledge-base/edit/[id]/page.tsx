@@ -28,6 +28,7 @@ const categories = [
 interface Article {
   _id: string;
   title: string;
+  slug?: string;
   content: string;
   excerpt: string;
   category: string;
@@ -37,6 +38,12 @@ interface Article {
   seoTitle: string;
   seoDescription: string;
   aiGenerated?: boolean;
+  views?: number;
+  likes?: number;
+  readTime?: number;
+  createdAt?: string;
+  updatedAt?: string;
+  lastModified?: string;
 }
 
 export default function EditArticlePage() {
@@ -201,7 +208,7 @@ export default function EditArticlePage() {
             <h1 className="text-3xl font-bold">Edit Article</h1>
             <p className="text-muted-foreground">
               {article.aiGenerated && "🤖 AI Generated • "}
-              Last modified: {new Date(article.lastModified || article.updatedAt).toLocaleString()}
+              Last modified: {new Date(article.lastModified || article.updatedAt || Date.now()).toLocaleString()}
             </p>
           </div>
         </div>
@@ -439,7 +446,7 @@ export default function EditArticlePage() {
                 </div>
                 <div className="flex justify-between text-sm">
                   <span>Created:</span>
-                  <span className="font-medium">{new Date(article.createdAt).toLocaleDateString()}</span>
+                  <span className="font-medium">{article.createdAt ? new Date(article.createdAt).toLocaleDateString() : '—'}</span>
                 </div>
               </CardContent>
             </Card>

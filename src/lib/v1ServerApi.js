@@ -6,8 +6,6 @@ import { refreshAndVerifyPurchase } from '@/lib/syncIpStockBeforePurchase';
 import { assignPanelCredentials } from '@/lib/panelCredentials';
 import { calculateExpiryDate } from '@/lib/expiryHelper';
 import NotificationService from '@/services/notificationService';
-import { incrementApiUsage } from '@/lib/api-utils';
-
 const { resolveOrderExpiryOnPayment } = require('@/lib/advpsOrderExpiry');
 const AutoProvisioningService = require('@/services/autoProvisioningService');
 const { fulfillOrderInventory } = require('@/lib/fulfillOrderInventory');
@@ -180,9 +178,8 @@ export async function purchaseServerViaApi(user, body) {
     ipStockId: String(serverId),
     clientTxnId,
     gatewayOrderId: clientTxnId,
-    transactionId: clientTxnId,
     paymentMethod: 'wallet',
-    status: 'confirmed',
+    status: 'pending',
     os,
     customerName: user.name,
     customerEmail: user.email,
@@ -194,7 +191,6 @@ export async function purchaseServerViaApi(user, body) {
       purchasedViaAPI: true,
       durationMonths,
       specifications,
-      confirmedAt: new Date(),
     },
   });
 
@@ -227,13 +223,17 @@ export async function purchaseServerViaApi(user, body) {
     timestamp: new Date(),
   };
   order.transactionId = debitResult.walletTxnId;
+  order.status = 'confirmed';
+  order.paymentDetails = {
+    ...(order.paymentDetails || {}),
+    confirmedAt: new Date(),
+  };
   await order.save();
 
   await assignPanelCredentials(order);
   await order.save();
   await fulfillOrderInventory(order);
 
-  await incrementApiUsage(user._id);
 
   try {
     await NotificationService.notifyOrderConfirmed(order.user, order);

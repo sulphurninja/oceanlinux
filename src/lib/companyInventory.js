@@ -1,5 +1,6 @@
 const IPStock = require('@/models/ipStockModel');
-const Order = require('@/models/orderModel');
+// orderModel uses `export default`, so the interop namespace must be unwrapped.
+const Order = require('@/models/orderModel').default;
 
 const VALID_OS = ['CentOS 7', 'Ubuntu 22', 'Windows 2022 64'];
 
@@ -84,8 +85,10 @@ function readLivePanelVariantAvailable(stock, company) {
   const {
     usesResellerLiveStock,
     usesNetbayLiveStock,
+    usesKurohostLiveStock,
     stockHasResellerPanelPlans,
     stockHasNetbayPlans,
+    stockHasKurohostPlans,
   } = require('@/lib/ipStockAvailability');
   const { toPlainConfigurations } = require('@/lib/advpsLiveStock');
 
@@ -96,6 +99,11 @@ function readLivePanelVariantAvailable(stock, company) {
   }
   if (usesNetbayLiveStock(stock, company) && stockHasNetbayPlans(stock)) {
     const cfg = toPlainConfigurations(stock.defaultConfigurations)?.netbay || {};
+    const variants = cfg.variantStock && typeof cfg.variantStock === 'object' ? cfg.variantStock : {};
+    return Object.values(variants).some((v) => v && typeof v === 'object' && v.available === true);
+  }
+  if (usesKurohostLiveStock(stock, company) && stockHasKurohostPlans(stock)) {
+    const cfg = toPlainConfigurations(stock.defaultConfigurations)?.kurohost || {};
     const variants = cfg.variantStock && typeof cfg.variantStock === 'object' ? cfg.variantStock : {};
     return Object.values(variants).some((v) => v && typeof v === 'object' && v.available === true);
   }
@@ -119,13 +127,18 @@ function isCompanyStockPurchasable(stock, company, quantity = 1) {
   const {
     usesResellerLiveStock,
     usesNetbayLiveStock,
+    usesKurohostLiveStock,
     stockHasResellerPanelPlans,
     stockHasNetbayPlans,
+    stockHasKurohostPlans,
   } = require('@/lib/ipStockAvailability');
   if (usesResellerLiveStock(stock, company) && stockHasResellerPanelPlans(stock)) {
     return readLivePanelVariantAvailable(stock, company);
   }
   if (usesNetbayLiveStock(stock, company) && stockHasNetbayPlans(stock)) {
+    return readLivePanelVariantAvailable(stock, company);
+  }
+  if (usesKurohostLiveStock(stock, company) && stockHasKurohostPlans(stock)) {
     return readLivePanelVariantAvailable(stock, company);
   }
   return getIpStockRemainingFromInventoryOrUnits(stock) >= quantity;
@@ -225,7 +238,8 @@ async function syncStockCountFromInventory(stockId) {
 
   const hybridLive =
     (usesResellerLiveStock(stock, company) && stockHasResellerPanelPlans(stock)) ||
-    (usesNetbayLiveStock(stock, company) && stockHasNetbayPlans(stock));
+    (usesNetbayLiveStock(stock, company) && stockHasNetbayPlans(stock)) ||
+    (usesKurohostLiveStock(stock, company) && stockHasKurohostPlans(stock));
 
   if (hybridLive) {
     stock.available = remaining > 0 || readLivePanelVariantAvailable(stock, company);

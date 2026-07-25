@@ -31,6 +31,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { dashboardFetch } from '@/lib/dashboardFetch';
 import { premiumSelectContent } from '@/lib/premium-badges';
 import { cn } from '@/lib/utils';
 import {
@@ -81,7 +82,7 @@ export default function CartPage() {
     try {
       const [cartSnapshot, walletRes] = await Promise.all([
         fetchCart(),
-        fetch('/api/wallet', { credentials: 'include' }).then(r => r.json()),
+        dashboardFetch('/api/wallet', { credentials: 'include' }).then(r => r.json()),
       ]);
       setCart(cartSnapshot);
       if (walletRes?.success) {
@@ -205,7 +206,7 @@ export default function CartPage() {
 
     setCheckingOut(true);
     try {
-      const initRes = await fetch('/api/cart/checkout/initiate', {
+      const initRes = await dashboardFetch('/api/cart/checkout/initiate', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -253,7 +254,7 @@ export default function CartPage() {
   const cancelCartCheckout = async (clientTxnId: string) => {
     if (!clientTxnId) return;
     try {
-      const res = await fetch('/api/cart/checkout/cancel', {
+      const res = await dashboardFetch('/api/cart/checkout/cancel', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -277,7 +278,7 @@ export default function CartPage() {
       themeColor: '#3b82f6',
       onSuccess: async (response) => {
         try {
-          const confirmRes = await fetch('/api/cart/checkout/confirm', {
+          const confirmRes = await dashboardFetch('/api/cart/checkout/confirm', {
             method: 'POST',
             credentials: 'include',
             headers: { 'Content-Type': 'application/json' },
@@ -336,7 +337,7 @@ export default function CartPage() {
     }
     if (result?.paymentDetails) {
       try {
-        const confirmRes = await fetch('/api/cart/checkout/confirm', {
+        const confirmRes = await dashboardFetch('/api/cart/checkout/confirm', {
           method: 'POST',
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },

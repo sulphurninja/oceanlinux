@@ -5,8 +5,10 @@ import IPStock from '@/models/ipStockModel';
 import Company from '@/models/companyModel';
 import User from '@/models/userModel';
 import { getDataFromToken } from '@/helper/getDataFromToken';
+import { enforceUserActionRateLimit } from '@/lib/rateLimit';
 import { isAdminUser } from '@/lib/adminAuth';
-import { execSync } from 'child_process';
+import { internalKeyMatches } from '@/lib/internalApiKey';
+import { execFileSync } from 'child_process';
 
 /** Hostycare reinstall probes multiple Virtualizor panels + may POST reinstall. */
 export const maxDuration = 120;
@@ -23,12 +25,20 @@ const {
 const { getCompanyResellerApiConfig } = require('@/lib/companyResellerApi');
 const ResellerApi = require('@/services/resellerApi');
 const { getCompanyNetbayApiConfig } = require('@/lib/companyNetbayApi');
+const { getCompanyKurohostApiConfig } = require('@/lib/companyKurohostApi');
 const NetbayApi = require('@/services/netbayApi');
+const KurohostApi = require('@/services/kurohostApi');
 const { getCompanyJoyApiConfig } = require('@/lib/companyJoyApi');
 const JoyApi = require('@/services/joyApi');
 const { applyJoyMachineToOrderUpdates } = require('@/lib/joyOrderSync');
 const { runNetbayPostRebuildFlow } = require('@/lib/netbayPostRebuildFlow');
 const { applyNetbayServiceToOrderUpdates, resolveNetbayPowerState } = require('@/lib/netbayOrderSync');
+const {
+  applyKurohostInstanceToOrderUpdates,
+  resolveKurohostPowerState,
+  syncKurohostOrderFromApi,
+} = require('@/lib/kurohostOrderSync');
+const { mapKurohostOsLabel, runKurohostPostReinstallFlow } = require('@/lib/kurohostPostReinstallFlow');
 const { toUserFacingNetbayError } = require('@/lib/netbayApiErrors');
 const { sanitizeCustomerApiPayload, customerServiceErrorMessage } = require('@/lib/customerFacingErrors');
 
@@ -37,14 +47,15 @@ function actionJson(body, status = 200, action = null) {
 }
 
 async function resolveOrderForAction(request, orderId) {
-  // Internal bypass: trusted services (Hosthell) call via internal proxy with this header
-  const bypassKey = request.headers.get('x-internal-bypass');
-  if (bypassKey && bypassKey === process.env.INTERNAL_API_KEY) {
+  // /api/internal/service-action forwards requests with the internal key in
+  // this header. The comparison is constant-time and fails closed when
+  // INTERNAL_API_KEY is unset, so it is no weaker than the outer gate.
+  if (internalKeyMatches(request.headers.get('x-internal-bypass'))) {
     const order = await Order.findById(orderId);
     if (!order) {
       return { error: NextResponse.json({ success: false, error: 'Order not found' }, { status: 404 }) };
     }
-    return { order, userId: null };
+    return { order, userId: order.user ? String(order.user) : null };
   }
 
   let userId;
@@ -135,6 +146,23 @@ async function resolveCompanyNetbayApi(order) {
     return { config, companyName: company.name };
   } catch (err) {
     console.error('[SERVICE-ACTION] Company-Netbay-API lookup failed:', err.message);
+    return { config: null, companyName: null };
+  }
+}
+
+async function resolveCompanyKurohostApi(order) {
+  if (!order?.ipStockId) return { config: null, companyName: null };
+  try {
+    const ipStock = await IPStock.findById(order.ipStockId).select('company').lean();
+    if (!ipStock?.company) return { config: null, companyName: null };
+    const company = await Company.findById(ipStock.company)
+      .select('kurohostApi name')
+      .lean();
+    if (!company) return { config: null, companyName: null };
+    const config = getCompanyKurohostApiConfig(company);
+    return { config, companyName: company.name };
+  } catch (err) {
+    console.error('[SERVICE-ACTION] Company-KuroHost-API lookup failed:', err.message);
     return { config: null, companyName: null };
   }
 }
@@ -406,17 +434,33 @@ function flattenOslist(oslist, virtFilter) {
 }
 
 
-function isServerReachable(ip) {
-  const cleanIp = ip.split(':')[0];
-  const port = ip.includes(':') ? parseInt(ip.split(':')[1]) : null;
+/** Strict IPv4 so a stored address can never reach the ping/TCP probes as shell input. */
+function toProbeIpv4(value) {
+  const parts = String(value || '').trim().split('.');
+  if (parts.length !== 4) return null;
+  const octets = parts.map((p) => (/^\d{1,3}$/.test(p) ? Number(p) : NaN));
+  if (octets.some((o) => Number.isNaN(o) || o > 255)) return null;
+  return octets.join('.');
+}
 
-  // Try ICMP ping first
+function isServerReachable(ip) {
+  const raw = String(ip || '');
+  const cleanIp = toProbeIpv4(raw.split(':')[0]);
+  if (!cleanIp) return false;
+
+  const parsedPort = raw.includes(':') ? parseInt(raw.split(':')[1], 10) : NaN;
+  const port = Number.isInteger(parsedPort) && parsedPort > 0 && parsedPort <= 65535
+    ? parsedPort
+    : null;
+
+  // execFileSync (not execSync) — no shell, so the address can't be used to
+  // smuggle extra commands onto our own server.
   const isWin = process.platform === 'win32';
-  const cmd = isWin
-    ? `ping -n 1 -w 3000 ${cleanIp}`
-    : `ping -c 1 -W 3 ${cleanIp}`;
+  const pingArgs = isWin
+    ? ['-n', '1', '-w', '3000', cleanIp]
+    : ['-c', '1', '-W', '3', cleanIp];
   try {
-    execSync(cmd, { stdio: 'ignore', timeout: 5000 });
+    execFileSync('ping', pingArgs, { stdio: 'ignore', timeout: 5000 });
     return true;
   } catch {
     // Ping failed — try TCP connect to the port (handles Windows servers that block ICMP)
@@ -425,8 +469,12 @@ function isServerReachable(ip) {
   const portsToTry = port ? [port] : [22, 3389];
   for (const p of portsToTry) {
     try {
-      execSync(
-        `node -e "const s=require('net').createConnection(${p},'${cleanIp}',()=>{process.exit(0)});s.setTimeout(3000);s.on('timeout',()=>process.exit(1));s.on('error',()=>process.exit(1))"`,
+      execFileSync(
+        process.execPath,
+        [
+          '-e',
+          `const s=require('net').createConnection(${p},'${cleanIp}',()=>{process.exit(0)});s.setTimeout(3000);s.on('timeout',()=>process.exit(1));s.on('error',()=>process.exit(1))`,
+        ],
         { stdio: 'ignore', timeout: 5000 }
       );
       return true;
@@ -489,6 +537,13 @@ async function buildMergedVirtualizorApi(order) {
 
 export async function POST(request) {
   try {
+    // Internal forwards carry no auth cookie, so they'd all share one "unknown IP"
+    // bucket and throttle each other. They are already gated by the internal key.
+    if (!internalKeyMatches(request.headers.get('x-internal-bypass'))) {
+      const rateLimited = enforceUserActionRateLimit(request);
+      if (rateLimited) return rateLimited;
+    }
+
     await connectDB();
 
     const body = await request.json();
@@ -551,7 +606,8 @@ export async function POST(request) {
     // shouldn't block the request. Every other provider in this route still
     // requires an IP for VM lookup.
     const orderIsNetbay = order.provider === 'netbay' || !!order.netbayServiceId;
-    if (!ipAddress && !orderIsNetbay) {
+    const orderIsKurohost = order.provider === 'kurohost' || !!order.kurohostInstanceId;
+    if (!ipAddress && !orderIsNetbay && !orderIsKurohost) {
       return actionJson({
         success: false,
         error: 'No IP address found for this VPS order. Please contact support.',
@@ -574,9 +630,212 @@ export async function POST(request) {
       (order.productName && order.productName.includes('🌊'))
     );
     const isNetbay = order.provider === 'netbay' || !!order.netbayServiceId;
+    const isKurohost = order.provider === 'kurohost' || !!order.kurohostInstanceId;
     const hasHostycareService = !!order.hostycareServiceId;
 
-    console.log(`[SERVICE-ACTION][POST] Provider detection: isSmartVps=${isSmartVps}, isNetbay=${isNetbay}, hasHostycareService=${hasHostycareService}, order.provider=${order.provider}`);
+    console.log(`[SERVICE-ACTION][POST] Provider detection: isSmartVps=${isSmartVps}, isNetbay=${isNetbay}, isKurohost=${isKurohost}, hasHostycareService=${hasHostycareService}, order.provider=${order.provider}`);
+
+    // -------------------- KuroHost branch --------------------
+    if (isKurohost) {
+      const supportedActions = new Set(['start', 'stop', 'restart', 'reboot', 'status', 'sync', 'templates', 'reinstall', 'terminate']);
+      if (!supportedActions.has(action)) {
+        return actionJson({
+          success: false,
+          error: `Action '${action}' is not supported for this server.`,
+        }, 400, action);
+      }
+
+      const { config: kurohostCfg, companyName: kurohostCompanyName } = await resolveCompanyKurohostApi(order);
+      if (!kurohostCfg) {
+        return actionJson({
+          success: false,
+          error: 'Server management is not available for this plan. Please contact support.',
+        }, 503, action);
+      }
+
+      if (!order.kurohostInstanceId && action !== 'templates') {
+        return actionJson({
+          success: false,
+          error: 'This server is still being set up. Please try again in a minute.',
+        }, 409, action);
+      }
+
+      console.log(`[SERVICE-ACTION][POST] Routing via KuroHost API (${kurohostCfg.baseUrl}) for action=${action} (company=${kurohostCompanyName || 'unknown'}, instanceId=${order.kurohostInstanceId})`);
+
+      let kurohostApi;
+      try {
+        kurohostApi = new KurohostApi(kurohostCfg);
+      } catch (apiErr) {
+        return actionJson({
+          success: false,
+          error: apiErr.message || 'Server management is temporarily unavailable.',
+        }, 500, action);
+      }
+
+      try {
+        switch (action) {
+          case 'start': {
+            const apiRes = await kurohostApi.startInstance(order.kurohostInstanceId);
+            await Order.findByIdAndUpdate(orderId, { lastAction: 'start', lastActionTime: new Date() });
+            return NextResponse.json({
+              success: true,
+              result: { success: true, message: 'Start command sent', apiResponse: apiRes, instanceId: order.kurohostInstanceId },
+            });
+          }
+          case 'stop': {
+            const apiRes = await kurohostApi.stopInstance(order.kurohostInstanceId);
+            await Order.findByIdAndUpdate(orderId, { lastAction: 'stop', lastActionTime: new Date() });
+            return NextResponse.json({
+              success: true,
+              result: { success: true, message: 'Stop command sent', apiResponse: apiRes, instanceId: order.kurohostInstanceId },
+            });
+          }
+          case 'restart':
+          case 'reboot': {
+            const apiRes = await kurohostApi.rebootInstance(order.kurohostInstanceId);
+            await Order.findByIdAndUpdate(orderId, { lastAction: 'restart', lastActionTime: new Date() });
+            return NextResponse.json({
+              success: true,
+              result: { success: true, message: 'Reboot command sent', apiResponse: apiRes, instanceId: order.kurohostInstanceId },
+            });
+          }
+          case 'terminate': {
+            const apiRes = await kurohostApi.terminateInstance(order.kurohostInstanceId);
+            await Order.findByIdAndUpdate(orderId, {
+              lastAction: 'terminate',
+              lastActionTime: new Date(),
+              provisioningStatus: 'terminated',
+              status: 'cancelled',
+            });
+            return NextResponse.json({
+              success: true,
+              result: { success: true, message: 'Instance terminated', apiResponse: apiRes, instanceId: order.kurohostInstanceId },
+            });
+          }
+          case 'status':
+          case 'sync': {
+            const sync = await syncKurohostOrderFromApi(order);
+            if (!sync.ok) {
+              return actionJson({ success: false, error: sync.error || 'Sync failed' }, 502, action);
+            }
+            const inst = sync.instance;
+            const { powerState, rawStatus } = resolveKurohostPowerState(inst);
+            await Order.findByIdAndUpdate(orderId, sync.dbUpdates);
+            const syncChanges = sync.changes || [];
+            const credentialsUpdated = syncChanges.some(c => ['password', 'username', 'ipAddress'].includes(c));
+            return NextResponse.json({
+              success: true,
+              powerState,
+              rawStatus,
+              provider: 'kurohost',
+              instanceId: order.kurohostInstanceId,
+              instance: inst || null,
+              credentialsUpdated,
+              syncResult: {
+                credentialsUpdated,
+                changes: syncChanges,
+                lastSyncTime: sync.dbUpdates.lastSyncTime?.toISOString?.() || new Date().toISOString(),
+              },
+            });
+          }
+          case 'templates': {
+            const zoneId = payload?.cloudZoneId || body?.cloudZoneId || order.kurohostZoneId || undefined;
+            const osRes = await kurohostApi.listOsTemplates(zoneId ? { cloudZoneId: zoneId } : undefined);
+            const osList = osRes?.items || [];
+            const flat = {};
+            for (const tpl of osList) {
+              const id = String(tpl?.id || '').trim();
+              const name = String(tpl?.name || id).trim();
+              if (!id) continue;
+              flat[id] = {
+                id,
+                name,
+                isWindows: !!tpl?.isWindows,
+                label: name,
+              };
+            }
+            return NextResponse.json({
+              success: true,
+              result: flat,
+              raw: osList,
+              provider: 'kurohost',
+            });
+          }
+          case 'reinstall': {
+            const osTemplateId =
+              payload?.templateId ||
+              payload?.osTemplateId ||
+              body?.templateId ||
+              templateId ||
+              null;
+            if (!osTemplateId) {
+              return actionJson({ success: false, error: 'Please select an operating system.' }, 400, 'reinstall');
+            }
+
+            const osTemplateName =
+              payload?.osName ||
+              body?.osName ||
+              payload?.name ||
+              '';
+            const isWindows = !!payload?.isWindows || /windows|win\s*server/i.test(String(osTemplateName));
+            const newPassword =
+              (typeof payload?.password === 'string' && payload.password.trim()) ||
+              (typeof body?.password === 'string' && body.password.trim()) ||
+              generateSecurePassword();
+
+            const apiRes = await kurohostApi.reinstallInstance(order.kurohostInstanceId, {
+              osTemplateId: String(osTemplateId),
+              password: newPassword,
+            });
+            const jobId = apiRes?.job?.id || apiRes?.jobId || null;
+
+            await Order.findByIdAndUpdate(orderId, {
+              lastAction: 'reinstall',
+              lastActionTime: new Date(),
+              provisioningStatus: 'provisioning',
+              provisioningError: 'Reinstall in progress — new password will appear when ready…',
+              password: newPassword,
+              os: mapKurohostOsLabel(osTemplateName, isWindows),
+              username: isWindows ? 'Administrator' : 'root',
+              ...(jobId ? { kurohostJobId: jobId } : {}),
+            });
+
+            const reinstallOrderId = orderId;
+            const reinstallInstanceId = order.kurohostInstanceId;
+            void runKurohostPostReinstallFlow({
+              api: kurohostApi,
+              Order,
+              orderId: reinstallOrderId,
+              instanceId: reinstallInstanceId,
+              jobId,
+              generatedPassword: newPassword,
+              osTemplateName,
+              isWindows,
+            }).catch((bgErr) => {
+              console.error('[SERVICE-ACTION][POST] KuroHost post-reinstall flow failed:', bgErr.message);
+            });
+
+            return NextResponse.json({
+              success: true,
+              result: {
+                accepted: true,
+                instanceId: order.kurohostInstanceId,
+                jobId,
+                osTemplateId: String(osTemplateId),
+                message: 'Reinstall submitted — new password will appear automatically when ready',
+                raw: apiRes,
+              },
+            });
+          }
+        }
+      } catch (kurohostErr) {
+        console.error(`[SERVICE-ACTION][POST] KuroHost action '${action}' failed:`, kurohostErr.message);
+        return actionJson({
+          success: false,
+          error: kurohostErr.message || 'Server action failed',
+        }, kurohostErr.status >= 400 && kurohostErr.status < 600 ? kurohostErr.status : 502, action);
+      }
+    }
 
     // -------------------- Netbay branch --------------------
     // Routed FIRST when the order is Netbay-backed: Netbay has its own
@@ -2026,6 +2285,43 @@ export async function GET(request) {
       || order.productDetails?.ip
       || order.ip
       || null;
+
+    // 1a-kurohost) KuroHost branch — instance id per order.
+    if (order.provider === 'kurohost' || !!order.kurohostInstanceId) {
+      const { config: kurohostCfg, companyName: kurohostCompanyName } = await resolveCompanyKurohostApi(order);
+      if (kurohostCfg && order.kurohostInstanceId) {
+        console.log(`[SERVICE-ACTION][GET] Using KuroHost API for order=${orderId} (instanceId=${order.kurohostInstanceId})`);
+        try {
+          const api = new KurohostApi(kurohostCfg);
+          const detailRes = await api.getInstance(order.kurohostInstanceId);
+          const inst = KurohostApi.unwrapInstance(detailRes);
+          const { powerState, rawStatus } = resolveKurohostPowerState(inst);
+          const applied = applyKurohostInstanceToOrderUpdates(inst, order);
+          await Order.findByIdAndUpdate(orderId, applied.dbUpdates);
+          const credentialsUpdated = applied.changes.some(c => ['password', 'username', 'ipAddress'].includes(c));
+
+          return NextResponse.json({
+            success: true,
+            provider: 'kurohost',
+            companyName: kurohostCompanyName || null,
+            instanceId: order.kurohostInstanceId,
+            ip: applied.dbUpdates.ipAddress || ipAddress || KurohostApi.extractInstanceIp(inst) || null,
+            status: powerState,
+            powerState,
+            rawStatus,
+            details: inst,
+            credentialsUpdated,
+            syncResult: {
+              credentialsUpdated,
+              changes: applied.changes,
+              lastSyncTime: applied.dbUpdates.lastSyncTime?.toISOString?.() || new Date().toISOString(),
+            },
+          });
+        } catch (kurohostGetErr) {
+          console.error('[SERVICE-ACTION][GET] KuroHost getInstance failed:', kurohostGetErr.message);
+        }
+      }
+    }
 
     // 1a-pre) Netbay branch — Netbay carries its own serviceId per order,
     //         so we go straight to /services/:id without any IP-based lookup.

@@ -9,8 +9,11 @@ const { resolveOrderExpiryOnPayment } = require('@/lib/advpsOrderExpiry');
 const AutoProvisioningService = require('@/services/autoProvisioningService');
 const WhatsAppService = require('@/services/whatsappService');
 import { enforceOrderAccess } from '@/lib/apiSecurity';
+import { enforcePaymentRateLimit } from '@/lib/rateLimit';
 const { customerApiCatchPayload } = require('@/lib/customerFacingErrors');
 import { chargeDeferredWalletForOrder, recoverPendingOrderPayment } from '@/lib/confirmPendingOrderPayment';
+import { verifyRazorpaySignature } from '@/lib/paymentGateways';
+import { toQueryString } from '@/lib/queryIds';
 
 function resolveGatewayMethod(paymentMethod, order) {
   const raw = String(paymentMethod || order?.paymentMethod || 'razorpay').toLowerCase();
@@ -28,6 +31,9 @@ Cashfree.XEnvironment = process.env.CASHFREE_ENVIRONMENT === 'SANDBOX'
   : Cashfree.Environment.PRODUCTION;
 
 export async function POST(request) {
+  const rateLimited = enforcePaymentRateLimit(request);
+  if (rateLimited) return rateLimited;
+
   await connectDB();
 
   console.log("========== PAYMENT CONFIRMATION API ==========");
@@ -38,9 +44,10 @@ export async function POST(request) {
 
     console.log('[Payment Confirm] Request body:', { clientTxnId, orderId, paymentMethod, razorpay_payment_id });
 
-    // Use clientTxnId or orderId to find the order
-    const orderIdentifier = clientTxnId || orderId;
-    
+    // Coerced to a string: a raw object here would be read as Mongo query
+    // operators and match somebody else's order.
+    const orderIdentifier = toQueryString(clientTxnId) || toQueryString(orderId);
+
     if (!orderIdentifier) {
       return NextResponse.json(
         { success: false, message: 'Order ID is required' },
@@ -126,13 +133,32 @@ export async function POST(request) {
         );
       }
 
-      const body = razorpay_order_id + "|" + razorpay_payment_id;
-      const expectedSignature = crypto
-        .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
-        .update(body)
-        .digest("hex");
+      // No stored gateway order id to bind against (legacy row) — the only safe
+      // route is to ask Razorpay directly rather than trust the posted ids.
+      if (!order.gatewayOrderId) {
+        const recovery = await recoverPendingOrderPayment(order, { maxAttempts: 3, delayMs: 1000 });
+        if (recovery.confirmed) {
+          return NextResponse.json({
+            success: true,
+            message: 'Payment confirmed via gateway recovery',
+            orderId: order._id,
+            recovered: true,
+          });
+        }
+        return NextResponse.json(
+          { success: false, message: 'Payment verification failed' },
+          { status: 400 }
+        );
+      }
 
-      if (expectedSignature !== razorpay_signature) {
+      const signatureOk = verifyRazorpaySignature({
+        razorpay_order_id,
+        razorpay_payment_id,
+        razorpay_signature,
+        expectedOrderId: order.gatewayOrderId,
+      });
+
+      if (!signatureOk) {
         console.error('Razorpay signature verification failed');
         return NextResponse.json(
           { success: false, message: 'Payment verification failed' },

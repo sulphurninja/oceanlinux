@@ -63,8 +63,8 @@ export async function PUT(request: NextRequest) {
       }
 
       // Validate new password strength
-      if (newPassword.length < 6) {
-        return NextResponse.json({ error: 'New password must be at least 6 characters long' }, { status: 400 });
+      if (newPassword.length < 8) {
+        return NextResponse.json({ error: 'New password must be at least 8 characters long' }, { status: 400 });
       }
 
       updateData.password = await hashUserPassword(newPassword);

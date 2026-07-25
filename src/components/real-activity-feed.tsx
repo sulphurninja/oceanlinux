@@ -30,7 +30,7 @@ interface ActivityItem {
     metadata?: any;
 }
 
-const RealActivityFeed = ({ userId }: { userId: string }) => {
+const RealActivityFeed = ({ userId }: { userId?: string }) => {
     const [activities, setActivities] = useState<ActivityItem[]>([]);
     const [loading, setLoading] = useState(true);
     const router = useRouter();

@@ -22,9 +22,9 @@ export default function CreateResellerPage() {
         createAccount: true
     });
 
-    const [createdCredentials, setCreatedCredentials] = useState(null);
+    const [createdCredentials, setCreatedCredentials] = useState<Record<string, any> | null>(null);
 
-    const handleSubmit = async (e) => {
+    const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
         setLoading(true);
 
@@ -51,7 +51,7 @@ export default function CreateResellerPage() {
         }
     };
 
-    const copyToClipboard = (text) => {
+    const copyToClipboard = (text: string) => {
         navigator.clipboard.writeText(text);
         toast.success('Copied to clipboard');
     };

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
+import { resolveCompanySession } from '@/lib/companySession';
 import connectDB from '@/lib/db';
 import IPStock from '@/models/ipStockModel';
 import Company from '@/models/companyModel';
@@ -33,17 +33,6 @@ const {
   fetchResellerCredentialsByIp,
   syncAllInventoryExpiriesFromReseller,
 } = require('@/lib/companyResellerInventorySync');
-
-async function getCompanySession() {
-  const cookieStore = await cookies();
-  const session = cookieStore.get('company_session')?.value;
-  if (!session) return null;
-  try {
-    return JSON.parse(session);
-  } catch {
-    return null;
-  }
-}
 
 function serializeInventoryItem(item) {
   return {
@@ -152,7 +141,7 @@ function serializeStock(stock, companyDoc) {
 }
 
 export async function GET() {
-  const company = await getCompanySession();
+  const company = await resolveCompanySession();
   if (!company) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers: { 'X-Deploy-Version': COMPANY_FILTER_VERSION } });
   }
@@ -192,7 +181,7 @@ export async function GET() {
 }
 
 export async function PUT(request) {
-  const company = await getCompanySession();
+  const company = await resolveCompanySession();
   if (!company) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   await connectDB();

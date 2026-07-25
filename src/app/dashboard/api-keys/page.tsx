@@ -26,6 +26,7 @@ import {
   Download,
   Zap
 } from 'lucide-react';
+import { dashboardFetch } from '@/lib/dashboardFetch';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -129,7 +130,7 @@ const APIKeysPage = () => {
   const fetchAPIKeys = async () => {
     try {
       setLoading(true);
-      const response = await fetch('/api/users/api-keys');
+      const response = await dashboardFetch('/api/users/api-keys');
       if (response.ok) {
         const data = await response.json();
         setApiKeys(data.keys);
@@ -162,7 +163,7 @@ const APIKeysPage = () => {
           ? null
           : createForm.expiresIn;
 
-      const response = await fetch('/api/users/api-keys', {
+      const response = await dashboardFetch('/api/users/api-keys', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -199,7 +200,7 @@ const APIKeysPage = () => {
 
   const deleteAPIKey = async (keyId: string) => {
     try {
-      const response = await fetch(`/api/users/api-keys/${keyId}`, {
+      const response = await dashboardFetch(`/api/users/api-keys/${keyId}`, {
         method: 'DELETE',
       });
 
@@ -218,7 +219,7 @@ const APIKeysPage = () => {
 
   const toggleKeyStatus = async (keyId: string, isActive: boolean) => {
     try {
-      const response = await fetch(`/api/users/api-keys/${keyId}`, {
+      const response = await dashboardFetch(`/api/users/api-keys/${keyId}`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',

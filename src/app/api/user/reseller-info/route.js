@@ -14,28 +14,20 @@ export async function GET(request) {
         }
 
         const user = await User.findById(userId);
-        console.log('Reseller Info User:', {
-            id: user?._id,
-            type: user?.userType,
-            resellerId: user?.resellerId
-        });
 
         if (!user) {
             return NextResponse.json({ success: false, message: 'User not found' }, { status: 404 });
-        }
-
-        if (user.userType !== 'reseller') {
-            console.log('User Type mismatch:', user.userType);
-        }
-        if (!user.resellerId) {
-            console.log('Reseller ID missing');
         }
 
         if (user.userType !== 'reseller' || !user.resellerId) {
             return NextResponse.json({ success: false, message: 'Not a reseller' }, { status: 403 });
         }
 
-        const reseller = await Reseller.findById(user.resellerId).select('+apiSecret');
+        // Never ship the password hash, the API secret, or our internal markup
+        // config to the browser — the dashboard only needs wallet/apiKey/stats.
+        const reseller = await Reseller.findById(user.resellerId)
+            .select('-password -apiSecret -pricing')
+            .lean();
 
         return NextResponse.json({
             success: true,

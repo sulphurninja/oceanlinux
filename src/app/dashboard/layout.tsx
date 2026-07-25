@@ -54,6 +54,7 @@ import PremiumPostLoginSplash from '@/components/landing/PremiumPostLoginSplash'
 import { performLogoutWithCelebration } from '@/lib/logoutWithCelebration';
 import { ThemeToggle } from '@/components/ui/theme-toggle';
 import { cn } from '@/lib/utils';
+import { dashboardFetch } from '@/lib/dashboardFetch';
 import {
     Dialog,
     DialogContent,
@@ -152,7 +153,7 @@ export default function DashboardLayout({
 
     const fetchUserData = async () => {
         try {
-            const response = await fetch('/api/users/me');
+            const response = await dashboardFetch('/api/users/me');
             if (response.ok) {
                 const userData = await response.json();
                 setUser(userData);
@@ -192,7 +193,7 @@ export default function DashboardLayout({
         }
         setIsSavingPhone(true);
         try {
-            const response = await fetch('/api/users/update', {
+            const response = await dashboardFetch('/api/users/update', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ phone: cleaned }),
@@ -226,7 +227,7 @@ export default function DashboardLayout({
         setIsSavingAddress(true);
         try {
             const billingAddress = { line, city, state, pincode, country: 'India' };
-            const response = await fetch('/api/users/update', {
+            const response = await dashboardFetch('/api/users/update', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ billingAddress }),

@@ -56,9 +56,9 @@ export async function PATCH(request, { params }) {
     }
 
     const { password } = await request.json();
-    if (!password || String(password).trim().length < 6) {
+    if (!password || String(password).trim().length < 8) {
       return new Response(
-        JSON.stringify({ message: 'Password must be at least 6 characters' }),
+        JSON.stringify({ message: 'Password must be at least 8 characters' }),
         { status: 400, headers: { 'Content-Type': 'application/json' } }
       );
     }

@@ -14,6 +14,7 @@ import {
 import { isSlotIpOrder, SLOT_IP_NO_RENEWAL_MESSAGE } from '@/lib/slotIpOrder';
 import { resolveOrderRenewalPrice } from '@/lib/orderRenewalPricingServer';
 const { customerApiCatchPayload } = require('@/lib/customerFacingErrors');
+import { enforcePaymentRateLimit } from '@/lib/rateLimit';
 
 async function refundRenewalWalletReservation(userId, amount, renewalTxnId) {
   if (!amount || amount <= 0) return;
@@ -28,6 +29,9 @@ async function refundRenewalWalletReservation(userId, amount, renewalTxnId) {
 }
 
 export async function POST(request) {
+  const rateLimited = enforcePaymentRateLimit(request);
+  if (rateLimited) return rateLimited;
+
   await connectDB();
   console.log("MongoDB connected");
 

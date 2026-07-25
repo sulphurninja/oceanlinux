@@ -5,17 +5,19 @@ export type PowerState = 'running' | 'stopped' | 'suspended' | 'busy' | 'unknown
 export type IPStockLike = {
   tags?: string[];
   companyAutomation?: {
-    provider: 'virtualizor' | 'reseller-api' | 'netbay' | 'joy';
+    provider: 'virtualizor' | 'reseller-api' | 'netbay' | 'kurohost' | 'joy';
     enabled: boolean;
   } | null;
 };
 
 export type OrderPowerLike = {
+  _id?: string;
   provider?: string;
   hostycareServiceId?: string;
   smartvpsServiceId?: string;
   advpsServiceId?: string;
   netbayServiceId?: string;
+  kurohostInstanceId?: string;
   ipAddress?: string;
   ipStockId?: string;
   slotIpPackageId?: string;
@@ -27,14 +29,16 @@ export type OrderPowerLike = {
 export function getProviderFromOrder(
   order: OrderPowerLike,
   ipStock: IPStockLike | null
-): 'hostycare' | 'smartvps' | 'oceanlinux' | 'advps' | 'netbay' {
+): 'hostycare' | 'smartvps' | 'oceanlinux' | 'advps' | 'netbay' | 'kurohost' {
   if (isSlotIpOrder(order)) return 'oceanlinux';
 
   if (order.provider === 'netbay') return 'netbay';
+  if (order.provider === 'kurohost') return 'kurohost';
   if (order.provider === 'advps') return 'advps';
   if (order.provider === 'smartvps') return 'smartvps';
 
   if (order.netbayServiceId) return 'netbay';
+  if (order.kurohostInstanceId) return 'kurohost';
   if (order.advpsServiceId) return 'advps';
   if (order.hostycareServiceId) return 'hostycare';
   if (order.smartvpsServiceId) return 'smartvps';
@@ -42,6 +46,7 @@ export function getProviderFromOrder(
   if (ipStock?.tags) {
     const tagsLower = ipStock.tags.map((t) => t.toLowerCase());
     if (tagsLower.includes('netbay')) return 'netbay';
+    if (tagsLower.includes('kurohost')) return 'kurohost';
     if (tagsLower.includes('advps') || tagsLower.includes('flex')) return 'advps';
     if (tagsLower.includes('smartvps') || tagsLower.includes('ocean linux')) return 'smartvps';
   }
@@ -65,6 +70,7 @@ export function hasCompanyAnyAutomation(stock: IPStockLike | null): boolean {
     (stock.companyAutomation.provider === 'virtualizor' ||
       stock.companyAutomation.provider === 'reseller-api' ||
       stock.companyAutomation.provider === 'netbay' ||
+      stock.companyAutomation.provider === 'kurohost' ||
       stock.companyAutomation.provider === 'joy')
   );
 }
@@ -82,7 +88,8 @@ export function isOrderCompanyAutomated(
     (prov === 'hostycare' && !!order.hostycareServiceId) ||
     (prov === 'smartvps' && !!(order.smartvpsServiceId || order.ipAddress)) ||
     (prov === 'advps' && !!order.advpsServiceId) ||
-    (prov === 'netbay' && !!order.netbayServiceId);
+    (prov === 'netbay' && !!order.netbayServiceId) ||
+    (prov === 'kurohost' && !!order.kurohostInstanceId);
 
   return !hasNativeServiceId;
 }
@@ -110,6 +117,7 @@ export function canShowLivePowerState(
     (provider === 'smartvps' && !!(order.smartvpsServiceId || order.ipAddress)) ||
     (provider === 'advps' && !!order.advpsServiceId) ||
     (provider === 'netbay' && !!order.netbayServiceId) ||
+    (provider === 'kurohost' && !!order.kurohostInstanceId) ||
     (companyAutomated && hasAssignedIp);
 
   return hasPowerApi && isActiveStatus;
@@ -118,7 +126,7 @@ export function canShowLivePowerState(
 /** Only oceanlinux / company-automation orders need an ipStock lookup. */
 export function orderNeedsIpStockForPowerState(order: OrderPowerLike): boolean {
   if (!order.ipStockId || isSlotIpOrder(order)) return false;
-  if (order.hostycareServiceId || order.smartvpsServiceId || order.advpsServiceId || order.netbayServiceId) {
+  if (order.hostycareServiceId || order.smartvpsServiceId || order.advpsServiceId || order.netbayServiceId || order.kurohostInstanceId) {
     return false;
   }
   return true;
@@ -152,7 +160,7 @@ export async function fetchPowerStatesForOrders(
 
   if (eligible.length === 0) return;
 
-  onStart?.(eligible.map((order) => order._id as string));
+  onStart?.(eligible.map((order) => order._id!));
 
   await runWithConcurrency(eligible, async (order) => {
     const stock = stocks[order.ipStockId || ''] || null;

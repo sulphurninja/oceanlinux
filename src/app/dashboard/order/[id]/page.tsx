@@ -49,6 +49,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Switch } from '@/components/ui/switch';
 import { fetchWalletSummary } from '@/lib/walletClient';
 import { toast } from 'sonner';
+import { dashboardFetch } from '@/lib/dashboardFetch';
 import { cn } from '@/lib/utils';
 import { OsIcon } from '@/components/os/OsIcon';
 import { premiumBtnOutline, premiumBadge } from '@/lib/premium-badges';
@@ -82,6 +83,7 @@ interface IPStock {
   _id: string;
   name: string;
   tags: string[];
+  serverType?: 'VPS' | 'Linux';
   /**
    * Set by /api/ipstock/[id] when the linked company has automation enabled.
    * The flag intentionally carries no credentials — it just lets this
@@ -93,7 +95,7 @@ interface IPStock {
    *                      (Hostheaven / SomaniOne pattern)
    */
   companyAutomation?: {
-    provider: 'virtualizor' | 'reseller-api' | 'netbay' | 'joy';
+    provider: 'virtualizor' | 'reseller-api' | 'netbay' | 'kurohost' | 'joy';
     enabled: boolean;
     companyName?: string;
     label?: string;
@@ -164,12 +166,13 @@ interface Order {
   password?: string;
   expiryDate?: Date;
   createdAt?: Date;
-  provider?: 'hostycare' | 'smartvps' | 'oceanlinux' | 'slotip' | 'advps' | 'netbay';
+  provider?: 'hostycare' | 'smartvps' | 'oceanlinux' | 'slotip' | 'advps' | 'netbay' | 'kurohost';
   hostycareServiceId?: string;
   smartvpsServiceId?: string;
   advpsServiceId?: string;
   advpsOrderId?: string;
   netbayServiceId?: string;
+  kurohostInstanceId?: string;
   netbayPlanId?: string;
   netbayTaskId?: string;
   advpsRebuildCount?: number;
@@ -424,7 +427,8 @@ const OrderDetails = () => {
       const hasNativeServiceId = (provider === 'hostycare' && order.hostycareServiceId) ||
         (provider === 'smartvps' && (order.smartvpsServiceId || order.ipAddress)) ||
         (provider === 'advps' && order.advpsServiceId) ||
-        (provider === 'netbay' && order.netbayServiceId);
+        (provider === 'netbay' && order.netbayServiceId) ||
+        (provider === 'kurohost' && order.kurohostInstanceId);
       const isCompanyAutomated = hasCompanyAnyAutomation(ipStock) &&
         (provider === 'oceanlinux' || !hasNativeServiceId);
 
@@ -437,7 +441,7 @@ const OrderDetails = () => {
         fetchPendingRequest();
       }
     }
-  }, [order?.hostycareServiceId, order?.smartvpsServiceId, order?.advpsServiceId, order?.netbayServiceId, order?.ipAddress, ipStock, loading]);
+  }, [order?.hostycareServiceId, order?.smartvpsServiceId, order?.advpsServiceId, order?.netbayServiceId, order?.kurohostInstanceId, order?.ipAddress, ipStock, loading]);
 
   // Auto-refresh while ADVPS or SmartVPS is provisioning (poll every 15s)
   useEffect(() => {
@@ -450,9 +454,9 @@ const OrderDetails = () => {
     const interval = setInterval(async () => {
       try {
         if (providerNow === 'smartvps') {
-          await fetch(`/api/orders/smartvps-action?orderId=${orderId}`, { cache: 'no-store' });
+          await dashboardFetch(`/api/orders/smartvps-action?orderId=${orderId}`, { cache: 'no-store', credentials: 'include' });
         }
-        const res = await fetch(`/api/orders/${orderId}`, { cache: 'no-store' });
+        const res = await dashboardFetch(`/api/orders/${orderId}`, { cache: 'no-store', credentials: 'include' });
         if (res.ok) {
           const updated = await res.json();
           setOrder(updated);
@@ -487,7 +491,7 @@ const OrderDetails = () => {
 
     const interval = setInterval(async () => {
       try {
-        const res = await fetch(`/api/orders/${orderId}`, { cache: 'no-store', credentials: 'include' });
+        const res = await dashboardFetch(`/api/orders/${orderId}`, { cache: 'no-store', credentials: 'include' });
         if (!res.ok) return;
         const updated = await res.json();
         setOrder(updated);
@@ -513,7 +517,7 @@ const OrderDetails = () => {
     setLoading(true);
     try {
       console.log('[ORDER-DETAILS] Fetching order:', orderId);
-      const response = await fetch(`/api/orders/${orderId}`, { cache: 'no-store', credentials: 'include' });
+      const response = await dashboardFetch(`/api/orders/${orderId}`, { cache: 'no-store', credentials: 'include' });
       if (response.status === 401) {
         showAlert('session_expired', 'Your session expired. Please log in again to view this server.');
         return;
@@ -534,7 +538,7 @@ const OrderDetails = () => {
       if (orderData.ipStockId) {
         console.log('[ORDER-DETAILS] Fetching IPStock for ID:', orderData.ipStockId);
         try {
-          const ipStockResponse = await fetch(`/api/ipstock/${orderData.ipStockId}`);
+          const ipStockResponse = await dashboardFetch(`/api/ipstock/${orderData.ipStockId}`);
           if (ipStockResponse.ok) {
             const ipStockData = await ipStockResponse.json();
             console.log('[ORDER-DETAILS] IPStock data received:', {
@@ -563,7 +567,7 @@ const OrderDetails = () => {
   const fetchOrder = async () => {
     setLoading(true);
     try {
-      const response = await fetch(`/api/orders/${orderId}`, { cache: 'no-store', credentials: 'include' });
+      const response = await dashboardFetch(`/api/orders/${orderId}`, { cache: 'no-store', credentials: 'include' });
       if (response.status === 401) {
         showAlert('session_expired', 'Your session expired. Please log in again to view this server.');
         return;
@@ -580,7 +584,7 @@ const OrderDetails = () => {
   };
 
   // Determine provider based on order data and ipStock
-  const getProviderFromOrder = (order: Order, ipStock: IPStock | null): 'hostycare' | 'smartvps' | 'oceanlinux' | 'advps' | 'netbay' => {
+  const getProviderFromOrder = (order: Order, ipStock: IPStock | null): 'hostycare' | 'smartvps' | 'oceanlinux' | 'advps' | 'netbay' | 'kurohost' => {
     console.log('[ORDER-DETAILS] Determining provider for order:', {
       explicitProvider: order.provider,
       hostycareServiceId: order.hostycareServiceId,
@@ -597,10 +601,12 @@ const OrderDetails = () => {
     if (isSlotIpOrder(order)) return 'oceanlinux';
 
     if (order.provider === 'netbay') return 'netbay';
+    if (order.provider === 'kurohost') return 'kurohost';
     if (order.provider === 'advps') return 'advps';
     if (order.provider === 'smartvps') return 'smartvps';
 
     if (order.netbayServiceId) return 'netbay';
+    if (order.kurohostInstanceId) return 'kurohost';
     if (order.advpsServiceId) return 'advps';
     if (order.hostycareServiceId) return 'hostycare';
     if (order.smartvpsServiceId) return 'smartvps';
@@ -608,6 +614,7 @@ const OrderDetails = () => {
     if (ipStock && ipStock.tags) {
       const tagsLower = ipStock.tags.map((t: string) => t.toLowerCase());
       if (tagsLower.includes('netbay')) return 'netbay';
+      if (tagsLower.includes('kurohost')) return 'kurohost';
       if (tagsLower.includes('advps') || tagsLower.includes('flex')) return 'advps';
       if (tagsLower.includes('smartvps') || tagsLower.includes('ocean linux')) return 'smartvps';
     }
@@ -666,7 +673,7 @@ const OrderDetails = () => {
     return { total, walletApplied, gatewayCharge };
   }, [order, ipStock, walletBalance, useWalletRenewal]);
 
-  const openOsDialog = async (provider: 'hostycare' | 'smartvps' | 'advps' | 'oceanlinux' | 'netbay') => {
+  const openOsDialog = async (provider: 'hostycare' | 'smartvps' | 'advps' | 'oceanlinux' | 'netbay' | 'kurohost') => {
     if (osAutoCloseTimer.current) {
       clearTimeout(osAutoCloseTimer.current);
       osAutoCloseTimer.current = null;
@@ -686,7 +693,7 @@ const OrderDetails = () => {
         : undefined;
 
       const endpoint = provider === 'smartvps' ? 'smartvps-action' : provider === 'advps' ? 'advps-action' : 'service-action';
-      const templatesRes = await fetch(`/api/orders/${endpoint}`, {
+      const templatesRes = await dashboardFetch(`/api/orders/${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -725,7 +732,7 @@ const OrderDetails = () => {
       const endpoint = provider === 'smartvps' ? 'smartvps-action' : provider === 'advps' ? 'advps-action' : 'service-action';
       const action = (provider === 'smartvps' || provider === 'advps') ? 'format' : 'reinstall';
 
-      const res = await fetch(`/api/orders/${endpoint}`, {
+      const res = await dashboardFetch(`/api/orders/${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -734,6 +741,9 @@ const OrderDetails = () => {
           payload: {
             templateId: selectedOs,
             osName: getOsTemplateRebuildName(osTemplates[selectedOs], selectedOs),
+            ...(provider === 'kurohost' && osTemplates[selectedOs] && typeof osTemplates[selectedOs] === 'object'
+              ? { isWindows: !!(osTemplates[selectedOs] as { isWindows?: boolean }).isWindows }
+              : {}),
           },
         })
       });
@@ -761,10 +771,19 @@ const OrderDetails = () => {
         : 'Reinstall submitted. Waiting for server to update...'
       );
 
+      if (provider === 'kurohost') {
+        setOrder((prev) => prev ? {
+          ...prev,
+          provisioningStatus: 'provisioning',
+          lastAction: 'reinstall',
+        } : prev);
+      }
+
       // re-use your existing poller
       await pollForServerUpdates({
         expectedTemplateId: selectedOs,
         useOsDialog: true,
+        kurohostReinstall: provider === 'kurohost',
       });
 
     } catch (err: any) {
@@ -791,7 +810,7 @@ const OrderDetails = () => {
     if (!order) return;
 
     try {
-      const res = await fetch(`/api/server-actions/status?orderId=${order._id}`);
+      const res = await dashboardFetch(`/api/server-actions/status?orderId=${order._id}`);
       const data = await res.json();
 
       if (data.success && data.hasRequest) {
@@ -817,7 +836,7 @@ const OrderDetails = () => {
 
     setRequestLoading(true);
     try {
-      const res = await fetch('/api/server-actions/request', {
+      const res = await dashboardFetch('/api/server-actions/request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ orderId: order._id, action })
@@ -857,6 +876,7 @@ const OrderDetails = () => {
     if (provider === 'smartvps' && (order.smartvpsServiceId || order.ipAddress)) return true;
     if (provider === 'advps' && order.advpsServiceId) return true;
     if (provider === 'netbay' && order.netbayServiceId) return true;
+    if (provider === 'kurohost' && order.kurohostInstanceId) return true;
 
     // Fall back to per-company automation (Virtualizor or reseller HTTP API).
     // This kicks in for:
@@ -996,10 +1016,11 @@ const OrderDetails = () => {
     const isSmartVPS = provider === 'smartvps' && (order.smartvpsServiceId || order.ipAddress);
     const isAdvps = provider === 'advps' && order.advpsServiceId;
     const isNetbay = provider === 'netbay' && !!order.netbayServiceId;
+    const isKurohost = provider === 'kurohost' && !!order.kurohostInstanceId;
     const isCompanyAuto = hasCompanyAnyAutomation(ipStock) &&
-      (provider === 'oceanlinux' || (!isHostycare && !isSmartVPS && !isAdvps && !isNetbay));
+      (provider === 'oceanlinux' || (!isHostycare && !isSmartVPS && !isAdvps && !isNetbay && !isKurohost));
 
-    if (!isHostycare && !isSmartVPS && !isAdvps && !isNetbay && !isCompanyAuto) {
+    if (!isHostycare && !isSmartVPS && !isAdvps && !isNetbay && !isKurohost && !isCompanyAuto) {
       return null;
     }
 
@@ -1014,7 +1035,7 @@ const OrderDetails = () => {
 
       const endpoint = provider === 'smartvps' ? 'smartvps-action' : provider === 'advps' ? 'advps-action' : 'service-action';
 
-      const res = await fetch(`/api/orders/${endpoint}`, {
+      const res = await dashboardFetch(`/api/orders/${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ orderId: order._id, action: 'status' })
@@ -1111,7 +1132,7 @@ const OrderDetails = () => {
     const provider = getProviderFromOrder(order, ipStock);
     const endpoint = getManageEndpoint(provider);
     try {
-      await fetch(`/api/orders/${endpoint}?orderId=${order._id}`, { cache: 'no-store' });
+      await dashboardFetch(`/api/orders/${endpoint}?orderId=${order._id}`, { cache: 'no-store', credentials: 'include' });
     } catch (err) {
       console.warn('[ORDER-DETAILS] Provider sync failed:', err);
     }
@@ -1132,7 +1153,7 @@ const OrderDetails = () => {
       const endpoint = provider === 'smartvps' ? 'smartvps-action' : provider === 'advps' ? 'advps-action' : 'service-action';
       console.log('[ORDER-DETAILS] Loading service details from:', endpoint);
 
-      const res = await fetch(`/api/orders/${endpoint}?orderId=${order._id}`);
+      const res = await dashboardFetch(`/api/orders/${endpoint}?orderId=${order._id}`);
       const data = await res.json();
 
       if (data.success || data.syncResult) {
@@ -1223,7 +1244,7 @@ const OrderDetails = () => {
       const provider = getProviderFromOrder(order, ipStock);
       const endpoint = provider === 'smartvps' ? 'smartvps-action' : provider === 'advps' ? 'advps-action' : 'service-action';
 
-      const res = await fetch(`/api/orders/${endpoint}`, {
+      const res = await dashboardFetch(`/api/orders/${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ orderId: order._id, action, payload })
@@ -1414,6 +1435,7 @@ const OrderDetails = () => {
       (provider === 'advps' && action === 'format') ||
       (provider === 'hostycare' && action === 'reinstall' && order.hostycareServiceId) ||
       (provider === 'netbay' && action === 'reinstall' && order.netbayServiceId) ||
+      (provider === 'kurohost' && action === 'reinstall' && order.kurohostInstanceId) ||
       (action === 'reinstall' && isOrderCompanyAutomated(order, ipStock))) {
       await openOsDialog(provider);
       return;
@@ -1426,7 +1448,7 @@ const OrderDetails = () => {
 
       // Get available templates
       const endpoint = provider === 'smartvps' ? 'smartvps-action' : provider === 'advps' ? 'advps-action' : 'service-action';
-      const templatesRes = await fetch(`/api/orders/${endpoint}`, {
+      const templatesRes = await dashboardFetch(`/api/orders/${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ orderId: order._id, action: 'templates' })
@@ -1488,7 +1510,7 @@ const OrderDetails = () => {
 
     try {
       // Get available templates
-      const templatesRes = await fetch(`/api/orders/smartvps-action`, {
+      const templatesRes = await dashboardFetch(`/api/orders/smartvps-action`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ orderId: order!._id, action: 'templates' })
@@ -1526,7 +1548,7 @@ const OrderDetails = () => {
 
     try {
       // Execute format action
-      const formatRes = await fetch(`/api/orders/smartvps-action`, {
+      const formatRes = await dashboardFetch(`/api/orders/smartvps-action`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1565,9 +1587,11 @@ const OrderDetails = () => {
   const pollForServerUpdates = async (options?: {
     expectedTemplateId?: string;
     useOsDialog?: boolean;
+    kurohostReinstall?: boolean;
   }) => {
     const expectedTemplateId = options?.expectedTemplateId;
     const useOsDialog = options?.useOsDialog ?? false;
+    const kurohostReinstall = options?.kurohostReinstall ?? false;
     const setProgress = useOsDialog ? setOsProgress : setFormatProgress;
 
     const closeDialog = () => {
@@ -1603,7 +1627,7 @@ const OrderDetails = () => {
       try {
         await syncManageOrderFromProvider();
 
-        const orderRes = await fetch(`/api/orders/${order!._id}`, { cache: 'no-store' });
+        const orderRes = await dashboardFetch(`/api/orders/${order!._id}`, { cache: 'no-store', credentials: 'include' });
         if (!orderRes.ok) throw new Error('Failed to fetch order');
         const latestOrder = await orderRes.json();
 
@@ -1626,18 +1650,22 @@ const OrderDetails = () => {
           pollProvider === 'netbay' &&
           !!latestOrder.password &&
           latestOrder.password !== originalOrder.password;
+        const kurohostPasswordReady =
+          pollProvider === 'kurohost' &&
+          kurohostReinstall &&
+          latestOrder.provisioningStatus === 'active';
         const statusImproved =
           latestOrder.provisioningStatus === 'active' &&
           originalOrder.provisioningStatus !== 'active';
         const stillProvisioning = latestOrder.provisioningStatus === 'provisioning';
 
         const formatComplete = expectedTemplateId
-          ? netbayPasswordReady || ((targetOsReached || credentialsUpdated) && !stillProvisioning)
+          ? netbayPasswordReady || kurohostPasswordReady || ((targetOsReached || credentialsUpdated) && !stillProvisioning)
           : credentialsUpdated || statusImproved;
 
         if (formatComplete) {
           setOrder(latestOrder);
-          if (netbayPasswordReady || credentialsUpdated) {
+          if (netbayPasswordReady || kurohostPasswordReady || credentialsUpdated) {
             setShowPassword(true);
           }
           setProgress(
@@ -1727,7 +1755,7 @@ const OrderDetails = () => {
     if (!order) return;
     setDownloadingInvoice(true);
     try {
-      const res = await fetch(`/api/invoice/download?orderId=${order._id}`);
+      const res = await dashboardFetch(`/api/invoice/download?orderId=${order._id}`);
       if (!res.ok) throw new Error('Failed to generate invoice');
       const blob = await res.blob();
       const url = window.URL.createObjectURL(blob);
@@ -1749,7 +1777,7 @@ const OrderDetails = () => {
 
   const cancelPendingRenewal = async (renewalTxnId: string) => {
     try {
-      const res = await fetch('/api/payment/cancel', {
+      const res = await dashboardFetch('/api/payment/cancel', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -1789,7 +1817,7 @@ const OrderDetails = () => {
     console.log(`[RENEWAL] Initiating renewal with payment method: ${paymentMethod}`);
 
     try {
-      const res = await fetch("/api/payment/renew", {
+      const res = await dashboardFetch("/api/payment/renew", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -1826,7 +1854,7 @@ const OrderDetails = () => {
       console.log("Renewal payment data received:", data);
 
       if (data.walletOnly) {
-        const confirmRes = await fetch("/api/payment/renew-confirm", {
+        const confirmRes = await dashboardFetch("/api/payment/renew-confirm", {
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
@@ -1927,7 +1955,7 @@ const OrderDetails = () => {
         onSuccess: async (response) => {
           toast.success("Payment successful! Processing renewal...");
           try {
-            const confirmRes = await fetch("/api/payment/renew-confirm", {
+            const confirmRes = await dashboardFetch("/api/payment/renew-confirm", {
               method: "POST",
               credentials: "include",
               headers: { "Content-Type": "application/json" },
@@ -2075,7 +2103,7 @@ const OrderDetails = () => {
     }
 
     const currentStatus = provisioningStatus || status;
-    const companyAutomated = isOrderCompanyAutomated(order, ipStock);
+    const companyAutomated = isOrderCompanyAutomated(order ?? null, ipStock);
     const hasAssignedIp = !!(order?.ipAddress?.trim());
 
     if (order && isOrderPaid(order) && hasOrderBeenDelivered(order)) {
@@ -3360,6 +3388,12 @@ const OrderDetails = () => {
                           </p>
                         )}
 
+                        {order && provider === 'kurohost' && (
+                          <p className="text-xs text-muted-foreground text-center">
+                            A new root password is generated automatically after reinstall. Server must be <strong>Running</strong> or <strong>Stopped</strong>. All disk data will be erased; your IP stays the same.
+                          </p>
+                        )}
+
                         {order && provider === 'advps' && (() => {
                           const { remaining: rebuildsRemaining } = getAdvpsRebuildUsage(order);
                           return (
@@ -3656,7 +3690,7 @@ const OrderDetails = () => {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={loadServiceDetails}
+                            onClick={() => void loadServiceDetails()}
                             disabled={serviceLoading}
                             className="gap-1.5 h-7 px-2 text-xs"
                           >

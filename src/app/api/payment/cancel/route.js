@@ -4,6 +4,7 @@ import { getDataFromToken } from '@/helper/getDataFromToken';
 import Order from '@/models/orderModel';
 import { cancelPendingBuyNowOrder, cancelPendingRenewal } from '@/lib/cancelPendingOrder';
 import { probeGatewayPayment } from '@/lib/confirmPendingOrderPayment';
+import { enforcePaymentRateLimit } from '@/lib/rateLimit';
 
 /**
  * POST /api/payment/cancel
@@ -15,6 +16,9 @@ import { probeGatewayPayment } from '@/lib/confirmPendingOrderPayment';
  * - RENEWAL_* → pending renewal (refunds wallet only if it was actually debited)
  */
 export async function POST(request) {
+  const rateLimited = enforcePaymentRateLimit(request);
+  if (rateLimited) return rateLimited;
+
   await connectDB();
 
   let userId;

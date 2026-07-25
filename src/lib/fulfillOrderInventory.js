@@ -6,6 +6,38 @@ const {
   allocateCompanyInventoryForOrder,
 } = require('@/lib/companyInventory');
 const { orderHasConfirmedPayment } = require('@/lib/orderPaymentStatus');
+const Order = require('@/models/orderModel').default;
+
+/** True when the run actually consumed an IP or a stock unit. */
+function consumedSomething(result) {
+  return result?.allocated === true || result?.remaining !== undefined;
+}
+
+/**
+ * Take the fulfilment claim for this order, atomically. Returns false when
+ * another handler already holds it, in which case we must not allocate.
+ *
+ * The individual allocators are each atomic on their own collection, but their
+ * "already done?" guards read the in-memory order. Two handlers that loaded the
+ * order separately (duplicate webhook, or webhook + confirm) both saw an
+ * unfulfilled order and each allocated a different IP for one payment.
+ */
+async function claimFulfilment(orderId) {
+  const claimed = await Order.findOneAndUpdate(
+    { _id: orderId, inventoryFulfilmentClaimedAt: null },
+    { $set: { inventoryFulfilmentClaimedAt: new Date() } },
+    { new: true }
+  );
+  return !!claimed;
+}
+
+async function releaseFulfilment(orderId) {
+  try {
+    await Order.updateOne({ _id: orderId }, { $set: { inventoryFulfilmentClaimedAt: null } });
+  } catch (err) {
+    console.error('[FULFILL-INVENTORY] Failed to release fulfilment claim:', err.message);
+  }
+}
 
 /**
  * On payment confirm: slot IP allocation, company pre-config inventory, or stockCount decrement.
@@ -43,12 +75,43 @@ async function fulfillOrderInventory(order, options = {}) {
     return { skipped: true, paymentRequired: true, blocked: true };
   }
 
-  if (order.slotIpPackageId && !order.slotIpId) {
-    return allocateSlotIpForOrder(order);
+  const wantsSlotIp = !!order.slotIpPackageId && !order.slotIpId;
+  const wantsStock =
+    !order.slotIpPackageId &&
+    !!order.ipStockId &&
+    !order.inventoryItemId &&
+    !order.inventoryDecremented;
+
+  // Cheap in-memory check first, so an obviously-finished order costs no write.
+  if (!wantsSlotIp && !wantsStock) {
+    if (order.slotIpPackageId) return { allocated: false, skipped: true };
+    return { skipped: true, alreadyDone: !!order.inventoryDecremented };
   }
 
-  if (!order.ipStockId || order.inventoryItemId || order.inventoryDecremented) {
-    return { skipped: true, alreadyDone: !!order.inventoryDecremented };
+  if (!(await claimFulfilment(order._id))) {
+    return { skipped: true, alreadyDone: true, concurrent: true };
+  }
+
+  let result;
+  try {
+    result = await runFulfilment(order, wantsSlotIp);
+  } catch (err) {
+    await releaseFulfilment(order._id);
+    throw err;
+  }
+
+  // Nothing was consumed (sold out, mismatch, nothing to do) — hand the claim
+  // back so a later legitimate retry can still fulfil this order.
+  if (!consumedSomething(result)) {
+    await releaseFulfilment(order._id);
+  }
+
+  return result;
+}
+
+async function runFulfilment(order, wantsSlotIp) {
+  if (wantsSlotIp) {
+    return allocateSlotIpForOrder(order);
   }
 
   const stock = await IPStock.findById(order.ipStockId)

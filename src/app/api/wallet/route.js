@@ -8,8 +8,7 @@ import WalletRecharge from '@/models/walletRechargeModel';
  * GET /api/wallet
  *
  * Customer wallet endpoint that returns balance + last 50 transactions
- * + recent recharge attempts. The legacy [src/app/api/users/wallet/route.js]
- * stays untouched for back-compat.
+ * + recent recharge attempts. Legacy POST /api/users/wallet is retired (410).
  */
 export async function GET(request) {
   await connectDB();

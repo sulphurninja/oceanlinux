@@ -7,6 +7,7 @@ export const maxDuration = 60; // seconds
 
 import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
+import { enforceCronSecret } from '@/lib/apiSecurity';
 import Order from '@/models/orderModel';
 import IPStock from '@/models/ipStockModel';
 
@@ -138,16 +139,11 @@ export async function POST(req) {
   L.head('SMARTVPS STATUS SYNC — START');
 
   try {
+    const cronDenied = enforceCronSecret(req);
+    if (cronDenied) return cronDenied;
+
     // Ensure we are on Node runtime and can open a real DB socket
     await connectDB();
-
-    // Allow optional protection when called from Lambda:
-    // if (process.env.SVPS_SYNC_TOKEN) {
-    //   const token = req.headers.get('x-sync-token');
-    //   if (token !== process.env.SVPS_SYNC_TOKEN) {
-    //     return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
-    //   }
-    // }
 
     const smartvpsApi = new SmartVpsAPI();
 

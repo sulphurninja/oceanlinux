@@ -1,8 +1,12 @@
 // Test endpoint to simulate SmartVPS provisioning WITHOUT purchasing
 const SmartVpsAPI = require('@/services/smartvpsApi');
+const { blockUnlessDevOrCron } = require('@/lib/apiSecurity');
 
 export async function POST(request) {
     try {
+        const blocked = blockUnlessDevOrCron(request);
+        if (blocked) return blocked;
+
         const body = await request.json();
         const { productName, memory } = body;
 

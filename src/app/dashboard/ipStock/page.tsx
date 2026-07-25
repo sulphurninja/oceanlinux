@@ -3,6 +3,7 @@
 import { useEffect, useState, Suspense, useMemo, memo, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { dashboardFetch } from '@/lib/dashboardFetch';
 import {
   Card,
   CardContent,
@@ -110,11 +111,19 @@ interface IPStock {
   fulfillmentMode?: 'units' | 'inventory' | null;
   company?: string | null;
   netbayUseLiveStockApi?: boolean | null;
+  kurohostUseLiveStockApi?: boolean | null;
   resellerUseLiveStockApi?: boolean | null;
   serverType: string;
   tags: string[];
   memoryOptions: Record<string, MemoryOptionDetails>;
   promoCodes?: PromoCode[];
+}
+
+function isKurohostLiveStock(stock: IPStock) {
+  const cfg = stock.defaultConfigurations?.kurohost;
+  if (!cfg?.cloudZoneId && !(cfg?.zoneIds?.length)) return false;
+  if (!Object.values(cfg.flavorByMemory || {}).some(Boolean)) return false;
+  return stock.kurohostUseLiveStockApi === true;
 }
 
 function isNetbayLiveStock(stock: IPStock) {
@@ -144,18 +153,27 @@ function usesCompanyManualUnits(stock: IPStock) {
 
 function isCompanyStock(stock: IPStock) {
   if (usesCompanyManualUnits(stock)) return true;
-  return !!stock.company && !isNetbayLiveStock(stock) && !isResellerLiveStock(stock);
+  return !!stock.company && !isNetbayLiveStock(stock) && !isKurohostLiveStock(stock) && !isResellerLiveStock(stock);
 }
 
 function getStockUnitsRemaining(stock: IPStock) {
   if (usesCompanyManualUnits(stock)) {
     return Math.max(0, stock.stockCount ?? 0);
   }
-  if (isNetbayLiveStock(stock) || isResellerLiveStock(stock)) {
+  if (isNetbayLiveStock(stock) || isKurohostLiveStock(stock) || isResellerLiveStock(stock)) {
     return stock.available ? Number.POSITIVE_INFINITY : 0;
   }
   if (isCompanyStock(stock)) return Math.max(0, stock.stockCount ?? 0);
   return stock.available ? Number.POSITIVE_INFINITY : 0;
+}
+
+function isKurohostMemoryInStock(stock: IPStock, memory: string) {
+  if (stock.available) return true;
+  const kh = stock.defaultConfigurations?.kurohost;
+  const variant = kh?.variantStock?.[memory];
+  if (variant?.available === true) return true;
+  if (!variant) return stock.available !== false;
+  return variant.available === true;
 }
 
 function isNetbayMemoryInStock(stock: IPStock, memory: string) {
@@ -203,7 +221,17 @@ function isStockPurchasable(stock: IPStock, memory?: string) {
   if (isNetbayLiveStock(stock)) {
     if (memory) return isNetbayMemoryInStock(stock, memory);
     if (stock.available) return true;
-    const variants = Object.values(stock.defaultConfigurations?.netbay?.variantStock || {});
+    const variants: Array<{ available?: boolean }> = Object.values(
+      stock.defaultConfigurations?.netbay?.variantStock || {}
+    );
+    return variants.some((v) => v?.available === true);
+  }
+  if (isKurohostLiveStock(stock)) {
+    if (memory) return isKurohostMemoryInStock(stock, memory);
+    if (stock.available) return true;
+    const variants: Array<{ available?: boolean }> = Object.values(
+      stock.defaultConfigurations?.kurohost?.variantStock || {}
+    );
     return variants.some((v) => v?.available === true);
   }
   if (isResellerLiveStock(stock)) {
@@ -400,7 +428,7 @@ function IPStockContent() {
       (Array.isArray(ipData) ? ipData : []).filter((s) => !s.hiddenFromStore);
 
     const reloadIpStocks = async () => {
-      const ipRes = await fetch("/api/ipstock", { cache: "no-store" });
+      const ipRes = await dashboardFetch("/api/ipstock", { cache: "no-store" });
       if (!ipRes.ok) return;
       const ipData = await ipRes.json();
       setIpStocks(parseIpStockRows(ipData));
@@ -413,9 +441,10 @@ function IPStockContent() {
           ? "/api/advps/refresh-stock?force=1"
           : "/api/advps/refresh-stock";
         await Promise.allSettled([
-          fetch(refreshUrl, { cache: "no-store" }),
-          fetch("/api/reseller-panel/refresh-stock", { cache: "no-store" }),
-          fetch("/api/smartvps/sync", { cache: "no-store" }),
+          dashboardFetch(refreshUrl, { cache: "no-store" }),
+          dashboardFetch("/api/reseller-panel/refresh-stock", { cache: "no-store" }),
+          dashboardFetch("/api/kurohost/refresh-stock", { cache: "no-store" }),
+          dashboardFetch("/api/smartvps/sync", { cache: "no-store" }),
         ]);
         await reloadIpStocks();
       } catch (e) {
@@ -429,8 +458,8 @@ function IPStockContent() {
       if (!silent) setIsLoading(true);
 
       const [ipRes, slotRes] = await Promise.all([
-        fetch("/api/ipstock", { cache: "no-store" }),
-        fetch("/api/slot-ips?view=customer", { cache: "no-store" }),
+        dashboardFetch("/api/ipstock", { cache: "no-store" }),
+        dashboardFetch("/api/slot-ips?view=customer", { cache: "no-store" }),
       ]);
 
       const ipData = await ipRes.json();
@@ -590,7 +619,7 @@ function IPStockContent() {
     slotIpPackageId?: string;
     memory?: string;
   }) => {
-    const res = await fetch('/api/ipstock/verify-purchase', {
+    const res = await dashboardFetch('/api/ipstock/verify-purchase', {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
@@ -689,7 +718,7 @@ function IPStockContent() {
       body.ipStockId = selectedProduct.ipStockId;
     }
 
-    const response = await fetch('/api/validate-promo', {
+    const response = await dashboardFetch('/api/validate-promo', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -777,7 +806,7 @@ function IPStockContent() {
   const cancelPendingPayment = async (clientTxnId: string) => {
     if (!clientTxnId) return;
     try {
-      const res = await fetch('/api/payment/cancel', {
+      const res = await dashboardFetch('/api/payment/cancel', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -830,7 +859,11 @@ function IPStockContent() {
         return;
       }
 
-      let checkoutPromo = { code: null as string | null, discount: 0, applied: false };
+      let checkoutPromo: Awaited<ReturnType<typeof resolvePromoForCheckout>> = {
+        code: null,
+        discount: 0,
+        applied: false,
+      };
       if (promoCode.trim()) {
         checkoutPromo = await resolvePromoForCheckout();
         if (!checkoutPromo.applied) {
@@ -859,7 +892,7 @@ function IPStockContent() {
         paymentBody.ipStockId = selectedProduct.ipStockId;
       }
 
-      const res = await fetch("/api/payment/create", {
+      const res = await dashboardFetch("/api/payment/create", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -976,7 +1009,7 @@ function IPStockContent() {
               fallbackBody.ipStockId = selectedProduct.ipStockId;
             }
 
-          const fallbackRes = await fetch("/api/payment/create", {
+          const fallbackRes = await dashboardFetch("/api/payment/create", {
             method: "POST",
             credentials: "include",
             headers: { "Content-Type": "application/json" },
@@ -1059,7 +1092,7 @@ function IPStockContent() {
       toast.success("Payment successful! Processing order...");
 
       try {
-        const confirmRes = await fetch("/api/payment/confirm", {
+        const confirmRes = await dashboardFetch("/api/payment/confirm", {
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
@@ -1128,7 +1161,7 @@ function IPStockContent() {
       onSuccess: async (response) => {
         toast.success("Payment successful! Processing order...");
         try {
-          const confirmRes = await fetch("/api/payment/confirm", {
+          const confirmRes = await dashboardFetch("/api/payment/confirm", {
             method: "POST",
             credentials: "include",
             headers: { "Content-Type": "application/json" },

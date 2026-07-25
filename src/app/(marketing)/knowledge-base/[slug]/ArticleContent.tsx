@@ -24,7 +24,7 @@ import {
 import Link from "next/link";
 import { toast } from 'sonner';
 
-interface Article {
+export interface Article {
   _id: string;
   title: string;
   slug: string;
@@ -45,7 +45,7 @@ interface Article {
   aiGenerated?: boolean;
 }
 
-interface RelatedArticle {
+export interface RelatedArticle {
   _id: string;
   title: string;
   slug: string;

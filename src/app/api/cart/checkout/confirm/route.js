@@ -8,6 +8,7 @@ import {
   verifyUPIPayment,
 } from '@/lib/paymentGateways';
 import { confirmCheckoutFromWebhook } from '@/lib/paymentDispatch';
+import { enforcePaymentRateLimit } from '@/lib/rateLimit';
 
 /**
  * POST /api/cart/checkout/confirm
@@ -23,6 +24,9 @@ import { confirmCheckoutFromWebhook } from '@/lib/paymentDispatch';
  * Auth: requires the calling user to own the session.
  */
 export async function POST(request) {
+  const rateLimited = enforcePaymentRateLimit(request);
+  if (rateLimited) return rateLimited;
+
   await connectDB();
 
   let body;
@@ -37,18 +41,18 @@ export async function POST(request) {
     return NextResponse.json({ success: false, message: 'clientTxnId is required' }, { status: 400 });
   }
 
-  let userId = null;
+  let userId;
   try {
     userId = await getDataFromToken(request);
   } catch {
-    userId = null;
+    return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
   }
 
   const session = await CheckoutSession.findOne({ clientTxnId });
   if (!session) {
     return NextResponse.json({ success: false, message: 'Checkout session not found' }, { status: 404 });
   }
-  if (userId && String(session.user) !== String(userId)) {
+  if (String(session.user) !== String(userId)) {
     return NextResponse.json({ success: false, message: 'Forbidden' }, { status: 403 });
   }
 
@@ -77,7 +81,12 @@ export async function POST(request) {
   let transactionId = '';
 
   if (gateway === 'razorpay') {
-    const ok = verifyRazorpaySignature({ razorpay_order_id, razorpay_payment_id, razorpay_signature });
+    const ok = verifyRazorpaySignature({
+      razorpay_order_id,
+      razorpay_payment_id,
+      razorpay_signature,
+      expectedOrderId: session.gatewayOrderId,
+    });
     if (!ok) {
       return NextResponse.json({ success: false, message: 'Razorpay signature verification failed' }, { status: 400 });
     }

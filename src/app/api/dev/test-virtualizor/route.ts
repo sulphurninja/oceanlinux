@@ -1,8 +1,12 @@
 import { NextResponse } from 'next/server';
+import { blockUnlessDevOrCron } from '@/lib/apiSecurity';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
+  const blocked = blockUnlessDevOrCron(request as any);
+  if (blocked) return blocked;
+
   const { searchParams } = new URL(request.url);
   const accountIndex = parseInt(searchParams.get('account') || '0');
   

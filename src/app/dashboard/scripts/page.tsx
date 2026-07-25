@@ -34,6 +34,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from 'sonner';
+import { dashboardFetch } from '@/lib/dashboardFetch';
 import { cn } from '@/lib/utils';
 import {
     Dialog,
@@ -137,7 +138,7 @@ const ProxySetupTerminal = () => {
         addLog('command', `ssh ${serverUsername}@${serverIp}`);
 
         try {
-            const response = await fetch('/api/terminal/proxy-setup', {
+            const response = await dashboardFetch('/api/terminal/proxy-setup', {
                 method: 'POST',
                 credentials: 'include',
                 headers: { 'Content-Type': 'application/json' },
@@ -199,7 +200,7 @@ const ProxySetupTerminal = () => {
             addLog('info', `Installing Squid proxy server...`);
             setProgress(20);
 
-            const response = await fetch('/api/terminal/proxy-setup', {
+            const response = await dashboardFetch('/api/terminal/proxy-setup', {
                 method: 'POST',
                 credentials: 'include',
                 headers: { 'Content-Type': 'application/json' },

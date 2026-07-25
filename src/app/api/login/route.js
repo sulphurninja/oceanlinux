@@ -1,13 +1,24 @@
 // src/pages/api/login.js
 
-import jwt from 'jsonwebtoken';
 import User from '../../../models/userModel'
 import connectDB from '../../../lib/db';
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyUserPassword } from '@/lib/userPassword';
 import { findUserByEmail } from '@/lib/userEmail';
+import { sanitizeAuthUser, setAuthCookie } from '@/lib/authSession';
+import { enforceRateLimit } from '@/lib/rateLimit';
+
+const INVALID_CREDENTIALS = 'Invalid email or password.';
 
 export async function POST(request) {
+    const rateLimited = enforceRateLimit(request, {
+        max: 10,
+        windowMs: 5 * 60_000,
+        scope: 'ip',
+        message: 'Too many login attempts. Please wait a few minutes and try again.',
+    });
+    if (rateLimited) return rateLimited;
+
     try {
         await connectDB();
 
@@ -16,8 +27,8 @@ export async function POST(request) {
 
         const existingUser = await findUserByEmail(User, email);
         if (!existingUser) {
-            return new NextResponse(JSON.stringify({ message: "User doesn't exist." }), {
-                status: 404,
+            return new NextResponse(JSON.stringify({ message: INVALID_CREDENTIALS }), {
+                status: 400,
                 headers: {
                     'Content-Type': 'application/json'
                 }
@@ -38,7 +49,7 @@ export async function POST(request) {
         const isPasswordValid = await verifyUserPassword(password, existingUser.password);
 
         if (!isPasswordValid) {
-            return new NextResponse(JSON.stringify({ message: 'Invalid credentials.' }), {
+            return new NextResponse(JSON.stringify({ message: INVALID_CREDENTIALS }), {
                 status: 400,
                 headers: {
                     'Content-Type': 'application/json'
@@ -46,25 +57,14 @@ export async function POST(request) {
             });
         }
 
-        // Generate token
-        const token = jwt.sign({ email: existingUser.email, id: existingUser._id }, process.env.TOKEN_SECRET, { expiresIn: '1h' });
-
-        // Set cookie with the token
-        const response = new NextResponse(JSON.stringify({ result: existingUser }), {
+        const response = new NextResponse(JSON.stringify({ result: sanitizeAuthUser(existingUser) }), {
             status: 200,
             headers: {
                 'Content-Type': 'application/json'
             }
         });
-        response.cookies.set("token", token, {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',  // Ensure secure flag in production for HTTPS
-            sameSite: 'strict',  // Cross-site cookie sending protection
-            path: '/'  // Make the cookie available across the entire site
-        });
 
-        // Send success response
-        return response;
+        return setAuthCookie(response, existingUser);
     } catch (error) {
         console.error('[login]', error);
         const message = error?.message?.includes('MongoDB') || error?.code === 'ECONNREFUSED'

@@ -26,6 +26,7 @@ import {
 import { Loader2, Plus, Ticket, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
 import { useSessionAlert } from '@/components/session-alert';
+import { dashboardFetch } from '@/lib/dashboardFetch';
 import { cn } from '@/lib/utils';
 import { premiumBadge, premiumBtnOutline } from '@/lib/premium-badges';
 import {
@@ -54,7 +55,7 @@ export default function DashboardSupportTicketsPage() {
   const fetchTickets = async () => {
     try {
       setLoading(true);
-      const response = await fetch('/api/support/tickets', { credentials: 'include' });
+      const response = await dashboardFetch('/api/support/tickets', { credentials: 'include' });
 
       if (response.status === 401) {
         const data = await response.json().catch(() => ({}));
@@ -88,7 +89,7 @@ export default function DashboardSupportTicketsPage() {
     setCreating(true);
 
     try {
-      const response = await fetch('/api/support/tickets', {
+      const response = await dashboardFetch('/api/support/tickets', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },

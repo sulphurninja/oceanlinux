@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
+import { enforceRateLimit } from '@/lib/rateLimit';
 
 function getOpenAIClient() {
   const apiKey = process.env.OPENAI_API_KEY;
@@ -47,8 +48,31 @@ FEATURES:
 Be helpful, friendly, and focus on the affordability and quality aspects. If someone asks about specific technical details you're unsure about, suggest they contact the support team directly. Always emphasize the value proposition of getting premium Linux hosting at the most affordable prices.`;
 
 export async function POST(req: NextRequest) {
+  const rateLimited = enforceRateLimit(req, { max: 20, windowMs: 60_000, scope: 'ip' });
+  if (rateLimited) return rateLimited;
+
   try {
     const { messages } = await req.json();
+
+    // This endpoint is unauthenticated and spends real OpenAI credit, so the
+    // conversation is clamped: bounded size, and no client-supplied `system`
+    // turns that could repurpose the assistant into a general-purpose LLM.
+    if (!Array.isArray(messages) || messages.length === 0) {
+      return NextResponse.json({ error: 'messages must be a non-empty array' }, { status: 400 });
+    }
+
+    const safeMessages = messages
+      .filter((m) => m && (m.role === 'user' || m.role === 'assistant'))
+      .slice(-10)
+      .map((m) => ({
+        role: m.role as 'user' | 'assistant',
+        content: String(m.content ?? '').slice(0, 2000),
+      }))
+      .filter((m) => m.content.length > 0);
+
+    if (safeMessages.length === 0) {
+      return NextResponse.json({ error: 'No valid message content provided' }, { status: 400 });
+    }
 
     if (!process.env.OPENAI_API_KEY) {
       return NextResponse.json(
@@ -69,7 +93,7 @@ export async function POST(req: NextRequest) {
       model: 'gpt-4o-mini',
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
-        ...messages
+        ...safeMessages
       ],
       max_tokens: 500,
       temperature: 0.7,

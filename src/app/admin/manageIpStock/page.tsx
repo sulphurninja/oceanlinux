@@ -19,7 +19,7 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import Link from 'next/link';
-import { X, ExternalLink, Zap, BookOpen, Copy, RefreshCw, Loader2, Cloud, EyeOff, Eye } from 'lucide-react';
+import { X, ExternalLink, Zap, BookOpen, Copy, RefreshCw, Loader2, Cloud, EyeOff, Eye, Globe } from 'lucide-react';
 import { ResellerZonePicker, buildResellerZoneConfig } from '@/components/admin/ResellerZonePicker';
 
 interface MemoryOptionDetails {
@@ -56,6 +56,7 @@ interface CompanyOption {
     _id: string;
     name: string;
     netbayApi?: { enabled?: boolean; useLiveStockApi?: boolean; apiKey?: string; apiSecret?: string } | null;
+    kurohostApi?: { enabled?: boolean; apiKey?: string } | null;
     resellerApi?: { enabled?: boolean; useLiveStockApi?: boolean } | null;
 }
 
@@ -151,6 +152,26 @@ function readNetbayConfig(stock: IPStock | null): {
     };
 }
 
+function readKurohostConfig(stock: IPStock | null): {
+    cloudZoneId: string;
+    zoneIds: string[];
+    flavorByMemory: Record<string, string>;
+    osTemplateByMemory: Record<string, string>;
+    defaultOs: { Linux?: string; Windows?: string };
+} {
+    const cfg: any = stock?.defaultConfigurations?.kurohost || {};
+    const flavorByMemory = (cfg?.flavorByMemory && typeof cfg.flavorByMemory === 'object') ? { ...cfg.flavorByMemory } : {};
+    const osTemplateByMemory = (cfg?.osTemplateByMemory && typeof cfg.osTemplateByMemory === 'object') ? { ...cfg.osTemplateByMemory } : {};
+    const defaultOs = (cfg?.defaultOs && typeof cfg.defaultOs === 'object') ? { ...cfg.defaultOs } : {};
+    return {
+        cloudZoneId: cfg.cloudZoneId || '',
+        zoneIds: Array.isArray(cfg.zoneIds) ? cfg.zoneIds.map(String) : [],
+        flavorByMemory,
+        osTemplateByMemory,
+        defaultOs,
+    };
+}
+
 const ManageIpStock = () => {
     const [ipStocks, setIpStocks] = useState<IPStock[]>([]);
     const [currentStock, setCurrentStock] = useState<IPStock | null>(null);
@@ -168,6 +189,8 @@ const ManageIpStock = () => {
     const [cloning, setCloning] = useState(false);
     const [panelZones, setPanelZones] = useState<PanelZone[]>([]);
     const [panelZonesLoading, setPanelZonesLoading] = useState(false);
+    const [kurohostZones, setKurohostZones] = useState<Array<{ id: string; name: string; code?: string }>>([]);
+    const [kurohostZonesLoading, setKurohostZonesLoading] = useState(false);
     const [refreshingLiveStock, setRefreshingLiveStock] = useState(false);
     const [hideOutDialogOpen, setHideOutDialogOpen] = useState(false);
     const [unhideOutDialogOpen, setUnhideOutDialogOpen] = useState(false);
@@ -195,6 +218,42 @@ const ManageIpStock = () => {
             .then(data => { if (Array.isArray(data)) setCompanies(data); })
             .catch(() => {});
     }, []);
+
+    const fetchKurohostZones = async (companyId: string, silent = false) => {
+        if (!companyId) return;
+        setKurohostZonesLoading(true);
+        try {
+            const r = await fetch(
+                `/api/admin/kurohost/zones?companyId=${encodeURIComponent(companyId)}`,
+                { credentials: 'include', cache: 'no-store' }
+            );
+            const j = await r.json();
+            if (!r.ok) throw new Error(j.error || 'Failed to fetch KuroHost zones');
+            setKurohostZones(Array.isArray(j.zones) ? j.zones : []);
+            if (!silent) toast.success(`${j.zones?.length || 0} KuroHost zone(s) loaded`);
+        } catch (e: unknown) {
+            const msg = e instanceof Error ? e.message : 'Zone fetch failed';
+            if (!silent) toast.error(msg);
+            setKurohostZones([]);
+        } finally {
+            setKurohostZonesLoading(false);
+        }
+    };
+
+    const refreshKurohostLiveStock = async () => {
+        setRefreshingLiveStock(true);
+        try {
+            const r = await fetch('/api/kurohost/refresh-stock?force=1', { credentials: 'include', cache: 'no-store' });
+            const j = await r.json();
+            if (!r.ok && !j.skipped) throw new Error(j.error || 'Refresh failed');
+            await reloadIpStocks();
+            toast.success(j.throttled ? 'KuroHost stock recently synced' : `KuroHost zones synced (${j.inStock ?? 0} in stock)`);
+        } catch (e: unknown) {
+            toast.error(e instanceof Error ? e.message : 'KuroHost refresh failed');
+        } finally {
+            setRefreshingLiveStock(false);
+        }
+    };
 
     const fetchPanelZones = async (companyId: string, silent = false) => {
         if (!companyId) return;
@@ -524,6 +583,42 @@ const ManageIpStock = () => {
         updateNetbayConfig({ planByMemory: next });
     };
 
+    const updateKurohostConfig = (patch: Partial<ReturnType<typeof readKurohostConfig>>) => {
+        if (!currentStock) return;
+        const merged = { ...readKurohostConfig(currentStock), ...patch };
+        const isEmpty =
+            !merged.cloudZoneId &&
+            Object.values(merged.flavorByMemory || {}).filter(Boolean).length === 0 &&
+            !merged.defaultOs?.Linux &&
+            !merged.defaultOs?.Windows;
+        const nextDefaults = { ...(currentStock.defaultConfigurations || {}) } as Record<string, any>;
+        if (isEmpty) {
+            delete nextDefaults.kurohost;
+        } else {
+            nextDefaults.kurohost = merged;
+        }
+        const tags = currentStock.tags.includes('kurohost')
+            ? currentStock.tags
+            : [...currentStock.tags, 'kurohost'];
+        setCurrentStock({ ...currentStock, defaultConfigurations: nextDefaults, tags });
+    };
+
+    const handleKurohostFlavorChange = (size: string, value: string) => {
+        const cfg = readKurohostConfig(currentStock);
+        const next = { ...cfg.flavorByMemory };
+        if (value.trim()) next[size] = value.trim();
+        else delete next[size];
+        updateKurohostConfig({ flavorByMemory: next });
+    };
+
+    const handleKurohostOsTemplateChange = (size: string, value: string) => {
+        const cfg = readKurohostConfig(currentStock);
+        const next = { ...cfg.osTemplateByMemory };
+        if (value.trim()) next[size] = value.trim();
+        else delete next[size];
+        updateKurohostConfig({ osTemplateByMemory: next });
+    };
+
     const updateResellerApiConfig = (
         next: Partial<{
             zoneId: number | null;
@@ -630,6 +725,20 @@ const ManageIpStock = () => {
         const c = companies.find((co) => co._id === currentStock.company);
         return !!(c?.netbayApi?.enabled && c?.netbayApi?.useLiveStockApi);
     })();
+
+    const selectedCompanyHasKurohost = (() => {
+        if (!currentStock?.company) return false;
+        const c = companies.find((co) => co._id === currentStock.company);
+        return !!(c?.kurohostApi?.enabled);
+    })();
+
+    useEffect(() => {
+        if (selectedCompanyHasKurohost && currentStock?.company) {
+            void fetchKurohostZones(String(currentStock.company), true);
+        } else {
+            setKurohostZones([]);
+        }
+    }, [selectedCompanyHasKurohost, currentStock?.company]);
 
     const handleHostycareProductIdChange = (size: string, value: string) => {
         if (currentStock) {
@@ -1255,6 +1364,165 @@ const ManageIpStock = () => {
                                             <strong>Name</strong> or <strong>OS ID</strong> — purchase sends the name; ID is resolved from catalog.
                                             <code> Windows Server 2022</code> when blank.
                                         </p>
+                                    </div>
+                                )}
+
+                                {selectedCompanyHasKurohost && (
+                                    <div className="border rounded-lg p-4 bg-violet-50/40 dark:bg-violet-950/10 border-violet-200/60 dark:border-violet-900/40 space-y-3">
+                                        <div className="flex items-center justify-between gap-3 flex-wrap">
+                                            <div>
+                                                <Label className="text-base font-semibold flex items-center gap-2">
+                                                    <Globe className="h-4 w-4 text-violet-600" />
+                                                    KuroHost Configuration
+                                                </Label>
+                                                <p className="text-xs text-muted-foreground mt-0.5">
+                                                    <strong>Zone = stock</strong> — availability follows KuroHost GET /zones.
+                                                    Pick the zone for this IP stock, then map flavor IDs per RAM.
+                                                </p>
+                                            </div>
+                                            <div className="flex flex-wrap gap-2">
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    size="sm"
+                                                    className="gap-1.5 h-8"
+                                                    disabled={kurohostZonesLoading || !currentStock.company}
+                                                    onClick={() => currentStock.company && fetchKurohostZones(String(currentStock.company))}
+                                                >
+                                                    {kurohostZonesLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                                                    Load zones
+                                                </Button>
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    size="sm"
+                                                    className="gap-1.5 h-8"
+                                                    onClick={refreshKurohostLiveStock}
+                                                >
+                                                    Sync zone stock
+                                                </Button>
+                                                {currentStock?.company && (
+                                                    <Button asChild variant="outline" size="sm" className="gap-1.5 h-8">
+                                                        <Link href={`/admin/companies/${currentStock.company}/kurohost-catalog`} target="_blank">
+                                                            <BookOpen className="h-3.5 w-3.5" />
+                                                            Catalog
+                                                        </Link>
+                                                    </Button>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        <div>
+                                            <Label className="text-sm">KuroHost Zone (this plan&apos;s region — stock source):</Label>
+                                            {kurohostZones.length > 0 ? (
+                                                <Select
+                                                    value={readKurohostConfig(currentStock).cloudZoneId || ''}
+                                                    onValueChange={(zoneId) => {
+                                                        const zone = kurohostZones.find((z) => z.id === zoneId);
+                                                        updateKurohostConfig({
+                                                            cloudZoneId: zoneId,
+                                                            zoneIds: zoneId ? [zoneId] : [],
+                                                        });
+                                                        if (zone) {
+                                                            toast.success(`Zone: ${zone.name}${zone.code ? ` (${zone.code})` : ''}`);
+                                                        }
+                                                    }}
+                                                >
+                                                    <SelectTrigger className="mt-1">
+                                                        <SelectValue placeholder="Select KuroHost zone…" />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        {kurohostZones.map((z) => (
+                                                            <SelectItem key={z.id} value={z.id}>
+                                                                {z.name}{z.code ? ` · ${z.code}` : ''}
+                                                            </SelectItem>
+                                                        ))}
+                                                    </SelectContent>
+                                                </Select>
+                                            ) : (
+                                                <Input
+                                                    type="text"
+                                                    placeholder="Load zones or paste zone UUID"
+                                                    className="mt-1 font-mono text-xs"
+                                                    value={readKurohostConfig(currentStock).cloudZoneId}
+                                                    onChange={(e) => updateKurohostConfig({ cloudZoneId: e.target.value.trim(), zoneIds: e.target.value.trim() ? [e.target.value.trim()] : [] })}
+                                                />
+                                            )}
+                                            <p className="text-[11px] text-muted-foreground mt-1">
+                                                Jab yeh zone KuroHost API mein dikhe → plan <strong>In Stock</strong>. Zone gayab → Out of Stock.
+                                            </p>
+                                        </div>
+
+                                        <div className="space-y-2">
+                                            <Label className="text-sm">Per-RAM Flavor IDs:</Label>
+                                            {Object.keys(currentStock.memoryOptions).length === 0 ? (
+                                                <p className="text-xs text-muted-foreground">Add memory options above first.</p>
+                                            ) : (
+                                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                                    {Object.keys(currentStock.memoryOptions).map(size => (
+                                                        <div key={size}>
+                                                            <Label className="text-xs">{size} → Flavor ID</Label>
+                                                            <Input
+                                                                type="text"
+                                                                placeholder="Flavor UUID"
+                                                                className="mt-1 font-mono text-xs"
+                                                                value={readKurohostConfig(currentStock).flavorByMemory[size] || ''}
+                                                                onChange={(e) => handleKurohostFlavorChange(size, e.target.value)}
+                                                            />
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        <div className="space-y-2">
+                                            <Label className="text-sm">Per-RAM OS Template IDs (optional):</Label>
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                                {Object.keys(currentStock.memoryOptions).map(size => (
+                                                    <div key={`os-${size}`}>
+                                                        <Label className="text-xs">{size} → OS Template ID</Label>
+                                                        <Input
+                                                            type="text"
+                                                            placeholder="Leave blank for defaultOs"
+                                                            className="mt-1 font-mono text-xs"
+                                                            value={readKurohostConfig(currentStock).osTemplateByMemory[size] || ''}
+                                                            onChange={(e) => handleKurohostOsTemplateChange(size, e.target.value)}
+                                                        />
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                            <div>
+                                                <Label className="text-xs">Default Linux OS template ID:</Label>
+                                                <Input
+                                                    type="text"
+                                                    placeholder="Optional fallback"
+                                                    value={readKurohostConfig(currentStock).defaultOs.Linux || ''}
+                                                    onChange={(e) => {
+                                                        const cfg = readKurohostConfig(currentStock);
+                                                        updateKurohostConfig({
+                                                            defaultOs: { ...cfg.defaultOs, Linux: e.target.value },
+                                                        });
+                                                    }}
+                                                />
+                                            </div>
+                                            <div>
+                                                <Label className="text-xs">Default Windows OS template ID:</Label>
+                                                <Input
+                                                    type="text"
+                                                    placeholder="Optional fallback"
+                                                    value={readKurohostConfig(currentStock).defaultOs.Windows || ''}
+                                                    onChange={(e) => {
+                                                        const cfg = readKurohostConfig(currentStock);
+                                                        updateKurohostConfig({
+                                                            defaultOs: { ...cfg.defaultOs, Windows: e.target.value },
+                                                        });
+                                                    }}
+                                                />
+                                            </div>
+                                        </div>
                                     </div>
                                 )}
 

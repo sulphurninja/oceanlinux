@@ -55,8 +55,8 @@ export function useTilt3D(maxTilt = 14, scale = 1.03, maxGlare = 0.22) {
   return { ref, style, glare, enabled };
 }
 
-export function useHeroParallax(intensity = 18) {
-  const ref = useRef<HTMLElement>(null);
+export function useHeroParallax<T extends HTMLElement = HTMLElement>(intensity = 18) {
+  const ref = useRef<T>(null);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
 
   useEffect(() => {

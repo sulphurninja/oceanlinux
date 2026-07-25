@@ -1,20 +1,10 @@
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
+import { resolveCompanySession } from '@/lib/companySession';
 import connectDB from '@/lib/db';
 import IPStock from '@/models/ipStockModel';
 import Order from '@/models/orderModel';
 import ServerActionRequest from '@/models/serverActionRequestModel';
-
-async function getCompanySession() {
-  const cookieStore = await cookies();
-  const session = cookieStore.get('company_session')?.value;
-  if (!session) return null;
-  try {
-    return JSON.parse(session);
-  } catch {
-    return null;
-  }
-}
+import { toObjectIdString } from '@/lib/queryIds';
 
 async function getCompanyOrderIds(companyId) {
   const stocks = await IPStock.find({ company: companyId }).select('_id').lean();
@@ -26,7 +16,7 @@ async function getCompanyOrderIds(companyId) {
 }
 
 export async function GET(request) {
-  const company = await getCompanySession();
+  const company = await resolveCompanySession();
   if (!company) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   await connectDB();
@@ -49,21 +39,22 @@ export async function GET(request) {
 }
 
 export async function POST(request) {
-  const company = await getCompanySession();
+  const company = await resolveCompanySession();
   if (!company) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   await connectDB();
 
   const { requestId, action, adminNotes, newPassword } = await request.json();
 
-  if (!requestId || !action || !['approve', 'reject'].includes(action)) {
+  const safeRequestId = toObjectIdString(requestId);
+  if (!safeRequestId || !action || !['approve', 'reject'].includes(action)) {
     return NextResponse.json({ error: 'Invalid request' }, { status: 400 });
   }
 
   const orderIds = await getCompanyOrderIds(company.id);
 
   const actionRequest = await ServerActionRequest.findOne({
-    _id: requestId,
+    _id: safeRequestId,
     orderId: { $in: orderIds },
     status: 'pending',
   });

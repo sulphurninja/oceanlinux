@@ -274,7 +274,9 @@ export async function POST(request) {
 
       case 'generatepassword': {
         const saveGeneratedPassword = async (newPassword, source = 'generate-password') => {
-          console.log(`[ADVPS-ACTION] 🔑 PASSWORD for service=${serviceId} order=${orderId} (src: ${source}): ${newPassword}`);
+          // Never log the credential itself — platform logs are retained and
+          // widely readable. Presence + source is enough to debug this flow.
+          console.log(`[ADVPS-ACTION] 🔑 Password generated for service=${serviceId} order=${orderId} (src: ${source})`);
 
           let saved = false;
           for (let dbAttempt = 0; dbAttempt < 5; dbAttempt++) {

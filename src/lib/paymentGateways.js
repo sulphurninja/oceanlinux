@@ -204,10 +204,25 @@ export async function createGatewayOrder({
  * Verifies a Razorpay payment signature. Mirrors the logic in
  * /api/payment/confirm/route.js so all confirmation paths share one impl.
  */
-export function verifyRazorpaySignature({ razorpay_order_id, razorpay_payment_id, razorpay_signature }) {
+export function verifyRazorpaySignature({
+  razorpay_order_id,
+  razorpay_payment_id,
+  razorpay_signature,
+  expectedOrderId,
+}) {
   if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
     return false;
   }
+
+  // `expectedOrderId` is mandatory: a valid signature only proves that *some*
+  // payment succeeded on our Razorpay account. Without binding it to the
+  // gatewayOrderId we stored for this record, a caller could settle an
+  // expensive pending order/recharge by replaying the signature from their own
+  // cheap payment. Callers with no stored id must use the server-side probe.
+  if (!expectedOrderId || String(razorpay_order_id) !== String(expectedOrderId)) {
+    return false;
+  }
+
   // crypto is a node builtin; lazy-require so this file stays edge-safe at import.
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const crypto = require('crypto');
@@ -216,7 +231,10 @@ export function verifyRazorpaySignature({ razorpay_order_id, razorpay_payment_id
     .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
     .update(body)
     .digest('hex');
-  return expected === razorpay_signature;
+  const a = Buffer.from(expected);
+  const b = Buffer.from(String(razorpay_signature));
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
 }
 
 /**

@@ -2,15 +2,19 @@ import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 import axios from 'axios';
+import { blockUnlessDevOrCron } from '@/lib/apiSecurity';
 
+/** @deprecated Legacy Cashfree confirm — disabled in production. Use /api/payment/confirm */
 export async function POST(request) {
+    const blocked = blockUnlessDevOrCron(request);
+    if (blocked) return blocked;
+
     await connectDB();
 
     try {
         const reqBody = await request.json();
         const { orderId } = reqBody;
 
-        // ✅ Fetch Order Details from Database
         const existingOrder = await Order.findOne({ paymentId: orderId });
 
         if (!existingOrder) {
@@ -20,7 +24,6 @@ export async function POST(request) {
             });
         }
 
-        // ✅ Fetch order status from Cashfree
         const response = await axios.get(
             `https://api.cashfree.com/pg/orders/${orderId}`,
             {
@@ -41,11 +44,10 @@ export async function POST(request) {
             });
         }
 
-        // ✅ Update order status in the database
         existingOrder.status = "paid";
         await existingOrder.save();
 
-        return new NextResponse(JSON.stringify({ message: "Order confirmed.", order: existingOrder }), {
+        return new NextResponse(JSON.stringify({ message: "Order confirmed.", orderId: existingOrder._id }), {
             status: 201,
             headers: { 'Content-Type': 'application/json' }
         });

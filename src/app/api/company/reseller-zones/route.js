@@ -3,24 +3,13 @@ import connectDB from '@/lib/db';
 import Company from '@/models/companyModel';
 import ResellerApi from '@/services/resellerApi';
 import { getCompanyResellerApiConfig } from '@/lib/companyResellerApi';
+import { resolveCompanySession } from '@/lib/companySession';
 
 export const dynamic = 'force-dynamic';
 
-async function getCompanySession() {
-  const { cookies } = await import('next/headers');
-  const cookieStore = await cookies();
-  const session = cookieStore.get('company_session')?.value;
-  if (!session) return null;
-  try {
-    return JSON.parse(session);
-  } catch {
-    return null;
-  }
-}
-
 /** List panel regions for the logged-in company (no admin required). */
 export async function GET() {
-  const session = await getCompanySession();
+  const session = await resolveCompanySession();
   if (!session?.id) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }

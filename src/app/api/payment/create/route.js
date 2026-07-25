@@ -11,6 +11,7 @@ import { assertIpStockPurchasable } from '@/lib/ipStockAvailability';
 import { refreshAndVerifyPurchase } from '@/lib/syncIpStockBeforePurchase';
 import { customerStockUnavailableMessage } from '@/lib/customerStockMessages';
 const { customerApiCatchPayload } = require('@/lib/customerFacingErrors');
+import { enforcePaymentRateLimit } from '@/lib/rateLimit';
 import { calculateExpiryDate } from '@/lib/expiryHelper';
 import { assignPanelCredentials } from '@/lib/panelCredentials';
 const { resolveOrderExpiryOnPayment } = require('@/lib/advpsOrderExpiry');
@@ -70,6 +71,9 @@ export async function POST(request) {
     if (!user) {
       return NextResponse.json({ message: 'User not found' }, { status: 404 });
     }
+
+    const rateLimited = enforcePaymentRateLimit(request);
+    if (rateLimited) return rateLimited;
 
     // 3. Read request data with promo code info and payment method
     const reqBody = await request.json();

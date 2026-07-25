@@ -3,19 +3,22 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
+type RenewalLog = Record<string, any>;
+type RenewalSummary = Record<string, any>;
+
 export default function RenewalLogsPage() {
     const router = useRouter();
-    const [logs, setLogs] = useState([]);
+    const [logs, setLogs] = useState<RenewalLog[]>([]);
     const [loading, setLoading] = useState(true);
-    const [error, setError] = useState(null);
-    const [summary, setSummary] = useState(null);
+    const [error, setError] = useState<string | null>(null);
+    const [summary, setSummary] = useState<RenewalSummary | null>(null);
 
     // Filters
     const [orderIdFilter, setOrderIdFilter] = useState('');
     const [statusFilter, setStatusFilter] = useState('all');
     const [providerFilter, setProviderFilter] = useState('all');
     const [autoRefresh, setAutoRefresh] = useState(false);
-    const [selectedLog, setSelectedLog] = useState(null);
+    const [selectedLog, setSelectedLog] = useState<RenewalLog | null>(null);
 
     const fetchLogs = useCallback(async (silent = false) => {
         try {
@@ -23,7 +26,7 @@ export default function RenewalLogsPage() {
 
             const params = new URLSearchParams();
             if (orderIdFilter.trim()) params.append('orderId', orderIdFilter.trim());
-            if (statusFilter !== 'all') params.append('success', statusFilter === 'success');
+            if (statusFilter !== 'all') params.append('success', String(statusFilter === 'success'));
             if (providerFilter !== 'all') params.append('provider', providerFilter);
 
             const response = await fetch(`/api/admin/renewal-logs?${params.toString()}`, {
@@ -37,7 +40,7 @@ export default function RenewalLogsPage() {
                 setError(null);
                 setSelectedLog((prev) => {
                     if (!prev) return null;
-                    return (data.logs || []).find((log) => log._id === prev._id) || null;
+                    return (data.logs || []).find((log: RenewalLog) => log._id === prev._id) || null;
                 });
             } else {
                 setError(data.message || 'Failed to fetch renewal logs');
@@ -60,7 +63,7 @@ export default function RenewalLogsPage() {
         return () => clearInterval(interval);
     }, [autoRefresh, fetchLogs]);
 
-    const formatTimestamp = (date) => {
+    const formatTimestamp = (date: string | Date | null | undefined) => {
         if (!date) return 'N/A';
         return new Date(date).toLocaleString('en-US', {
             year: 'numeric',
@@ -72,17 +75,17 @@ export default function RenewalLogsPage() {
         });
     };
 
-    const formatDuration = (ms) => {
+    const formatDuration = (ms: number | null | undefined) => {
         if (ms == null || Number.isNaN(ms)) return 'N/A';
         if (ms < 1000) return `${Math.round(ms)}ms`;
         return `${(ms / 1000).toFixed(2)}s`;
     };
 
-    const getStatusColor = (success) => {
+    const getStatusColor = (success: boolean) => {
         return success ? 'text-green-400' : 'text-red-400';
     };
 
-    const getLevelColor = (level) => {
+    const getLevelColor = (level: string | undefined) => {
         switch (level) {
             case 'success': return 'text-green-400';
             case 'error': return 'text-red-400';
@@ -93,7 +96,7 @@ export default function RenewalLogsPage() {
         }
     };
 
-    const getProviderErrorMessage = (providerError) => {
+    const getProviderErrorMessage = (providerError: any) => {
         if (!providerError) return null;
         if (typeof providerError === 'string') return providerError;
         return providerError.message || JSON.stringify(providerError);
@@ -274,7 +277,7 @@ export default function RenewalLogsPage() {
                                             <div className="text-gray-400 mb-2 text-sm font-bold">📋 LOG ENTRIES:</div>
                                             <div className="bg-black rounded p-3 max-h-64 sm:max-h-96 overflow-y-auto overflow-x-auto space-y-1">
                                                 {log.logs && log.logs.length > 0 ? (
-                                                    log.logs.map((entry, idx) => (
+                                                    log.logs.map((entry: RenewalLog, idx: number) => (
                                                         <div key={idx} className="flex flex-col sm:flex-row sm:gap-3 gap-0.5 min-w-0">
                                                             <span className="text-gray-600 shrink-0">{formatTimestamp(entry.timestamp)}</span>
                                                             <span className={`font-bold shrink-0 ${getLevelColor(entry.level)}`}>

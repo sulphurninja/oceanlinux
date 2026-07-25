@@ -10,6 +10,13 @@ const orderSchema = new mongoose.Schema({
     promoDiscount: { type: Number, default: 0 },
     ipStockId: { type: String },
     inventoryDecremented: { type: Boolean, default: false },
+    /**
+     * Set atomically by fulfillOrderInventory() before it allocates anything.
+     * Stops a duplicate webhook (or a webhook racing the browser's confirm
+     * call) from handing out a second IP for the same payment. Cleared again
+     * when fulfilment consumed nothing, so genuine retries still work.
+     */
+    inventoryFulfilmentClaimedAt: { type: Date, default: null },
     slotIpPackageId: { type: String },
     slotIpId: { type: String },
     /** Pre-configured company inventory row assigned on payment */
@@ -44,7 +51,7 @@ const orderSchema = new mongoose.Schema({
     // Provider identification
     provider: {
         type: String,
-        enum: ['hostycare', 'smartvps', 'slotip', 'advps', 'netbay', 'reseller-api'],
+        enum: ['hostycare', 'smartvps', 'slotip', 'advps', 'netbay', 'kurohost', 'reseller-api'],
         default: 'hostycare'
     },
 
@@ -70,6 +77,12 @@ const orderSchema = new mongoose.Schema({
     netbayPlanId: { type: String },    // plan used at purchase time (cached for renewals)
     netbayTaskId: { type: String },    // most recent async task (purchase / rebuild)
     netbayGroupTag: { type: String },  // location filter used at purchase
+
+    // KuroHost Cloud Platform (https://kurohost.com/cloud/docs)
+    kurohostInstanceId: { type: String },
+    kurohostJobId: { type: String },
+    kurohostZoneId: { type: String },
+    kurohostFlavorId: { type: String },
 
     // Reseller panel integration (PrimeVPS / Hostheaven UserSide.pdf)
     resellerVmId: { type: String },       // upstream VM database id
@@ -173,6 +186,7 @@ orderSchema.index({ hostycareServiceId: 1 });
 orderSchema.index({ smartvpsServiceId: 1 });
 orderSchema.index({ advpsServiceId: 1 });
 orderSchema.index({ netbayServiceId: 1 });
+orderSchema.index({ kurohostInstanceId: 1 });
 orderSchema.index({ lastSyncTime: -1 });
 orderSchema.index({ expiryDate: 1 });
 orderSchema.index({ provider: 1 });

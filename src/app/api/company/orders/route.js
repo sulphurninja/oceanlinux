@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
 import connectDB from '@/lib/db';
+import { resolveCompanySession } from '@/lib/companySession';
 import IPStock from '@/models/ipStockModel';
 import Order from '@/models/orderModel';
 import {
@@ -28,19 +28,8 @@ function responseHeaders() {
   };
 }
 
-async function getCompanySession() {
-  const cookieStore = await cookies();
-  const session = cookieStore.get('company_session')?.value;
-  if (!session) return null;
-  try {
-    return JSON.parse(session);
-  } catch {
-    return null;
-  }
-}
-
 export async function GET() {
-  const company = await getCompanySession();
+  const company = await resolveCompanySession();
   if (!company) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers: responseHeaders() });
   }
@@ -90,7 +79,7 @@ export async function GET() {
 }
 
 export async function PUT(request) {
-  const company = await getCompanySession();
+  const company = await resolveCompanySession();
   if (!company) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers: responseHeaders() });
   }
@@ -98,7 +87,8 @@ export async function PUT(request) {
   await connectDB();
 
   const { orderId, ipAddress, username, password, os } = await request.json();
-  if (!orderId) {
+  const safeOrderId = toObjectIdString(orderId);
+  if (!safeOrderId) {
     return NextResponse.json({ error: 'Order ID is required' }, { status: 400, headers: responseHeaders() });
   }
 
@@ -107,7 +97,7 @@ export async function PUT(request) {
   const stockTypeMap = Object.fromEntries(stocks.map((s) => [s._id.toString(), s.serverType]));
 
   const order = await Order.findOne({
-    _id: orderId,
+    _id: safeOrderId,
     ipStockId: { $in: buildCompanyStockIdVariants(stockIds) },
     status: { $in: COMPANY_VISIBLE_ORDER_STATUSES },
   });
@@ -143,7 +133,10 @@ export async function PUT(request) {
     );
   }
 
-  await Order.updateOne({ _id: orderId }, { $set: updateFields });
+  await Order.updateOne(
+    { _id: safeOrderId, ipStockId: { $in: buildCompanyStockIdVariants(stockIds) } },
+    { $set: updateFields }
+  );
 
   return NextResponse.json({ success: true, message: 'Order updated' }, { headers: responseHeaders() });
 }

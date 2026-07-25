@@ -11,12 +11,10 @@ const {
   consumeAdvpsRebuildCredit,
 } = require('@/lib/advpsRebuildLimit');
 const { syncAdvpsOrderCredentials, configureAdvpsServiceIp } = require('@/lib/advpsOrderSync');
+import { internalKeyMatches } from '@/lib/internalApiKey';
 
 function validateInternalKey(request) {
-  const key = request.headers.get('x-internal-key');
-  const expected = process.env.INTERNAL_API_KEY;
-  if (!expected || !key || key !== expected) return false;
-  return true;
+  return internalKeyMatches(request.headers.get('x-internal-key'));
 }
 
 export async function POST(request) {

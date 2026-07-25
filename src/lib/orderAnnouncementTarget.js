@@ -10,11 +10,13 @@ export function resolveProviderFromOrder(order, ipStock = null) {
   if (isSlotIpOrder(order)) return 'oceanlinux';
 
   if (order.provider === 'netbay') return 'netbay';
+  if (order.provider === 'kurohost') return 'kurohost';
   if (order.provider === 'reseller-api') return 'reseller-api';
   if (order.provider === 'advps') return 'advps';
   if (order.provider === 'smartvps') return 'smartvps';
 
   if (order.netbayServiceId) return 'netbay';
+  if (order.kurohostInstanceId) return 'kurohost';
   if (order.resellerVmId) return 'reseller-api';
   if (order.advpsServiceId) return 'advps';
   if (order.hostycareServiceId) return 'hostycare';
@@ -24,6 +26,7 @@ export function resolveProviderFromOrder(order, ipStock = null) {
 
   const tags = (ipStock?.tags || []).map((t) => String(t).toLowerCase());
   if (tags.includes('netbay')) return 'netbay';
+  if (tags.includes('kurohost')) return 'kurohost';
   if (tags.includes('reseller-api') || tags.includes('primevps') || tags.includes('primevm')) return 'reseller-api';
   if (tags.includes('advps') || tags.includes('flex')) return 'advps';
   if (tags.includes('smartvps') || tags.includes('ocean linux')) return 'smartvps';

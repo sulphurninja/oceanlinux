@@ -25,12 +25,20 @@
       "schedule": "*/5 * * * *"
     },
     {
+      "path": "/api/kurohost/refresh-stock?force=1",
+      "schedule": "*/8 * * * *"
+    },
+    {
       "path": "/api/orders/expiry-reminders",
       "schedule": "0 4 * * *"
     },
     {
       "path": "/api/cart/checkout/sweep?minutes=30",
       "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/orders/cleanup-expired",
+      "schedule": "0 3 * * *"
     },
     {
       "path": "/api/payment/recover-pending?minutes=120&limit=30",

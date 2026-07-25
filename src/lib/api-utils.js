@@ -97,6 +97,10 @@ export async function validateAPIKey(request, { requiredPermission } = {}) {
       return { success: false, message: 'Monthly API limit exceeded' };
     }
 
+    // Count every authenticated call, not just purchases — otherwise the
+    // monthly quota above never rises and reads/reboots are unlimited.
+    await incrementApiUsage(keyDoc.userId);
+
     return {
       success: true,
       user,

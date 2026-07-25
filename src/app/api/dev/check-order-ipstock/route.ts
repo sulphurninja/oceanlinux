@@ -4,12 +4,16 @@ export const runtime = 'nodejs';
 
 import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
+import { blockUnlessDevOrCron } from '@/lib/apiSecurity';
 const Order = require('@/models/orderModel').default;
 const IPStock = require('@/models/ipStockModel');
 const SmartVpsAPI = require('@/services/smartvpsApi');
 
 export async function GET(request: Request) {
   try {
+    const blocked = blockUnlessDevOrCron(request as any);
+    if (blocked) return blocked;
+
     await connectDB();
 
     const url = new URL(request.url);

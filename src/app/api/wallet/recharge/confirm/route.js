@@ -8,6 +8,7 @@ import {
   confirmRechargeFromWebhook,
   probeWalletRechargePayment,
 } from '@/lib/paymentDispatch';
+import { enforcePaymentRateLimit } from '@/lib/rateLimit';
 
 /**
  * POST /api/wallet/recharge/confirm
@@ -21,6 +22,9 @@ import {
  * without double-crediting. The webhook may have raced this endpoint.
  */
 export async function POST(request) {
+  const rateLimited = enforcePaymentRateLimit(request);
+  if (rateLimited) return rateLimited;
+
   await connectDB();
 
   let body;
@@ -35,11 +39,11 @@ export async function POST(request) {
     return NextResponse.json({ success: false, message: 'clientTxnId is required' }, { status: 400 });
   }
 
-  let tokenUserId = null;
+  let tokenUserId;
   try {
     tokenUserId = await getDataFromToken(request);
   } catch {
-    tokenUserId = null;
+    return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
   }
 
   const recharge = await WalletRecharge.findOne({ clientTxnId });
@@ -47,7 +51,7 @@ export async function POST(request) {
     return NextResponse.json({ success: false, message: 'Recharge not found' }, { status: 404 });
   }
 
-  if (tokenUserId && String(recharge.user) !== String(tokenUserId)) {
+  if (String(recharge.user) !== String(tokenUserId)) {
     return NextResponse.json({ success: false, message: 'Forbidden' }, { status: 403 });
   }
 
@@ -79,9 +83,15 @@ export async function POST(request) {
     recharge.paymentMethod === 'razorpay' &&
     razorpay_payment_id &&
     razorpay_order_id &&
-    razorpay_signature
+    razorpay_signature &&
+    recharge.gatewayOrderId
   ) {
-    const ok = verifyRazorpaySignature({ razorpay_order_id, razorpay_payment_id, razorpay_signature });
+    const ok = verifyRazorpaySignature({
+      razorpay_order_id,
+      razorpay_payment_id,
+      razorpay_signature,
+      expectedOrderId: recharge.gatewayOrderId,
+    });
     if (!ok) {
       return NextResponse.json({ success: false, message: 'Razorpay signature verification failed' }, { status: 400 });
     }

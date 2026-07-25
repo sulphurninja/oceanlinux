@@ -7,6 +7,7 @@ import {
   verifyAdminGateCookie,
   verifyAdminGatePassword,
 } from '@/lib/adminGate';
+import { enforceRateLimit } from '@/lib/rateLimit';
 
 function gateCookieOptions() {
   return {
@@ -32,6 +33,16 @@ export async function GET(request) {
 }
 
 export async function POST(request) {
+  // The whole admin panel sits behind this one password — without a limit it can
+  // be brute forced offline-fast over HTTP.
+  const rateLimited = enforceRateLimit(request, {
+    max: 5,
+    windowMs: 10 * 60_000,
+    scope: 'ip',
+    message: 'Too many attempts. Please wait 10 minutes and try again.',
+  });
+  if (rateLimited) return rateLimited;
+
   if (!getAdminPanelPassword()) {
     return NextResponse.json(
       { success: false, message: 'Admin panel password is not configured on the server.' },

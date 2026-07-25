@@ -33,7 +33,7 @@ function AuthShell({
   children: React.ReactNode;
   mounted: boolean;
 }) {
-  const { ref, offset } = useHeroParallax(10);
+  const { ref, offset } = useHeroParallax<HTMLDivElement>(10);
 
   return (
     <div

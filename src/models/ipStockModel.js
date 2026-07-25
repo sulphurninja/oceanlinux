@@ -4,6 +4,13 @@ const IPStockSchema = new mongoose.Schema({
   name: { type: String, required: true },
   description: { type: String, default: "" },
   available: { type: Boolean, default: true },
+  /**
+   * True when an admin has pinned `available` by hand. Every provider sync
+   * (smartvps, advps, netbay, reseller live stock) checks this before
+   * overwriting `available`, so without it declared here Mongoose strict mode
+   * silently dropped the flag and the manual override never took effect.
+   */
+  availabilityManual: { type: Boolean, default: false },
   /** When true, plan is hidden from customer dashboard / store listing (admin still sees it). */
   hiddenFromStore: { type: Boolean, default: false },
   /** Set by bulk "hide out of stock" — cleared when live stock / units return. */

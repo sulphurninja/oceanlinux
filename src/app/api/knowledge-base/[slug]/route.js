@@ -9,7 +9,10 @@ export async function GET(request, { params }) {
             { slug: params.slug, published: true },
             { $inc: { views: 1 } },
             { new: true }
-        ).lean();
+        )
+            // aiPrompt is an internal authoring field — this route is public.
+            .select('-aiPrompt')
+            .lean();
 
         if (!article) {
             return new Response(JSON.stringify({ message: 'Article not found' }), {

@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import type { DateRange } from 'react-day-picker';
 import {
   ArrowLeft,
   Activity,
@@ -52,6 +53,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { toast } from 'sonner';
+import { dashboardFetch } from '@/lib/dashboardFetch';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 
@@ -90,7 +92,7 @@ const ActivityPage = () => {
     total: 0,
     pages: 0
   });
-  const [dateRange, setDateRange] = useState<{ from?: Date; to?: Date }>({});
+  const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
   const [activityStats, setActivityStats] = useState({
     total: 0,
     today: 0,
@@ -118,11 +120,11 @@ const ActivityPage = () => {
         ...(filters.status !== 'all' && { status: filters.status }),
         ...(filters.category !== 'all' && { category: filters.category }),
         ...(filters.search && { search: filters.search }),
-        ...(dateRange.from && { dateFrom: dateRange.from.toISOString() }),
-        ...(dateRange.to && { dateTo: dateRange.to.toISOString() })
+        ...(dateRange?.from && { dateFrom: dateRange.from.toISOString() }),
+        ...(dateRange?.to && { dateTo: dateRange.to.toISOString() })
       });
 
-      const response = await fetch(`/api/users/activity?${queryParams}`);
+      const response = await dashboardFetch(`/api/users/activity?${queryParams}`);
       if (response.ok) {
         const data = await response.json();
         setActivities(data.activities);
@@ -140,7 +142,7 @@ const ActivityPage = () => {
 
   const fetchActivityStats = async () => {
     try {
-      const response = await fetch('/api/users/activity/stats');
+      const response = await dashboardFetch('/api/users/activity/stats');
       if (response.ok) {
         const data = await response.json();
         setActivityStats(data);
@@ -159,7 +161,7 @@ const ActivityPage = () => {
         ...(filters.search && { search: filters.search })
       });
 
-      const response = await fetch(`/api/users/activity/export?${queryParams}`);
+      const response = await dashboardFetch(`/api/users/activity/export?${queryParams}`);
       if (response.ok) {
         const blob = await response.blob();
         const url = window.URL.createObjectURL(blob);
@@ -494,7 +496,7 @@ const ActivityPage = () => {
                   <PopoverTrigger asChild>
                     <Button variant="outline" className="w-full justify-start text-left font-normal">
                       <Calendar className="mr-2 h-4 w-4" />
-                      {dateRange.from ? (
+                      {dateRange?.from ? (
                         dateRange.to ? (
                           <>
                             {format(dateRange.from, "LLL dd, y")} - {format(dateRange.to, "LLL dd, y")}
@@ -511,7 +513,7 @@ const ActivityPage = () => {
                     <CalendarComponent
                       initialFocus
                       mode="range"
-                      defaultMonth={dateRange.from}
+                      defaultMonth={dateRange?.from}
                       selected={dateRange}
                       onSelect={setDateRange}
                       numberOfMonths={2}
@@ -521,7 +523,7 @@ const ActivityPage = () => {
               </div>
             </div>
 
-            {(filters.search || filters.type !== 'all' || filters.status !== 'all' || filters.category !== 'all' || dateRange.from) && (
+            {(filters.search || filters.type !== 'all' || filters.status !== 'all' || filters.category !== 'all' || dateRange?.from) && (
               <div className="mt-4 pt-4 border-t">
                 <Button
                   variant="outline"
@@ -534,7 +536,7 @@ const ActivityPage = () => {
                       dateRange: 'all',
                       category: 'all'
                     });
-                    setDateRange({});
+                    setDateRange(undefined);
                   }}
                 >
                   Clear All Filters
@@ -566,12 +568,12 @@ const ActivityPage = () => {
                 <Activity className="h-16 w-16 text-muted-foreground mx-auto mb-4 opacity-50" />
                 <h3 className="text-lg font-semibold mb-2">No activities found</h3>
                 <p className="text-muted-foreground mb-4">
-                  {Object.values(filters).some(f => f !== 'all' && f !== '') || dateRange.from
+                  {Object.values(filters).some(f => f !== 'all' && f !== '') || dateRange?.from
                     ? 'Try adjusting your filters to see more activities.'
                     : 'Your activities will appear here as you use our services.'
                   }
                 </p>
-                {(Object.values(filters).some(f => f !== 'all' && f !== '') || dateRange.from) && (
+                {(Object.values(filters).some(f => f !== 'all' && f !== '') || dateRange?.from) && (
                   <Button
                     variant="outline"
                     onClick={() => {
@@ -582,7 +584,7 @@ const ActivityPage = () => {
                         dateRange: 'all',
                         category: 'all'
                       });
-                      setDateRange({});
+                      setDateRange(undefined);
                     }}
                   >
                     Clear Filters

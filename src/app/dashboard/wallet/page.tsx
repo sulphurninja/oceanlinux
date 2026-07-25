@@ -22,6 +22,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { dashboardFetch } from '@/lib/dashboardFetch';
 import { cn } from '@/lib/utils';
 import { broadcastWallet } from '@/lib/walletClient';
 import {
@@ -87,7 +88,7 @@ export default function WalletPage() {
 
   const fetchWallet = async () => {
     try {
-      const res = await fetch('/api/wallet', { credentials: 'include' });
+      const res = await dashboardFetch('/api/wallet', { credentials: 'include' });
       const data = await res.json();
       if (!res.ok || !data.success) {
         throw new Error(data.message || 'Failed to load wallet');
@@ -129,7 +130,7 @@ export default function WalletPage() {
     setSubmitting(true);
     setRechargeOpen(false);
     try {
-      const res = await fetch('/api/wallet/recharge/initiate', {
+      const res = await dashboardFetch('/api/wallet/recharge/initiate', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -182,7 +183,7 @@ export default function WalletPage() {
     razorpay_order_id: string;
     razorpay_signature: string;
   }) => {
-    const confirmRes = await fetch('/api/wallet/recharge/confirm', {
+    const confirmRes = await dashboardFetch('/api/wallet/recharge/confirm', {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
@@ -194,7 +195,7 @@ export default function WalletPage() {
       return true;
     }
 
-    const pollRes = await fetch('/api/payment/status', {
+    const pollRes = await dashboardFetch('/api/payment/status', {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },

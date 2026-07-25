@@ -1,7 +1,42 @@
 import { NextResponse } from 'next/server';
 import { NodeSSH } from 'node-ssh';
+import { enforceRateLimit } from '@/lib/rateLimit';
 
 const SSH_PORTS = [22, 3052];
+
+/**
+ * This tool dials arbitrary hosts on the caller's behalf, so the target must be
+ * a real public IPv4. Blocking loopback/private/link-local/CGNAT ranges stops it
+ * being used to reach internal infrastructure or the cloud metadata endpoint,
+ * and rejecting hostnames avoids DNS pointing back at a private address.
+ */
+function publicIpv4Error(ip) {
+  const raw = String(ip || '').trim();
+  const parts = raw.split('.');
+  if (parts.length !== 4) return 'Enter a valid public IPv4 address.';
+
+  const octets = parts.map((p) => (/^\d{1,3}$/.test(p) ? Number(p) : NaN));
+  if (octets.some((o) => Number.isNaN(o) || o > 255)) {
+    return 'Enter a valid public IPv4 address.';
+  }
+
+  const [a, b] = octets;
+  const isReserved =
+    a === 0 ||
+    a === 10 ||
+    a === 127 ||
+    a >= 224 ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 169 && b === 254) ||
+    (a === 100 && b >= 64 && b <= 127) ||
+    (a === 192 && b === 0);
+
+  if (isReserved) {
+    return 'Only public server IPs are supported for this tool.';
+  }
+  return null;
+}
 
 async function connectWithFallback(ssh, ip, username, password) {
   const attempts = [];
@@ -35,8 +70,18 @@ async function connectWithFallback(ssh, ip, username, password) {
 
 // POST - Setup proxy on server via SSH
 export async function POST(request) {
+  // Unauthenticated tool that opens outbound SSH — cap it so it can't be used as
+  // a credential-stuffing relay that gets our egress IP blacklisted.
+  const rateLimited = enforceRateLimit(request, {
+    max: 10,
+    windowMs: 10 * 60_000,
+    scope: 'ip',
+    message: 'Too many setup attempts. Please wait a few minutes and try again.',
+  });
+  if (rateLimited) return rateLimited;
+
   const ssh = new NodeSSH();
-  
+
   try {
     const { ip, username, password, proxyUsername, proxyPassword, action } = await request.json();
 
@@ -46,6 +91,11 @@ export async function POST(request) {
         { success: false, message: 'IP, username, and password are required' },
         { status: 400 }
       );
+    }
+
+    const ipError = publicIpv4Error(ip);
+    if (ipError) {
+      return NextResponse.json({ success: false, message: ipError }, { status: 400 });
     }
 
     // Public free tool — any Linux VPS credentials; no account/IP ownership gate.

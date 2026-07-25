@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
+import { enforceCronSecret } from '@/lib/apiSecurity';
 
 /**
  * DELETE old orders that are stuck or abandoned:
@@ -12,6 +13,9 @@ import Order from '@/models/orderModel';
  * This endpoint should be called by a cron job regularly
  */
 export async function POST(request) {
+  const cronDenied = enforceCronSecret(request);
+  if (cronDenied) return cronDenied;
+
   const startTime = Date.now();
   
   console.log("\n" + "🧹".repeat(40));

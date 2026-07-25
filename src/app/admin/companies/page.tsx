@@ -35,7 +35,7 @@ import Link from 'next/link';
 import {
   Building2, Plus, Trash2, Copy, ExternalLink, Loader2, Eye, EyeOff,
   Server, ShieldCheck, ShieldAlert, CheckCircle2, XCircle,
-  ChevronDown, ChevronUp, Cloud, Zap, BookOpen, Package, Sparkles,
+  ChevronDown, ChevronUp, Cloud, Zap, BookOpen, Package, Sparkles, Globe,
 } from 'lucide-react';
 
 interface CompanyVirtualizor {
@@ -71,6 +71,14 @@ interface CompanyNetbayApi {
   useLiveStockApi?: boolean;
 }
 
+interface CompanyKurohostApi {
+  enabled: boolean;
+  label: string;
+  baseUrl: string;
+  apiKey: string;
+  useLiveStockApi?: boolean;
+}
+
 interface CompanyJoyApi {
   enabled: boolean;
   label: string;
@@ -91,6 +99,7 @@ interface Company {
   virtualizor?: Partial<CompanyVirtualizor>;
   resellerApi?: Partial<CompanyResellerApi> | null;
   netbayApi?: Partial<CompanyNetbayApi> | null;
+  kurohostApi?: Partial<CompanyKurohostApi> | null;
   joyApi?: Partial<CompanyJoyApi> | null;
 }
 
@@ -151,6 +160,26 @@ const NETBAY_API_DIALOG_DEFAULTS: CompanyNetbayApi = {
   apiSecret: '',
   useLiveStockApi: false,
 };
+
+const EMPTY_KUROHOST_API = (): CompanyKurohostApi => ({
+  enabled: false,
+  label: '',
+  baseUrl: '',
+  apiKey: '',
+  useLiveStockApi: false,
+});
+
+const KUROHOST_API_DIALOG_DEFAULTS: CompanyKurohostApi = {
+  enabled: false,
+  label: 'KuroHost Cloud',
+  baseUrl: 'https://kurohost.com/api/cloud/v1',
+  apiKey: '',
+  useLiveStockApi: false,
+};
+
+function companyHasKurohostEnabled(company: Pick<Company, 'kurohostApi'> | null | undefined) {
+  return company?.kurohostApi?.enabled === true;
+}
 
 function companyHasNetbayEnabled(company: Pick<Company, 'netbayApi'> | null | undefined) {
   return company?.netbayApi?.enabled === true;
@@ -229,6 +258,14 @@ export default function CompaniesPage() {
   const [netbayTesting, setNetbayTesting] = useState(false);
   const [netbayTestResult, setNetbayTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [showNetbaySecret, setShowNetbaySecret] = useState(false);
+
+  // KuroHost API dialog state
+  const [kurohostCompany, setKurohostCompany] = useState<Company | null>(null);
+  const [kurohostForm, setKurohostForm] = useState<CompanyKurohostApi>(EMPTY_KUROHOST_API());
+  const [kurohostSaving, setKurohostSaving] = useState(false);
+  const [kurohostTesting, setKurohostTesting] = useState(false);
+  const [kurohostTestResult, setKurohostTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [showKurohostKey, setShowKurohostKey] = useState(false);
 
   // Joy Services API dialog state (manage-only)
   const [joyCompany, setJoyCompany] = useState<Company | null>(null);
@@ -790,6 +827,137 @@ export default function CompaniesPage() {
     }
   };
 
+  // -------------------- KuroHost API handlers --------------------
+  const openKurohostDialog = (c: Company) => {
+    const r = c.kurohostApi || null;
+    setKurohostForm({
+      enabled: r?.enabled === true,
+      label: r?.label || 'KuroHost Cloud',
+      baseUrl: r?.baseUrl || KUROHOST_API_DIALOG_DEFAULTS.baseUrl,
+      apiKey: r?.apiKey || '',
+      useLiveStockApi: r?.useLiveStockApi === true,
+    });
+    setKurohostTestResult(null);
+    setShowKurohostKey(false);
+    setKurohostCompany(c);
+  };
+
+  const closeKurohostDialog = () => {
+    if (kurohostSaving || kurohostTesting) return;
+    setKurohostCompany(null);
+    setKurohostForm(EMPTY_KUROHOST_API());
+    setKurohostTestResult(null);
+    setShowKurohostKey(false);
+  };
+
+  const openStocksFromKurohost = () => {
+    if (!kurohostCompany || kurohostSaving || kurohostTesting) return;
+    const company = kurohostCompany;
+    closeKurohostDialog();
+    void openStocksDialog(company);
+  };
+
+  const updateKurohostField = <K extends keyof CompanyKurohostApi>(key: K, value: CompanyKurohostApi[K]) => {
+    setKurohostForm(prev => ({ ...prev, [key]: value }));
+    setKurohostTestResult(null);
+  };
+
+  const handleTestKurohostApi = async () => {
+    if (!kurohostCompany) return;
+    setKurohostTesting(true);
+    setKurohostTestResult(null);
+    try {
+      const res = await fetch(`/api/admin/companies/${kurohostCompany._id}/test-kurohost-api`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kurohostApi: kurohostForm }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setKurohostTestResult({ success: true, message: data.message || 'Connected' });
+      } else {
+        setKurohostTestResult({ success: false, message: data.error || 'Connection failed' });
+      }
+    } catch (err: any) {
+      setKurohostTestResult({ success: false, message: err?.message || 'Request failed' });
+    } finally {
+      setKurohostTesting(false);
+    }
+  };
+
+  const handleSaveKurohostApi = async () => {
+    if (!kurohostCompany) return;
+    if (kurohostForm.enabled && !kurohostForm.apiKey.trim()) {
+      const ok = await confirm({
+        title: 'Save without API key?',
+        description: <>No API key entered. Continue using global <code>KUROHOST_API_KEY</code> env var?</>,
+        confirmLabel: 'Save anyway',
+      });
+      if (!ok) return;
+    }
+    setKurohostSaving(true);
+    try {
+      const payload = {
+        ...kurohostForm,
+        enabled: kurohostForm.enabled === true,
+        useLiveStockApi: false,
+      };
+      const res = await fetch(`/api/admin/companies/${kurohostCompany._id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kurohostApi: payload }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        const saved = data as Company;
+        setCompanies((prev) =>
+          prev.map((c) => (String(c._id) === String(saved._id) ? saved : c))
+        );
+        openKurohostDialog(saved);
+        toast.success('KuroHost saved — set zone/flavor IDs in manageIpStock, stock units via Stocks button');
+      } else {
+        toast.error((data as { error?: string }).error || 'Failed to save');
+      }
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to save');
+    } finally {
+      setKurohostSaving(false);
+    }
+  };
+
+  const handleClearKurohostApi = async () => {
+    if (!kurohostCompany) return;
+    const ok = await confirm({
+      title: 'Clear KuroHost API',
+      description: <>Clear KuroHost API config for <strong>{kurohostCompany.name}</strong>?</>,
+      confirmLabel: 'Clear',
+      destructive: true,
+    });
+    if (!ok) return;
+    setKurohostSaving(true);
+    try {
+      const res = await fetch(`/api/admin/companies/${kurohostCompany._id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kurohostApi: null }),
+      });
+      if (res.ok) {
+        toast.success('KuroHost API configuration cleared');
+        setKurohostCompany(null);
+        setKurohostForm(EMPTY_KUROHOST_API());
+        setKurohostTestResult(null);
+        fetchCompanies();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast.error((data as { error?: string }).error || 'Failed to clear');
+      }
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to clear');
+    } finally {
+      setKurohostSaving(false);
+    }
+  };
+
   const handleClearNetbayApi = async () => {
     if (!netbayCompany) return;
     const ok = await confirm({
@@ -1109,6 +1277,17 @@ export default function CompaniesPage() {
                           </Badge>
                         );
                       }
+                      const kh = c.kurohostApi;
+                      if (kh?.enabled) {
+                        let host = kh.baseUrl || 'kurohost.com';
+                        try { if (kh.baseUrl) host = new URL(kh.baseUrl).host; } catch { /* keep as-is */ }
+                        return (
+                          <Badge variant="outline" className="gap-1 text-violet-600 border-violet-200">
+                            <Globe className="h-3 w-3" />
+                            KuroHost: {host} · Zone API stock
+                          </Badge>
+                        );
+                      }
                       const j = c.joyApi;
                       if (j?.enabled) {
                         let host = j.baseUrl || 'api.joy.services';
@@ -1149,6 +1328,10 @@ export default function CompaniesPage() {
                         <Zap className="h-3.5 w-3.5" />
                         Netbay
                       </Button>
+                      <Button variant="ghost" size="sm" className="h-8 gap-1.5" onClick={() => openKurohostDialog(c)}>
+                        <Globe className="h-3.5 w-3.5" />
+                        KuroHost
+                      </Button>
                       <Button variant="ghost" size="sm" className="h-8 gap-1.5" onClick={() => openJoyDialog(c)}>
                         <Sparkles className="h-3.5 w-3.5" />
                         Joy
@@ -1158,6 +1341,14 @@ export default function CompaniesPage() {
                           <Link href={`/admin/companies/${c._id}/netbay-catalog`}>
                             <BookOpen className="h-3.5 w-3.5" />
                             Catalog
+                          </Link>
+                        </Button>
+                      )}
+                      {c.kurohostApi?.enabled && (
+                        <Button variant="ghost" size="sm" className="h-8 gap-1.5" asChild>
+                          <Link href={`/admin/companies/${c._id}/kurohost-catalog`}>
+                            <BookOpen className="h-3.5 w-3.5" />
+                            KH Catalog
                           </Link>
                         </Button>
                       )}
@@ -1939,6 +2130,169 @@ export default function CompaniesPage() {
             </Button>
             <Button onClick={handleSaveNetbayApi} disabled={netbaySaving}>
               {netbaySaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!kurohostCompany} onOpenChange={(open) => !open && closeKurohostDialog()}>
+        <DialogContent className="max-w-xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Globe className="h-5 w-5" />
+              KuroHost Cloud API
+            </DialogTitle>
+          </DialogHeader>
+          {kurohostCompany && (
+            <div className="space-y-4">
+              <div className="rounded-md border p-3 text-sm">
+                <p className="font-medium">{kurohostCompany.name}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Wire orders to the KuroHost Cloud Platform API. Auto-buy VMs on payment,
+                  then start/stop/reboot/sync via API. Generate your API key from the KuroHost
+                  console under API &amp; IAM. Link this company to IPStock and set zone + flavor
+                  IDs in /admin/manageIpStock.
+                </p>
+                <p className="text-xs text-muted-foreground mt-2">
+                  <span className="font-medium text-foreground">Docs:</span>{' '}
+                  <a
+                    href="https://kurohost.com/cloud/docs"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 hover:underline"
+                  >
+                    kurohost.com/cloud/docs
+                  </a>
+                  {' '}— Auth: <code>Authorization: Bearer kuro_…</code>
+                </p>
+                {kurohostCompany.kurohostApi?.enabled && (
+                  <div className="mt-2">
+                    <Link
+                      href={`/admin/companies/${kurohostCompany._id}/kurohost-catalog`}
+                      className="inline-flex items-center gap-1.5 text-xs text-blue-600 hover:underline"
+                      target="_blank"
+                    >
+                      <BookOpen className="h-3 w-3" />
+                      Browse zones, flavors &amp; OS templates
+                    </Link>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center justify-between rounded-md border p-2.5">
+                <div className="text-sm">
+                  <p className="font-medium">Enabled</p>
+                  <p className="text-xs text-muted-foreground">
+                    Disable to stop using KuroHost without losing saved config.
+                  </p>
+                </div>
+                <Switch
+                  checked={!!kurohostForm.enabled}
+                  onCheckedChange={(c) => {
+                    updateKurohostField('enabled', c);
+                  }}
+                />
+              </div>
+
+              {kurohostForm.enabled && (
+                <div className="rounded-md border border-violet-300/70 bg-violet-50/50 dark:bg-violet-950/20 p-3 text-xs text-muted-foreground">
+                  Stock automatically follows KuroHost <strong>GET /zones</strong>.
+                  Har IP stock plan ko ek zone assign karo in manageIpStock — zone available = In Stock.
+                </div>
+              )}
+
+              <div>
+                <Label className="text-xs">Label (optional)</Label>
+                <Input
+                  placeholder="e.g. KuroHost Production"
+                  value={kurohostForm.label}
+                  onChange={(e) => updateKurohostField('label', e.target.value)}
+                  className="mt-1"
+                />
+              </div>
+
+              <div>
+                <Label className="text-xs">Base URL</Label>
+                <Input
+                  placeholder="https://kurohost.com/api/cloud/v1"
+                  value={kurohostForm.baseUrl}
+                  onChange={(e) => updateKurohostField('baseUrl', e.target.value)}
+                  className="mt-1"
+                />
+              </div>
+
+              <div>
+                <Label className="text-xs">API Key (Bearer kuro_…)</Label>
+                <div className="relative mt-1">
+                  <Input
+                    type={showKurohostKey ? 'text' : 'password'}
+                    placeholder="kuro_…"
+                    value={kurohostForm.apiKey}
+                    onChange={(e) => updateKurohostField('apiKey', e.target.value)}
+                    className="font-mono text-xs"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowKurohostKey((s) => !s)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    tabIndex={-1}
+                  >
+                    {showKurohostKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Or leave blank to use global <code>KUROHOST_API_KEY</code> env var.
+                </p>
+              </div>
+
+              {kurohostTestResult && (
+                <div
+                  className={`flex items-start gap-2 rounded-md border p-2.5 text-xs ${
+                    kurohostTestResult.success
+                      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                      : 'border-red-200 bg-red-50 text-red-700'
+                  }`}
+                >
+                  {kurohostTestResult.success
+                    ? <CheckCircle2 className="h-4 w-4 mt-0.5" />
+                    : <XCircle className="h-4 w-4 mt-0.5" />}
+                  <span>{kurohostTestResult.message}</span>
+                </div>
+              )}
+
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleTestKurohostApi}
+                  disabled={kurohostTesting || kurohostSaving}
+                  className="gap-2"
+                >
+                  {kurohostTesting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+                  Test Credentials
+                </Button>
+                {kurohostCompany.kurohostApi && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleClearKurohostApi}
+                    disabled={kurohostSaving || kurohostTesting}
+                    className="gap-2 text-red-600 hover:text-red-700"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Clear Config
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
+          <DialogFooter className="gap-2">
+            <Button variant="ghost" onClick={closeKurohostDialog} disabled={kurohostSaving || kurohostTesting}>
+              Cancel
+            </Button>
+            <Button onClick={handleSaveKurohostApi} disabled={kurohostSaving}>
+              {kurohostSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
               Save
             </Button>
           </DialogFooter>

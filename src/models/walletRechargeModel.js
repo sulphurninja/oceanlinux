@@ -37,7 +37,7 @@ const walletRechargeSchema = new mongoose.Schema({
 
   status: {
     type: String,
-    enum: ['pending', 'confirmed', 'failed', 'refunded'],
+    enum: ['pending', 'processing', 'confirmed', 'failed', 'refunded'],
     default: 'pending',
     index: true,
   },

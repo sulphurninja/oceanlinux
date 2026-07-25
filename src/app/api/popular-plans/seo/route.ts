@@ -25,7 +25,6 @@ export async function GET() {
         $group: {
           _id: '$productName',
           orderCount: { $sum: 1 },
-          totalRevenue: { $sum: '$price' },
           avgPrice: { $avg: '$price' },
           minPrice: { $min: '$price' },
           maxPrice: { $max: '$price' }

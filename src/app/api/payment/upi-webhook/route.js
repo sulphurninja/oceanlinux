@@ -191,6 +191,18 @@ export async function POST(request) {
 
     console.log(`[UPI Webhook] Found order: ${order._id}, Status from webhook: ${status}`);
 
+    // The gateway may deliver the same webhook more than once. Without this the
+    // retry would re-run the deferred wallet charge, re-assign panel credentials
+    // and re-notify the customer.
+    if (order.status === 'confirmed' || order.status === 'active') {
+      console.log(`[UPI Webhook] Order ${order._id} already ${order.status} — ignoring duplicate webhook`);
+      return NextResponse.json({
+        success: true,
+        message: 'Order already confirmed',
+        alreadyProcessed: true,
+      });
+    }
+
     // Only process successful payments
     if (status === 'success') {
       // SECURITY: Verify the payment with UPI Gateway API before confirming

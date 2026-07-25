@@ -1,12 +1,15 @@
 import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
+import { enforceCronSecret } from '@/lib/apiSecurity';
 
 export async function POST(request) {
+  const cronDenied = enforceCronSecret(request);
+  if (cronDenied) return cronDenied;
+
   await connectDB();
 
   try {
-    // Find orders stuck in "provisioning" for more than 10 minutes
     const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
 
     const stuckOrders = await Order.find({

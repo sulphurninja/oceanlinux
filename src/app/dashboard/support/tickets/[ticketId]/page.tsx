@@ -10,6 +10,8 @@ import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { ArrowLeft, Send, Clock, User, Bot, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { useSessionAlert } from '@/components/session-alert';
+import { dashboardFetch } from '@/lib/dashboardFetch';
 import { cn } from '@/lib/utils';
 import { premiumBadge, premiumBtnOutline } from '@/lib/premium-badges';
 import {
@@ -28,13 +30,12 @@ export default function DashboardSupportTicketDetailPage() {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [newMessage, setNewMessage] = useState('');
+  const { showAlert } = useSessionAlert();
 
   const fetchTicketDetails = async () => {
     try {
       setLoading(true);
-      const response = await fetch(`/api/support/tickets/${ticketId}`, {
-        credentials: 'include',
-      });
+      const response = await dashboardFetch(`/api/support/tickets/${ticketId}`);
 
       if (response.ok) {
         setTicket(await response.json());
@@ -42,7 +43,13 @@ export default function DashboardSupportTicketDetailPage() {
         toast.error('Ticket not found');
         setTicket(null);
       } else if (response.status === 401) {
-        toast.error('Please log in to view this ticket');
+        const data = await response.json().catch(() => ({}));
+        const code = data.code || '';
+        if (code === 'SESSION_EXPIRED' || String(data.message || '').toLowerCase().includes('expired')) {
+          showAlert('session_expired');
+        } else {
+          showAlert('action_requires_login', 'Please log in to view this ticket.');
+        }
       } else {
         toast.error('Failed to load ticket details');
       }
@@ -64,9 +71,8 @@ export default function DashboardSupportTicketDetailPage() {
 
     setSending(true);
     try {
-      const response = await fetch(`/api/support/tickets/${ticketId}`, {
+      const response = await dashboardFetch(`/api/support/tickets/${ticketId}`, {
         method: 'POST',
-        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: newMessage }),
       });

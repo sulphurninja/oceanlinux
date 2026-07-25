@@ -57,6 +57,9 @@ export async function POST(request) {
 
 // Get orders that can be auto-provisioned
 export async function GET(request) {
+  const denied = await enforceAdmin(request);
+  if (denied) return denied;
+
   await connectDB();
   try {
     const { searchParams } = new URL(request.url);

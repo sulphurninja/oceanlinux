@@ -168,6 +168,23 @@ async function listTransactions(userId, { limit = 50, offset = 0 } = {}) {
   return all.slice(offset, offset + limit);
 }
 
+/**
+ * Find an existing credit/refund/bonus txn by reference (e.g. recharge id).
+ * Used so a crash between credit() and marking the recharge confirmed cannot
+ * cause a second credit on retry.
+ */
+async function findTxnByReference(userId, reference, types = ['credit', 'refund', 'bonus']) {
+  if (!userId || !reference) return null;
+  const ref = String(reference);
+  const wallet = await Wallet.findOne({ userId }).lean();
+  if (!wallet?.transactions?.length) return null;
+  return (
+    wallet.transactions.find(
+      (t) => String(t.reference || '') === ref && types.includes(t.type)
+    ) || null
+  );
+}
+
 const userWalletService = {
   getOrCreateWallet,
   getBalance,
@@ -176,6 +193,7 @@ const userWalletService = {
   debit,
   refund,
   listTransactions,
+  findTxnByReference,
 };
 
 export default userWalletService;

@@ -15,6 +15,7 @@ import {
     AlertCircle
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { dashboardFetch } from '@/lib/dashboardFetch';
 
 interface Transaction {
     type: string;
@@ -49,7 +50,7 @@ export default function ResellerWalletPage() {
     const fetchWalletData = async () => {
         try {
             setLoading(true);
-            const res = await fetch('/api/user/reseller-info');
+            const res = await dashboardFetch('/api/user/reseller-info');
             const responseData = await res.json();
 
             if (responseData.success) {

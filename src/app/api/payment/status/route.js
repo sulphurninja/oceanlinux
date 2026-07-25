@@ -17,6 +17,7 @@ import {
 import CheckoutSession from '@/models/checkoutSessionModel';
 import WalletRecharge from '@/models/walletRechargeModel';
 import { getDataFromToken } from '@/helper/getDataFromToken';
+import { enforcePaymentRateLimit } from '@/lib/rateLimit';
 
 // Initialize Cashfree
 Cashfree.XClientId = process.env.CASHFREE_APP_ID;
@@ -26,6 +27,9 @@ Cashfree.XEnvironment = process.env.CASHFREE_ENVIRONMENT === 'SANDBOX'
   : Cashfree.Environment.PRODUCTION;
 
 export async function POST(request) {
+  const rateLimited = enforcePaymentRateLimit(request);
+  if (rateLimited) return rateLimited;
+
   await connectDB();
   
   console.log("========== PAYMENT STATUS API CALLED ==========");
@@ -335,8 +339,22 @@ export async function POST(request) {
     if (order.status === 'confirmed') {
       console.log(`Order ${order._id} is already confirmed`);
 
+      // Inventory / slot-IP fulfilment must run before any late auto-buy.
+      // Otherwise a status poll can purchase from upstream while a webhook is
+      // still allocating a pre-configured inventory row for the same payment.
+      try {
+        const { fulfillOrderInventory } = require('@/lib/fulfillOrderInventory');
+        await fulfillOrderInventory(order);
+        const fresh = await Order.findById(order._id).lean();
+        if (fresh) Object.assign(order, fresh);
+      } catch (fulfillErr) {
+        console.error('[PAYMENT-STATUS] Late inventory fulfilment failed:', fulfillErr?.message || fulfillErr);
+      }
+
       const needsProvisioning =
         !order.ipAddress &&
+        !order.inventoryItemId &&
+        !order.slotIpId &&
         order.provisioningStatus !== 'completed' &&
         order.provisioningStatus !== 'in_progress' &&
         order.provisioningStatus !== 'provisioning' &&

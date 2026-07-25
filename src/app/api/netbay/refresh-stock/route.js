@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import { refreshNetbayStockForCustomer } from '@/lib/netbayLiveStock';
-import { enforceCronSecret } from '@/lib/apiSecurity';
+import { enforceCronSecret, enforceCronOrLoggedInUser } from '@/lib/apiSecurity';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
@@ -19,6 +19,9 @@ export async function GET(request) {
     if (force) {
       const cronDenied = enforceCronSecret(request);
       if (cronDenied) return cronDenied;
+    } else {
+      const authDenied = enforceCronOrLoggedInUser(request);
+      if (authDenied) return authDenied;
     }
 
     await connectDB();

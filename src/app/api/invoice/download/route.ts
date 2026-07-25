@@ -3,6 +3,7 @@ import { getDataFromToken } from '@/helper/getDataFromToken';
 import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 import User from '@/models/userModel';
+import type { LeanDoc } from '@/types/lean';
 import { jsPDF } from 'jspdf';
 import { getOrdersPageStatus } from '@/lib/orderDeliveryStatus';
 import { getOrAssignInvoiceNumber } from '@/lib/invoiceNumber';
@@ -103,8 +104,8 @@ export async function GET(request: NextRequest) {
     const orderId = new URL(request.url).searchParams.get('orderId');
     if (!orderId) return NextResponse.json({ error: 'Order ID is required' }, { status: 400 });
 
-    const order = await Order.findOne({ _id: orderId, user: userId }).lean();
-    const user = await User.findById(userId).lean();
+    const order = await Order.findOne({ _id: orderId, user: userId }).lean<LeanDoc>();
+    const user = await User.findById(userId).lean<LeanDoc>();
     if (!order) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
     if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 

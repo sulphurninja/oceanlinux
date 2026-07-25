@@ -3,18 +3,16 @@ import connectDB from '@/lib/db';
 import { getDataFromToken } from '@/helper/getDataFromToken';
 import ServerActionRequest from '@/models/serverActionRequestModel';
 import Order from '@/models/orderModel';
-import User from '@/models/userModel';
+import { enforceAdmin } from '@/lib/apiSecurity';
 
 export async function POST(request) {
+    const denied = await enforceAdmin(request);
+    if (denied) return denied;
+
     await connectDB();
 
     try {
-        // Get user from token
         const userId = await getDataFromToken(request);
-       
-
-        // Check if user is admin
-        const admin = await User.findById(userId);
 
         const { requestId, action, adminNotes, newPassword } = await request.json();
 
@@ -59,7 +57,7 @@ export async function POST(request) {
         }
         await actionRequest.save();
 
-        console.log(`[SERVER-ACTION-PROCESS] Request ${requestId} ${newStatus} by admin ${admin.email}`);
+        console.log(`[SERVER-ACTION-PROCESS] Request ${requestId} ${newStatus} by admin ${userId}`);
 
         if (action === 'approve') {
             const updateFields = {

@@ -8,6 +8,7 @@ const { resolveOrderExpiryOnPayment } = require('@/lib/advpsOrderExpiry');
 const AutoProvisioningService = require('@/services/autoProvisioningService');
 const WhatsAppService = require('@/services/whatsappService');
 import userWalletService from '@/services/userWalletService';
+import { paymentAmountsMatch, expectedGatewayAmountFromOrder } from '@/lib/paymentAmountValidation';
 const PaymentOrderLogger = require('@/services/paymentOrderLogger');
 
 Cashfree.XClientId = process.env.CASHFREE_APP_ID;
@@ -75,6 +76,10 @@ async function checkCashfreePayment(order) {
       method: 'cashfree',
     };
   }
+  const expectedAmount = expectedGatewayAmountFromOrder(order);
+  if (!paymentAmountsMatch(success.payment_amount, expectedAmount)) {
+    return { success: false, status: 'AMOUNT_MISMATCH', method: 'cashfree' };
+  }
   return {
     success: true,
     method: 'cashfree',
@@ -109,6 +114,11 @@ async function checkRazorpayPayment(order) {
   if (razorpayOrder.status === 'paid') {
     const payments = await razorpay.orders.fetchPayments(razorpayOrderId);
     const captured = payments.items?.find((p) => p.status === 'captured') || payments.items?.[0];
+    const paidInr = Number(captured?.amount ?? razorpayOrder.amount) / 100;
+    const expectedAmount = expectedGatewayAmountFromOrder(order);
+    if (!paymentAmountsMatch(paidInr, expectedAmount)) {
+      return { success: false, status: 'AMOUNT_MISMATCH', method: 'razorpay' };
+    }
     return {
       success: true,
       method: 'razorpay',

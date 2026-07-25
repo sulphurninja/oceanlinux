@@ -75,6 +75,7 @@ export async function GET(request) {
         const status = searchParams.get('status');
         const priority = searchParams.get('priority');
         const search = searchParams.get('search');
+        const limit = Math.min(Math.max(parseInt(searchParams.get('limit') || '200', 10) || 200, 1), 500);
 
         let query = {};
 
@@ -90,16 +91,19 @@ export async function GET(request) {
 
         // Search functionality
         if (search) {
+            // Escaped so a search term like "(((" can't build a catastrophic regex.
+            const safe = String(search).trim().slice(0, 100).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
             query.$or = [
-                { subject: { $regex: search, $options: 'i' } },
-                { ticketId: { $regex: search, $options: 'i' } },
-                { description: { $regex: search, $options: 'i' } }
+                { subject: { $regex: safe, $options: 'i' } },
+                { ticketId: { $regex: safe, $options: 'i' } },
+                { description: { $regex: safe, $options: 'i' } }
             ];
         }
 
         const tickets = await SupportTicket.find(query)
             .populate('userId', 'name email')
             .sort({ createdAt: -1 })
+            .limit(limit)
             .lean();
 
         const [open, inProgress, waitingResponse, resolved, closed, closable] = await Promise.all([

@@ -26,6 +26,7 @@ import {
   AlertTitle,
 } from "@/components/ui/alert";
 import { toast } from 'sonner';
+import { dashboardFetch } from '@/lib/dashboardFetch';
 import { cn } from '@/lib/utils';
 
 interface PasswordRequirement {
@@ -133,7 +134,7 @@ const ChangePasswordPage = () => {
     setLoading(true);
 
     try {
-      const response = await fetch('/api/users/change-password', {
+      const response = await dashboardFetch('/api/users/change-password', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -160,7 +161,7 @@ const ChangePasswordPage = () => {
 
         // Redirect to login after a short delay
         setTimeout(() => {
-          router.push('/auth/login');
+          router.push('/login');
         }, 2000);
       } else {
         toast.error(data.message || 'Failed to change password');

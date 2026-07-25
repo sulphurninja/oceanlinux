@@ -52,6 +52,7 @@ import { cn } from "@/lib/utils";
 import { premiumSelectContent, premiumBadge } from "@/lib/premium-badges";
 import { useTheme } from 'next-themes';
 import { toast } from "sonner";
+import { dashboardFetch } from '@/lib/dashboardFetch';
 import {
   AreaChart,
   Area,
@@ -123,7 +124,7 @@ export default function Dashboard() {
   const fetchDashboardData = async () => {
     try {
       setIsLoading(true);
-      const response = await fetch(`/api/dashboard/stats?timeframe=${timeframe}`);
+      const response = await dashboardFetch(`/api/dashboard/stats?timeframe=${timeframe}`);
       const data = await response.json();
       setStats(data);
     } catch (error) {
@@ -146,7 +147,7 @@ export default function Dashboard() {
     }
     setIsDownloadingInvoice(true);
     try {
-      const response = await fetch(`/api/invoice/download?orderId=${selectedOrderForInvoice}`);
+      const response = await dashboardFetch(`/api/invoice/download?orderId=${selectedOrderForInvoice}`);
       if (!response.ok) throw new Error('Failed to generate invoice');
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
@@ -180,7 +181,7 @@ export default function Dashboard() {
     }
     setIsUpdatingSettings(true);
     try {
-      const response = await fetch('/api/user/update-settings', {
+      const response = await dashboardFetch('/api/user/update-settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

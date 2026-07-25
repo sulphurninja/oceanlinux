@@ -2,9 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 import User from '@/models/userModel';
+import type { LeanDoc } from '@/types/lean';
 import { jsPDF } from 'jspdf';
 import { getOrdersPageStatus } from '@/lib/orderDeliveryStatus';
 import { getOrAssignInvoiceNumber } from '@/lib/invoiceNumber';
+import { getDataFromTokenSafe } from '@/helper/getDataFromToken';
+import { isAdminUser, requireAdminUser } from '@/lib/adminAuth';
 import fs from 'fs';
 import path from 'path';
 
@@ -100,15 +103,37 @@ const hr = (doc: jsPDF, y: number, x1 = 20, x2 = 190) => {
 export async function GET(req: NextRequest) {
   try {
     const txId = req.nextUrl.searchParams.get('txId') || '';
-    const key = req.nextUrl.searchParams.get('key') || '';
+    const legacyKey = req.nextUrl.searchParams.get('key') || '';
     if (!txId) return NextResponse.json({ error: 'Query param txId is required' }, { status: 400 });
-    if (ADMIN_KEY && key !== ADMIN_KEY) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
     await connectDB();
-    const order = await Order.findOne({ transactionId: txId }).lean();
+
+    const order = await Order.findOne({ transactionId: txId }).lean<LeanDoc>();
     if (!order) return NextResponse.json({ error: 'Order not found for this transactionId' }, { status: 404 });
+
+    const userId = getDataFromTokenSafe(req);
+    let authorized = false;
+
+    if (userId) {
+      const user = await User.findById(userId).select('userType isAdmin role').lean<LeanDoc>();
+      if (isAdminUser(user)) {
+        authorized = true;
+      } else if (String((order as any).user) === String(userId)) {
+        authorized = true;
+      }
+    }
+
+    if (!authorized) {
+      const admin = await requireAdminUser(req);
+      if (admin) authorized = true;
+    }
+
+    if (!authorized) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
     const orderUser: any = (order as any).user
-      ? await User.findById((order as any).user).lean()
+      ? await User.findById((order as any).user).lean<LeanDoc>()
       : null;
 
     const productName = makeCompliantName(clean(order.productName || 'N/A'));

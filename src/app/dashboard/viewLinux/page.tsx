@@ -51,6 +51,7 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import { toast } from 'sonner';
+import { dashboardFetch } from '@/lib/dashboardFetch';
 import { useSessionAlert } from '@/components/session-alert';
 import { premiumBadge, premiumBtnCredentials, premiumBtnOutline, premiumSelectContent } from '@/lib/premium-badges';
 import { getCustomerProviderDisplayNameFromOrder } from '@/lib/customerProviderDisplay';
@@ -80,10 +81,11 @@ interface Order {
     password?: string;
     expiryDate?: Date;
     createdAt?: Date;
-    provider?: 'hostycare' | 'smartvps' | 'oceanlinux' | 'slotip' | 'advps';
+    provider?: 'hostycare' | 'smartvps' | 'oceanlinux' | 'slotip' | 'advps' | 'netbay';
     hostycareServiceId?: string;
     smartvpsServiceId?: string;
     advpsServiceId?: string;
+    netbayServiceId?: string;
     slotIpPackageId?: string;
     slotIpId?: string;
     provisioningStatus?: string;
@@ -163,7 +165,7 @@ const ViewLinux = () => {
         }
 
         try {
-            const response = await fetch('/api/orders/me', { cache: 'no-store', credentials: 'include' });
+            const response = await dashboardFetch('/api/orders/me', { cache: 'no-store', credentials: 'include' });
             if (response.status === 401) {
                 const data = await response.json().catch(() => ({}));
                 const code = data.code || '';
@@ -260,7 +262,7 @@ const ViewLinux = () => {
     const downloadInvoice = async (e: React.MouseEvent, orderId: string) => {
         e.stopPropagation();
         try {
-            const res = await fetch(`/api/invoice/download?orderId=${orderId}`);
+            const res = await dashboardFetch(`/api/invoice/download?orderId=${orderId}`);
             if (!res.ok) throw new Error('Failed');
             const blob = await res.blob();
             const url = window.URL.createObjectURL(blob);

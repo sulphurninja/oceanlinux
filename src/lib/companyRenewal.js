@@ -13,6 +13,11 @@ import { isSlotIpOrder } from '@/lib/slotIpOrder';
  * existing automated path even if their stock happens to belong to a
  * company — the upstream system handles the actual extension.
  *
+ * KuroHost orders intentionally use the approval queue: KuroHost has no
+ * hosting-style renew API (PAYG meter). On approve, Start + Sync runs via
+ * executeKurohostRenewalOnApprove — you may still top up KuroHost credits
+ * separately on the KuroHost console if needed.
+ *
  * Slot IP orders are one-time purchases and never use company renewal.
  *
  * Returns { isCompany: boolean, companyId?: ObjectId }.

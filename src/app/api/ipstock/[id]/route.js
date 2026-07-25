@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import { enforceAdmin } from '@/lib/apiSecurity';
+import { getDataFromTokenSafe } from '@/helper/getDataFromToken';
+import { isAdminUser } from '@/lib/adminAuth';
+import User from '@/models/userModel';
 const IPStock = require('@/models/ipStockModel');
 import Company from '@/models/companyModel';
 const {
@@ -10,7 +13,31 @@ const {
 const { getCompanyVirtualizorAccounts } = require('@/lib/companyVirtualizor');
 const { getCompanyResellerApiConfig } = require('@/lib/companyResellerApi');
 const { getCompanyNetbayApiConfig } = require('@/lib/companyNetbayApi');
+const { getCompanyKurohostApiConfig } = require('@/lib/companyKurohostApi');
 const { getCompanyJoyApiConfig } = require('@/lib/companyJoyApi');
+
+function stripSensitiveIpStockFields(doc, { isAdmin = false } = {}) {
+  if (!doc || isAdmin) return doc;
+  const safe = { ...doc };
+  delete safe.inventoryItems;
+  delete safe.panelPassword;
+  delete safe.panelUsername;
+  if (safe.configurations && typeof safe.configurations === 'object') {
+    const configs = { ...safe.configurations };
+    for (const key of Object.keys(configs)) {
+      if (configs[key] && typeof configs[key] === 'object') {
+        const c = { ...configs[key] };
+        delete c.apiKey;
+        delete c.apiSecret;
+        delete c.password;
+        delete c.token;
+        configs[key] = c;
+      }
+    }
+    safe.configurations = configs;
+  }
+  return safe;
+}
 
 export async function GET(request, { params }) {
     console.log('[IPSTOCK-ID][GET] === REQUEST START ===');
@@ -56,7 +83,7 @@ export async function GET(request, { params }) {
         if (ipStock.company) {
             try {
                 const company = await Company.findById(ipStock.company)
-                    .select('virtualizors virtualizor resellerApi netbayApi joyApi name')
+                    .select('virtualizors virtualizor resellerApi netbayApi kurohostApi joyApi name')
                     .lean();
                 const accounts = getCompanyVirtualizorAccounts(company);
                 if (accounts.length > 0) {
@@ -85,15 +112,25 @@ export async function GET(request, { params }) {
                                 label: netbay.label || null,
                             };
                         } else {
-                            // Joy Services — manage-only (power actions + status).
-                            const joy = getCompanyJoyApiConfig(company);
-                            if (joy) {
+                            const kurohost = getCompanyKurohostApiConfig(company);
+                            if (kurohost) {
                                 companyAutomation = {
-                                    provider: 'joy',
+                                    provider: 'kurohost',
                                     enabled: true,
                                     companyName: company?.name,
-                                    label: joy.label || null,
+                                    label: kurohost.label || null,
                                 };
+                            } else {
+                                // Joy Services — manage-only (power actions + status).
+                                const joy = getCompanyJoyApiConfig(company);
+                                if (joy) {
+                                    companyAutomation = {
+                                        provider: 'joy',
+                                        enabled: true,
+                                        companyName: company?.name,
+                                        label: joy.label || null,
+                                    };
+                                }
                             }
                         }
                     }
@@ -106,7 +143,16 @@ export async function GET(request, { params }) {
         console.log('[IPSTOCK-ID][GET] Returning IPStock data', {
             companyAutomation: companyAutomation ? companyAutomation.provider : 'none',
         });
-        return NextResponse.json({ ...ipStock, companyAutomation });
+
+        let isAdmin = false;
+        const userId = getDataFromTokenSafe(request);
+        if (userId) {
+            const user = await User.findById(userId).select('userType isAdmin role').lean();
+            isAdmin = isAdminUser(user);
+        }
+
+        const payload = stripSensitiveIpStockFields({ ...ipStock, companyAutomation }, { isAdmin });
+        return NextResponse.json(payload);
     } catch (error) {
         console.error('[IPSTOCK-ID][GET] === ERROR ===');
         console.error('[IPSTOCK-ID][GET] Error type:', error.constructor.name);

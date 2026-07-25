@@ -3,8 +3,17 @@ import User from '@/models/userModel';
 import PasswordReset from '@/models/passwordResetModel';
 import EmailService from '@/lib/sendgrid';
 import crypto from 'crypto';
+import { enforceRateLimit } from '@/lib/rateLimit';
 
 export async function POST(request) {
+  const rateLimited = enforceRateLimit(request, {
+    max: 5,
+    windowMs: 15 * 60_000,
+    scope: 'ip',
+    message: 'Too many reset requests. Please wait a few minutes and try again.',
+  });
+  if (rateLimited) return rateLimited;
+
   try {
     await connectDB();
 

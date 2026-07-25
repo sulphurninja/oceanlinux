@@ -197,6 +197,14 @@ function sanitizeOrderForCustomer(order, { isAdmin = false } = {}) {
   if (safe.provisioningError) {
     safe.provisioningError = customerProvisioningErrorMessage(safe.provisioningError);
   }
+  delete safe.inventoryItems;
+  if (safe.paymentDetails && typeof safe.paymentDetails === 'object') {
+    const pd = { ...safe.paymentDetails };
+    delete pd.webhookPayload;
+    delete pd.gatewayRaw;
+    delete pd.rawGatewayResponse;
+    safe.paymentDetails = pd;
+  }
   return safe;
 }
 

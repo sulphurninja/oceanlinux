@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ComponentType } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   Check,
@@ -8,6 +8,7 @@ import {
   RefreshCw,
   ShieldCheck,
   Wallet,
+  type LucideIcon,
 } from "lucide-react";
 import OceanFlyingBird from "@/components/landing/OceanFlyingBird";
 import { cn } from "@/lib/utils";
@@ -61,10 +62,7 @@ const BIRD_SIZES: Record<OceanBirdFlyVariant, number> = {
   logout: 80,
 };
 
-const VARIANT_ICONS: Record<
-  OceanBirdFlyVariant,
-  ComponentType<{ className?: string; strokeWidth?: number }>
-> = {
+const VARIANT_ICONS: Record<OceanBirdFlyVariant, LucideIcon> = {
   login: ShieldCheck,
   "wallet-success": Wallet,
   "order-success": Check,

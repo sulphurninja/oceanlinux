@@ -11,6 +11,7 @@ type User = {
     email: string;
     id: string;
     isAdmin?: boolean;
+    createdAt?: string;
     stats?: any;
 } | null;
 

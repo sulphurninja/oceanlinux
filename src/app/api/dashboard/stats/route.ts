@@ -107,7 +107,6 @@ export async function GET(request: NextRequest) {
         createdAt: order.createdAt,
       })),
       monthlySpending,
-      monthlySpending,
       orderStatusBreakdown,
       resellerWallet: resellerInfo,
     };

@@ -7,6 +7,7 @@ export const runtime = 'nodejs';
 
 import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
+import { blockUnlessDevOrCron } from '@/lib/apiSecurity';
 import IPStock from '@/models/ipStockModel';
 
 const SmartVpsAPI = require('@/services/smartvpsApi');
@@ -26,7 +27,11 @@ function normalizeSmartVpsResponse(payload: any) {
 }
 
 export async function GET(req: Request) {
-  // GET = preview only
+  // GET = preview only, but it still reads our stock table and queries the
+  // SmartVPS account — same guard as POST.
+  const blocked = blockUnlessDevOrCron(req);
+  if (blocked) return blocked;
+
   try {
     await connectDB();
     
@@ -65,6 +70,9 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
+    const blocked = blockUnlessDevOrCron(req as any);
+    if (blocked) return blocked;
+
     await connectDB();
     
     console.log('[SVPS-RESET] Starting reset...');

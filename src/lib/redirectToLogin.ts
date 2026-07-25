@@ -46,6 +46,7 @@ export function redirectToLogin(returnPath?: string): Promise<void> {
   }
 
   return fetch('/api/auth/logout', { method: 'POST', credentials: 'include' })
+    .then(() => {})
     .catch(() => {})
     .finally(() => {
       window.location.href = '/login';

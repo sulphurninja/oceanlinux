@@ -109,6 +109,10 @@ export function getOrderRenewalPrice(order, currentListPrice = null) {
   return baseRate;
 }
 
+/**
+ * @param {any} order
+ * @param {number | null} [currentListPrice]
+ */
 export function getOrderRenewalPriceNote(order, currentListPrice = null) {
   if (!order) return null;
 

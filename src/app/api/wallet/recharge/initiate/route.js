@@ -4,6 +4,7 @@ import { getDataFromToken } from '@/helper/getDataFromToken';
 import User from '@/models/userModel';
 import WalletRecharge from '@/models/walletRechargeModel';
 import { createGatewayOrder, buildClientTxnId } from '@/lib/paymentGateways';
+import { enforcePaymentRateLimit } from '@/lib/rateLimit';
 
 const MIN_RECHARGE = 50;
 const MAX_RECHARGE = 100000;
@@ -34,6 +35,9 @@ export async function POST(request) {
   if (!user) {
     return NextResponse.json({ success: false, message: 'User not found' }, { status: 404 });
   }
+
+  const rateLimited = enforcePaymentRateLimit(request);
+  if (rateLimited) return rateLimited;
 
   let body;
   try {

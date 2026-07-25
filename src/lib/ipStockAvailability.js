@@ -42,6 +42,24 @@ export function usesResellerLiveStock(stock, company) {
   return company.resellerApi.useLiveStockApi === true;
 }
 
+/** IP stock has KuroHost zone + flavor mapping for auto-buy. */
+export function stockHasKurohostPlans(stock) {
+  const { stockHasKurohostPlans: hasPlans } = require('@/lib/kurohostStockConfig');
+  return hasPlans(stock);
+}
+
+/**
+ * KuroHost zone = stock. When cloudZoneId is set on the plan and company
+ * KuroHost is enabled, availability follows GET /zones (not manual stockCount).
+ */
+export function usesKurohostLiveStock(stock, company) {
+  if (!stockHasKurohostPlans(stock)) return false;
+  if (!company?.kurohostApi?.enabled) return false;
+  const { readKurohostStockConfig } = require('@/lib/kurohostStockConfig');
+  const cfg = readKurohostStockConfig(stock);
+  return !!(cfg.cloudZoneId || (cfg.zoneIds?.length ?? 0) > 0);
+}
+
 /**
  * Netbay-linked plans with live API stock mode (company.netbayApi.useLiveStockApi).
  * When company is omitted, defaults to manual stockCount mode.
@@ -57,6 +75,7 @@ export function usesNetbayLiveStock(stock, company) {
 export function usesStockCount(stock, company) {
   if (usesCompanyUnitFulfillment(stock)) return true;
   if (usesNetbayLiveStock(stock, company)) return false;
+  if (usesKurohostLiveStock(stock, company)) return false;
   if (usesResellerLiveStock(stock, company)) return false;
   return !!(stock?.company);
 }
@@ -68,7 +87,7 @@ export function getIpStockRemaining(stock, company) {
   }
   if (stock?.company && company) {
     const { isCompanyStockPurchasable } = require('@/lib/companyInventory');
-    if (usesResellerLiveStock(stock, company) || usesNetbayLiveStock(stock, company)) {
+    if (usesResellerLiveStock(stock, company) || usesNetbayLiveStock(stock, company) || usesKurohostLiveStock(stock, company)) {
       return isCompanyStockPurchasable(stock, company) ? Number.POSITIVE_INFINITY : 0;
     }
   }

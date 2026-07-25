@@ -65,7 +65,7 @@ function LoginPage({ className, ...props }: React.ComponentPropsWithoutRef<"div"
   const router = useRouter();
   const searchParams = useSearchParams();
   const returnTo = searchParams.get('returnTo');
-  const { ref, offset } = useHeroParallax(10);
+  const { ref, offset } = useHeroParallax<HTMLDivElement>(10);
 
   useEffect(() => {
     setMounted(true);

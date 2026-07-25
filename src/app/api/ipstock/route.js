@@ -5,9 +5,11 @@ import Company from '@/models/companyModel';
 import { enforceAdmin } from '@/lib/apiSecurity';
 import { requireAdmin } from '@/lib/adminAuth';
 const { companyUsesNetbayLiveStock } = require('@/lib/companyNetbayApi');
+const { companyUsesKurohostLiveStock } = require('@/lib/companyKurohostApi');
 const { companyUsesResellerLiveStock } = require('@/lib/companyResellerApi');
-const { usesResellerLiveStock, stockHasResellerPanelPlans } = require('@/lib/ipStockAvailability');
+const { usesResellerLiveStock, usesKurohostLiveStock, stockHasResellerPanelPlans, stockHasKurohostPlans } = require('@/lib/ipStockAvailability');
 const { syncResellerIpStockRow } = require('@/lib/resellerLiveStock');
+const { syncKurohostIpStockRow } = require('@/lib/kurohostLiveStock');
 const { getCompanyFulfillmentMode, countUnallocatedInventory, usesPreconfiguredInventory } = require('@/lib/companyInventory');
 
 function toPlainMap(value) {
@@ -45,6 +47,13 @@ function slimDefaultConfigurationsForStore(defaultConfigurations) {
         };
     }
 
+    if (dc.kurohost && typeof dc.kurohost === 'object') {
+        slim.kurohost = {
+            cloudZoneId: !!dc.kurohost.cloudZoneId,
+            variantStock: slimVariantStock(dc.kurohost.variantStock),
+        };
+    }
+
     if (dc.resellerApi && typeof dc.resellerApi === 'object') {
         slim.resellerApi = {
             variantStock: slimVariantStock(dc.resellerApi.variantStock),
@@ -73,13 +82,16 @@ async function enrichIpStocksWithProviderModes(ipStocks) {
     if (!companyIds.length) return ipStocks;
 
     const companies = await Company.find({ _id: { $in: companyIds } })
-        .select('netbayApi resellerApi')
+        .select('netbayApi kurohostApi resellerApi')
         .lean();
     const companyMap = Object.fromEntries(companies.map((c) => [String(c._id), c]));
 
     return ipStocks.map((stock) => ({
         ...stock,
         fulfillmentMode: stock.company ? getCompanyFulfillmentMode(stock) : null,
+        kurohostUseLiveStockApi: stock.company
+            ? companyUsesKurohostLiveStock(companyMap[String(stock.company)])
+            : null,
         netbayUseLiveStockApi: stock.company
             ? companyUsesNetbayLiveStock(companyMap[String(stock.company)])
             : null,

@@ -101,7 +101,7 @@ function GetStartedPage({ className, ...props }: React.ComponentPropsWithoutRef<
   const [mounted, setMounted] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { ref, offset } = useHeroParallax(10);
+  const { ref, offset } = useHeroParallax<HTMLDivElement>(10);
   const passwordChecks = getPasswordChecks(formData.password);
   const passwordsMatch =
     formData.confirmPassword.length > 0 && formData.confirmPassword === formData.password;

@@ -3,8 +3,17 @@ import User from '@/models/userModel';
 import PasswordReset from '@/models/passwordResetModel';
 import crypto from 'crypto';
 import { hashUserPassword } from '@/lib/userPassword';
+import { enforceRateLimit } from '@/lib/rateLimit';
 
 export async function POST(request) {
+  const rateLimited = enforceRateLimit(request, {
+    max: 10,
+    windowMs: 15 * 60_000,
+    scope: 'ip',
+    message: 'Too many attempts. Please wait a few minutes and try again.',
+  });
+  if (rateLimited) return rateLimited;
+
   try {
     await connectDB();
 
@@ -17,8 +26,8 @@ export async function POST(request) {
       });
     }
 
-    if (newPassword.length < 6) {
-      return new Response(JSON.stringify({ message: 'Password must be at least 6 characters long' }), {
+    if (newPassword.length < 8) {
+      return new Response(JSON.stringify({ message: 'Password must be at least 8 characters long' }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' }
       });
