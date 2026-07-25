@@ -5,6 +5,8 @@ import KnowledgeBase from '@/models/knowledgeBaseModel';
 import type { LeanDoc } from '@/types/lean';
 import ArticleContent, { type Article, type RelatedArticle } from './ArticleContent';
 
+export const dynamic = 'force-dynamic';
+
 interface Props {
   params: { slug: string };
 }
@@ -132,22 +134,5 @@ export default async function ArticlePage({ params }: Props) {
   } catch (error) {
     console.error('Error fetching article:', error);
     notFound();
-  }
-}
-
-// Generate static params for better performance
-export async function generateStaticParams() {
-  try {
-    await connectDB();
-    const articles = await KnowledgeBase.find({ published: true })
-      .select('slug')
-      .lean<LeanDoc[]>();
-
-    return articles.map(article => ({
-      slug: article.slug
-    }));
-  } catch (error) {
-    console.error('Error generating static params:', error);
-    return [];
   }
 }
