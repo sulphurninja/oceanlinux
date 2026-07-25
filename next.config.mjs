@@ -1,9 +1,13 @@
 /** @type {import('next').NextConfig} */
+const skipBuildChecks = process.env.SKIP_BUILD_TYPECHECK === '1';
+
 const nextConfig = {
   typescript: {
-    // The codebase typechecks clean, so let the build fail on new type errors
-    // instead of hiding them.
-    ignoreBuildErrors: false,
+    // EC2 deploy: SKIP_BUILD_TYPECHECK=1 skips tsc (saves RAM). Run `bunx tsc --noEmit` locally/CI.
+    ignoreBuildErrors: skipBuildChecks,
+  },
+  eslint: {
+    ignoreDuringBuilds: skipBuildChecks,
   },
   // Handle native node modules (ssh2, cpu-features) - exclude from webpack bundling
   webpack: (config, { isServer }) => {

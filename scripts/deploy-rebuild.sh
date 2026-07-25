@@ -24,14 +24,18 @@ else
   BUILD_CMD="npm run build"
 fi
 
+echo "==> stop PM2 (free RAM for build)..."
+pm2 stop oceanlinux 2>/dev/null || true
+
 echo "==> remove stray nested app (breaks typecheck on small EC2)..."
 rm -rf oceanlinux-orders
 
 echo "==> wipe old build..."
 rm -rf .next
 
-echo "==> build (typecheck can take 5-15 min on t2/t3.small — watch: free -h)..."
-export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=1536}"
+echo "==> build (skip typecheck on server — run tsc locally before push)..."
+export SKIP_BUILD_TYPECHECK=1
+export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=2048}"
 $BUILD_CMD
 
 echo "==> verify new company orders filter is in build..."
