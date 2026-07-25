@@ -4,6 +4,7 @@ import {
   usesCompanyInventoryFulfillment,
   usesCompanyUnitFulfillment,
   countUnallocatedInventory,
+  hasUnallocatedCompanyInventory,
 } from '@/lib/companyInventory';
 
 /** IP stock has Netbay plan IDs configured (automation), regardless of stock mode. */
@@ -62,7 +63,16 @@ export function usesStockCount(stock, company) {
 
 export function getIpStockRemaining(stock, company) {
   if (!stock) return 0;
-  if (usesCompanyInventoryFulfillment(stock)) {
+  if (hasUnallocatedCompanyInventory(stock)) {
+    return countUnallocatedInventory(stock);
+  }
+  if (stock?.company && company) {
+    const { isCompanyStockPurchasable } = require('@/lib/companyInventory');
+    if (usesResellerLiveStock(stock, company) || usesNetbayLiveStock(stock, company)) {
+      return isCompanyStockPurchasable(stock, company) ? Number.POSITIVE_INFINITY : 0;
+    }
+  }
+  if (usesCompanyInventoryFulfillment(stock, company)) {
     return countUnallocatedInventory(stock);
   }
   if (usesStockCount(stock, company)) {
@@ -84,6 +94,10 @@ export function storeAutoUnhideUpdate(stock, inStock) {
 export function isIpStockPurchasable(stock, quantity = 1, company) {
   if (!stock) return false;
   if (isIpStockHiddenFromStore(stock)) return false;
+  if (stock?.company && company) {
+    const { isCompanyStockPurchasable } = require('@/lib/companyInventory');
+    return isCompanyStockPurchasable(stock, company, quantity);
+  }
   if (usesStockCount(stock, company)) {
     return getIpStockRemaining(stock, company) >= quantity;
   }

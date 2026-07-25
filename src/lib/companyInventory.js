@@ -72,16 +72,68 @@ function getCompanyFulfillmentMode(stock) {
 
 function usesCompanyInventoryFulfillment(stock, company) {
   if (!stock?.company) return false;
-  // Live panel auto-buy (Hostheaven / Netbay) must not assign pre-saved inventory rows.
-  if (company?.resellerApi?.enabled && company.resellerApi.useLiveStockApi) {
-    const { stockHasResellerPanelPlans } = require('@/lib/ipStockAvailability');
-    if (stockHasResellerPanelPlans(stock)) return false;
+  return shouldAssignCompanyInventoryForOrder(stock, company);
+}
+
+/** Saved VPS rows waiting — these sell before live panel API buy. */
+function hasUnallocatedCompanyInventory(stock) {
+  return countUnallocatedInventory(stock) > 0;
+}
+
+function readLivePanelVariantAvailable(stock, company) {
+  const {
+    usesResellerLiveStock,
+    usesNetbayLiveStock,
+    stockHasResellerPanelPlans,
+    stockHasNetbayPlans,
+  } = require('@/lib/ipStockAvailability');
+  const { toPlainConfigurations } = require('@/lib/advpsLiveStock');
+
+  if (usesResellerLiveStock(stock, company) && stockHasResellerPanelPlans(stock)) {
+    const cfg = toPlainConfigurations(stock.defaultConfigurations)?.resellerApi || {};
+    const variants = cfg.variantStock && typeof cfg.variantStock === 'object' ? cfg.variantStock : {};
+    return Object.values(variants).some((v) => v && typeof v === 'object' && v.available === true);
   }
-  if (company?.netbayApi?.enabled && company.netbayApi.useLiveStockApi) {
-    const { stockHasNetbayPlans } = require('@/lib/ipStockAvailability');
-    if (stockHasNetbayPlans(stock)) return false;
+  if (usesNetbayLiveStock(stock, company) && stockHasNetbayPlans(stock)) {
+    const cfg = toPlainConfigurations(stock.defaultConfigurations)?.netbay || {};
+    const variants = cfg.variantStock && typeof cfg.variantStock === 'object' ? cfg.variantStock : {};
+    return Object.values(variants).some((v) => v && typeof v === 'object' && v.available === true);
   }
-  return getCompanyFulfillmentMode(stock) === 'inventory';
+  return !!stock?.available;
+}
+
+/** True when the next paid order should take a saved inventory row (not API buy yet). */
+function shouldAssignCompanyInventoryForOrder(stock, company) {
+  if (!stock?.company || !hasUnallocatedCompanyInventory(stock)) return false;
+  if (getCompanyFulfillmentMode(stock) === 'inventory') return true;
+  if (usesPreconfiguredInventory(stock)) return true;
+  return false;
+}
+
+/** Store can sell if saved VPS rows exist OR live panel zone/wallet says in stock. */
+function isCompanyStockPurchasable(stock, company, quantity = 1) {
+  if (!stock?.company) return false;
+  if (hasUnallocatedCompanyInventory(stock)) {
+    return countUnallocatedInventory(stock) >= quantity;
+  }
+  const {
+    usesResellerLiveStock,
+    usesNetbayLiveStock,
+    stockHasResellerPanelPlans,
+    stockHasNetbayPlans,
+  } = require('@/lib/ipStockAvailability');
+  if (usesResellerLiveStock(stock, company) && stockHasResellerPanelPlans(stock)) {
+    return readLivePanelVariantAvailable(stock, company);
+  }
+  if (usesNetbayLiveStock(stock, company) && stockHasNetbayPlans(stock)) {
+    return readLivePanelVariantAvailable(stock, company);
+  }
+  return getIpStockRemainingFromInventoryOrUnits(stock) >= quantity;
+}
+
+function getIpStockRemainingFromInventoryOrUnits(stock) {
+  if (hasUnallocatedCompanyInventory(stock)) return countUnallocatedInventory(stock);
+  return Math.max(0, Number(stock?.stockCount) || 0);
 }
 
 /** True only when company owner explicitly saved manual units (not live panel sync). */
@@ -153,11 +205,37 @@ function parseInventoryBulkLines(text, serverType = 'Linux') {
 
 async function syncStockCountFromInventory(stockId) {
   const stock = await IPStock.findById(stockId);
-  if (!stock || !usesCompanyInventoryFulfillment(stock)) return stock;
+  if (!stock || !usesPreconfiguredInventory(stock)) return stock;
+
+  let company = null;
+  if (stock.company) {
+    const Company = require('@/models/companyModel').default;
+    company = await Company.findById(stock.company).select('resellerApi netbayApi').lean();
+  }
+
   const remaining = countUnallocatedInventory(stock);
   stock.stockCount = remaining;
-  stock.available = remaining > 0;
-  if (remaining > 0 && stock.autoHiddenFromStore) {
+
+  const {
+    usesResellerLiveStock,
+    usesNetbayLiveStock,
+    stockHasResellerPanelPlans,
+    stockHasNetbayPlans,
+  } = require('@/lib/ipStockAvailability');
+
+  const hybridLive =
+    (usesResellerLiveStock(stock, company) && stockHasResellerPanelPlans(stock)) ||
+    (usesNetbayLiveStock(stock, company) && stockHasNetbayPlans(stock));
+
+  if (hybridLive) {
+    stock.available = remaining > 0 || readLivePanelVariantAvailable(stock, company);
+  } else if (usesCompanyInventoryFulfillment(stock, company)) {
+    stock.available = remaining > 0;
+  } else {
+    stock.available = remaining > 0;
+  }
+
+  if (stock.available && stock.autoHiddenFromStore) {
     const { storeAutoUnhideUpdate } = require('@/lib/ipStockAvailability');
     Object.assign(stock, storeAutoUnhideUpdate(stock, true));
   }
@@ -317,10 +395,7 @@ async function allocateCompanyInventoryForOrder(order) {
     );
 
     if (!allocated) {
-      order.provisioningStatus = 'failed';
-      order.provisioningError = 'No pre-configured servers available in stock';
-      await order.save();
-      return { allocated: false, reason: 'no_inventory_available' };
+      return { allocated: false, reason: 'no_inventory_available', fallbackToApi: true };
     }
 
     const item = allocated.inventoryItems.find(
@@ -369,6 +444,9 @@ module.exports = {
   usesPreconfiguredInventory,
   getCompanyFulfillmentMode,
   usesCompanyInventoryFulfillment,
+  hasUnallocatedCompanyInventory,
+  shouldAssignCompanyInventoryForOrder,
+  isCompanyStockPurchasable,
   usesCompanyUnitFulfillment,
   setCompanyFulfillmentMode,
   mergeCompanyConfig,

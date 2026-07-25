@@ -150,6 +150,8 @@ function isNetbayVariantInStock(stock, memory, company) {
 
 function isResellerVariantInStock(stock, memory, company) {
   if (!memory || !isResellerIpStock(stock)) return true;
+  const { hasUnallocatedCompanyInventory } = require('@/lib/companyInventory');
+  if (hasUnallocatedCompanyInventory(stock)) return true;
   if (!usesResellerLiveStock(stock, company)) return isIpStockPurchasable(stock, 1, company);
   if (stock.available) return true;
   const cfg = toPlainConfigurations(stock.defaultConfigurations)?.resellerApi;

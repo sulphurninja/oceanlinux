@@ -194,6 +194,8 @@ function isResellerMemoryInStock(stock: IPStock, memory: string) {
 }
 
 function isStockPurchasable(stock: IPStock, memory?: string) {
+  const savedVps = stock.inventoryAvailable ?? 0;
+  if (savedVps > 0) return true;
   if (usesCompanyManualUnits(stock)) {
     return getStockUnitsRemaining(stock) > 0;
   }

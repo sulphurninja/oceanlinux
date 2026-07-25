@@ -8,7 +8,18 @@ const { companyUsesNetbayLiveStock } = require('@/lib/companyNetbayApi');
 const { companyUsesResellerLiveStock } = require('@/lib/companyResellerApi');
 const { usesResellerLiveStock, stockHasResellerPanelPlans } = require('@/lib/ipStockAvailability');
 const { syncResellerIpStockRow } = require('@/lib/resellerLiveStock');
-const { getCompanyFulfillmentMode } = require('@/lib/companyInventory');
+const { getCompanyFulfillmentMode, countUnallocatedInventory, usesPreconfiguredInventory } = require('@/lib/companyInventory');
+
+function enrichIpStocksForStore(ipStocks) {
+    return ipStocks.map((stock) => {
+        const hasInventory = usesPreconfiguredInventory(stock);
+        const { inventoryItems, ...safeStock } = stock;
+        return {
+            ...safeStock,
+            inventoryAvailable: hasInventory ? countUnallocatedInventory(stock) : 0,
+        };
+    });
+}
 
 async function enrichIpStocksWithProviderModes(ipStocks) {
     const companyIds = [...new Set(
@@ -142,7 +153,7 @@ export async function GET(request) {
             });
         }
 
-        const enriched = await enrichIpStocksWithProviderModes(ipStocks);
+        const enriched = enrichIpStocksForStore(await enrichIpStocksWithProviderModes(ipStocks));
         const jsonResponse = JSON.stringify(enriched);
         console.log(`[IPSTOCK-API] Response size: ${jsonResponse.length} bytes`);
 

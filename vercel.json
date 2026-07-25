@@ -21,6 +21,10 @@
       "schedule": "*/8 * * * *"
     },
     {
+      "path": "/api/reseller-panel/refresh-stock?force=1",
+      "schedule": "*/5 * * * *"
+    },
+    {
       "path": "/api/orders/expiry-reminders",
       "schedule": "0 4 * * *"
     },

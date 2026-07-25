@@ -239,7 +239,15 @@ async function syncResellerIpStockRow(stock, { force = false, memoryOnly = null,
   const company = ctx.company;
   if (!companyUsesResellerLiveStock(company)) return stock;
 
-  if (stock.availabilityManual === true) {
+  const stockCfg = readResellerApiStockConfig(stock);
+  const isZoneLiveStock =
+    stockCfg.zoneId != null || (Array.isArray(stockCfg.zoneIds) && stockCfg.zoneIds.length > 0);
+
+  // Zone-based PrimeVPS/Hostheaven stock must follow panel ACTIVE/INACTIVE — not manual units.
+  if (isZoneLiveStock && stock.availabilityManual === true) {
+    await IPStock.findByIdAndUpdate(stock._id, { availabilityManual: false });
+    stock.availabilityManual = false;
+  } else if (stock.availabilityManual === true) {
     return IPStock.findById(stock._id).lean();
   }
 
@@ -249,7 +257,6 @@ async function syncResellerIpStockRow(stock, { force = false, memoryOnly = null,
     return stock;
   }
 
-  const stockCfg = readResellerApiStockConfig(stock);
   let memories = getIpStockMemoryKeys(stock);
   if (memories.length === 0) {
     memories = ['4GB', '2GB', '8GB'];
@@ -340,19 +347,25 @@ async function syncResellerIpStockRow(stock, { force = false, memoryOnly = null,
   };
 
   if (!stock.availabilityManual) {
-    updatePayload.available = shouldAvailable;
+    const { hasUnallocatedCompanyInventory, countUnallocatedInventory } = require('@/lib/companyInventory');
+    const invRemaining = hasUnallocatedCompanyInventory(stock) ? countUnallocatedInventory(stock) : 0;
+    const hybridAvailable = shouldAvailable || invRemaining > 0;
+    updatePayload.available = hybridAvailable;
     // Live panel stock: when region/zone is live, plan must show on the store.
-    if (shouldAvailable && usesResellerLiveStock(stock, company)) {
+    if (hybridAvailable && usesResellerLiveStock(stock, company)) {
       updatePayload.hiddenFromStore = false;
       updatePayload.autoHiddenFromStore = false;
-    } else if (shouldAvailable && stock.autoHiddenFromStore) {
+    } else if (hybridAvailable && stock.autoHiddenFromStore) {
       updatePayload.hiddenFromStore = false;
       updatePayload.autoHiddenFromStore = false;
     }
   }
   // Manual override wins over panel zone status — owner set count by hand.
   if (usesResellerLiveStock(stock, company) && !stock.availabilityManual) {
-    updatePayload.stockCount = shouldAvailable ? Math.max(1, maxUnits) : 0;
+    const { hasUnallocatedCompanyInventory, countUnallocatedInventory } = require('@/lib/companyInventory');
+    const invRemaining = hasUnallocatedCompanyInventory(stock) ? countUnallocatedInventory(stock) : 0;
+    updatePayload.stockCount =
+      invRemaining > 0 ? invRemaining : shouldAvailable ? Math.max(1, maxUnits) : 0;
   }
 
   await IPStock.findByIdAndUpdate(stock._id, updatePayload);
@@ -361,6 +374,15 @@ async function syncResellerIpStockRow(stock, { force = false, memoryOnly = null,
 
 async function verifyResellerMemoryInStock(stock, memory, { preferCache = false, zonesList = null } = {}) {
   if (!isResellerIpStock(stock)) return { ok: true, skipped: true };
+
+  const { hasUnallocatedCompanyInventory } = require('@/lib/companyInventory');
+  if (hasUnallocatedCompanyInventory(stock)) {
+    return {
+      ok: true,
+      result: { available: true, stockMode: 'inventory', message: 'Saved VPS in stock' },
+      fromInventory: true,
+    };
+  }
 
   const ctx = await getResellerApiForStock(stock);
   if (!ctx) {

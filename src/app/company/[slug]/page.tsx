@@ -1053,7 +1053,7 @@ export default function CompanyDashboard() {
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-emerald-800 dark:text-emerald-200">PrimeVPS live stock</p>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    Panel zone status se auto in/out of stock. Manual Units save karoge to live sync skip hoga us plan par.
+                    Panel zone ACTIVE/INACTIVE se auto in/out of stock (har 5 min sync). Manual Units mat dabao — zone hi control karega.
                   </p>
                 </div>
                 <Button
@@ -1081,7 +1081,8 @@ export default function CompanyDashboard() {
               const count = stock.stockCount ?? 0;
               const live = stock.liveStock;
               const usesLivePanel = live?.enabled && !live.manualOverride;
-              const inStock = usesLivePanel ? !!live.zoneLive : count > 0;
+              const invFree = stock.inventoryAvailable ?? 0;
+              const inStock = usesLivePanel ? (!!live?.zoneLive || invFree > 0) : (invFree > 0 || count > 0);
               const hasPreconfig = stock.usesPreconfiguredInventory;
               const form = getInventoryForm(stock);
               const osOptions = osOptionsForStock(stock.serverType);
@@ -1104,7 +1105,11 @@ export default function CompanyDashboard() {
                           {stock.tags?.map(t => <Badge key={t} variant="secondary" className="text-[10px] h-4">{t}</Badge>)}
                           {inStock ? (
                             <Badge className="text-[10px] h-4 bg-emerald-500/10 text-emerald-700">
-                              {usesLivePanel ? 'Live on panel' : `${count} in stock`}
+                              {invFree > 0
+                                ? `${invFree} saved VPS · then panel`
+                                : usesLivePanel
+                                  ? 'Live on panel'
+                                  : `${count} in stock`}
                             </Badge>
                           ) : (
                             <Badge className="text-[10px] h-4 bg-red-500/10 text-red-600">Out of stock</Badge>
@@ -1131,23 +1136,32 @@ export default function CompanyDashboard() {
                       >
                         {expanded ? 'Hide' : 'Manage servers'}
                       </Button>
-                      <Label htmlFor={`stock-${stock._id}`} className="text-xs text-muted-foreground whitespace-nowrap">Units</Label>
-                      <Input
-                        id={`stock-${stock._id}`}
-                        type="number"
-                        min={0}
-                        step={1}
-                        value={stockCountDrafts[stock._id] ?? String(count)}
-                        onChange={(e) => setStockCountDrafts(prev => ({ ...prev, [stock._id]: e.target.value }))}
-                        className="w-24 h-9"
-                      />
-                      <Button
-                        size="sm"
-                        onClick={() => updateStockCount(stock._id)}
-                        disabled={savingStockId === stock._id}
-                      >
-                        {savingStockId === stock._id ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save'}
-                      </Button>
+                      {usesLivePanel ? (
+                        <div className="text-xs text-muted-foreground max-w-[220px] text-right">
+                          Panel zone controls stock
+                          {live?.zoneName ? ` · ${live.zoneName}` : ''}
+                        </div>
+                      ) : (
+                        <>
+                          <Label htmlFor={`stock-${stock._id}`} className="text-xs text-muted-foreground whitespace-nowrap">Units</Label>
+                          <Input
+                            id={`stock-${stock._id}`}
+                            type="number"
+                            min={0}
+                            step={1}
+                            value={stockCountDrafts[stock._id] ?? String(count)}
+                            onChange={(e) => setStockCountDrafts(prev => ({ ...prev, [stock._id]: e.target.value }))}
+                            className="w-24 h-9"
+                          />
+                          <Button
+                            size="sm"
+                            onClick={() => updateStockCount(stock._id)}
+                            disabled={savingStockId === stock._id}
+                          >
+                            {savingStockId === stock._id ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save'}
+                          </Button>
+                        </>
+                      )}
                     </div>
                   </div>
 

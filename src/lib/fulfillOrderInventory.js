@@ -2,7 +2,7 @@ const IPStock = require('@/models/ipStockModel');
 const { decrementIpStockForOrder } = require('@/lib/ipStockAvailability');
 const { allocateSlotIpForOrder } = require('@/lib/allocateSlotIpForOrder');
 const {
-  usesCompanyInventoryFulfillment,
+  shouldAssignCompanyInventoryForOrder,
   allocateCompanyInventoryForOrder,
 } = require('@/lib/companyInventory');
 const { orderHasConfirmedPayment } = require('@/lib/orderPaymentStatus');
@@ -63,8 +63,10 @@ async function fulfillOrderInventory(order, options = {}) {
       .lean();
   }
 
-  if (stock && usesCompanyInventoryFulfillment(stock, company)) {
-    return allocateCompanyInventoryForOrder(order);
+  if (stock && shouldAssignCompanyInventoryForOrder(stock, company)) {
+    const result = await allocateCompanyInventoryForOrder(order);
+    if (result.allocated || !result.fallbackToApi) return result;
+    // Saved VPS exhausted — fall through to panel API auto-buy when zone is live.
   }
 
   return decrementIpStockForOrder(order);

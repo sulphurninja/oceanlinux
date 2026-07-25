@@ -27,6 +27,7 @@ const {
   serializeResellerZonesForClient,
 } = require('@/lib/resellerZoneConfig');
 const { syncResellerIpStockRow, stockHasResellerPanelPlans } = require('@/lib/resellerLiveStock');
+const { readResellerApiStockConfig } = require('@/lib/resellerApiStockConfig');
 const ResellerApi = require('@/services/resellerApi');
 const {
   fetchResellerCredentialsByIp,
@@ -336,7 +337,10 @@ const ResellerApi = require('@/services/resellerApi');
 
     for (const stock of stocks) {
       if (!stockHasResellerPanelPlans(stock)) continue;
-      if (stock.availabilityManual) {
+      const stockCfg = readResellerApiStockConfig(stock);
+      const isZoneLiveStock =
+        (stockCfg.zoneId != null || (stockCfg.zoneIds?.length ?? 0) > 0);
+      if (stock.availabilityManual && !isZoneLiveStock) {
         skippedManual += 1;
         continue;
       }
@@ -444,8 +448,21 @@ const ResellerApi = require('@/services/resellerApi');
     }
   }
 
-  // Manual unit stock — always allowed; switches plan to units mode on save
+  // Manual unit stock — blocked for live zone plans (panel controls in/out of stock).
   if (action === 'setStockCount' || (stockCount !== undefined && !action)) {
+    if (companyUsesResellerLiveStock(companyDoc) && stockHasResellerPanelPlans(stock)) {
+      const stockCfg = readResellerApiStockConfig(stock);
+      if (stockCfg.zoneId != null || (stockCfg.zoneIds?.length ?? 0) > 0) {
+        return NextResponse.json(
+          {
+            error:
+              'Live zone stock is controlled by panel region status. Use "Sync live stock" — do not set manual units.',
+          },
+          { status: 400 }
+        );
+      }
+    }
+
     const count = Math.max(0, Math.floor(Number(stockCount) || 0));
     const companyCfg = mergeCompanyConfig(stock, { fulfillmentMode: 'units' });
     stock.defaultConfigurations.set('company', companyCfg);

@@ -362,18 +362,23 @@ async function syncNetbayIpStockRow(stock, { force = false, sharedCheckCache = n
   };
 
   if (!stock.availabilityManual) {
-    updatePayload.available = shouldAvailable;
-    if (shouldAvailable && usesNetbayLiveStock(stock, company)) {
+    const { hasUnallocatedCompanyInventory, countUnallocatedInventory } = require('@/lib/companyInventory');
+    const invRemaining = hasUnallocatedCompanyInventory(stock) ? countUnallocatedInventory(stock) : 0;
+    const hybridAvailable = shouldAvailable || invRemaining > 0;
+    updatePayload.available = hybridAvailable;
+    if (hybridAvailable && usesNetbayLiveStock(stock, company)) {
       updatePayload.hiddenFromStore = false;
       updatePayload.autoHiddenFromStore = false;
-    } else if (shouldAvailable && stock.autoHiddenFromStore) {
+    } else if (hybridAvailable && stock.autoHiddenFromStore) {
       updatePayload.hiddenFromStore = false;
       updatePayload.autoHiddenFromStore = false;
     }
   }
 
   if (usesNetbayLiveStock(stock, company)) {
-    updatePayload.stockCount = 0;
+    const { hasUnallocatedCompanyInventory, countUnallocatedInventory } = require('@/lib/companyInventory');
+    const invRemaining = hasUnallocatedCompanyInventory(stock) ? countUnallocatedInventory(stock) : 0;
+    updatePayload.stockCount = invRemaining > 0 ? invRemaining : 0;
   }
 
   await IPStock.findByIdAndUpdate(stock._id, updatePayload);
