@@ -73,6 +73,7 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog";
 import { toast } from 'sonner';
+import { useSessionAlert } from '@/components/session-alert';
 import { cn } from '@/lib/utils';
 import { Label } from '@/components/ui/label';
 import {
@@ -154,6 +155,7 @@ const OrderHistory = () => {
     const [activeTab, setActiveTab] = useState<string>('all');
 
     const router = useRouter();
+    const { showAlert } = useSessionAlert();
 
     useEffect(() => {
         fetchOrders();
@@ -162,14 +164,26 @@ const OrderHistory = () => {
     const fetchOrders = async () => {
         setLoading(true);
         try {
-            const response = await fetch('/api/orders/me');
+            const response = await fetch('/api/orders/me', { cache: 'no-store', credentials: 'include' });
+            if (response.status === 401) {
+                const data = await response.json().catch(() => ({}));
+                const code = data.code || '';
+                if (code === 'SESSION_EXPIRED' || String(data.message || '').toLowerCase().includes('expired')) {
+                    showAlert('session_expired');
+                } else {
+                    showAlert('action_requires_login', 'Please log in to view your order history.');
+                }
+                return;
+            }
             if (!response.ok) throw new Error('Failed to fetch orders');
             const data = await response.json();
+            if (!Array.isArray(data)) {
+                throw new Error('Invalid orders response');
+            }
             setOrders(data);
         } catch (error) {
             console.error('Failed to fetch orders:', error);
-            toast.error('Failed to fetch order history');
-            router.push('/login');
+            toast.error('Could not load order history. Please try again.');
         } finally {
             setLoading(false);
         }

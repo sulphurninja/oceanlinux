@@ -25,6 +25,7 @@ import {
 } from '@/components/ui/select';
 import { Loader2, Plus, Ticket, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
+import { useSessionAlert } from '@/components/session-alert';
 import { cn } from '@/lib/utils';
 import { premiumBadge, premiumBtnOutline } from '@/lib/premium-badges';
 import {
@@ -38,6 +39,7 @@ import {
 
 export default function DashboardSupportTicketsPage() {
   const router = useRouter();
+  const { showAlert } = useSessionAlert();
   const [tickets, setTickets] = useState<SupportTicketRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
@@ -55,8 +57,13 @@ export default function DashboardSupportTicketsPage() {
       const response = await fetch('/api/support/tickets', { credentials: 'include' });
 
       if (response.status === 401) {
-        toast.error('Please log in again');
-        router.push('/login');
+        const data = await response.json().catch(() => ({}));
+        const code = data.code || '';
+        if (code === 'SESSION_EXPIRED' || String(data.message || '').toLowerCase().includes('expired')) {
+          showAlert('session_expired');
+        } else {
+          showAlert('action_requires_login', 'Please log in to view your support tickets.');
+        }
         return;
       }
 

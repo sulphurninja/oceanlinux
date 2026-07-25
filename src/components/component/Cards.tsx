@@ -24,7 +24,8 @@ const Dashboard = () => {
 
 
                 const response = await fetch('/api/orders/me', {
-                    headers: { 'Authorization': `Bearer ` }
+                    cache: 'no-store',
+                    credentials: 'include',
                 });
 
                 if (!response.ok) {

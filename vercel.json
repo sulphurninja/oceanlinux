@@ -31,6 +31,14 @@
     {
       "path": "/api/cart/checkout/sweep?minutes=30",
       "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/payment/recover-pending?minutes=120&limit=30",
+      "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/admin/advps-pending-cron",
+      "schedule": "*/15 * * * *"
     }
   ]
 }

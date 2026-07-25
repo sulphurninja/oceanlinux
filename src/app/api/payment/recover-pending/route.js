@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 import { recoverPendingOrderPayment } from '@/lib/confirmPendingOrderPayment';
+import { enforceCronSecret } from '@/lib/apiSecurity';
 
 /**
  * POST /api/payment/recover-pending
@@ -10,26 +11,15 @@ import { recoverPendingOrderPayment } from '@/lib/confirmPendingOrderPayment';
  * confirmation was missed (callback race, webhook delay, etc.).
  *
  * Query: ?minutes=60&limit=50
- * Auth: CRON_SECRET header or ?secret=
+ * Auth: CRON_SECRET via Authorization Bearer, x-cron-secret, or ?secret=
  */
 export async function POST(request) {
-  const cronSecret = process.env.CRON_SECRET;
-  const headerSecret = request.headers.get('x-cron-secret');
-  const url = new URL(request.url);
-  const querySecret = url.searchParams.get('secret');
-
-  if (!cronSecret) {
-    return NextResponse.json(
-      { success: false, message: 'CRON_SECRET not configured' },
-      { status: 503 }
-    );
-  }
-  if (headerSecret !== cronSecret && querySecret !== cronSecret) {
-    return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
-  }
+  const cronDenied = enforceCronSecret(request);
+  if (cronDenied) return cronDenied;
 
   await connectDB();
 
+  const url = new URL(request.url);
   const lookbackMinutes = Math.max(10, Number(url.searchParams.get('minutes')) || 120);
   const limit = Math.min(100, Math.max(1, Number(url.searchParams.get('limit')) || 30));
   const cutoff = new Date(Date.now() - lookbackMinutes * 60 * 1000);
@@ -81,4 +71,8 @@ export async function POST(request) {
     lookbackMinutes,
     results,
   });
+}
+
+export async function GET(request) {
+  return POST(request);
 }

@@ -63,6 +63,7 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import { toast } from 'sonner';
+import { useSessionAlert } from '@/components/session-alert';
 import { cn } from '@/lib/utils';
 import { useTheme } from 'next-themes';
 import RealActivityFeed from '@/components/real-activity-feed';
@@ -193,6 +194,7 @@ const MyAccount = () => {
     const [emailChangeError, setEmailChangeError] = useState('');
 
     const router = useRouter();
+    const { showAlert } = useSessionAlert();
 
     const { theme, setTheme, systemTheme } = useTheme();
 
@@ -219,7 +221,17 @@ const MyAccount = () => {
     const fetchUserData = async () => {
         try {
             setLoading(true);
-            const response = await fetch('/api/users/me');
+            const response = await fetch('/api/users/me', { cache: 'no-store', credentials: 'include' });
+            if (response.status === 401) {
+                const authData = await response.json().catch(() => ({}));
+                const code = authData.code || '';
+                if (code === 'SESSION_EXPIRED' || String(authData.message || '').toLowerCase().includes('expired')) {
+                    showAlert('session_expired');
+                } else {
+                    showAlert('action_requires_login', 'Please log in to view your account.');
+                }
+                return;
+            }
             if (!response.ok) throw new Error('Failed to fetch user data');
             const data = await response.json();
 
@@ -282,8 +294,7 @@ const MyAccount = () => {
 
         } catch (error) {
             console.error('Error fetching user data:', error);
-            toast.error('Failed to load profile data');
-            router.push('/login');
+            toast.error('Could not load profile data. Please try again.');
         } finally {
             setLoading(false);
         }
