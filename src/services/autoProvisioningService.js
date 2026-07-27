@@ -826,6 +826,39 @@ class AutoProvisioningService {
         throw new Error(`Order ${orderId} not found in database`);
       }
 
+      // Slot IP orders are inventory-assigned — never route to Hostycare/SmartVPS/etc.
+      if (paymentCheckOrder.slotIpPackageId) {
+        if (paymentCheckOrder.slotIpId && paymentCheckOrder.ipAddress) {
+          return {
+            success: true,
+            alreadyProvisioned: true,
+            message: 'Slot IP already assigned',
+            ipAddress: paymentCheckOrder.ipAddress,
+            totalTime: Date.now() - startTime,
+          };
+        }
+        const { fulfillOrderInventory } = require('@/lib/fulfillOrderInventory');
+        await fulfillOrderInventory(paymentCheckOrder);
+        const slotOrder = await Order.findById(orderId);
+        if (slotOrder?.slotIpId && slotOrder?.ipAddress) {
+          return {
+            success: true,
+            message: 'Slot IP assigned',
+            ipAddress: slotOrder.ipAddress,
+            totalTime: Date.now() - startTime,
+          };
+        }
+        const slotErr =
+          slotOrder?.provisioningError || 'No slot IPs available in this package';
+        return {
+          success: false,
+          slotIpOrder: true,
+          error: slotErr,
+          message: slotErr,
+          totalTime: Date.now() - startTime,
+        };
+      }
+
       // Never re-block an order that was already delivered.
       const alreadyDelivered =
         paymentCheckOrder.provisioningStatus === 'active' && !!paymentCheckOrder.ipAddress;

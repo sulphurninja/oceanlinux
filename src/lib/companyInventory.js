@@ -50,6 +50,30 @@ function usesPreconfiguredInventory(stock) {
   return !!(stock?.company && Array.isArray(stock.inventoryItems) && stock.inventoryItems.length > 0);
 }
 
+function stockHasLivePanelPlan(stock) {
+  const {
+    stockHasKurohostPlans,
+    stockHasNetbayPlans,
+    stockHasResellerPanelPlans,
+  } = require('@/lib/ipStockAvailability');
+  return (
+    stockHasKurohostPlans(stock) ||
+    stockHasNetbayPlans(stock) ||
+    stockHasResellerPanelPlans(stock)
+  );
+}
+
+/**
+ * Saved VPS rows drive store availability only when fulfillment is inventory-first.
+ * KuroHost/Netbay/Reseller plans may keep legacy sold rows — zone/live stock still applies.
+ */
+function inventoryDrivesStoreAvailability(stock) {
+  if (!usesPreconfiguredInventory(stock)) return false;
+  if (readCompanyConfig(stock).fulfillmentMode === 'inventory') return true;
+  if (stockHasLivePanelPlan(stock)) return false;
+  return true;
+}
+
 function readCompanyConfig(stock) {
   let cfg = stock?.defaultConfigurations?.company;
   if (!cfg && typeof stock?.defaultConfigurations?.get === 'function') {
@@ -66,8 +90,9 @@ function mergeCompanyConfig(stock, patch) {
 function getCompanyFulfillmentMode(stock) {
   const mode = readCompanyConfig(stock).fulfillmentMode;
   if (mode === 'inventory') return 'inventory';
+  if (mode === 'units') return 'units';
   if (stock?.availabilityManual === true) return 'units';
-  if (usesPreconfiguredInventory(stock)) return 'inventory';
+  if (usesPreconfiguredInventory(stock) && !stockHasLivePanelPlan(stock)) return 'inventory';
   return 'auto';
 }
 
@@ -488,6 +513,8 @@ module.exports = {
   allowedOsForServerType,
   normalizeOsForServerType,
   usesPreconfiguredInventory,
+  inventoryDrivesStoreAvailability,
+  stockHasLivePanelPlan,
   getCompanyFulfillmentMode,
   usesCompanyInventoryFulfillment,
   hasUnallocatedCompanyInventory,

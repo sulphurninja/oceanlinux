@@ -313,7 +313,7 @@ export async function refreshAndVerifyIpStockPurchase(ipStockId, memory) {
   };
 }
 
-export async function refreshAndVerifySlotIpPurchase(slotIpPackageId) {
+export async function refreshAndVerifySlotIpPurchase(slotIpPackageId, quantity = 1) {
   await connectDB();
 
   const pkg = await SlotIPPackage.findById(slotIpPackageId);
@@ -326,10 +326,16 @@ export async function refreshAndVerifySlotIpPurchase(slotIpPackageId) {
   }
 
   const availableIps = (pkg.ips || []).filter((ip) => !ip.allocated);
-  if (!pkg.available || availableIps.length === 0) {
+  const need = Math.max(1, Math.floor(Number(quantity) || 1));
+  if (!pkg.available || availableIps.length < need) {
     return {
       ok: false,
-      message: customerStockUnavailableMessage('No slot IPs available in this package', { kind: 'slot' }),
+      message: customerStockUnavailableMessage(
+        availableIps.length === 0
+          ? 'No slot IPs available in this package'
+          : `Only ${availableIps.length} slot IP${availableIps.length === 1 ? '' : 's'} available, need ${need}`,
+        { kind: 'slot' }
+      ),
       synced: true,
     };
   }
@@ -342,9 +348,9 @@ export async function refreshAndVerifySlotIpPurchase(slotIpPackageId) {
   };
 }
 
-export async function refreshAndVerifyPurchase({ ipStockId, slotIpPackageId, memory }) {
+export async function refreshAndVerifyPurchase({ ipStockId, slotIpPackageId, memory, quantity }) {
   if (slotIpPackageId) {
-    return refreshAndVerifySlotIpPurchase(slotIpPackageId);
+    return refreshAndVerifySlotIpPurchase(slotIpPackageId, quantity);
   }
   if (!ipStockId) {
     return {

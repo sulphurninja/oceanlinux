@@ -92,6 +92,7 @@ export async function POST(request) {
       ipStockId: item.ipStockId,
       memory: item.memory,
       slotIpPackageId: item.slotIpPackageId,
+      quantity: item.quantity,
     });
     if (!live.ok) {
       return NextResponse.json({

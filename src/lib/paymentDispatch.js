@@ -620,6 +620,7 @@ export async function confirmCheckoutFromWebhook(session, { paymentMethod, trans
       updated?.slotIpPackageId ||
       updated?.inventoryItemId ||
       updated?.ipAddress ||
+      updated?.slotIpId ||
       updated?.provisioningStatus === 'active'
     ) {
       continue;

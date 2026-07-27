@@ -36,6 +36,13 @@ function sleep(ms) {
 // Helper: Comprehensive validation for order configuration
 async function validateOrderConfiguration(order) {
     try {
+        if (order.slotIpPackageId) {
+            return {
+                valid: false,
+                reason: 'Slot IP order — assign from package inventory, not VPS auto-provision',
+            };
+        }
+
         const IPStock = require('@/models/ipStockModel');
         
         console.log(`[VALIDATION] 🔍 Validating order ${order._id}:`);
@@ -264,6 +271,13 @@ async function acquireDatabaseLock() {
         const candidateOrders = await Order.find({
             $and: [
                 { status: 'confirmed' },
+                {
+                    $or: [
+                        { slotIpPackageId: { $exists: false } },
+                        { slotIpPackageId: null },
+                        { slotIpPackageId: '' },
+                    ],
+                },
                 {
                     $or: [
                         { autoProvisioned: { $ne: true } },

@@ -10,7 +10,7 @@ const { companyUsesResellerLiveStock } = require('@/lib/companyResellerApi');
 const { usesResellerLiveStock, usesKurohostLiveStock, stockHasResellerPanelPlans, stockHasKurohostPlans } = require('@/lib/ipStockAvailability');
 const { syncResellerIpStockRow } = require('@/lib/resellerLiveStock');
 const { syncKurohostIpStockRow } = require('@/lib/kurohostLiveStock');
-const { getCompanyFulfillmentMode, countUnallocatedInventory, usesPreconfiguredInventory } = require('@/lib/companyInventory');
+const { getCompanyFulfillmentMode, countUnallocatedInventory, usesPreconfiguredInventory, inventoryDrivesStoreAvailability } = require('@/lib/companyInventory');
 
 function toPlainMap(value) {
     if (!value) return {};
@@ -48,8 +48,14 @@ function slimDefaultConfigurationsForStore(defaultConfigurations) {
     }
 
     if (dc.kurohost && typeof dc.kurohost === 'object') {
+        const flavorByMemory = {};
+        for (const [memory, flavorId] of Object.entries(toPlainMap(dc.kurohost.flavorByMemory))) {
+            if (flavorId) flavorByMemory[memory] = true;
+        }
         slim.kurohost = {
             cloudZoneId: !!dc.kurohost.cloudZoneId,
+            zoneIds: Array.isArray(dc.kurohost.zoneIds) ? dc.kurohost.zoneIds.map(String) : [],
+            flavorByMemory,
             variantStock: slimVariantStock(dc.kurohost.variantStock),
         };
     }
@@ -66,12 +72,13 @@ function slimDefaultConfigurationsForStore(defaultConfigurations) {
 function enrichIpStocksForStore(ipStocks) {
     return ipStocks.map((stock) => {
         const hasInventory = usesPreconfiguredInventory(stock);
+        const inventoryForStore = hasInventory && inventoryDrivesStoreAvailability(stock);
         const { inventoryItems, defaultConfigurations, ...safeStock } = stock;
         return {
             ...safeStock,
             defaultConfigurations: slimDefaultConfigurationsForStore(defaultConfigurations),
-            usesPreconfiguredInventory: hasInventory,
-            inventoryAvailable: hasInventory ? countUnallocatedInventory(stock) : undefined,
+            usesPreconfiguredInventory: inventoryForStore,
+            inventoryAvailable: inventoryForStore ? countUnallocatedInventory(stock) : undefined,
         };
     });
 }

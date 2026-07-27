@@ -55,10 +55,28 @@ export async function PUT(request, { params }) {
       if (newIps.length > 0) {
         const pkg = await SlotIPPackage.findByIdAndUpdate(
           id,
-          { $push: { ips: { $each: newIps } } },
+          {
+            $push: { ips: { $each: newIps } },
+            $set: { available: true },
+          },
           { new: true }
         );
-        return NextResponse.json({ success: true, package: pkg, added: newIps.length });
+
+        let slotRetry = { retried: 0, allocated: 0 };
+        try {
+          const { retryPendingSlotIpOrdersForPackage } = require('@/lib/retryPendingSlotIpOrders');
+          slotRetry = await retryPendingSlotIpOrdersForPackage(id);
+        } catch (retryErr) {
+          console.error('[slot-ips] Auto-assign pending orders failed:', retryErr.message);
+        }
+
+        return NextResponse.json({
+          success: true,
+          package: pkg,
+          added: newIps.length,
+          autoAssignedOrders: slotRetry.allocated,
+          pendingRetried: slotRetry.retried,
+        });
       }
       return NextResponse.json({ error: 'No valid IPs to add' }, { status: 400 });
     }
