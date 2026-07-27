@@ -167,6 +167,62 @@ async function resolveCompanyKurohostApi(order) {
   }
 }
 
+/** KuroHost power actions are async; treat already-in-target-state as success. */
+async function runKurohostPowerAction(api, instanceId, action) {
+  const detailRes = await api.getInstance(instanceId);
+  const current = KurohostApi.unwrapInstance(detailRes);
+  const status = String(current?.status || '').toUpperCase();
+
+  if (action === 'start' && status === 'RUNNING') {
+    return {
+      apiResponse: { instance: current, action: 'start', alreadyInState: true },
+      message: 'Server is already running',
+      powerState: 'running',
+      rawStatus: status,
+    };
+  }
+  if (action === 'stop' && (status === 'STOPPED' || status === 'SUSPENDED')) {
+    return {
+      apiResponse: { instance: current, action: 'stop', alreadyInState: true },
+      message: 'Server is already stopped',
+      powerState: 'stopped',
+      rawStatus: status,
+    };
+  }
+  if ((action === 'restart' || action === 'reboot') && status === 'STOPPED') {
+    const err = new Error('Cannot reboot a stopped instance — start it first.');
+    err.status = 409;
+    throw err;
+  }
+
+  let apiRes;
+  if (action === 'start') apiRes = await api.startInstance(instanceId);
+  else if (action === 'stop') apiRes = await api.stopInstance(instanceId);
+  else apiRes = await api.rebootInstance(instanceId);
+
+  const jobId = apiRes?.job?.id || apiRes?.jobId || null;
+  if (jobId) {
+    try {
+      await api.waitForJob(jobId, { maxWaitMs: 120_000, pollIntervalMs: 3_000 });
+    } catch (jobErr) {
+      console.warn(`[SERVICE-ACTION] KuroHost ${action} job poll: ${jobErr.message}`);
+    }
+  }
+
+  const afterRes = await api.getInstance(instanceId);
+  const after = KurohostApi.unwrapInstance(afterRes);
+  const { powerState, rawStatus } = resolveKurohostPowerState(after);
+
+  const actionLabel = action === 'start' ? 'Start' : action === 'stop' ? 'Stop' : 'Reboot';
+  return {
+    apiResponse: apiRes,
+    message: `${actionLabel} command completed`,
+    powerState,
+    rawStatus,
+    jobId,
+  };
+}
+
 /**
  * Resolve the company-level Joy Services API config for an order. Joy is a
  * manage-only provider (power actions + status) with NO per-order service id —
@@ -674,29 +730,32 @@ export async function POST(request) {
 
       try {
         switch (action) {
-          case 'start': {
-            const apiRes = await kurohostApi.startInstance(order.kurohostInstanceId);
-            await Order.findByIdAndUpdate(orderId, { lastAction: 'start', lastActionTime: new Date() });
-            return NextResponse.json({
-              success: true,
-              result: { success: true, message: 'Start command sent', apiResponse: apiRes, instanceId: order.kurohostInstanceId },
-            });
-          }
-          case 'stop': {
-            const apiRes = await kurohostApi.stopInstance(order.kurohostInstanceId);
-            await Order.findByIdAndUpdate(orderId, { lastAction: 'stop', lastActionTime: new Date() });
-            return NextResponse.json({
-              success: true,
-              result: { success: true, message: 'Stop command sent', apiResponse: apiRes, instanceId: order.kurohostInstanceId },
-            });
-          }
+          case 'start':
+          case 'stop':
           case 'restart':
           case 'reboot': {
-            const apiRes = await kurohostApi.rebootInstance(order.kurohostInstanceId);
-            await Order.findByIdAndUpdate(orderId, { lastAction: 'restart', lastActionTime: new Date() });
+            const normalizedAction = action === 'reboot' ? 'restart' : action;
+            const powerResult = await runKurohostPowerAction(
+              kurohostApi,
+              order.kurohostInstanceId,
+              normalizedAction
+            );
+            await Order.findByIdAndUpdate(orderId, {
+              lastAction: normalizedAction,
+              lastActionTime: new Date(),
+              ...(powerResult.jobId ? { kurohostJobId: powerResult.jobId } : {}),
+            });
             return NextResponse.json({
               success: true,
-              result: { success: true, message: 'Reboot command sent', apiResponse: apiRes, instanceId: order.kurohostInstanceId },
+              powerState: powerResult.powerState,
+              rawStatus: powerResult.rawStatus,
+              result: {
+                success: true,
+                message: powerResult.message,
+                apiResponse: powerResult.apiResponse,
+                instanceId: order.kurohostInstanceId,
+                alreadyInState: !!powerResult.apiResponse?.alreadyInState,
+              },
             });
           }
           case 'terminate': {

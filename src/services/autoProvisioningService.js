@@ -11,6 +11,7 @@ const IPStock = require('@/models/ipStockModel');
 const Company = require('@/models/companyModel').default;
 const { getCompanyNetbayApiConfig } = require('@/lib/companyNetbayApi');
 const { getCompanyKurohostApiConfig } = require('@/lib/companyKurohostApi');
+const { generateSecurePassword } = require('@/lib/securePassword');
 const {
   readKurohostStockConfig,
   resolveKurohostFlavorId,
@@ -1725,14 +1726,15 @@ class AutoProvisioningService {
         throw new Error('Could not resolve a KuroHost OS template. Set defaultOs or osTemplateByMemory in manageIpStock.');
       }
 
-      L.kv('[KUROHOST] create payload', { cloudZoneId, cloudFlavorId, osTemplateId });
+      L.kv('[KUROHOST] create payload', { cloudZoneId, flavorId: cloudFlavorId, osTemplateId });
 
+      const rootPassword = order.password || generateSecurePassword();
       const createRes = await api.createInstance({
         cloudZoneId,
-        cloudFlavorId,
+        flavorId: cloudFlavorId,
         osTemplateId,
         name: `ol-${String(order._id).slice(-8)}`,
-        hostname: `vm-${String(order._id).slice(-8)}`,
+        password: rootPassword,
       });
 
       const instance = KurohostApi.unwrapInstance(createRes);
@@ -1750,6 +1752,7 @@ class AutoProvisioningService {
         kurohostFlavorId: cloudFlavorId,
         provider: 'kurohost',
         autoProvisioned: true,
+        password: rootPassword,
       });
     } else {
       L.line(`[KUROHOST] Resuming — instanceId=${kurohostInstanceId}, jobId=${kurohostJobId || 'n/a'}`);
@@ -1777,7 +1780,9 @@ class AutoProvisioningService {
       ipAddress = KurohostApi.extractInstanceIp(inst) || '';
       const creds = KurohostApi.extractCredentials(inst);
       if (creds.username) username = creds.username;
-      if (creds.password) password = creds.password;
+      // KuroHost GET /instances never returns plaintext password (only rootPasswordEnc).
+      // We keep the password we sent at create/reinstall time.
+      if (!password && creds.password) password = creds.password;
     } catch (detailErr) {
       L.line(`[KUROHOST] getInstance failed: ${detailErr.message}`);
     }

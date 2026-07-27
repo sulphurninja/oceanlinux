@@ -402,7 +402,7 @@ const OrderDetails = () => {
 
   useEffect(() => {
     if (orderId) {
-      fetchOrder();
+      fetchOrderAndIPStock();
     }
   }, [orderId]);
 
@@ -411,11 +411,6 @@ const OrderDetails = () => {
       if (wallet) setWalletBalance(wallet.balance);
     });
   }, []);
-  useEffect(() => {
-    if (orderId) {
-      fetchOrderAndIPStock();
-    }
-  }, [orderId]);
 
   // Fetch server power state when order is loaded (for managed orders).
   // OceanLinux orders only get status polling when the linked company has
@@ -513,8 +508,8 @@ const OrderDetails = () => {
     };
   }, [order?._id, order?.status, order?.provisioningStatus, order?.ipAddress, order?.password, loading, orderId]);
 
-  const fetchOrderAndIPStock = async () => {
-    setLoading(true);
+  const fetchOrderAndIPStock = async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoading(true);
     try {
       console.log('[ORDER-DETAILS] Fetching order:', orderId);
       const response = await dashboardFetch(`/api/orders/${orderId}`, { cache: 'no-store', credentials: 'include' });
@@ -560,12 +555,12 @@ const OrderDetails = () => {
       console.error('Failed to fetch order:', error);
       toast.error('Failed to load order details');
     } finally {
-      setLoading(false);
+      if (!opts?.silent) setLoading(false);
     }
   };
 
-  const fetchOrder = async () => {
-    setLoading(true);
+  const fetchOrder = async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoading(true);
     try {
       const response = await dashboardFetch(`/api/orders/${orderId}`, { cache: 'no-store', credentials: 'include' });
       if (response.status === 401) {
@@ -579,7 +574,7 @@ const OrderDetails = () => {
       console.error('Failed to fetch order:', error);
       toast.error('Failed to load order details');
     } finally {
-      setLoading(false);
+      if (!opts?.silent) setLoading(false);
     }
   };
 
@@ -1055,12 +1050,12 @@ const OrderDetails = () => {
       // API) rotates the password on reinstall and reports it via
       // syncResult.credentialsUpdated; ADVPS reports it top-level.
       if (data.credentialsUpdated || data.syncResult?.credentialsUpdated) {
-        await fetchOrder();
+        await fetchOrder({ silent: true });
         if (provider === 'netbay' && (data.credentialsUpdated || data.syncResult?.credentialsUpdated)) {
           setShowPassword(true);
         }
       } else if (data.syncResult?.expiryUpdated) {
-        await fetchOrder();
+        await fetchOrder({ silent: true });
       }
 
       return nextState;
@@ -1171,9 +1166,15 @@ const OrderDetails = () => {
           setServerPowerState(syncedPower);
         }
 
-        await fetchOrder();
+        await fetchOrder({ silent: true });
 
-        if (!opts?.skipPowerRefresh && data.success && (provider === 'hostycare' || provider === 'smartvps' || provider === 'advps')) {
+        if (!opts?.skipPowerRefresh && data.success && (
+          provider === 'hostycare' ||
+          provider === 'smartvps' ||
+          provider === 'advps' ||
+          provider === 'netbay' ||
+          provider === 'kurohost'
+        )) {
           await fetchServerPowerState({ force: true });
         }
 
@@ -1308,7 +1309,7 @@ const OrderDetails = () => {
           loadServiceDetails({
             skipPowerRefresh: ['start', 'stop', 'restart', 'resetmac'].includes(action),
           }),
-          fetchOrder(),
+          fetchOrder({ silent: true }),
         ]);
 
         if (action === 'changepassword' || action === 'reinstall' || action === 'format') {
@@ -1704,7 +1705,7 @@ const OrderDetails = () => {
         ? 'OS change is taking longer than expected. Use Sync to refresh credentials.'
         : 'Update is taking longer than expected. Use Sync or check back shortly.'
     );
-    await fetchOrder();
+    await fetchOrder({ silent: true });
     await fetchServerPowerState({ force: true });
     await new Promise((resolve) => setTimeout(resolve, 3000));
     closeDialog();
@@ -1879,7 +1880,7 @@ const OrderDetails = () => {
         } else {
           toast.success('Service renewed successfully using wallet balance!');
         }
-        await fetchOrder();
+        await fetchOrder({ silent: true });
         setActionBusy(null);
         return;
       }
@@ -1976,7 +1977,7 @@ const OrderDetails = () => {
               if (confirmData.companyApproval?.status === 'pending') {
                 toast.success('Payment received — your provider will approve the renewal shortly.');
               }
-              await fetchOrder();
+              await fetchOrder({ silent: true });
             } else {
               toast.error("Payment successful but renewal processing failed. Please contact support.");
             }
@@ -2135,6 +2136,7 @@ const OrderDetails = () => {
         provider === 'smartvps' ||
         (provider === 'advps' && !!order?.advpsServiceId) ||
         (provider === 'netbay' && !!order?.netbayServiceId) ||
+        (provider === 'kurohost' && !!order?.kurohostInstanceId) ||
         (companyAutomated && hasAssignedIp)
       ) &&
       isActiveStatus;
@@ -2322,6 +2324,7 @@ const OrderDetails = () => {
     provider === 'smartvps' ||
     (provider === 'advps' && !!order.advpsServiceId) ||
     (provider === 'netbay' && !!order.netbayServiceId) ||
+    (provider === 'kurohost' && !!order.kurohostInstanceId) ||
     isOrderCompanyAutomated(order, ipStock));
   const currentListPrice = getCurrentListPriceFromStock(ipStock, order.memory);
   const renewalPrice = renewalPaymentTotals.total;
@@ -2371,11 +2374,11 @@ const OrderDetails = () => {
                 onClick={() => {
                   if (order && getProviderFromOrder(order, ipStock) === 'advps' && order.advpsServiceId) {
                     loadServiceDetails();
-                  } else if (order && usesLivePowerUi) {
+                  } else if (order && (usesLivePowerUi || (provider === 'kurohost' && order.kurohostInstanceId))) {
                     void fetchServerPowerState({ force: true });
-                    void fetchOrder();
+                    void fetchOrder({ silent: true });
                   } else {
-                    fetchOrder();
+                    fetchOrder({ silent: true });
                   }
                 }}
                 disabled={loading || serviceLoading}

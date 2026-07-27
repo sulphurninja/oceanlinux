@@ -226,6 +226,8 @@ class KurohostApi {
   static extractInstanceIp(instance) {
     if (!instance) return '';
     if (instance.primaryIp) return String(instance.primaryIp).trim();
+    const vpsIp = instance.vpsService?.ipAddress?.address;
+    if (vpsIp) return String(vpsIp).trim();
     const ips = instance.ips || instance.ipAddresses || [];
     for (const row of ips) {
       const addr = row?.ipAddress?.address || row?.address || row?.ip;
@@ -237,12 +239,16 @@ class KurohostApi {
   static extractCredentials(instance) {
     if (!instance) return { username: '', password: '' };
     const creds = instance.credentials || instance.access || instance.login || {};
+    const vps = instance.vpsService || {};
     const username =
       instance.username ||
       instance.rootUsername ||
+      vps.ciuser ||
       creds.username ||
       creds.user ||
-      'root';
+      (instance?.osTemplate?.isWindows || vps.osTemplateName?.toLowerCase?.().includes('windows')
+        ? 'Administrator'
+        : 'root');
     const password =
       instance.password ||
       instance.rootPassword ||
