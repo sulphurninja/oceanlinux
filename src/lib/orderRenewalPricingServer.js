@@ -7,6 +7,32 @@ import {
   labelContainsIpPrefix,
 } from '@/lib/orderRenewalPricing';
 
+function pickBestStockCandidate(candidates, order, productPrefix) {
+  let best = null;
+  let bestPrice = null;
+  let bestScore = -1;
+
+  const orderProduct = String(order.productName || '').trim();
+
+  for (const candidate of candidates) {
+    if (!labelContainsIpPrefix(candidate.name, productPrefix)) continue;
+    const price = getCurrentListPriceFromStock(candidate, order.memory);
+    if (price == null || price <= 0) continue;
+
+    const exactName = String(candidate.name || '').trim() === orderProduct;
+    const exactPrefix = extractIpPrefixFromLabel(candidate.name) === productPrefix;
+    const score = (exactName ? 2_000_000 : 0) + (exactPrefix ? 1_000_000 : 0) + price;
+
+    if (score > bestScore) {
+      best = candidate;
+      bestPrice = price;
+      bestScore = score;
+    }
+  }
+
+  return best ? { stock: best, listPrice: bestPrice } : null;
+}
+
 /**
  * Resolve the IP stock + list price to use for renewal.
  * When order.productName says "192.232.xx" but ipStockId still points at an old
@@ -46,30 +72,39 @@ export async function resolveRenewalIpStockForOrder(order) {
 
   // Product line renamed / re-listed — find the current stock for this IP range.
   const escaped = productPrefix.replace(/\./g, '\\.');
-  const candidates = await IPStock.find({
-    company: linked.company,
-    name: { $regex: new RegExp(escaped, 'i') },
-  }).lean();
+  const prefixRegex = new RegExp(escaped, 'i');
 
-  let best = null;
-  let bestPrice = null;
-  for (const candidate of candidates) {
-    if (!labelContainsIpPrefix(candidate.name, productPrefix)) continue;
-    const price = getCurrentListPriceFromStock(candidate, order.memory);
-    if (price == null || price <= 0) continue;
-    // Prefer exact prefix match; among equals pick highest current list price (latest rate)
-    const exact = extractIpPrefixFromLabel(candidate.name) === productPrefix;
-    const score = (exact ? 1_000_000 : 0) + price;
-    if (!best || score > ((extractIpPrefixFromLabel(best.name) === productPrefix ? 1_000_000 : 0) + (bestPrice || 0))) {
-      best = candidate;
-      bestPrice = price;
+  const orderProduct = String(order.productName || '').trim();
+  if (orderProduct) {
+    const exactStock = await IPStock.findOne({ name: orderProduct }).lean();
+    if (exactStock) {
+      const exactPrice = getCurrentListPriceFromStock(exactStock, order.memory);
+      if (exactPrice != null && exactPrice > 0) {
+        return {
+          stock: exactStock,
+          listPrice: exactPrice,
+          correctedFrom: linked._id,
+        };
+      }
     }
   }
 
-  if (best) {
+  const companyCandidates = await IPStock.find({
+    company: linked.company,
+    name: { $regex: prefixRegex },
+  }).lean();
+
+  let picked = pickBestStockCandidate(companyCandidates, order, productPrefix);
+
+  if (!picked) {
+    const globalCandidates = await IPStock.find({ name: { $regex: prefixRegex } }).lean();
+    picked = pickBestStockCandidate(globalCandidates, order, productPrefix);
+  }
+
+  if (picked) {
     return {
-      stock: best,
-      listPrice: bestPrice,
+      stock: picked.stock,
+      listPrice: picked.listPrice,
       correctedFrom: linked._id,
     };
   }
