@@ -3,14 +3,17 @@ import { resolveCompanySession } from '@/lib/companySession';
 import connectDB from '@/lib/db';
 import RenewalRequest from '@/models/renewalRequestModel';
 import Order from '@/models/orderModel';
+import Company from '@/models/companyModel';
 import { calculateCompanyRenewalExpiryDate } from '@/lib/expiryHelper';
 import { isSlotIpOrder, SLOT_IP_NO_RENEWAL_MESSAGE } from '@/lib/slotIpOrder';
 import { toObjectIdString } from '@/lib/queryIds';
 const { getAdvpsRebuildResetFields, isAdvpsOrder } = require('@/lib/advpsRebuildLimit');
 const { notifyRenewalCompleted } = require('@/lib/renewalNotifications');
 const { executeResellerPanelUpstreamRenewal } = require('@/lib/resellerPanelRenewal');
+const { resolveRenewalExpiryFromPanel } = require('@/lib/companyResellerInventorySync');
 const { resolveProviderFromOrder } = require('@/lib/orderAnnouncementTarget');
 const { isKurohostOrder, executeKurohostRenewalOnApprove } = require('@/lib/kurohostRenewal');
+const { canRenewHostheavenPanelOnCompanyApprove, isHostheavenDirectRenewEligible } = require('@/lib/companyRenewal');
 
 /**
  * GET /api/company/renewal-requests?status=pending|approved|rejected
@@ -56,7 +59,7 @@ export async function POST(request) {
 
   await connectDB();
 
-  const { requestId, action, adminNotes } = await request.json();
+  const { requestId, action, adminNotes, renewOnHostheavenPanel } = await request.json();
 
   const safeRequestId = toObjectIdString(requestId);
   if (!safeRequestId || !['approve', 'reject'].includes(action)) {
@@ -91,14 +94,27 @@ export async function POST(request) {
 
     let providerRenewalSuccess = true;
     let providerRenewalResult = null;
+    let hostheavenPanelRenewAttempted = false;
     const provider = resolveProviderFromOrder(order);
+    const companyDoc = await Company.findById(company.id).select('resellerApi name').lean();
+    const panelRenewEligible =
+      renewOnHostheavenPanel !== false &&
+      (provider === 'reseller-api' ||
+        (await isHostheavenDirectRenewEligible(order)) ||
+        canRenewHostheavenPanelOnCompanyApprove(order, companyDoc));
 
-    if (provider === 'reseller-api') {
-      const panelRenew = await executeResellerPanelUpstreamRenewal(order, { months: 1, Order });
+    if (panelRenewEligible && !isKurohostOrder(order)) {
+      hostheavenPanelRenewAttempted = true;
+      const panelRenew = await executeResellerPanelUpstreamRenewal(order, {
+        months: 1,
+        Order,
+        companyId: company.id,
+      });
       providerRenewalSuccess = panelRenew.success;
       providerRenewalResult = panelRenew.result || { error: panelRenew.error };
-      if (panelRenew.success && panelRenew.newExpiryDate) {
-        newExpiry = panelRenew.newExpiryDate;
+      newExpiry = await resolveRenewalExpiryFromPanel(order, newExpiry, { panelRenew });
+      if (!panelRenew.success) {
+        console.warn('[COMPANY-RENEWAL] Hostheaven panel renew on approve failed:', panelRenew.error);
       }
     } else if (isKurohostOrder(order)) {
       const kuroRenew = await executeKurohostRenewalOnApprove(order, { Order });
@@ -152,15 +168,24 @@ export async function POST(request) {
       console.error('[COMPANY-RENEWAL] renewal notification failed:', err.message),
     );
 
+    const approveMessage = isKurohostOrder(order)
+      ? providerRenewalSuccess
+        ? 'Renewal approved — site expiry extended and KuroHost VM started/synced.'
+        : 'Renewal approved — site expiry extended. KuroHost action had issues; check providerRenewalResult.'
+      : hostheavenPanelRenewAttempted
+        ? providerRenewalSuccess
+          ? 'Renewal approved — order extended and Hostheaven panel renewed.'
+          : 'Renewal approved — order extended on OceanLinux. Hostheaven panel renew failed; extend manually on panel.'
+        : 'Renewal approved — order has been extended.';
+
     return NextResponse.json({
       success: true,
-      message: isKurohostOrder(order)
-        ? providerRenewalSuccess
-          ? 'Renewal approved — site expiry extended and KuroHost VM started/synced.'
-          : 'Renewal approved — site expiry extended. KuroHost action had issues; check providerRenewalResult.'
-        : 'Renewal approved — order has been extended.',
+      message: approveMessage,
       orderId: String(order._id),
       newExpiryDate: newExpiry,
+      hostheavenPanelRenew: hostheavenPanelRenewAttempted
+        ? { attempted: true, success: providerRenewalSuccess, result: providerRenewalResult }
+        : undefined,
       kurohostRenewal: isKurohostOrder(order) ? providerRenewalResult : undefined,
     });
   }

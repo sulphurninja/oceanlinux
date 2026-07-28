@@ -203,7 +203,8 @@ export async function PUT(request) {
     }
 
     const stocks = await IPStock.find({ company: company.id });
-    const { updated, failed, panelExpiriesByIp } = await syncAllInventoryExpiriesFromReseller(companyDoc, stocks);
+    const { updated, failed, panelExpiriesByIp, ordersUpdated, ordersFailed } =
+      await syncAllInventoryExpiriesFromReseller(companyDoc, stocks);
 
     const stockIds = stocks.map((s) => s._id);
     const orders = stockIds.length
@@ -228,11 +229,15 @@ export async function PUT(request) {
 
     return NextResponse.json({
       success: true,
-      message: `Synced expiry for ${updated.length} VPS`,
+      message: `Synced expiry for ${updated.length} inventory VPS + ${ordersUpdated?.length || 0} customer orders`,
       updatedCount: updated.length,
+      ordersUpdatedCount: ordersUpdated?.length || 0,
       failedCount: failed.length,
+      ordersFailedCount: ordersFailed?.length || 0,
       updated,
+      ordersUpdated: ordersUpdated || [],
       failed,
+      ordersFailed: ordersFailed || [],
       mismatches,
       mismatchCount: mismatches.length,
       mismatchIps: mismatches.map((m) => m.ipAddress),

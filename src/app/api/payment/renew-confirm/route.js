@@ -5,9 +5,9 @@ import RenewalRequest from '@/models/renewalRequestModel';
 import User from '@/models/userModel';
 import { Cashfree } from 'cashfree-pg';
 import crypto from 'crypto';
-import { calculateRenewalExpiryDate, calculateCompanyRenewalExpiryDate } from '@/lib/expiryHelper';
+import { resolveOrderRenewalExpiryDate } from '@/lib/expiryHelper';
 import { assignPanelCredentials } from '@/lib/panelCredentials';
-import { detectCompanyManagedRenewal, resolveRenewalProvider } from '@/lib/companyRenewal';
+import { detectCompanyManagedRenewal, resolveRenewalProvider, shouldUseCompanyValidityForRenewal } from '@/lib/companyRenewal';
 import { isSlotIpOrder, SLOT_IP_NO_RENEWAL_MESSAGE } from '@/lib/slotIpOrder';
 import { resolveOrderRenewalPrice } from '@/lib/orderRenewalPricingServer';
 const { customerApiCatchPayload } = require('@/lib/customerFacingErrors');
@@ -22,6 +22,7 @@ const { getAdvpsRebuildResetFields, isAdvpsOrder } = require('@/lib/advpsRebuild
 const { executeAdvpsUpstreamRenewal } = require('@/lib/advpsRenewal');
 const { executeNetbayUpstreamRenewal } = require('@/lib/netbayRenewal');
 const { executeResellerPanelUpstreamRenewal } = require('@/lib/resellerPanelRenewal');
+const { resolveRenewalExpiryFromPanel } = require('@/lib/companyResellerInventorySync');
 const { pickAdvpsExpiryDate } = require('@/lib/advpsOrderExpiry');
 const { extractAdvpsStatusCredentials } = require('@/lib/advpsStatusNormalize');
 const HostycareAPI = require('@/services/hostycareApi');
@@ -363,10 +364,9 @@ export async function POST(request) {
     const currentExpiry = order.expiryDate;
     const companyCheck = await detectCompanyManagedRenewal(order);
 
-    // Company stocks: 30d (28/29 in Feb). Other orders: calendar month length.
-    let newExpiryDate = companyCheck.isCompany
-      ? calculateCompanyRenewalExpiryDate(currentExpiry)
-      : calculateRenewalExpiryDate(currentExpiry);
+    // Company / Hostheaven: 30d (28/29 in Feb). Other orders: calendar month length.
+    const useCompanyValidity = shouldUseCompanyValidityForRenewal(companyCheck, provider);
+    let newExpiryDate = resolveOrderRenewalExpiryDate(currentExpiry, { useCompanyValidity });
 
     // ─── Company-managed renewal branch ───────────────────────────────────
     // For orders whose IPStock is linked to a Company AND that have no
@@ -700,11 +700,10 @@ export async function POST(request) {
         providerRenewalResult = panelRenew.result || { error: panelRenew.error, vmId: panelRenew.vmId };
         providerRenewalSuccess = panelRenew.success;
 
+        newExpiryDate = await resolveRenewalExpiryFromPanel(order, newExpiryDate, { panelRenew });
+
         if (panelRenew.success) {
           logger.setProviderApiResult('reseller-api', true, panelRenew.result, null, apiDuration);
-          if (panelRenew.newExpiryDate) {
-            newExpiryDate = panelRenew.newExpiryDate;
-          }
         } else {
           logger.setProviderApiResult('reseller-api', false, panelRenew.result, { message: panelRenew.error }, apiDuration);
         }

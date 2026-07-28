@@ -6,6 +6,32 @@ const {
   defaultUsernameForOs,
 } = require('@/lib/companyInventory');
 
+const EXPIRY_FETCH_COOLDOWN_MS = 5 * 60 * 1000;
+
+function expiryMs(value) {
+  if (!value) return null;
+  const ms = new Date(value).getTime();
+  return Number.isFinite(ms) ? ms : null;
+}
+
+/** True when Hostheaven panel expiry is later than the customer's OceanLinux expiry. */
+function panelExpiryExtendsCustomer(orderExpiry, panelExpiry) {
+  const panelMs = expiryMs(panelExpiry);
+  if (panelMs == null) return false;
+  const orderMs = expiryMs(orderExpiry);
+  if (orderMs == null) return true;
+  return panelMs > orderMs;
+}
+
+/** Customer-facing sync: use panel date when it extends validity or differs. */
+function shouldApplyPanelExpiryToCustomer(orderExpiry, panelExpiry) {
+  const panelMs = expiryMs(panelExpiry);
+  if (panelMs == null) return false;
+  const orderMs = expiryMs(orderExpiry);
+  if (orderMs == null) return true;
+  return panelMs !== orderMs;
+}
+
 function createResellerApiClient(company) {
   const cfg = getCompanyResellerApiConfig(company);
   if (!cfg) {
@@ -146,6 +172,10 @@ async function syncAllInventoryExpiriesFromReseller(company, stockDocs) {
           try {
             const details = await api.getVmDetails(found.vmId);
             expiryDate = ResellerApi.extractVmExpiryDate(found.raw, details);
+            if (expiryDate) {
+              found.expiryDate = expiryDate;
+              ipIndex.set(cleanIp, { ...found, expiryDate });
+            }
           } catch {
             // details optional when overview lacks expiry
           }
@@ -178,15 +208,316 @@ async function syncAllInventoryExpiriesFromReseller(company, stockDocs) {
     }
   }
 
-  return { updated, failed, panelExpiriesByIp: Object.fromEntries(
-    [...ipIndex.entries()]
-      .filter(([, entry]) => entry.expiryDate)
-      .map(([ip, entry]) => [ip, entry.expiryDate])
-  ) };
+  const orderSync = await syncCompanyOrderExpiriesFromPanelIndex(ipIndex, stockDocs, api);
+
+  return {
+    updated,
+    failed,
+    ordersUpdated: orderSync.updated,
+    ordersSkipped: orderSync.skipped,
+    ordersFailed: orderSync.failed,
+    panelExpiriesByIp: Object.fromEntries(
+      [...ipIndex.entries()]
+        .filter(([, entry]) => entry.expiryDate)
+        .map(([ip, entry]) => [ip, entry.expiryDate])
+    ),
+  };
+}
+
+/**
+ * Match sold OceanLinux orders to panel expiry by IP (same source as inventory sync).
+ */
+async function syncCompanyOrderExpiriesFromPanelIndex(ipIndex, stockDocs, api = null) {
+  const Order = (await import('@/models/orderModel')).default;
+  const stockIds = stockDocs.map((s) => s._id).filter(Boolean);
+  if (!stockIds.length) {
+    return { updated: [], skipped: [], failed: [] };
+  }
+
+  const orders = await Order.find({
+    ipStockId: { $in: stockIds },
+    status: { $nin: ['cancelled', 'failed'] },
+    ipAddress: { $exists: true, $ne: '' },
+  }).select('_id ipAddress expiryDate inventoryItemId ipStockId resellerVmId');
+
+  const updated = [];
+  const skipped = [];
+  const failed = [];
+
+  for (const order of orders) {
+    const ip = cleanIpAddress(order.ipAddress);
+    if (!ip) continue;
+
+    const entry = ipIndex.get(ip);
+    if (!entry) {
+      failed.push({
+        orderId: String(order._id),
+        ipAddress: ip,
+        error: `No VM found on Hostheaven for IP ${ip}`,
+      });
+      continue;
+    }
+
+    let panelExpiry = entry.expiryDate;
+    if (!panelExpiry && entry.vmId && api) {
+      try {
+        const details = await api.getVmDetails(entry.vmId);
+        panelExpiry = ResellerApi.extractVmExpiryDate(entry.raw, details);
+      } catch {
+        // overview often has expiresAt — details optional
+      }
+    }
+
+    if (!panelExpiry) {
+      failed.push({
+        orderId: String(order._id),
+        ipAddress: ip,
+        error: `Hostheaven did not return expiry for IP ${ip}`,
+      });
+      continue;
+    }
+
+    const before = expiryMs(order.expiryDate);
+    const after = expiryMs(panelExpiry);
+    const orderUpdates = { lastSyncTime: new Date() };
+    if (entry.vmId && !order.resellerVmId) {
+      orderUpdates.resellerVmId = String(entry.vmId);
+      orderUpdates.provider = 'reseller-api';
+    }
+
+    const extendsCustomer = panelExpiryExtendsCustomer(order.expiryDate, panelExpiry);
+    const shouldUpdate = shouldApplyPanelExpiryToCustomer(order.expiryDate, panelExpiry);
+
+    if (!shouldUpdate) {
+      if (orderUpdates.resellerVmId) {
+        await Order.findByIdAndUpdate(order._id, orderUpdates);
+      }
+      skipped.push({ orderId: String(order._id), ipAddress: ip, expiryDate: panelExpiry });
+      continue;
+    }
+
+    orderUpdates.expiryDate = panelExpiry;
+    await Order.findByIdAndUpdate(order._id, orderUpdates);
+
+    if (order.inventoryItemId) {
+      const IPStock = require('@/models/ipStockModel');
+      await IPStock.updateOne(
+        { 'inventoryItems._id': order.inventoryItemId },
+        { $set: { 'inventoryItems.$.expiryDate': panelExpiry } }
+      );
+    }
+
+    updated.push({
+      orderId: String(order._id),
+      ipAddress: ip,
+      previousExpiry: order.expiryDate,
+      expiryDate: panelExpiry,
+      extended: extendsCustomer,
+    });
+  }
+
+  return { updated, skipped, failed };
+}
+
+/**
+ * Pull one order's expiry from Hostheaven panel (by IP). Used on customer order page load.
+ */
+async function syncSingleOrderExpiryFromPanel(order, { force = false, companyDoc = null } = {}) {
+  if (!order?.ipAddress || !order?.ipStockId) {
+    return { order, synced: false };
+  }
+
+  const IPStock = require('@/models/ipStockModel');
+  const Order = (await import('@/models/orderModel')).default;
+  const Company = (await import('@/models/companyModel')).default;
+
+  const ipStock = await IPStock.findById(order.ipStockId).select('company').lean();
+  if (!ipStock?.company) return { order, synced: false };
+
+  const company =
+    companyDoc || (await Company.findById(ipStock.company).select('resellerApi name').lean());
+  if (!getCompanyResellerApiConfig(company)) return { order, synced: false };
+
+  if (!force && order.lastSyncTime) {
+    const age = Date.now() - new Date(order.lastSyncTime).getTime();
+    if (age < EXPIRY_FETCH_COOLDOWN_MS) {
+      return { order, synced: false, reason: 'cooldown' };
+    }
+  }
+
+  let panel;
+  try {
+    panel = await fetchResellerExpiryByIp(company, order.ipAddress);
+  } catch (err) {
+    return { order, synced: false, error: err.message };
+  }
+
+  const extendsCustomer = panelExpiryExtendsCustomer(order.expiryDate, panel.expiryDate);
+  const shouldUpdate = shouldApplyPanelExpiryToCustomer(order.expiryDate, panel.expiryDate);
+
+  const updates = { lastSyncTime: new Date() };
+  if (panel.vmId && !order.resellerVmId) {
+    updates.resellerVmId = String(panel.vmId);
+    updates.provider = 'reseller-api';
+  }
+
+  if (shouldUpdate) {
+    updates.expiryDate = panel.expiryDate;
+  }
+
+  const updated = await Order.findByIdAndUpdate(order._id, updates, { new: true }).lean();
+
+  if (shouldUpdate && order.inventoryItemId) {
+    await IPStock.updateOne(
+      { 'inventoryItems._id': order.inventoryItemId },
+      { $set: { 'inventoryItems.$.expiryDate': panel.expiryDate } }
+    );
+  }
+
+  return {
+    order: updated,
+    synced: shouldUpdate,
+    extended: extendsCustomer,
+    expiryDate: panel.expiryDate,
+  };
+}
+
+/**
+ * On dashboard order list — if Hostheaven panel expiry is later, extend customer orders.
+ * Uses one overview fetch per company (not one API call per order).
+ */
+async function syncUserHostheavenOrderExpiries(orders) {
+  if (!Array.isArray(orders) || !orders.length) {
+    return { orders, updated: 0, extended: 0 };
+  }
+
+  const IPStock = require('@/models/ipStockModel');
+  const Order = (await import('@/models/orderModel')).default;
+  const Company = (await import('@/models/companyModel')).default;
+
+  const stockIds = [...new Set(orders.map((o) => String(o.ipStockId || '')).filter(Boolean))];
+  if (!stockIds.length) return { orders, updated: 0, extended: 0 };
+
+  const stocks = await IPStock.find({ _id: { $in: stockIds } }).select('company').lean();
+  const stockToCompany = new Map(stocks.map((s) => [String(s._id), String(s.company)]));
+
+  const companyIds = [...new Set(stocks.map((s) => String(s.company)).filter(Boolean))];
+  const companies = await Company.find({ _id: { $in: companyIds } }).select('resellerApi name').lean();
+  const companyById = new Map(companies.map((c) => [String(c._id), c]));
+
+  const byCompany = new Map();
+  for (const order of orders) {
+    if (!order?.ipAddress || !order?.ipStockId) continue;
+    const companyId = stockToCompany.get(String(order.ipStockId));
+    if (!companyId || !getCompanyResellerApiConfig(companyById.get(companyId))) continue;
+    const bucket = byCompany.get(companyId) || [];
+    bucket.push(order);
+    byCompany.set(companyId, bucket);
+  }
+
+  if (!byCompany.size) return { orders, updated: 0, extended: 0 };
+
+  const orderById = new Map(orders.map((o) => [String(o._id), { ...o }]));
+  let updated = 0;
+  let extended = 0;
+
+  for (const [companyId, companyOrders] of byCompany) {
+    const company = companyById.get(companyId);
+    let ipIndex;
+    try {
+      const api = createResellerApiClient(company);
+      ipIndex = await api.buildVmIpIndex();
+    } catch (err) {
+      console.warn('[HOSTHEAVEN-EXPIRY] User list sync overview failed:', err.message);
+      continue;
+    }
+
+    for (const order of companyOrders) {
+      const ip = cleanIpAddress(order.ipAddress);
+      const entry = ipIndex.get(ip);
+      if (!entry?.expiryDate) continue;
+
+      if (!panelExpiryExtendsCustomer(order.expiryDate, entry.expiryDate)) continue;
+
+      await Order.findByIdAndUpdate(order._id, {
+        expiryDate: entry.expiryDate,
+        lastSyncTime: new Date(),
+        ...(entry.vmId && !order.resellerVmId
+          ? { resellerVmId: String(entry.vmId), provider: 'reseller-api' }
+          : {}),
+      });
+
+      if (order.inventoryItemId) {
+        await IPStock.updateOne(
+          { 'inventoryItems._id': order.inventoryItemId },
+          { $set: { 'inventoryItems.$.expiryDate': entry.expiryDate } }
+        );
+      }
+
+      const fresh = { ...order, expiryDate: entry.expiryDate };
+      orderById.set(String(order._id), fresh);
+      updated += 1;
+      extended += 1;
+    }
+  }
+
+  return {
+    orders: orders.map((o) => orderById.get(String(o._id)) || o),
+    updated,
+    extended,
+  };
+}
+
+/**
+ * After panel renew — prefer panel expiry, especially when panel already has more validity.
+ */
+async function resolveRenewalExpiryFromPanel(order, calculatedExpiry, { panelRenew = null } = {}) {
+  if (panelRenew?.success && panelRenew.newExpiryDate) {
+    return panelRenew.newExpiryDate;
+  }
+
+  let panelExpiry = panelRenew?.newExpiryDate || null;
+
+  if (!order?.ipAddress || !order?.ipStockId) {
+    return panelExpiry || calculatedExpiry;
+  }
+
+  try {
+    const IPStock = require('@/models/ipStockModel');
+    const Company = (await import('@/models/companyModel')).default;
+    const ipStock = await IPStock.findById(order.ipStockId).select('company').lean();
+    if (!ipStock?.company) return panelExpiry || calculatedExpiry;
+
+    const company = await Company.findById(ipStock.company).select('resellerApi name').lean();
+    if (!getCompanyResellerApiConfig(company)) return panelExpiry || calculatedExpiry;
+
+    const panel = await fetchResellerExpiryByIp(company, order.ipAddress);
+    panelExpiry = panel?.expiryDate || panelExpiry;
+  } catch {
+    // keep calculated fallback
+  }
+
+  const calcMs = expiryMs(calculatedExpiry);
+  const panelMs = expiryMs(panelExpiry);
+
+  if (panelMs != null && (calcMs == null || panelMs > calcMs)) {
+    return panelExpiry;
+  }
+  if (panelMs != null && panelMs !== calcMs) {
+    return panelExpiry;
+  }
+
+  return calculatedExpiry;
 }
 
 module.exports = {
   fetchResellerCredentialsByIp,
   fetchResellerExpiryByIp,
   syncAllInventoryExpiriesFromReseller,
+  syncCompanyOrderExpiriesFromPanelIndex,
+  syncSingleOrderExpiryFromPanel,
+  syncUserHostheavenOrderExpiries,
+  resolveRenewalExpiryFromPanel,
+  panelExpiryExtendsCustomer,
+  EXPIRY_FETCH_COOLDOWN_MS,
 };

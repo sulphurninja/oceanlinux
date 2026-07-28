@@ -118,7 +118,15 @@ const orderSchema = new mongoose.Schema({
         paidAt: { type: Date, required: true },
         previousExpiry: { type: Date, required: true },
         newExpiry: { type: Date, required: true },
-        renewalTxnId: { type: String, required: true }
+        renewalTxnId: { type: String, required: true },
+        provider: { type: String },
+        paymentMethod: { type: String },
+        gatewayOrderId: { type: String },
+        paymentDetails: { type: mongoose.Schema.Types.Mixed },
+        providerRenewalSuccess: { type: Boolean },
+        providerRenewalResult: { type: mongoose.Schema.Types.Mixed },
+        processedViaCompanyApproval: { type: Boolean },
+        approvedBy: { type: mongoose.Schema.Types.Mixed },
     }],
 
     // Pending renewal tracking - stores the current renewal transaction awaiting payment

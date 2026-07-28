@@ -244,6 +244,77 @@ function findRamEntryForGb(ramList, gb) {
   );
 }
 
+function findCpuEntryForCores(cpuList, cores) {
+  const target = Math.max(1, Number(cores) || 1);
+  return (
+    cpuList.find((x) => Number(x.cores) === target) ||
+    cpuList.find((x) => Number(x.cores) >= target) ||
+    cpuList
+      .slice()
+      .sort((a, b) => Number(a.cores || 0) - Number(b.cores || 0))
+      .find((x) => Number(x.cores || 0) >= target) ||
+    cpuList[0] ||
+    null
+  );
+}
+
+function findDiskEntryForGb(diskList, diskGb) {
+  const target = Math.max(1, Number(diskGb) || 0);
+  if (!target) return diskList[0] || null;
+  return (
+    diskList.find((x) => Number(x.diskGb) === target) ||
+    diskList.find((x) => Number(x.diskGb) >= target) ||
+    diskList
+      .slice()
+      .sort((a, b) => Number(a.diskGb || 0) - Number(b.diskGb || 0))
+      .find((x) => Number(x.diskGb || 0) >= target) ||
+    diskList[0] ||
+    null
+  );
+}
+
+/**
+ * Match panel pricing IDs to an existing VM's live spec so renew is not treated
+ * as a spec change (required for upstream coupons like UME299 on renew).
+ */
+async function resolvePriceIdsForVmSpec(api, vmDetails, { planType = 'SHARED' } = {}) {
+  if (!vmDetails || typeof vmDetails !== 'object') return null;
+
+  const pt = String(planType || 'SHARED').toUpperCase();
+  const cores = Number(vmDetails.cores);
+  const ramMb = Number(vmDetails.ramMb);
+  const diskGb = Number(vmDetails.diskGb);
+  if (!Number.isFinite(cores) || !Number.isFinite(ramMb) || cores <= 0 || ramMb <= 0) {
+    return null;
+  }
+
+  const gb = Math.max(1, Math.round(ramMb / 1024));
+  const [cpuList, ramList, diskList, bwList] = await Promise.all([
+    api.getPricingCatalog(pt, 'cpu'),
+    api.getPricingCatalog(pt, 'ram'),
+    api.getPricingCatalog(pt, 'disk'),
+    api.getPricingCatalog(pt, 'bandwidth'),
+  ]);
+
+  const ramEntry = findRamEntryForGb(ramList, gb);
+  const cpuEntry = findCpuEntryForCores(cpuList, cores);
+  const diskEntry = findDiskEntryForGb(diskList, diskGb);
+  const bwEntry = bwList[0];
+
+  if (!ramEntry?.id || !cpuEntry?.id || !diskEntry?.id || !bwEntry?.id) return null;
+
+  return {
+    planType: pt,
+    cpuPriceId: cpuEntry.id,
+    ramPriceId: ramEntry.id,
+    diskPriceId: diskEntry.id,
+    bandwidthPriceId: bwEntry.id,
+    resolvedRamMb: ramEntry.ramMb,
+    resolvedRamLabel: ramEntry.label,
+    matchedVmSpec: true,
+  };
+}
+
 async function resolvePriceIdsFromPlanCatalog(api, { gb, planType }) {
   const pt = String(planType || 'SHARED').toUpperCase();
   const [cpuList, ramList, diskList, bwList] = await Promise.all([
@@ -257,14 +328,7 @@ async function resolvePriceIdsFromPlanCatalog(api, { gb, planType }) {
   if (!ramEntry?.id) return null;
 
   const targetCores = Math.max(1, Math.min(8, Math.ceil(gb / 2)));
-  const cpuEntry =
-    cpuList.find((x) => Number(x.cores) === targetCores) ||
-    cpuList.find((x) => Number(x.cores) >= targetCores) ||
-    cpuList
-      .slice()
-      .sort((a, b) => Number(a.cores || 0) - Number(b.cores || 0))
-      .find((x) => Number(x.cores || 0) >= targetCores) ||
-    cpuList[0];
+  const cpuEntry = findCpuEntryForCores(cpuList, targetCores);
 
   const diskEntry = diskList[0];
   const bwEntry = bwList[0];
@@ -351,6 +415,7 @@ module.exports = {
   normalizeCouponByMemory,
   resolveZoneIsoIdFromCatalog,
   autoResolveResellerPriceIds,
+  resolvePriceIdsForVmSpec,
   resolveEffectiveResellerPlanType,
   isResellerApiStock,
 };

@@ -177,15 +177,24 @@ export default function AdminStatusPage() {
       const data = await res.json();
       if (data.success) {
         const recovered = data.recoveredCount ?? 0;
+        const carts = data.cartsRecovered?.length ?? 0;
+        const recharges = data.rechargesRecovered?.length ?? 0;
+        const orders = data.recovered?.length ?? 0;
         const anomalies = data.anomalyCount ?? 0;
         if (recovered > 0) {
+          const parts = [];
+          if (orders > 0) parts.push(`${orders} order(s)`);
+          if (carts > 0) parts.push(`${carts} cart(s)`);
+          if (recharges > 0) parts.push(`${recharges} wallet top-up(s)`);
           toast.success(
-            `Recovered ${recovered} order(s) automatically${anomalies > 0 ? ` — ${anomalies} still need manual check` : ''}`
+            `Recovered ${parts.join(', ')}${anomalies > 0 ? ` — ${anomalies} still need manual check` : ''}`
           );
         } else if (anomalies > 0) {
           toast.warning(`Found ${anomalies} paid-but-pending order(s) — recovery failed, check logs`);
         } else {
-          toast.success(`Scanned ${data.scanned} pending orders — no mismatches found`);
+          toast.success(
+            `Scanned ${data.scanned ?? 0} orders, ${data.scannedCarts ?? 0} carts, ${data.scannedRecharges ?? 0} wallet top-ups — no mismatches found`
+          );
         }
         await fetchPaymentLogs();
       } else {
@@ -497,7 +506,7 @@ export default function AdminStatusPage() {
           </div>
           <p className="text-sm text-gray-400 mt-1">
             Tracks when customer paid successfully but order stayed pending. Scan now{" "}
-            <strong className="text-green-400">auto-recovers</strong> paid orders. Use{" "}
+            <strong className="text-green-400">auto-recovers</strong> buy-now orders, cart checkouts, and wallet top-ups. Use{" "}
             <strong className="text-green-400">Copy log</strong> to share for debugging.
           </p>
         </CardHeader>

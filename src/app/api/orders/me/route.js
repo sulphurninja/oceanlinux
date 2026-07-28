@@ -4,6 +4,7 @@ import User from '../../../../models/userModel';
 import { getDataFromToken, getAuthErrorResponse } from '../../../../helper/getDataFromToken';
 import { isAdminUser } from '@/lib/adminAuth';
 const { sanitizeOrdersForCustomer, customerApiCatchPayload } = require('@/lib/customerFacingErrors');
+const { syncUserHostheavenOrderExpiries } = require('@/lib/companyResellerInventorySync');
 
 export async function GET(request) {
     try {
@@ -32,7 +33,17 @@ export async function GET(request) {
             });
         }
 
-        const orders = await Order.find({ user: userId }).lean().sort({ createdAt: -1 });
+        let orders = await Order.find({ user: userId }).lean().sort({ createdAt: -1 });
+
+        try {
+            const synced = await syncUserHostheavenOrderExpiries(orders);
+            if (synced.updated > 0) {
+                orders = synced.orders;
+            }
+        } catch (syncErr) {
+            console.warn('[orders/me] Hostheaven expiry extend sync failed:', syncErr.message);
+        }
+
         const safeOrders = sanitizeOrdersForCustomer(orders, { isAdmin: isAdminUser(user) });
 
         return new Response(JSON.stringify(safeOrders), {

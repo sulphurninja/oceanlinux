@@ -5,8 +5,8 @@
 import Order from '@/models/orderModel';
 import Reseller from '@/models/resellerModel';
 import ResellerWalletService from '@/services/resellerWalletService';
-import { calculateRenewalExpiryDate, getDaysUntilExpiry, isWithinRenewalWindow, RENEWAL_DAYS_BEFORE_EXPIRY } from '@/lib/expiryHelper';
-import { resolveRenewalProvider, detectCompanyManagedRenewal } from '@/lib/companyRenewal';
+import { resolveOrderRenewalExpiryDate, getDaysUntilExpiry, isWithinRenewalWindow, RENEWAL_DAYS_BEFORE_EXPIRY } from '@/lib/expiryHelper';
+import { resolveRenewalProvider, detectCompanyManagedRenewal, shouldUseCompanyValidityForRenewal } from '@/lib/companyRenewal';
 import { isSlotIpOrder, SLOT_IP_NO_RENEWAL_MESSAGE } from '@/lib/slotIpOrder';
 import { calculateResellerPlanPrice } from '@/lib/resellerOrderApi';
 import { getCurrentListPriceForOrder } from '@/lib/orderRenewalPricingServer';
@@ -19,6 +19,7 @@ const AdvpsAPI = require('@/services/advpsApi');
 const { executeAdvpsUpstreamRenewal } = require('@/lib/advpsRenewal');
 const { executeNetbayUpstreamRenewal } = require('@/lib/netbayRenewal');
 const { executeResellerPanelUpstreamRenewal } = require('@/lib/resellerPanelRenewal');
+const { resolveRenewalExpiryFromPanel } = require('@/lib/companyResellerInventorySync');
 const { pickAdvpsExpiryDate } = require('@/lib/advpsOrderExpiry');
 const { extractAdvpsStatusCredentials } = require('@/lib/advpsStatusNormalize');
 
@@ -45,6 +46,7 @@ async function resolveResellerRenewalPrice(order, reseller) {
 async function runProviderRenewal(order, orderId, provider) {
   let providerRenewalResult = null;
   let providerRenewalSuccess = false;
+  let providerNewExpiryDate = null;
 
   if (provider === 'hostycare' && order.hostycareServiceId) {
     try {
@@ -93,6 +95,9 @@ async function runProviderRenewal(order, orderId, provider) {
       const panelRenew = await executeResellerPanelUpstreamRenewal(order, { months: 1, Order });
       providerRenewalResult = panelRenew.result || { error: panelRenew.error };
       providerRenewalSuccess = panelRenew.success;
+      if (panelRenew.success && panelRenew.newExpiryDate) {
+        providerNewExpiryDate = panelRenew.newExpiryDate;
+      }
     } catch (err) {
       providerRenewalResult = { error: err.message };
     }
@@ -100,7 +105,7 @@ async function runProviderRenewal(order, orderId, provider) {
     providerRenewalSuccess = true;
   }
 
-  return { providerRenewalResult, providerRenewalSuccess };
+  return { providerRenewalResult, providerRenewalSuccess, providerNewExpiryDate };
 }
 
 export async function renewResellerOrder(reseller, order, orderId) {
@@ -156,7 +161,8 @@ export async function renewResellerOrder(reseller, order, orderId) {
 
   const provider = await resolveRenewalProvider(order);
   const currentExpiry = order.expiryDate;
-  let newExpiryDate = calculateRenewalExpiryDate(currentExpiry);
+  const useCompanyValidity = shouldUseCompanyValidityForRenewal(companyCheck, provider);
+  let newExpiryDate = resolveOrderRenewalExpiryDate(currentExpiry, { useCompanyValidity });
   const renewalTxnId = `RESELLER_RENEW_${Date.now()}_${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
 
   try {
@@ -170,7 +176,21 @@ export async function renewResellerOrder(reseller, order, orderId) {
     return { ok: false, status: 402, body: { success: false, message: err.message } };
   }
 
-  const { providerRenewalResult, providerRenewalSuccess } = await runProviderRenewal(order, orderId, provider);
+  const { providerRenewalResult, providerRenewalSuccess, providerNewExpiryDate } =
+    await runProviderRenewal(order, orderId, provider);
+
+  if (provider === 'reseller-api' && providerRenewalSuccess && providerNewExpiryDate) {
+    newExpiryDate = providerNewExpiryDate;
+  }
+
+  if (provider === 'reseller-api') {
+    newExpiryDate = await resolveRenewalExpiryFromPanel(order, newExpiryDate, {
+      panelRenew: {
+        success: providerRenewalSuccess,
+        newExpiryDate: providerNewExpiryDate,
+      },
+    });
+  }
 
   if (provider === 'advps' && providerRenewalSuccess && order.advpsServiceId) {
     try {

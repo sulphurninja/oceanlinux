@@ -4,6 +4,7 @@ import Order from '@/models/orderModel';
 import { resolveOrderForUserOrAdmin } from '@/lib/resolveOrderAccess';
 import { ensureOrderRenewalStockLink } from '@/lib/orderRenewalPricingServer';
 const { maybeSyncResellerOrderOnFetch } = require('@/lib/resellerApiOrderSync');
+const { syncSingleOrderExpiryFromPanel } = require('@/lib/companyResellerInventorySync');
 const { sanitizeOrderForCustomer } = require('@/lib/customerFacingErrors');
 
 export async function GET(request, { params }) {
@@ -15,6 +16,10 @@ export async function GET(request, { params }) {
         if (resolved.error) return resolved.error;
 
         let order = resolved.order;
+
+        const expirySync = await syncSingleOrderExpiryFromPanel(order, { force: true });
+        if (expirySync?.order) order = expirySync.order;
+
         order = await maybeSyncResellerOrderOnFetch(order);
 
         if (order?.ipStockId && ['active', 'confirmed'].includes(String(order.status || ''))) {

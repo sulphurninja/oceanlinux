@@ -2,8 +2,14 @@ import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import PaymentOrderLog from '@/models/paymentOrderLogModel';
 import Order from '@/models/orderModel';
+import CheckoutSession from '@/models/checkoutSessionModel';
+import WalletRecharge from '@/models/walletRechargeModel';
 import { enforceAdmin } from '@/lib/apiSecurity';
 import { probeGatewayPayment, confirmPendingOrderPayment } from '@/lib/confirmPendingOrderPayment';
+import {
+  recoverPendingCheckoutSession,
+  recoverPendingWalletRecharge,
+} from '@/lib/paymentDispatch';
 const PaymentOrderLogger = require('@/services/paymentOrderLogger');
 
 export async function GET(request) {
@@ -109,16 +115,18 @@ export async function POST(request) {
     }
 
     const since = new Date(Date.now() - hours * 60 * 60 * 1000);
+    const anomalies = [];
+    const recovered = [];
+
+    // Buy-now orders only — cart child rows (CART_*-0) have no gatewayOrderId.
     const pendingOrders = await Order.find({
       status: 'pending',
+      clientTxnId: { $regex: /^ORDER_/ },
       createdAt: { $gte: since },
     })
       .sort({ createdAt: -1 })
       .limit(100)
       .lean();
-
-    const anomalies = [];
-    const recovered = [];
 
     for (const orderDoc of pendingOrders) {
       const order = await Order.findById(orderDoc._id);
@@ -181,15 +189,137 @@ export async function POST(request) {
       });
     }
 
+    const cartsRecovered = [];
+    const cartsAnomalies = [];
+    const pendingSessions = await CheckoutSession.find({
+      status: { $in: ['pending', 'failed', 'cancelled'] },
+      clientTxnId: { $regex: /^CART_/ },
+      createdAt: { $gte: since },
+      gatewayAmount: { $gt: 0 },
+    })
+      .sort({ createdAt: -1 })
+      .limit(100);
+
+    for (const session of pendingSessions) {
+      if (!autoRecover) {
+        cartsAnomalies.push({
+          kind: 'cart',
+          sessionId: String(session._id),
+          clientTxnId: session.clientTxnId,
+          customerEmail: session.customerEmail,
+        });
+        continue;
+      }
+
+      try {
+        const result = await recoverPendingCheckoutSession(session, {
+          maxAttempts: 2,
+          delayMs: 500,
+        });
+        if (result.success) {
+          cartsRecovered.push({
+            kind: 'cart',
+            sessionId: String(session._id),
+            clientTxnId: session.clientTxnId,
+            customerEmail: session.customerEmail,
+            orderIds: result.orderIds?.map(String) || [],
+            alreadyProcessed: !!result.alreadyProcessed,
+          });
+        } else {
+          cartsAnomalies.push({
+            kind: 'cart',
+            sessionId: String(session._id),
+            clientTxnId: session.clientTxnId,
+            customerEmail: session.customerEmail,
+            reason: result.reason,
+          });
+        }
+      } catch (err) {
+        cartsAnomalies.push({
+          kind: 'cart',
+          sessionId: String(session._id),
+          clientTxnId: session.clientTxnId,
+          customerEmail: session.customerEmail,
+          reason: err.message,
+        });
+      }
+    }
+
+    const rechargesRecovered = [];
+    const rechargesAnomalies = [];
+    const pendingRecharges = await WalletRecharge.find({
+      status: 'pending',
+      clientTxnId: { $regex: /^WALLET_/ },
+      createdAt: { $gte: since },
+    })
+      .sort({ createdAt: -1 })
+      .limit(100);
+
+    for (const recharge of pendingRecharges) {
+      if (!autoRecover) {
+        rechargesAnomalies.push({
+          kind: 'recharge',
+          rechargeId: String(recharge._id),
+          clientTxnId: recharge.clientTxnId,
+          amount: recharge.amount,
+        });
+        continue;
+      }
+
+      try {
+        const result = await recoverPendingWalletRecharge(recharge, {
+          maxAttempts: 2,
+          delayMs: 500,
+        });
+        if (result.success) {
+          rechargesRecovered.push({
+            kind: 'recharge',
+            rechargeId: String(recharge._id),
+            clientTxnId: recharge.clientTxnId,
+            amount: recharge.amount,
+            newBalance: result.newBalance,
+            alreadyProcessed: !!result.alreadyProcessed,
+          });
+        } else {
+          rechargesAnomalies.push({
+            kind: 'recharge',
+            rechargeId: String(recharge._id),
+            clientTxnId: recharge.clientTxnId,
+            amount: recharge.amount,
+            reason: result.reason,
+          });
+        }
+      } catch (err) {
+        rechargesAnomalies.push({
+          kind: 'recharge',
+          rechargeId: String(recharge._id),
+          clientTxnId: recharge.clientTxnId,
+          amount: recharge.amount,
+          reason: err.message,
+        });
+      }
+    }
+
+    const totalRecovered =
+      recovered.length + cartsRecovered.length + rechargesRecovered.length;
+    const totalAnomalies =
+      anomalies.length + cartsAnomalies.length + rechargesAnomalies.length;
+
     return NextResponse.json({
       success: true,
       scanned: pendingOrders.length,
+      scannedCarts: pendingSessions.length,
+      scannedRecharges: pendingRecharges.length,
       hours,
       autoRecover,
-      recoveredCount: recovered.length,
+      recoveredCount: totalRecovered,
       recovered,
-      anomalyCount: anomalies.length,
+      cartsRecovered,
+      rechargesRecovered,
+      anomalyCount: totalAnomalies,
       anomalies,
+      cartsAnomalies,
+      rechargesAnomalies,
     });
   } catch (error) {
     console.error('[PAYMENT-ORDER-LOGS] POST scan error:', error);

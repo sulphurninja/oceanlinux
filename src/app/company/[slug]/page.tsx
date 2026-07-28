@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog';
@@ -369,6 +370,7 @@ export default function CompanyDashboard() {
   const [renewalAction, setRenewalAction] = useState<'approve' | 'reject'>('approve');
   const [renewalNotes, setRenewalNotes] = useState('');
   const [renewalProcessingLoading, setRenewalProcessingLoading] = useState(false);
+  const [renewOnHostheavenPanel, setRenewOnHostheavenPanel] = useState(true);
   const [renewalStatusFilter, setRenewalStatusFilter] = useState<'pending' | 'approved' | 'rejected'>('pending');
 
   const friendlyCompanyError = (raw: unknown, action?: string) =>
@@ -570,10 +572,15 @@ export default function CompanyDashboard() {
       const urgentCount = Array.isArray(data.mismatches)
         ? data.mismatches.filter((m: { panelDaysLeft?: number }) => (m.panelDaysLeft ?? 99) <= 10).length
         : 0;
-      if (data.failedCount > 0) {
-        toast.warning(`${data.updatedCount} synced, ${data.failedCount} failed (panel par nahi mile)`);
+      if (data.failedCount > 0 || data.ordersFailedCount > 0) {
+        toast.warning(
+          `${data.updatedCount} inventory + ${data.ordersUpdatedCount || 0} orders synced` +
+            ` — ${(data.failedCount || 0) + (data.ordersFailedCount || 0)} failed (panel par nahi mile)`
+        );
       } else {
-        toast.success(`${data.updatedCount} VPS ki expiry Hostheaven se sync ho gayi`);
+        toast.success(
+          `${data.updatedCount} inventory + ${data.ordersUpdatedCount || 0} customer orders — Hostheaven expiry sync ho gayi`
+        );
       }
 
       if (mismatchIps.length > 0) {
@@ -837,12 +844,30 @@ export default function CompanyDashboard() {
           requestId: processingRenewal._id,
           action: renewalAction,
           adminNotes: renewalNotes,
+          renewOnHostheavenPanel:
+            renewalAction === 'approve' && hasResellerSync && !!processingRenewal.orderSnapshot?.ipAddress
+              ? renewOnHostheavenPanel
+              : undefined,
         }),
       });
       if (res.ok) {
-        toast.success(`Renewal ${renewalAction === 'approve' ? 'approved — order extended' : 'rejected'}`);
+        const data = await res.json().catch(() => ({}));
+        const panelFailed =
+          renewalAction === 'approve' &&
+          data.hostheavenPanelRenew?.attempted &&
+          data.hostheavenPanelRenew?.success === false;
+        if (panelFailed) {
+          toast.warning(
+            data.message ||
+              'OceanLinux expiry extended, but Hostheaven panel renew failed — extend manually on Hostheaven.',
+            { duration: 12000 }
+          );
+        } else {
+          toast.success(data.message || `Renewal ${renewalAction === 'approve' ? 'approved — order extended' : 'rejected'}`);
+        }
         setProcessingRenewal(null);
         setRenewalNotes('');
+        setRenewOnHostheavenPanel(true);
         loadRenewalRequests(renewalStatusFilter);
         if (renewalStatusFilter !== 'pending') {
           // Refresh the pending count badge.
@@ -2243,7 +2268,11 @@ export default function CompanyDashboard() {
                   <CardContent className="py-12 text-center">
                     <RefreshCw className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
                     <p className="text-sm text-muted-foreground">No {renewalStatusFilter} renewal requests.</p>
-                    <p className="text-xs text-muted-foreground mt-1">Customers&apos; renewal payments appear here for your approval before order expiry is extended.</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {resellerLabel === 'Hostheaven' || resellerLabel?.toLowerCase().includes('host')
+                        ? 'Hostheaven VPS renewals are automatic — customers pay on OceanLinux and expiry extends on the panel without your approval. Only manual / non-Hostheaven renewals appear here.'
+                        : 'Customers\' renewal payments appear here for your approval before order expiry is extended.'}
+                    </p>
                   </CardContent>
                 </Card>
               ) : renewalRequests.map((req) => {
@@ -2310,7 +2339,12 @@ export default function CompanyDashboard() {
                         {req.status === 'pending' && (
                           <div className="flex gap-1.5 shrink-0">
                             <Button size="sm" variant="outline" className="gap-1 h-8 text-green-600 border-green-200 hover:bg-green-50"
-                              onClick={() => { setProcessingRenewal(req); setRenewalAction('approve'); setRenewalNotes(''); }}>
+                              onClick={() => {
+                                setProcessingRenewal(req);
+                                setRenewalAction('approve');
+                                setRenewalNotes('');
+                                setRenewOnHostheavenPanel(!!(hasResellerSync && req.orderSnapshot?.ipAddress));
+                              }}>
                               <CheckCircle className="h-3.5 w-3.5" />
                               Approve
                             </Button>
@@ -2458,6 +2492,24 @@ export default function CompanyDashboard() {
                   Rejecting will <span className="font-medium">not</span> automatically refund the customer. Process the refund from your gateway dashboard separately.
                 </div>
               )}
+              {renewalAction === 'approve' && hasResellerSync && processingRenewal.orderSnapshot?.ipAddress && (
+                <div className="flex items-start gap-2.5 p-3 rounded-md border bg-primary/5">
+                  <Checkbox
+                    id="renew-on-panel"
+                    checked={renewOnHostheavenPanel}
+                    onCheckedChange={(checked) => setRenewOnHostheavenPanel(checked === true)}
+                    className="mt-0.5"
+                  />
+                  <div className="space-y-1">
+                    <Label htmlFor="renew-on-panel" className="text-sm font-medium cursor-pointer">
+                      Also renew on {resellerLabel} panel
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      Wallet se panel par auto extend — pehle wale manual renewal requests ke liye bhi. Sirf OceanLinux expiry badhani ho to unchecked rakho.
+                    </p>
+                  </div>
+                </div>
+              )}
               <div>
                 <Label>Notes (optional)</Label>
                 <Textarea value={renewalNotes} onChange={(e) => setRenewalNotes(e.target.value)} placeholder="Add a note for the customer..." className="mt-1.5" rows={3} />
@@ -2469,7 +2521,7 @@ export default function CompanyDashboard() {
             <Button onClick={handleProcessRenewal} disabled={renewalProcessingLoading}
               className={cn('gap-2', renewalAction === 'approve' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700')}>
               {renewalProcessingLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : renewalAction === 'approve' ? <CheckCircle className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
-              {renewalAction === 'approve' ? 'Approve & Extend' : 'Reject'}
+              {renewalAction === 'approve' ? (renewOnHostheavenPanel && hasResellerSync && processingRenewal?.orderSnapshot?.ipAddress ? 'Approve & Panel Renew' : 'Approve & Extend') : 'Reject'}
             </Button>
           </DialogFooter>
         </DialogContent>

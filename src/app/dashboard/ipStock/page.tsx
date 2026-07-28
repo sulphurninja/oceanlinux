@@ -4,6 +4,7 @@ import { useEffect, useState, Suspense, useMemo, memo, useCallback } from "react
 import { useSearchParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { dashboardFetch } from '@/lib/dashboardFetch';
+import { normalizeMemoryKey } from '@/lib/orderRenewalPricing';
 import {
   Card,
   CardContent,
@@ -319,13 +320,20 @@ function stockMatchesSearch(stock: IPStock, query: string) {
   return false;
 }
 
+function memoryTierSortIndex(label: string) {
+  const normalized = normalizeMemoryKey(label);
+  const idx = MEMORY_TIER_ORDER.indexOf(normalized);
+  if (idx !== -1) return idx;
+  const gb = normalized.match(/^(\d+)GB$/i);
+  if (gb) return 1000 + Number(gb[1]);
+  return 9999;
+}
+
 function sortMemoryOptionEntries(entries: [string, MemoryOptionDetails][]) {
   return [...entries].sort((a, b) => {
-    const ai = MEMORY_TIER_ORDER.indexOf(a[0]);
-    const bi = MEMORY_TIER_ORDER.indexOf(b[0]);
-    if (ai !== -1 && bi !== -1) return ai - bi;
-    if (ai !== -1) return -1;
-    if (bi !== -1) return 1;
+    const ai = memoryTierSortIndex(a[0]);
+    const bi = memoryTierSortIndex(b[0]);
+    if (ai !== bi) return ai - bi;
     return (a[1].price || 0) - (b[1].price || 0);
   });
 }

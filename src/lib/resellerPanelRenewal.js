@@ -36,8 +36,25 @@ async function resolveResellerApiForOrder(order) {
 /**
  * Renew on PrimeVPS / Hostheaven panel via wallet (UserSide.pdf upgrade-renew).
  */
-async function executeResellerPanelUpstreamRenewal(order, { months = 1, Order } = {}) {
-  const { api, ipStock, error } = await resolveResellerApiForOrder(order);
+async function executeResellerPanelUpstreamRenewal(order, { months = 1, Order, companyId } = {}) {
+  let { api, ipStock, error } = await resolveResellerApiForOrder(order);
+
+  if (!api && companyId) {
+    const company = await Company.findById(companyId).select('resellerApi name').lean();
+    const cfg = getCompanyResellerApiConfig(company);
+    if (cfg) {
+      if (!ipStock && order?.ipStockId) {
+        ipStock = await IPStock.findById(order.ipStockId).lean();
+      }
+      try {
+        api = new ResellerApi(cfg);
+        error = null;
+      } catch (err) {
+        error = err.message;
+      }
+    }
+  }
+
   if (!api) {
     return {
       success: false,

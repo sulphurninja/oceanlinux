@@ -66,6 +66,35 @@ export function calculateCompanyRenewalExpiryDate(currentExpiry) {
   return calculateCompanyExpiryDate(base);
 }
 
+/**
+ * Renewal expiry — company / Hostheaven stocks use fixed 30-day cycles (Feb = calendar days).
+ * Other providers use calendar month length (Jan/Mar/May… = 31 days).
+ *
+ * @param {Date|string} currentExpiry
+ * @param {{ useCompanyValidity?: boolean }} [options]
+ */
+export function resolveOrderRenewalExpiryDate(currentExpiry, { useCompanyValidity = false } = {}) {
+  return useCompanyValidity
+    ? calculateCompanyRenewalExpiryDate(currentExpiry)
+    : calculateRenewalExpiryDate(currentExpiry);
+}
+
+/**
+ * Hostheaven panel `expiresAt` strings without a timezone are IST, not UTC.
+ * @param {unknown} raw
+ * @returns {Date|null}
+ */
+export function parseHostheavenExpiryDate(raw) {
+  if (raw == null || raw === '') return null;
+  const s = String(raw).trim();
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(s) && !/[zZ]|[+-]\d{2}:?\d{2}$/.test(s)) {
+    const d = new Date(`${s}+05:30`);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  const d = new Date(s);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 /** Renew button opens when this many days or fewer remain (inclusive). */
 export const RENEWAL_DAYS_BEFORE_EXPIRY = 2;
 

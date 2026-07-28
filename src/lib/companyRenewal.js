@@ -1,26 +1,71 @@
 import IPStock from '@/models/ipStockModel';
+import Company from '@/models/companyModel';
 import { isSlotIpOrder } from '@/lib/slotIpOrder';
+import { getCompanyResellerApiConfig } from '@/lib/companyResellerApi';
+import { stockHasResellerPanelPlans } from '@/lib/ipStockAvailability';
+import { looksLikeIpv4 } from '@/lib/companyInventory';
+
+/**
+ * Hostheaven / PrimeVPS panel renew — customer pays on OceanLinux, we renew
+ * on the company reseller panel automatically (by VM id or IP lookup).
+ */
+export function stockUsesHostheavenResellerApi(ipStock) {
+  if (!ipStock) return false;
+  if (stockHasResellerPanelPlans(ipStock)) return true;
+  const tags = (ipStock.tags || []).map((t) => String(t).toLowerCase());
+  return tags.some((t) =>
+    t.includes('reseller-api') || t.includes('primevps') || t.includes('primevm') || t.includes('advance')
+  );
+}
+
+/**
+ * True when this order should skip the company approval queue and renew
+ * directly on Hostheaven when the customer pays.
+ */
+export async function isHostheavenDirectRenewEligible(order, ipStock = null) {
+  if (!order || isSlotIpOrder(order)) return false;
+  if (order.kurohostInstanceId || order.provider === 'kurohost') return false;
+  if (order.netbayServiceId && order.provider === 'netbay') return false;
+  if (order.resellerVmId || order.provider === 'reseller-api') return true;
+
+  if (!order.ipStockId) return false;
+
+  const stock =
+    ipStock ||
+    (await IPStock.findById(order.ipStockId).select('company tags defaultConfigurations name').lean());
+  if (!stock?.company) return false;
+  if (!stockUsesHostheavenResellerApi(stock)) return false;
+
+  const company = await Company.findById(stock.company).select('resellerApi kurohostApi').lean();
+  if (!getCompanyResellerApiConfig(company)) return false;
+
+  const ip = String(order.ipAddress || '').split(':')[0].trim();
+  return ip.length > 0;
+}
+
+/**
+ * True when approving a queued company renewal should also renew on the
+ * Hostheaven / reseller panel (lookup VM by IP if resellerVmId is missing).
+ */
+export function canRenewHostheavenPanelOnCompanyApprove(order, companyDoc) {
+  if (!order || isSlotIpOrder(order)) return false;
+  if (order.kurohostInstanceId || order.provider === 'kurohost') return false;
+  if (order.netbayServiceId && order.provider === 'netbay') return false;
+  if (!getCompanyResellerApiConfig(companyDoc)) return false;
+
+  const ip = String(order.ipAddress || '').split(':')[0].trim();
+  return ip.length > 0 && looksLikeIpv4(ip);
+}
 
 /**
  * Detect whether an order's renewal must be routed through the company
  * approval queue rather than executed automatically.
  *
- * Rule: if the order has no native upstream automation (no hostycare /
- * smartvps / advps service id) AND its IPStock is linked to a Company,
- * the renewal needs that company's approval before expiry is extended.
+ * Hostheaven (reseller panel) renewals are automatic — customer pays, panel
+ * extends via wallet, order expiry updates. No /company → Renewals approval.
  *
- * Hostycare / SmartVPS / ADVPS / Netbay orders with real service IDs keep the
- * existing automated path even if their stock happens to belong to a
- * company — the upstream system handles the actual extension.
- *
- * KuroHost orders intentionally use the approval queue: KuroHost has no
- * hosting-style renew API (PAYG meter). On approve, Start + Sync runs via
- * executeKurohostRenewalOnApprove — you may still top up KuroHost credits
- * separately on the KuroHost console if needed.
- *
- * Slot IP orders are one-time purchases and never use company renewal.
- *
- * Returns { isCompany: boolean, companyId?: ObjectId }.
+ * KuroHost and pure manual company inventory (no Hostheaven panel) still use
+ * the approval queue.
  */
 export async function detectCompanyManagedRenewal(order) {
   if (!order) return { isCompany: false };
@@ -33,9 +78,18 @@ export async function detectCompanyManagedRenewal(order) {
   if (!order.ipStockId) return { isCompany: false };
 
   const ipStock = await IPStock.findById(order.ipStockId)
-    .select('company name')
+    .select('company name tags defaultConfigurations')
     .lean();
   if (!ipStock?.company) return { isCompany: false };
+
+  if (await isHostheavenDirectRenewEligible(order, ipStock)) {
+    return {
+      isCompany: false,
+      hostheavenAutoRenew: true,
+      companyId: ipStock.company,
+      stockName: ipStock.name || '',
+    };
+  }
 
   return {
     isCompany: true,
@@ -57,9 +111,8 @@ export function orderHasUpstreamAutomation(order) {
 }
 
 /**
- * Renewal provider routing. Company-linked manual orders must stay on the
- * `oceanlinux` path (company approval queue) — never infer SmartVPS from the
- * generic "ocean linux" ipStock tag used on partner stocks.
+ * Renewal provider routing. Hostheaven company stocks use reseller-api renew
+ * even when resellerVmId is not saved yet (lookup by IP on panel).
  */
 export async function resolveRenewalProvider(order) {
   if (!order) return 'oceanlinux';
@@ -71,8 +124,14 @@ export async function resolveRenewalProvider(order) {
   if (order.smartvpsServiceId || order.provider === 'smartvps') return 'smartvps';
 
   if (order.ipStockId) {
-    const ipStock = await IPStock.findById(order.ipStockId).select('company tags').lean();
+    const ipStock = await IPStock.findById(order.ipStockId)
+      .select('company tags defaultConfigurations name')
+      .lean();
     if (ipStock) {
+      if (await isHostheavenDirectRenewEligible(order, ipStock)) {
+        return 'reseller-api';
+      }
+
       if (ipStock.company && !orderHasUpstreamAutomation(order)) {
         return 'oceanlinux';
       }
@@ -96,4 +155,15 @@ export async function resolveRenewalProvider(order) {
   }
 
   return 'oceanlinux';
+}
+
+/**
+ * Hostheaven / company IP stock renewals always use 30-day validity (Feb = calendar days),
+ * not calendar-month length (which adds 31 days in Jul/Aug/…).
+ */
+export function shouldUseCompanyValidityForRenewal(companyCheck, provider) {
+  if (companyCheck?.hostheavenAutoRenew) return true;
+  if (companyCheck?.isCompany) return true;
+  if (provider === 'reseller-api') return true;
+  return false;
 }

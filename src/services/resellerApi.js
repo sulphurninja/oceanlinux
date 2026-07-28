@@ -495,6 +495,7 @@ class ResellerApi {
    */
   static extractVmExpiryDate(...sources) {
     const { parseAdvpsExpiryDate } = require('@/lib/advpsOrderExpiry');
+    const { parseHostheavenExpiryDate } = require('@/lib/expiryHelper');
     const keys = [
       'expiresAt',
       'expiryDate',
@@ -511,7 +512,10 @@ class ResellerApi {
       if (!src || typeof src !== 'object') continue;
       for (const key of keys) {
         if (src[key] != null && src[key] !== '') {
-          const d = parseAdvpsExpiryDate(src[key]);
+          const d =
+            key === 'expiresAt'
+              ? parseHostheavenExpiryDate(src[key]) || parseAdvpsExpiryDate(src[key])
+              : parseAdvpsExpiryDate(src[key]);
           if (d) return d;
         }
       }
@@ -572,6 +576,12 @@ class ResellerApi {
     return Array.isArray(parsed) ? parsed : (parsed?.items || parsed?.data || []);
   }
 
+  /**
+   * UserSide.pdf renew flow:
+   * 1. GET /api/pricing/upgrades/{vmId}
+   * 2. POST /api/billing/price/calculate-renewal (+ couponCode)
+   * 3. POST /api/vms/renew/{vmId}/upgrade-renew?gateway=WALLET
+   */
   async getUpgradeOptions(vmId) {
     return this._request(`/api/pricing/upgrades/${encodeURIComponent(vmId)}`);
   }
@@ -626,6 +636,7 @@ class ResellerApi {
   /**
    * Renew or upgrade an existing VM subscription.
    * POST /api/vms/renew/{vmId}/upgrade-renew?gateway=
+   * Optional couponCode — same upstream panel discount as create (couponByMemory).
    */
   async upgradeRenew(vmId, body, { gateway = 'WALLET' } = {}) {
     const qs = new URLSearchParams({ gateway: String(gateway) });

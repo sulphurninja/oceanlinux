@@ -12,6 +12,8 @@ const {
   resolveEffectiveResellerPlanType,
   resolveResellerZoneCandidatesForPurchase,
   resolveExpectedZoneIds,
+  resolveCouponCodeForMemory,
+  resolvePriceIdsForVmSpec,
 } = require('@/lib/resellerApiStockConfig');
 const { parseAdvpsExpiryDate } = require('@/lib/advpsOrderExpiry');
 const {
@@ -136,17 +138,20 @@ function resolveResellerApiConfigFromCompany(company) {
   return getCompanyResellerApiConfig(company);
 }
 
-function buildRenewBody(vmId, order, stockCfg, priceIds) {
-  return {
+function buildRenewBody(vmId, order, stockCfg, priceIds, { couponCode, planType } = {}) {
+  const body = {
     vmId: Number(vmId),
     monthsToAdd: 1,
-    planType: resolveEffectiveResellerPlanType(stockCfg, priceIds),
+    planType: planType || priceIds?.planType || resolveEffectiveResellerPlanType(stockCfg, priceIds),
     useWalletBalance: true,
     cpuPriceId: priceIds.cpuPriceId,
     ramPriceId: priceIds.ramPriceId,
     diskPriceId: priceIds.diskPriceId,
     bandwidthPriceId: priceIds.bandwidthPriceId,
   };
+  const code = String(couponCode || '').trim().toUpperCase();
+  if (code) body.couponCode = code;
+  return body;
 }
 
 async function resolveVmId(api, order) {
@@ -500,46 +505,293 @@ async function syncResellerVmCredentials(api, order, vmId) {
   return { updates, changes, details };
 }
 
+function isCouponRenewFailure(err) {
+  const msg = String(err?.message || err?.body?.error || err?.body?.message || '').toLowerCase();
+  return /coupon|minimum order amount|promo/i.test(msg);
+}
+
+function couponAppliedOnCalculate(calc) {
+  if (!calc || typeof calc !== 'object') return false;
+  const status = String(calc.couponStatus || '').toUpperCase();
+  return status === 'APPLIED' || Number(calc.discountAmount) > 0;
+}
+
+/** UserSide.pdf: pick the tier closest to the VM's current subscription (proRata 0 = exact match). */
+function pickCurrentUpgradeTier(options) {
+  if (!Array.isArray(options) || !options.length) return null;
+  const zero = options.find((o) => Number(o.proRataUpgradeCost) === 0);
+  if (zero?.tier?.id != null) return zero.tier.id;
+  const sorted = options
+    .slice()
+    .sort((a, b) => Number(a.proRataUpgradeCost || 0) - Number(b.proRataUpgradeCost || 0));
+  return sorted[0]?.tier?.id ?? null;
+}
+
 /**
- * Call upstream renew (wallet) for an OceanLinux order linked to a reseller panel VM.
+ * UserSide.pdf renew flow step 1: GET /api/pricing/upgrades/{vmId}
+ * Returns price IDs tied to this VM so isSpecChange stays false on renew.
  */
-async function renewResellerPanelVm({ api, order, ipStock, Order }) {
-  const stockCfg = readResellerApiStockConfig(ipStock);
-  const vmId = await resolveVmId(api, order);
-  if (!vmId) {
-    return { success: false, error: 'No VM found on reseller panel for this order' };
+async function resolveRenewPriceIdsFromUpgradeOptions(api, vmId) {
+  const opts = await api.getUpgradeOptions(vmId);
+  const cpuPriceId = pickCurrentUpgradeTier(opts?.cpuOptions);
+  const ramPriceId = pickCurrentUpgradeTier(opts?.ramOptions);
+  const diskPriceId = pickCurrentUpgradeTier(opts?.diskOptions);
+  const bandwidthPriceId = pickCurrentUpgradeTier(opts?.bandwidthOptions);
+  if (!cpuPriceId || !ramPriceId || !diskPriceId || !bandwidthPriceId) return null;
+
+  return {
+    planType: String(opts?.currentPlan || 'SHARED').toUpperCase(),
+    cpuPriceId,
+    ramPriceId,
+    diskPriceId,
+    bandwidthPriceId,
+    fromUpgradeApi: true,
+  };
+}
+
+async function resolveRenewPriceIds(api, order, stockCfg, { panelPlanType, vmDetails, vmId } = {}) {
+  if (vmId) {
+    try {
+      const fromUpgrade = await resolveRenewPriceIdsFromUpgradeOptions(api, vmId);
+      if (fromUpgrade?.cpuPriceId) {
+        console.log(`[RESELLER-RENEW] Price IDs from /api/pricing/upgrades/${vmId} (plan ${fromUpgrade.planType})`);
+        return fromUpgrade;
+      }
+    } catch (err) {
+      console.warn('[RESELLER-RENEW] getUpgradeOptions failed — falling back to catalog:', err.message);
+    }
+  }
+
+  const renewPlanType = panelPlanType || stockCfg.planType || 'SHARED';
+
+  if (vmDetails) {
+    const fromVm = await resolvePriceIdsForVmSpec(api, vmDetails, { planType: renewPlanType });
+    if (fromVm?.cpuPriceId) return fromVm;
   }
 
   let priceIds = resolvePriceIdsForMemory(stockCfg, order.memory);
   if (!priceIds?.cpuPriceId) {
     priceIds = await autoResolveResellerPriceIds(api, {
       memory: order.memory,
-      planType: stockCfg.planType,
+      planType: renewPlanType,
     });
   }
+  return priceIds;
+}
 
-  const renewBody = buildRenewBody(vmId, order, stockCfg, priceIds);
+function overviewPlanType(overviewRow) {
+  const raw = overviewRow?.raw || overviewRow || {};
+  return String(raw.serverPlan || raw.planType || raw.serverPlanType || '').trim().toUpperCase() || null;
+}
 
+function panelExpiryMs(value) {
+  if (!value) return null;
+  const d = new Date(value);
+  const ms = d.getTime();
+  return Number.isFinite(ms) ? ms : null;
+}
+
+/** Hostheaven sometimes returns COMPLETED but leaves expiresAt unchanged — treat as failure. */
+function panelExpiryWasExtended(beforeMs, afterMs, { minDays = 7 } = {}) {
+  if (beforeMs == null || afterMs == null) return afterMs != null && afterMs > beforeMs;
+  const minMs = minDays * 24 * 60 * 60 * 1000;
+  return afterMs - beforeMs >= minMs;
+}
+
+async function upgradeRenewWithCouponFallback(api, vmId, renewBody, gateway, { calcWithCoupon } = {}) {
   try {
-    await api.calculateRenewal(renewBody);
+    const res = await api.upgradeRenew(vmId, renewBody, { gateway });
+    return { res, couponUsed: !!renewBody.couponCode };
+  } catch (err) {
+    if (!renewBody.couponCode || !isCouponRenewFailure(err)) throw err;
+
+    // Coupon was pre-validated on calculate-renewal — do not silently drop it unless
+    // the quote never applied the discount (Hostheaven would reject upgrade-renew).
+    if (calcWithCoupon && couponAppliedOnCalculate(calcWithCoupon)) {
+      throw err;
+    }
+
+    console.warn(
+      `[RESELLER-RENEW] Coupon renew failed for VM ${vmId} (${renewBody.couponCode}), retrying without coupon:`,
+      err.message
+    );
+    const { couponCode, ...withoutCoupon } = renewBody;
+    const res = await api.upgradeRenew(vmId, withoutCoupon, { gateway });
+    return { res, couponUsed: false, couponFallback: true };
+  }
+}
+
+/**
+ * Call upstream renew (wallet) for an OceanLinux order linked to a reseller panel VM.
+ */
+async function renewResellerPanelVm({ api, order, ipStock, Order, companyCoupon = null }) {
+  const stockCfg = readResellerApiStockConfig(ipStock);
+  const vmId = await resolveVmId(api, order);
+  if (!vmId) {
+    return { success: false, error: 'No VM found on reseller panel for this order' };
+  }
+
+  const overviewRow = await resolveOverviewRowForVm(api, vmId);
+  const panelPlanType = overviewPlanType(overviewRow);
+  const renewPlanType = panelPlanType || stockCfg.planType || 'SHARED';
+  const panelExpiryBefore =
+    panelExpiryMs(overviewRow?.raw?.expiresAt) ||
+    panelExpiryMs(ResellerApi.extractVmExpiryDate(overviewRow?.raw, overviewRow));
+
+  let vmDetails = null;
+  try {
+    vmDetails = await api.getVmDetails(vmId);
+  } catch (detailsErr) {
+    console.warn('[RESELLER-RENEW] getVmDetails failed — price IDs may not match VM spec:', detailsErr.message);
+  }
+
+  let priceIds = await resolveRenewPriceIds(api, order, stockCfg, {
+    panelPlanType: renewPlanType,
+    vmDetails,
+    vmId,
+  });
+
+  let couponSource = companyCoupon;
+  if (!couponSource && ipStock?.company) {
+    const Company = (await import('@/models/companyModel')).default;
+    const company = await Company.findById(ipStock.company).select('resellerApi').lean();
+    const cfg = getCompanyResellerApiConfig(company);
+    if (cfg) {
+      couponSource = { couponCode: cfg.couponCode, couponByMemory: cfg.couponByMemory };
+    }
+  }
+
+  const upstreamCoupon = resolveCouponCodeForMemory(stockCfg, order.memory, couponSource || {});
+  const renewBody = buildRenewBody(vmId, order, stockCfg, priceIds, {
+    couponCode: upstreamCoupon,
+  });
+  renewBody.planType = priceIds?.planType || panelPlanType || renewPlanType;
+
+  if (upstreamCoupon) {
+    console.log(`[RESELLER-RENEW] Upstream coupon ${upstreamCoupon} for ${order.memory} (order ${order._id})`);
+  }
+
+  let calcWithCoupon = null;
+  try {
+    calcWithCoupon = await api.calculateRenewal(renewBody);
+    if (upstreamCoupon && !couponAppliedOnCalculate(calcWithCoupon)) {
+      console.warn(
+        `[RESELLER-RENEW] Coupon ${upstreamCoupon} not applied on calculate-renewal — proceeding without coupon`
+      );
+      delete renewBody.couponCode;
+      calcWithCoupon = await api.calculateRenewal(renewBody);
+    } else if (calcWithCoupon?.isSpecChange === true && vmId) {
+      console.warn('[RESELLER-RENEW] isSpecChange=true — re-fetching price IDs from /api/pricing/upgrades');
+      priceIds = await resolveRenewPriceIdsFromUpgradeOptions(api, vmId);
+      if (priceIds?.cpuPriceId) {
+        Object.assign(
+          renewBody,
+          buildRenewBody(vmId, order, stockCfg, priceIds, { couponCode: upstreamCoupon })
+        );
+        renewBody.planType = priceIds.planType || renewBody.planType;
+        calcWithCoupon = await api.calculateRenewal(renewBody);
+        if (upstreamCoupon && !couponAppliedOnCalculate(calcWithCoupon)) {
+          console.warn(
+            `[RESELLER-RENEW] Coupon ${upstreamCoupon} not applied after upgrade re-quote — proceeding without coupon`
+          );
+          delete renewBody.couponCode;
+          calcWithCoupon = await api.calculateRenewal(renewBody);
+        }
+      }
+    }
+    if (upstreamCoupon && calcWithCoupon && couponAppliedOnCalculate(calcWithCoupon)) {
+      const orderAmount = Number(calcWithCoupon.originalAmount || calcWithCoupon.extensionCost || 0);
+      if (orderAmount > 0) {
+        try {
+          const check = await api.validateCoupon({ code: upstreamCoupon, orderAmount });
+          const checkData = check?.data && typeof check.data === 'object' ? check.data : check;
+          if (checkData?.valid === true) {
+            console.log(
+              `[RESELLER-RENEW] Coupon ${upstreamCoupon} validated — ₹${checkData.finalAmount ?? '?'} (was ₹${checkData.originalAmount ?? orderAmount})`
+            );
+          }
+        } catch (validateErr) {
+          console.warn('[RESELLER-RENEW] Coupon validate warning:', validateErr.message);
+        }
+      }
+    }
   } catch (calcErr) {
     console.warn('[RESELLER-RENEW] calculate-renewal warning:', calcErr.message);
   }
 
-  const gateway = stockCfg.gateway || 'WALLET';
-  const renewRes = await api.upgradeRenew(vmId, renewBody, { gateway });
+  let couponUsed = null;
 
-  let newExpiryDate = null;
+  const gateway = stockCfg.gateway || 'WALLET';
+  let renewRes;
   try {
-    const details = await api.getVmDetails(vmId);
-    newExpiryDate = ResellerApi.extractVmExpiryDate(details) || parseAdvpsExpiryDate(renewRes?.expiresAt);
+    const out = await upgradeRenewWithCouponFallback(api, vmId, renewBody, gateway, { calcWithCoupon });
+    renewRes = out.res;
+    couponUsed = out.couponUsed ? upstreamCoupon : out.couponFallback ? null : renewBody.couponCode || null;
+  } catch (err) {
+    const errMsg = String(err?.body?.error || err.message || '');
+    if (/no changes detected/i.test(errMsg)) {
+      return {
+        success: false,
+        error:
+          'Hostheaven panel says renewal already applied for this billing cycle — extend manually on panel if expiry is still short.',
+        vmId,
+        upstream: err.body || null,
+        couponUsed: upstreamCoupon || null,
+        calcQuote: calcWithCoupon
+          ? {
+              payableAmount: calcWithCoupon.payableAmount,
+              couponStatus: calcWithCoupon.couponStatus,
+              isSpecChange: calcWithCoupon.isSpecChange,
+            }
+          : null,
+      };
+    }
+    return {
+      success: false,
+      error: err.message,
+      vmId,
+      upstream: err.body || null,
+    };
+  }
+
+  let newExpiryDate =
+    parseAdvpsExpiryDate(renewRes?.newExpiry || renewRes?.expiresAt) ||
+    ResellerApi.extractVmExpiryDate(overviewRow?.raw, overviewRow);
+
+  try {
+    const freshOverview = await resolveOverviewRowForVm(api, vmId, { maxPages: 5 });
+    newExpiryDate =
+      ResellerApi.extractVmExpiryDate(freshOverview?.raw, freshOverview) ||
+      newExpiryDate;
+    if (!newExpiryDate) {
+      const details = await api.getVmDetails(vmId);
+      newExpiryDate = ResellerApi.extractVmExpiryDate(details);
+    }
   } catch (_) { /* best effort */ }
+
+  const panelExpiryAfter = panelExpiryMs(newExpiryDate);
+  if (!panelExpiryWasExtended(panelExpiryBefore, panelExpiryAfter)) {
+    const panelMonthly = Number(overviewRow?.raw?.monthlyPrice || 0);
+    return {
+      success: false,
+      error:
+        'Hostheaven panel renew completed but expiry did not extend — VM billing spec may not match catalog (extend manually on Hostheaven panel).',
+      vmId,
+      upstream: renewRes,
+      newExpiryDate,
+      couponUsed,
+      panelPlanType: panelPlanType || renewPlanType,
+      panelExpiryBefore: panelExpiryBefore ? new Date(panelExpiryBefore).toISOString() : null,
+      panelExpiryAfter: panelExpiryAfter ? new Date(panelExpiryAfter).toISOString() : null,
+      panelMonthlyPrice: panelMonthly || null,
+      isSpecChange: calcWithCoupon?.isSpecChange === true,
+    };
+  }
 
   if (Order && order._id) {
     await Order.findByIdAndUpdate(order._id, {
       resellerVmId: vmId,
       provider: 'reseller-api',
-      ...(newExpiryDate ? {} : {}),
     });
   }
 
@@ -548,6 +800,8 @@ async function renewResellerPanelVm({ api, order, ipStock, Order }) {
     vmId,
     upstream: renewRes,
     newExpiryDate,
+    couponUsed,
+    panelPlanType: panelPlanType || renewPlanType,
   };
 }
 
