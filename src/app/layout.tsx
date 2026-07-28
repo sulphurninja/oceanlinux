@@ -54,7 +54,14 @@ export const metadata: Metadata = {
     ]
   },
   manifest: "/site.webmanifest",
-  category: "Technology"
+  category: "Technology",
+  themeColor: "#0ea5e9",
+  appleWebApp: {
+    capable: true,
+    title: "OceanLinux",
+    statusBarStyle: "default",
+  },
+  applicationName: "OceanLinux",
 };
 
 // Structured data for better SEO
@@ -88,6 +95,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <head>
+        <meta name="mobile-web-app-capable" content="yes" />
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{
