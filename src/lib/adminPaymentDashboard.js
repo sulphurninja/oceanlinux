@@ -80,6 +80,30 @@ function computeOrderAmounts(order) {
   return { total: price, wallet: 0, gateway: gatewayAmt || price };
 }
 
+function computeRenewalAmounts(renewal) {
+  const total = Number(renewal.amount) || 0;
+  const gatewayAmt = Number(renewal.paymentDetails?.gatewayAmount);
+  const walletAmt = Number(renewal.paymentDetails?.walletAmount);
+  if (gatewayAmt > 0 || walletAmt > 0) {
+    return {
+      total,
+      gateway: gatewayAmt > 0 ? gatewayAmt : Math.max(0, total - walletAmt),
+      wallet: walletAmt > 0 ? walletAmt : Math.max(0, total - gatewayAmt),
+    };
+  }
+  const method = String(renewal.paymentMethod || '').toLowerCase();
+  if (method === 'wallet' || method.startsWith('wallet')) {
+    return { total, gateway: 0, wallet: total };
+  }
+  return { total, gateway: total, wallet: 0 };
+}
+
+function renewalPaidInRange(renewal, rangeStart, rangeEnd) {
+  const paidAt = renewal?.paidAt ? new Date(renewal.paidAt) : null;
+  if (!paidAt || Number.isNaN(paidAt.getTime())) return false;
+  return paidAt >= rangeStart && paidAt <= rangeEnd;
+}
+
 function orderPaymentDay(order) {
   const confirmedAt = order.paymentDetails?.confirmedAt;
   if (confirmedAt) {
@@ -87,6 +111,36 @@ function orderPaymentDay(order) {
     if (!Number.isNaN(d.getTime())) return istDayKey(d);
   }
   return istDayKey(order.createdAt);
+}
+
+/** New-order sale day — renewals overwrite paymentDetails, so don't reuse latest confirmedAt. */
+function vpsSaleDay(order) {
+  const renewals = order.renewalPayments || [];
+  if (renewals.length === 0) return orderPaymentDay(order);
+
+  const firstRenewalAt = new Date(renewals[0].paidAt);
+  const confirmedAt = order.paymentDetails?.confirmedAt
+    ? new Date(order.paymentDetails.confirmedAt)
+    : null;
+  if (
+    confirmedAt &&
+    !Number.isNaN(confirmedAt.getTime()) &&
+    !Number.isNaN(firstRenewalAt.getTime()) &&
+    confirmedAt < firstRenewalAt
+  ) {
+    return istDayKey(confirmedAt);
+  }
+  return istDayKey(order.createdAt);
+}
+
+function shouldCountVpsSale(order, rangeStart, rangeEnd) {
+  const renewals = order.renewalPayments || [];
+  if (renewals.length > 0) {
+    return order.createdAt >= rangeStart && order.createdAt <= rangeEnd;
+  }
+  const saleDay = orderPaymentDay(order);
+  const saleAt = new Date(`${saleDay}T12:00:00.000+05:30`);
+  return saleAt >= rangeStart && saleAt <= rangeEnd;
 }
 
 function mergeDay(map, dayKey, patch) {
@@ -127,13 +181,19 @@ async function buildAdminPaymentDashboard(Order, WalletRecharge, { days = 30 } =
   const [orders, recharges] = await Promise.all([
     Order.find({
       status: { $in: PAID_STATUSES },
-      createdAt: { $gte: rangeStart, $lte: rangeEnd },
+      $or: [
+        { createdAt: { $gte: rangeStart, $lte: rangeEnd } },
+        { 'renewalPayments.paidAt': { $gte: rangeStart, $lte: rangeEnd } },
+      ],
     })
       .select('price status paymentMethod paymentDetails walletDeduction createdAt renewalPayments')
       .lean(),
     WalletRecharge.find({
       status: 'confirmed',
-      createdAt: { $gte: rangeStart, $lte: rangeEnd },
+      $or: [
+        { creditedAt: { $gte: rangeStart, $lte: rangeEnd } },
+        { createdAt: { $gte: rangeStart, $lte: rangeEnd } },
+      ],
     })
       .select('amount creditedAt createdAt')
       .lean(),
@@ -142,29 +202,31 @@ async function buildAdminPaymentDashboard(Order, WalletRecharge, { days = 30 } =
   const byDay = new Map();
 
   for (const order of orders) {
-    const amounts = computeOrderAmounts(order);
-    const dayKey = orderPaymentDay(order);
-    if (!rangeKeys.includes(dayKey)) continue;
-
-    mergeDay(byDay, dayKey, {
-      vpsOrders: 1,
-      vpsRevenue: amounts.total,
-      gatewayAmount: amounts.gateway,
-      walletUsed: amounts.wallet,
-      totalExternalIn: amounts.gateway,
-    });
+    if (shouldCountVpsSale(order, rangeStart, rangeEnd)) {
+      const amounts = computeOrderAmounts(order);
+      const dayKey = vpsSaleDay(order);
+      if (rangeKeys.includes(dayKey)) {
+        mergeDay(byDay, dayKey, {
+          vpsOrders: 1,
+          vpsRevenue: amounts.total,
+          gatewayAmount: amounts.gateway,
+          walletUsed: amounts.wallet,
+          totalExternalIn: amounts.gateway,
+        });
+      }
+    }
 
     for (const renewal of order.renewalPayments || []) {
-      const paidAt = renewal?.paidAt ? new Date(renewal.paidAt) : null;
-      if (!paidAt || Number.isNaN(paidAt.getTime())) continue;
-      const renewalDay = istDayKey(paidAt);
+      if (!renewalPaidInRange(renewal, rangeStart, rangeEnd)) continue;
+      const renewalDay = istDayKey(new Date(renewal.paidAt));
       if (!rangeKeys.includes(renewalDay)) continue;
-      const amt = Number(renewal.amount) || 0;
+      const renewalAmounts = computeRenewalAmounts(renewal);
       mergeDay(byDay, renewalDay, {
         renewals: 1,
-        renewalRevenue: amt,
-        renewalGateway: amt,
-        totalExternalIn: amt,
+        renewalRevenue: renewalAmounts.total,
+        renewalGateway: renewalAmounts.gateway,
+        walletUsed: renewalAmounts.wallet,
+        totalExternalIn: renewalAmounts.gateway,
       });
     }
   }

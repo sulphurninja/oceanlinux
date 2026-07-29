@@ -8,6 +8,7 @@ const {
   ensureSmartVpsNotBusy: ensureSmartVpsNotBusyFromLib,
   executeSmartVpsRestart,
 } = require('@/lib/smartvpsPowerActions');
+const { parseSmartVpsExpiryDate } = require('@/lib/smartvpsOrderSync');
 const { sanitizeCustomerApiPayload, customerServiceErrorMessage } = require('@/lib/customerFacingErrors');
 
 function customerJson(body, status = 200, action = null) {
@@ -445,6 +446,8 @@ export async function GET(request) {
       powerStatus: details?.PowerStatus || null,
       syncResult: {
         credentialsUpdated: !!(syncResult.username || syncResult.password || syncResult.os),
+        expiryUpdated: syncResult.expiryUpdated,
+        expiryDate: syncResult.expiryDate || syncResult.panelExpiry || null,
         lastSyncTime: syncResult.lastSyncTime
       }
     };
@@ -841,10 +844,8 @@ export async function POST(request) {
             ...parsedStatusData
           };
           
-          // Fire and forget - don't block response
-          syncServerState(orderId, details, details).catch(e => 
-            console.error('[SMARTVPS-ACTION][POST] Background sync error:', e.message)
-          );
+          // Sync expiry + creds before responding so the dashboard shows panel truth
+          const syncResult = await syncServerState(orderId, details, details);
 
           return NextResponse.json({
             success: true,
@@ -852,7 +853,13 @@ export async function POST(request) {
             powerStatus: PowerStatus,
             machineStatus: MachineStatus,
             actionStatus: ActionStatus,
-            lastSync: new Date().toISOString()
+            lastSync: new Date().toISOString(),
+            syncResult: {
+              credentialsUpdated: syncResult.credentialsUpdated,
+              expiryUpdated: syncResult.expiryUpdated,
+              expiryDate: syncResult.expiryDate || syncResult.panelExpiry || null,
+              lastSyncTime: syncResult.lastSyncTime,
+            },
           });
         } catch (error) {
           console.error('[SMARTVPS-ACTION][POST] Power status fetch error:', error.message);
@@ -886,7 +893,9 @@ export async function POST(request) {
           result = {
             synced: true,
             message: 'Server status synced successfully',
-            credentialsUpdated: !!(syncResult.username || syncResult.password || syncResult.os),
+            credentialsUpdated: syncResult.credentialsUpdated,
+            expiryUpdated: syncResult.expiryUpdated,
+            expiryDate: syncResult.expiryDate || syncResult.panelExpiry || null,
             lastSyncTime: syncResult.lastSyncTime
           };
         } catch (syncError) {
@@ -1275,6 +1284,8 @@ async function syncServerState(orderId, details, info) {
     const updateData = {
       lastSyncTime: new Date()
     };
+    let expiryUpdated = false;
+    let panelExpiry = null;
     console.log('[SMARTVPS-SYNC] Initial update data:', updateData);
 
     if (details) {
@@ -1436,6 +1447,23 @@ async function syncServerState(orderId, details, info) {
         console.log('[SMARTVPS-SYNC] No password in SmartVPS response, keeping current');
       }
 
+      // Expiry sync — always prefer SmartVPS panel ExpiryDate
+      console.log('[SMARTVPS-SYNC] === EXPIRY SYNC ===');
+      panelExpiry = parseSmartVpsExpiryDate(details);
+      if (panelExpiry) {
+        const prevMs = currentOrder.expiryDate ? new Date(currentOrder.expiryDate).getTime() : null;
+        const nextMs = panelExpiry.getTime();
+        if (prevMs !== nextMs) {
+          console.log('[SMARTVPS-SYNC] ✅ Expiry update from panel:', panelExpiry.toISOString());
+          updateData.expiryDate = panelExpiry;
+          expiryUpdated = true;
+        } else {
+          console.log('[SMARTVPS-SYNC] Expiry unchanged:', panelExpiry.toISOString());
+        }
+      } else {
+        console.log('[SMARTVPS-SYNC] No ExpiryDate in SmartVPS response');
+      }
+
       // OS sync - enhanced with better comparison
       console.log('[SMARTVPS-SYNC] === OS SYNC ===');
       if (details.os && details.os !== currentOrder.os) {
@@ -1539,6 +1567,7 @@ async function syncServerState(orderId, details, info) {
       username: updateData.username ? `${updateData.username} (UPDATED)` : 'unchanged',
       password: updateData.password ? '[PASSWORD UPDATED]' : 'unchanged',
       os: updateData.os ? `${updateData.os} (UPDATED)` : 'unchanged',
+      expiryDate: updateData.expiryDate ? `${updateData.expiryDate.toISOString?.() || updateData.expiryDate} (UPDATED)` : 'unchanged',
       hasServerDetails: !!updateData.serverDetails
     });
 
@@ -1559,7 +1588,12 @@ async function syncServerState(orderId, details, info) {
     }
 
     console.log('[SMARTVPS-SYNC] === SYNC SUCCESS ===');
-    return updateData;
+    return {
+      ...updateData,
+      expiryUpdated,
+      credentialsUpdated: Boolean(updateData.username || updateData.password || updateData.os),
+      panelExpiry: panelExpiry || null,
+    };
   } catch (error) {
     console.error('[SMARTVPS-SYNC] === SYNC ERROR ===');
     console.error('[SMARTVPS-SYNC] Error syncing server state for order', orderId, ':', error);

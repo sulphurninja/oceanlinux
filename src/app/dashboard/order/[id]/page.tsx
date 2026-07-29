@@ -1045,11 +1045,10 @@ const OrderDetails = () => {
         console.log('[ORDER-DETAILS] Power state unchanged (transient/busy):', data);
       }
 
-      // Re-read the order whenever the provider reported a credential change so
-      // the dashboard shows the fresh password immediately. Hostheaven (reseller
-      // API) rotates the password on reinstall and reports it via
-      // syncResult.credentialsUpdated; ADVPS reports it top-level.
-      if (data.credentialsUpdated || data.syncResult?.credentialsUpdated) {
+      // SmartVPS status sync always writes panel expiry — reload order so UI matches DB.
+      if (provider === 'smartvps') {
+        await fetchOrder({ silent: true });
+      } else if (data.credentialsUpdated || data.syncResult?.credentialsUpdated) {
         await fetchOrder({ silent: true });
         if (provider === 'netbay' && (data.credentialsUpdated || data.syncResult?.credentialsUpdated)) {
           setShowPassword(true);

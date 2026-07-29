@@ -73,7 +73,7 @@ const WhatsAppWidget: React.FC<WhatsAppWidgetProps> = ({ className }) => {
           </svg>
 
           {/* Pulse animation ring */}
-          <div className="absolute inset-0 rounded-full bg-green-400/40 animate-ping" />
+          <div className="absolute inset-0 rounded-full bg-green-400/40 ocean-soft-pulse" />
         </div>
       </button>
 

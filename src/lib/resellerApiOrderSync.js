@@ -674,31 +674,42 @@ async function renewResellerPanelVm({ api, order, ipStock, Order, companyCoupon 
   let calcWithCoupon = null;
   try {
     calcWithCoupon = await api.calculateRenewal(renewBody);
-    if (upstreamCoupon && !couponAppliedOnCalculate(calcWithCoupon)) {
+
+    const couponMissing = upstreamCoupon && !couponAppliedOnCalculate(calcWithCoupon);
+    const needsUpgradeRequote = calcWithCoupon?.isSpecChange === true || couponMissing;
+
+    if (needsUpgradeRequote && vmId) {
       console.warn(
-        `[RESELLER-RENEW] Coupon ${upstreamCoupon} not applied on calculate-renewal — proceeding without coupon`
+        `[RESELLER-RENEW] Re-quote VM ${vmId} via /api/pricing/upgrades (isSpecChange=${!!calcWithCoupon?.isSpecChange}, couponApplied=${couponAppliedOnCalculate(calcWithCoupon)})`
       );
-      delete renewBody.couponCode;
-      calcWithCoupon = await api.calculateRenewal(renewBody);
-    } else if (calcWithCoupon?.isSpecChange === true && vmId) {
-      console.warn('[RESELLER-RENEW] isSpecChange=true — re-fetching price IDs from /api/pricing/upgrades');
-      priceIds = await resolveRenewPriceIdsFromUpgradeOptions(api, vmId);
-      if (priceIds?.cpuPriceId) {
+      const fromUpgrade = await resolveRenewPriceIdsFromUpgradeOptions(api, vmId);
+      if (fromUpgrade?.cpuPriceId) {
+        priceIds = fromUpgrade;
         Object.assign(
           renewBody,
           buildRenewBody(vmId, order, stockCfg, priceIds, { couponCode: upstreamCoupon })
         );
         renewBody.planType = priceIds.planType || renewBody.planType;
         calcWithCoupon = await api.calculateRenewal(renewBody);
-        if (upstreamCoupon && !couponAppliedOnCalculate(calcWithCoupon)) {
-          console.warn(
-            `[RESELLER-RENEW] Coupon ${upstreamCoupon} not applied after upgrade re-quote — proceeding without coupon`
-          );
-          delete renewBody.couponCode;
-          calcWithCoupon = await api.calculateRenewal(renewBody);
-        }
       }
     }
+
+    if (upstreamCoupon && !couponAppliedOnCalculate(calcWithCoupon)) {
+      return {
+        success: false,
+        error: `Hostheaven coupon ${upstreamCoupon} did not apply (panel quoted ₹${Number(calcWithCoupon?.payableAmount || 0).toFixed(0)}) — renew aborted to avoid full-price wallet debit.`,
+        vmId,
+        upstreamCoupon,
+        couponUsed: null,
+        calcQuote: {
+          payableAmount: calcWithCoupon?.payableAmount,
+          extensionCost: calcWithCoupon?.extensionCost,
+          couponStatus: calcWithCoupon?.couponStatus,
+          isSpecChange: calcWithCoupon?.isSpecChange,
+        },
+      };
+    }
+
     if (upstreamCoupon && calcWithCoupon && couponAppliedOnCalculate(calcWithCoupon)) {
       const orderAmount = Number(calcWithCoupon.originalAmount || calcWithCoupon.extensionCost || 0);
       if (orderAmount > 0) {
@@ -716,6 +727,15 @@ async function renewResellerPanelVm({ api, order, ipStock, Order, companyCoupon 
       }
     }
   } catch (calcErr) {
+    if (upstreamCoupon) {
+      return {
+        success: false,
+        error: `Hostheaven renew quote failed with coupon ${upstreamCoupon}: ${calcErr.message}`,
+        vmId,
+        upstreamCoupon,
+        couponUsed: null,
+      };
+    }
     console.warn('[RESELLER-RENEW] calculate-renewal warning:', calcErr.message);
   }
 
@@ -801,6 +821,7 @@ async function renewResellerPanelVm({ api, order, ipStock, Order, companyCoupon 
     upstream: renewRes,
     newExpiryDate,
     couponUsed,
+    panelPayableAmount: calcWithCoupon?.payableAmount ?? null,
     panelPlanType: panelPlanType || renewPlanType,
   };
 }

@@ -84,6 +84,8 @@ async function executeResellerPanelUpstreamRenewal(order, { months = 1, Order, c
       result: renewed.upstream,
       vmId: renewed.vmId,
       newExpiryDate,
+      couponUsed: renewed.couponUsed ?? null,
+      panelPayableAmount: renewed.panelPayableAmount ?? null,
     };
   } catch (err) {
     return {

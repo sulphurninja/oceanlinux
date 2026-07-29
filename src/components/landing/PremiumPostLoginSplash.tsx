@@ -4,7 +4,9 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
 import PremiumAuthBackground from "@/components/landing/PremiumAuthBackground";
+import { triggerLoginBird } from "@/lib/oceanBirdFly";
 import {
+  JUST_LOGGED_IN_KEY,
   POST_LOGIN_SPLASH_DONE_KEY,
   POST_LOGIN_SPLASH_EVENT,
   POST_LOGIN_SPLASH_MS,
@@ -12,7 +14,6 @@ import {
   isPostLoginSplashPending,
   setPostLoginLoadingScreen,
 } from "@/lib/post-login";
-import { triggerLoginBird } from "@/lib/oceanBirdFly";
 
 const STEPS = [
   "Authenticating credentials",
@@ -34,6 +35,12 @@ function finishSplash(onComplete?: () => void) {
   sessionStorage.setItem(POST_LOGIN_SPLASH_DONE_KEY, "1");
   clearPostLoginLoadingScreen();
   window.dispatchEvent(new CustomEvent(POST_LOGIN_SPLASH_EVENT));
+
+  const justLoggedIn = sessionStorage.getItem(JUST_LOGGED_IN_KEY) === "1";
+  if (justLoggedIn) {
+    window.setTimeout(() => triggerLoginBird(), 100);
+  }
+
   onComplete?.();
 }
 
@@ -77,11 +84,8 @@ export default function PremiumPostLoginSplash({
       setExiting(true);
       window.setTimeout(() => {
         setVisible(false);
-        finishSplash(() => {
-          window.setTimeout(() => triggerLoginBird(), 180);
-          onCompleteRef.current?.();
-        });
-      }, 420);
+        finishSplash(onCompleteRef.current);
+      }, 280);
     }, duration);
 
     return () => {
@@ -108,7 +112,7 @@ export default function PremiumPostLoginSplash({
         paddingBottom: "env(safe-area-inset-bottom, 0px)",
       }}
     >
-      <PremiumAuthBackground />
+      <PremiumAuthBackground lite />
 
       <div className="relative z-10 w-full max-w-sm text-center">
         <div className="premium-post-login-card mx-auto">

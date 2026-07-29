@@ -24,7 +24,10 @@ const notificationSchema = new mongoose.Schema({
             'payment_failed',
             'server_action',
             'profile_updated',
-            'login_new_device'
+            'login_new_device',
+            'service_expiring',
+            'renewal_success',
+            'service_suspended',
         ],
         required: true
     },

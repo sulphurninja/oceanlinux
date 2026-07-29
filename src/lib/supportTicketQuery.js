@@ -11,3 +11,14 @@ export function buildUserTicketFilter(userId) {
   }
   return clauses.length === 1 ? clauses[0] : { $or: clauses };
 }
+
+export function markTicketReadByUserUpdate() {
+  return {
+    hasUnreadAdminReply: false,
+    userLastReadAt: new Date(),
+  };
+}
+
+export function markTicketAdminReplyUnreadUpdate() {
+  return { hasUnreadAdminReply: true };
+}

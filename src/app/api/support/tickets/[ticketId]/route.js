@@ -3,7 +3,7 @@ import SupportTicket from "@/models/supportTicketModel";
 import User from "@/models/userModel";
 import { getDataFromToken } from "@/helper/getDataFromToken";
 import NotificationService from '@/services/notificationService';
-import { buildUserTicketFilter } from '@/lib/supportTicketQuery';
+import { buildUserTicketFilter, markTicketReadByUserUpdate } from '@/lib/supportTicketQuery';
 
 export async function GET(request, { params }) {
     try {
@@ -17,10 +17,14 @@ export async function GET(request, { params }) {
             });
         }
 
-        const ticket = await SupportTicket.findOne({
-            ticketId: params.ticketId,
-            ...buildUserTicketFilter(userId),
-        }).lean();
+        const ticket = await SupportTicket.findOneAndUpdate(
+            {
+                ticketId: params.ticketId,
+                ...buildUserTicketFilter(userId),
+            },
+            { $set: markTicketReadByUserUpdate() },
+            { new: true }
+        ).lean();
 
         if (!ticket) {
             return new Response(JSON.stringify({ message: 'Ticket not found' }), {
@@ -78,7 +82,9 @@ export async function POST(request, { params }) {
                 },
                 $set: {
                     status: 'waiting-response',
-                    updatedAt: new Date()
+                    updatedAt: new Date(),
+                    hasUnreadAdminReply: false,
+                    userLastReadAt: new Date(),
                 }
             },
             { new: true }

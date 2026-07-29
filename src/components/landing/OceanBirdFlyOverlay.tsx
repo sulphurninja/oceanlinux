@@ -43,15 +43,15 @@ type ActiveCelebration = OceanBirdFlyDetail & {
   birdOpacity: number;
 };
 
-const ANNOUNCE_MS = 1850;
-const MORPH_MS = 620;
+const ANNOUNCE_MS = 1050;
+const MORPH_MS = 380;
 
 const FLY_DURATIONS: Record<OceanBirdFlyVariant, number> = {
-  login: 2100,
-  "order-success": 2200,
-  "renewal-success": 2300,
-  "wallet-success": 2050,
-  logout: 1900,
+  login: 1250,
+  "order-success": 1400,
+  "renewal-success": 1450,
+  "wallet-success": 1300,
+  logout: 1150,
 };
 
 const BIRD_SIZES: Record<OceanBirdFlyVariant, number> = {
@@ -146,11 +146,9 @@ export default function OceanBirdFlyOverlay() {
   const [celebration, setCelebration] = useState<ActiveCelebration | null>(null);
   const rafRef = useRef<number | null>(null);
   const timersRef = useRef<number[]>([]);
+  const birdRef = useRef<HTMLDivElement | null>(null);
   const fromRef = useRef<Point>({ x: 0, y: 0 });
   const toRef = useRef<Point>({ x: 0, y: 0 });
-  const morphWingRef = useRef(0);
-  const morphRafRef = useRef<number | null>(null);
-  const morphActiveRef = useRef(false);
 
   const clearTimers = useCallback(() => {
     timersRef.current.forEach((id) => clearTimeout(id));
@@ -162,11 +160,6 @@ export default function OceanBirdFlyOverlay() {
       cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
     }
-    if (morphRafRef.current !== null) {
-      cancelAnimationFrame(morphRafRef.current);
-      morphRafRef.current = null;
-    }
-    morphActiveRef.current = false;
   }, []);
 
   const finishCelebration = useCallback(
@@ -206,9 +199,10 @@ export default function OceanBirdFlyOverlay() {
         const elapsedSec = (now - flyStart) / 1000;
         const frame = computeBirdFrame(fromRef.current, toRef.current, progress, detail.variant, elapsedSec);
 
-        setCelebration((prev) =>
-          prev && prev.id === id ? { ...prev, frame } : prev,
-        );
+        if (birdRef.current) {
+          birdRef.current.style.opacity = String(frame.opacity);
+          birdRef.current.style.transform = `translate3d(${frame.x}px, ${frame.y}px, 0) translate(-50%, -50%) rotate(${frame.rotate}deg) scale(${frame.scale})`;
+        }
 
         if (progress < 1) {
           rafRef.current = requestAnimationFrame(tick);
@@ -221,7 +215,7 @@ export default function OceanBirdFlyOverlay() {
             });
           }
           timersRef.current.push(
-            window.setTimeout(() => finishCelebration(id), 140),
+            window.setTimeout(() => finishCelebration(id), 120),
           );
         }
       };
@@ -259,24 +253,6 @@ export default function OceanBirdFlyOverlay() {
         frame: computeBirdFrame(origin, origin, 0, detail.variant, 0),
       });
 
-      const morphWingStart = performance.now();
-      const morphWingLoop = (now: number) => {
-        if (!morphActiveRef.current) return;
-        morphWingRef.current = ((now - morphWingStart) / 1000) * 3.8;
-        setCelebration((prev) =>
-          prev && prev.id === id && prev.phase === "morph"
-            ? {
-                ...prev,
-                frame: {
-                  ...prev.frame,
-                  wingPhase: morphWingRef.current,
-                },
-              }
-            : prev,
-        );
-        morphRafRef.current = requestAnimationFrame(morphWingLoop);
-      };
-
       timersRef.current.push(
         window.setTimeout(() => {
           setCelebration((prev) =>
@@ -284,16 +260,9 @@ export default function OceanBirdFlyOverlay() {
               ? { ...prev, phase: "morph", showBird: true, birdOpacity: 0.08 }
               : prev,
           );
-          morphActiveRef.current = true;
-          morphRafRef.current = requestAnimationFrame(morphWingLoop);
 
           timersRef.current.push(
             window.setTimeout(() => {
-              morphActiveRef.current = false;
-              if (morphRafRef.current !== null) {
-                cancelAnimationFrame(morphRafRef.current);
-                morphRafRef.current = null;
-              }
               setCelebration((prev) =>
                 prev && prev.id === id ? { ...prev, birdOpacity: 1 } : prev,
               );
@@ -327,7 +296,7 @@ export default function OceanBirdFlyOverlay() {
 
   const copy = OCEAN_CELEBRATION_COPY[celebration.variant];
   const Icon = VARIANT_ICONS[celebration.variant];
-  const { frame, size, phase } = celebration;
+  const { size, phase } = celebration;
   const isFlying = phase === "fly";
   const showCard = phase === "announce" || phase === "morph";
 
@@ -372,6 +341,7 @@ export default function OceanBirdFlyOverlay() {
 
       {celebration.showBird && (
         <div
+          ref={birdRef}
           className={cn(
             "ocean-bird-fly-bird",
             `ocean-bird-fly-bird--${celebration.variant}`,
@@ -379,16 +349,16 @@ export default function OceanBirdFlyOverlay() {
             isFlying && "ocean-bird-fly-bird--flying",
           )}
           style={{
-            opacity: isFlying ? frame.opacity : celebration.birdOpacity,
+            opacity: isFlying ? undefined : celebration.birdOpacity,
             transform: isFlying
-              ? `translate3d(${frame.x}px, ${frame.y}px, 0) translate(-50%, -50%) rotate(${frame.rotate}deg) scale(${frame.scale})`
+              ? undefined
               : `translate3d(${celebration.origin.x}px, ${celebration.origin.y}px, 0) translate(-50%, -50%) scale(${phase === "morph" ? 0.42 : 0.22})`,
           }}
         >
           <div className="ocean-bird-fly-glow" aria-hidden />
           <OceanFlyingBird
             size={size}
-            wingPhase={frame.wingPhase}
+            autoFlap={phase === "morph" || isFlying}
             className="ocean-bird-fly-svg"
           />
         </div>

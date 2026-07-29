@@ -3,21 +3,39 @@
  *
  * Modern, clean email templates with professional design.
  *
- * Supports two transports — picked at runtime in this order:
- *   1. Resend HTTP API (preferred) — set RESEND_API_KEY
- *   2. SMTP via Nodemailer (fallback) — set SMTP_HOST/SMTP_USER/SMTP_PASS
+ * Supports multiple transports:
+ *   - ZeptoMail HTTP API — ZEPTOMAIL_API_KEY (India: api.zeptomail.in)
+ *   - Resend HTTP API — RESEND_API_KEY
+ *   - SMTP — SMTP_HOST/SMTP_USER/SMTP_PASS
  *
- * The first one that's configured wins. This keeps backward compat with
- * existing SMTP setups while letting us move to Resend without touching
- * any of the call sites.
+ * EMAIL_PROVIDER=zeptomail|resend|smtp|both
+ *   both = ZeptoMail + Resend together (round-robin or failover via EMAIL_STRATEGY)
+ * EMAIL_STRATEGY=round-robin|failover|resend-quota
+ *   resend-quota = up to RESEND_DAILY_LIMIT (default 190) via Resend/day, then ZeptoMail
  */
 
 const nodemailer = require('nodemailer');
 const { Resend } = require('resend');
+const emailProviderQuota = require('./emailProviderQuota');
 
-let transporter = null;       // nodemailer transport (SMTP fallback)
-let resendClient = null;      // Resend HTTP API client
-let transport = 'none';       // 'resend' | 'smtp' | 'none'
+const ZEPTOMAIL_DEFAULT_API_URL = 'https://api.zeptomail.in/v1.1/email';
+
+let transporter = null;
+let resendClient = null;
+let zeptomailApiKey = null;
+let zeptomailApiUrl = ZEPTOMAIL_DEFAULT_API_URL;
+let transport = 'none'; // 'both' | 'zeptomail' | 'resend' | 'smtp' | 'none'
+let emailSendCounter = 0;
+
+function zeptomailAuthHeader(key) {
+  const trimmed = String(key).trim();
+  if (trimmed.toLowerCase().startsWith('zoho-enczapikey')) return trimmed;
+  return `Zoho-enczapikey ${trimmed}`;
+}
+
+function getFromAddress() {
+  return process.env.EMAIL_FROM || process.env.SMTP_FROM_EMAIL || 'noreply@updates.oceanlinux.com';
+}
 
 const BRAND = {
   primary: '#8b5cf6',
@@ -33,39 +51,68 @@ const BRAND = {
   supportEmail: 'hello@oceanlinux.com',
 };
 
-function initializeTransporter() {
-  // 1) Prefer Resend if an API key is present. Resend gives us much better
-  //    deliverability + tracking and is the default going forward.
-  const resendKey = process.env.RESEND_API_KEY;
-  if (resendKey) {
-    try {
-      resendClient = new Resend(resendKey);
-      transport = 'resend';
-      const fromAddr = process.env.EMAIL_FROM || process.env.SMTP_FROM_EMAIL || 'noreply@updates.oceanlinux.com';
-      console.log(`[EmailService] ✅ Configured via Resend (from: ${fromAddr})`);
-      return;
-    } catch (error) {
-      console.error('[EmailService] ❌ Resend init failed:', error.message);
-      // fall through to SMTP
-    }
-  }
+function initZeptoMail() {
+  const key = process.env.ZEPTOMAIL_API_KEY || process.env.ZEPTOMAIL_SEND_TOKEN;
+  if (!key) return false;
 
-  // 2) Fall back to SMTP (Nodemailer) for legacy setups.
+  zeptomailApiKey = key;
+  zeptomailApiUrl = process.env.ZEPTOMAIL_API_URL || ZEPTOMAIL_DEFAULT_API_URL;
+  return true;
+}
+
+function initResend() {
+  const resendKey = process.env.RESEND_API_KEY;
+  if (!resendKey) return false;
+
+  try {
+    resendClient = new Resend(resendKey);
+    return true;
+  } catch (error) {
+    console.error('[EmailService] ❌ Resend init failed:', error.message);
+    return false;
+  }
+}
+
+function configureZeptoMail() {
+  if (!initZeptoMail()) return false;
+  transport = 'zeptomail';
+  console.log(`[EmailService] ✅ Configured via ZeptoMail (from: ${getFromAddress()}, api: ${zeptomailApiUrl})`);
+  return true;
+}
+
+function configureResend() {
+  if (!initResend()) return false;
+  transport = 'resend';
+  console.log(`[EmailService] ✅ Configured via Resend (from: ${getFromAddress()})`);
+  return true;
+}
+
+function configureBoth() {
+  const hasZepto = initZeptoMail();
+  const hasResend = initResend();
+  if (!hasZepto || !hasResend) return false;
+
+  transport = 'both';
+  const strategy = (process.env.EMAIL_STRATEGY || 'round-robin').toLowerCase();
+  console.log(
+    `[EmailService] ✅ Configured ZeptoMail + Resend (strategy: ${strategy}, from: ${getFromAddress()})`
+  );
+  return true;
+}
+
+function configureSmtp() {
   const smtpHost = process.env.SMTP_HOST;
   const smtpPort = process.env.SMTP_PORT || 465;
   const smtpUser = process.env.SMTP_USER;
   const smtpPass = process.env.SMTP_PASS;
   const smtpSecure = process.env.SMTP_SECURE !== 'false';
 
-  if (!smtpHost || !smtpUser || !smtpPass) {
-    console.warn('[EmailService] ⚠️ No transport configured (set RESEND_API_KEY or SMTP_HOST/USER/PASS)');
-    return;
-  }
+  if (!smtpHost || !smtpUser || !smtpPass) return false;
 
   try {
     transporter = nodemailer.createTransport({
       host: smtpHost,
-      port: parseInt(smtpPort),
+      port: parseInt(smtpPort, 10),
       secure: smtpSecure,
       auth: { user: smtpUser, pass: smtpPass },
       pool: true,
@@ -73,10 +120,120 @@ function initializeTransporter() {
     });
     transport = 'smtp';
     console.log(`[EmailService] ✅ Configured via SMTP: ${smtpHost}:${smtpPort}`);
-    transporter.verify().catch(err => console.error('[EmailService] ❌', err.message));
+    transporter.verify().catch((err) => console.error('[EmailService] ❌', err.message));
+    return true;
   } catch (error) {
     console.error('[EmailService] ❌', error.message);
+    return false;
   }
+}
+
+function initializeTransporter() {
+  const provider = String(process.env.EMAIL_PROVIDER || '').toLowerCase().trim();
+
+  if (provider === 'both' || provider === 'dual') {
+    if (configureBoth()) return;
+    // Fall back to whichever single provider is available
+    if (configureZeptoMail()) return;
+    if (configureResend()) return;
+    configureSmtp();
+    return;
+  }
+
+  const attempts =
+    provider === 'zeptomail'
+      ? [configureZeptoMail, configureResend, configureSmtp]
+      : provider === 'resend'
+        ? [configureResend, configureZeptoMail, configureSmtp]
+        : provider === 'smtp'
+          ? [configureSmtp, configureZeptoMail, configureResend]
+          : [configureResend, configureZeptoMail, configureSmtp];
+
+  for (const attempt of attempts) {
+    if (attempt()) return;
+  }
+
+  console.warn(
+    '[EmailService] ⚠️ No transport configured (set ZEPTOMAIL_API_KEY, RESEND_API_KEY, or SMTP_HOST/USER/PASS)'
+  );
+}
+
+async function resolveBothProviderOrder() {
+  const strategy = (process.env.EMAIL_STRATEGY || 'round-robin').toLowerCase();
+
+  if (strategy === 'failover') return ['zeptomail', 'resend'];
+
+  if (strategy === 'resend-quota' || strategy === 'daily-quota' || strategy === 'quota') {
+    try {
+      const status = await emailProviderQuota.getResendQuotaStatus();
+      console.log(
+        `[EmailService] Resend quota today: ${status.count}/${status.limit} (${status.remaining} left)`
+      );
+      if (status.remaining > 0) return ['resend', 'zeptomail'];
+      console.log('[EmailService] Resend daily quota reached — using ZeptoMail');
+      return ['zeptomail'];
+    } catch (error) {
+      console.warn('[EmailService] Quota check failed, using ZeptoMail:', error.message);
+      return ['zeptomail', 'resend'];
+    }
+  }
+
+  emailSendCounter += 1;
+  return emailSendCounter % 2 === 0 ? ['resend', 'zeptomail'] : ['zeptomail', 'resend'];
+}
+
+async function sendViaZeptoMail({ fromEmail, fromName, to, subject, html }) {
+  const recipients = (Array.isArray(to) ? to : [to]).map((address) => ({
+    email_address: { address },
+  }));
+
+  const response = await fetch(zeptomailApiUrl, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      Authorization: zeptomailAuthHeader(zeptomailApiKey),
+    },
+    body: JSON.stringify({
+      from: { address: fromEmail, name: fromName },
+      to: recipients,
+      subject,
+      htmlbody: html,
+    }),
+  });
+
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || result.error) {
+    const errMsg =
+      result.error?.message ||
+      result.error?.details?.[0]?.message ||
+      `ZeptoMail HTTP ${response.status}`;
+    return { success: false, error: errMsg, provider: 'zeptomail' };
+  }
+
+  const id = result.request_id || result.data?.[0]?.message || 'zeptomail';
+  return { success: true, messageId: id, provider: 'zeptomail' };
+}
+
+async function sendViaResend({ fromEmail, fromName, to, subject, html }) {
+  const from = fromName ? `${fromName} <${fromEmail}>` : fromEmail;
+  const result = await resendClient.emails.send({
+    from,
+    to: Array.isArray(to) ? to : [to],
+    subject,
+    html,
+  });
+
+  if (result.error) {
+    return {
+      success: false,
+      error: result.error.message || 'Resend send failed',
+      provider: 'resend',
+    };
+  }
+
+  const id = result.data?.id || result.id;
+  return { success: true, messageId: id, provider: 'resend' };
 }
 
 initializeTransporter();
@@ -161,25 +318,99 @@ class EmailService {
       return { success: false, error: 'Email service not configured' };
     }
 
-    // ---- Resend path ----
+    const payload = {
+      fromEmail: this.fromEmail,
+      fromName: this.fromName,
+      to,
+      subject,
+      html,
+    };
+
+    // ---- Both providers: round-robin, quota, or failover ----
+    if (this.transport === 'both' && zeptomailApiKey && resendClient) {
+      const order = await resolveBothProviderOrder();
+      let lastError = 'All email providers failed';
+
+      for (const provider of order) {
+        let reservedResend = false;
+
+        if (provider === 'resend') {
+          try {
+            reservedResend = await emailProviderQuota.reserveResendSlot();
+            if (!reservedResend) {
+              console.log('[EmailService] Resend slot unavailable — trying next provider');
+              continue;
+            }
+          } catch (error) {
+            console.warn('[EmailService] Resend quota reserve failed:', error.message);
+            continue;
+          }
+        }
+
+        try {
+          const result =
+            provider === 'zeptomail'
+              ? await sendViaZeptoMail(payload)
+              : await sendViaResend(payload);
+
+          if (result.success) {
+            console.log(`[EmailService] ✅ Email sent via ${result.provider} - ${result.messageId}`);
+            return result;
+          }
+
+          if (reservedResend) {
+            await emailProviderQuota.releaseResendSlot().catch(() => {});
+            if (emailProviderQuota.isResendMonthlyQuotaError(result.error)) {
+              await emailProviderQuota.exhaustResendForToday('monthly-quota').catch(() => {});
+              console.log('[EmailService] Resend monthly quota hit — ZeptoMail only for today');
+            }
+          }
+
+          lastError = result.error;
+          console.warn(`[EmailService] ⚠️ ${provider} failed: ${result.error}`);
+        } catch (error) {
+          if (reservedResend) {
+            await emailProviderQuota.releaseResendSlot().catch(() => {});
+            if (emailProviderQuota.isResendMonthlyQuotaError(result.error)) {
+              await emailProviderQuota.exhaustResendForToday('monthly-quota').catch(() => {});
+              console.log('[EmailService] Resend monthly quota hit — ZeptoMail only for today');
+            }
+          }
+          lastError = error.message;
+          console.warn(`[EmailService] ⚠️ ${provider} exception: ${error.message}`);
+        }
+      }
+
+      console.error('[EmailService] ❌ Both providers failed');
+      return { success: false, error: lastError };
+    }
+
+    // ---- ZeptoMail only ----
+    if (this.transport === 'zeptomail' && zeptomailApiKey) {
+      try {
+        const result = await sendViaZeptoMail(payload);
+        if (!result.success) {
+          console.error('[EmailService] ❌ ZeptoMail rejected:', result.error);
+          return result;
+        }
+        console.log(`[EmailService] ✅ Email sent via ZeptoMail - ${result.messageId}`);
+        return result;
+      } catch (error) {
+        console.error('[EmailService] ❌ ZeptoMail exception:', error.message);
+        return { success: false, error: error.message };
+      }
+    }
+
+    // ---- Resend only ----
     if (this.transport === 'resend' && resendClient) {
       try {
-        // Resend accepts `from` either as plain "name <email>" or just an
-        // email. Build the friendly form when we have both.
-        const from = this.fromName ? `${this.fromName} <${this.fromEmail}>` : this.fromEmail;
-        const result = await resendClient.emails.send({
-          from,
-          to: Array.isArray(to) ? to : [to],
-          subject,
-          html,
-        });
-        if (result.error) {
-          console.error('[EmailService] ❌ Resend rejected:', result.error.message || result.error);
-          return { success: false, error: result.error.message || 'Resend send failed' };
+        const result = await sendViaResend(payload);
+        if (!result.success) {
+          console.error('[EmailService] ❌ Resend rejected:', result.error);
+          return result;
         }
-        const id = result.data?.id || result.id;
-        console.log(`[EmailService] ✅ Email sent via Resend - ${id}`);
-        return { success: true, messageId: id };
+        console.log(`[EmailService] ✅ Email sent via Resend - ${result.messageId}`);
+        return result;
       } catch (error) {
         console.error('[EmailService] ❌ Resend exception:', error.message);
         return { success: false, error: error.message };

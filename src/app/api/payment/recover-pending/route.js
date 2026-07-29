@@ -75,6 +75,7 @@ export async function POST(request) {
         maxAttempts: 2,
         delayMs: 500,
         logSource: 'recover-api',
+        quiet: true,
       });
       orderResults.push({
         kind: 'order',

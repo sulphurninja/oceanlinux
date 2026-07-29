@@ -33,6 +33,7 @@ type DailyRow = {
   walletUsed: number;
   renewals: number;
   renewalRevenue: number;
+  renewalGateway: number;
   walletTopups: number;
   walletTopupAmount: number;
   totalExternalIn: number;
@@ -191,8 +192,8 @@ export function PaymentDashboard() {
             />
             <StatCard
               title="Gateway In"
-              value={formatInr(today.gatewayAmount + today.renewalRevenue)}
-              hint="Razorpay / Cashfree / UPI"
+              value={formatInr(today.gatewayAmount + today.renewalGateway)}
+              hint={`New orders ${formatInr(today.gatewayAmount)} + renewals ${formatInr(today.renewalGateway)}`}
               icon={CreditCard}
               tone="green"
             />
@@ -262,8 +263,8 @@ export function PaymentDashboard() {
         />
         <StatCard
           title={`${days}-day gateway`}
-          value={formatInr(periodTotals.gatewayAmount)}
-          hint="New order gateway portion"
+          value={formatInr(periodTotals.gatewayAmount + periodTotals.renewalGateway)}
+          hint={`Orders ${formatInr(periodTotals.gatewayAmount)} + renewals ${formatInr(periodTotals.renewalGateway)}`}
           icon={CreditCard}
           tone="green"
         />
@@ -296,7 +297,7 @@ export function PaymentDashboard() {
                   <TableHead>Date</TableHead>
                   <TableHead className="text-right">VPS</TableHead>
                   <TableHead className="text-right">VPS ₹</TableHead>
-                  <TableHead className="text-right">Gateway ₹</TableHead>
+                  <TableHead className="text-right">Gateway ₹ (incl. renew)</TableHead>
                   <TableHead className="text-right">Wallet ₹</TableHead>
                   <TableHead className="text-right">Renewals</TableHead>
                   <TableHead className="text-right">Top-ups ₹</TableHead>
@@ -320,7 +321,7 @@ export function PaymentDashboard() {
                     <TableCell className="text-right tabular-nums">{row.vpsOrders}</TableCell>
                     <TableCell className="text-right tabular-nums">{formatInr(row.vpsRevenue)}</TableCell>
                     <TableCell className="text-right tabular-nums text-emerald-700 dark:text-emerald-400">
-                      {formatInr(row.gatewayAmount)}
+                      {formatInr(row.gatewayAmount + row.renewalGateway)}
                     </TableCell>
                     <TableCell className="text-right tabular-nums text-amber-700 dark:text-amber-400">
                       {formatInr(row.walletUsed)}

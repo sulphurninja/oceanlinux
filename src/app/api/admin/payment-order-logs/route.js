@@ -5,12 +5,68 @@ import Order from '@/models/orderModel';
 import CheckoutSession from '@/models/checkoutSessionModel';
 import WalletRecharge from '@/models/walletRechargeModel';
 import { enforceAdmin } from '@/lib/apiSecurity';
-import { probeGatewayPayment, confirmPendingOrderPayment } from '@/lib/confirmPendingOrderPayment';
+import { recoverPendingOrderPayment } from '@/lib/confirmPendingOrderPayment';
 import {
   recoverPendingCheckoutSession,
   recoverPendingWalletRecharge,
 } from '@/lib/paymentDispatch';
-const PaymentOrderLogger = require('@/services/paymentOrderLogger');
+
+/** Gateway probes are slow (~1s/order); allow full batch on PM2/Vercel. */
+export const maxDuration = 300;
+
+/** Cart/recharge recovery failures that are normal unpaid — not gateway-paid anomalies. */
+function isNormalUnpaidRecovery(reason) {
+  const r = String(reason || '').toLowerCase();
+  return (
+    !r ||
+    r === 'payment not verified' ||
+    r === 'not paid' ||
+    r === 'pending' ||
+    r === 'created' ||
+    r === 'attempted'
+  );
+}
+
+async function mapWithConcurrency(items, concurrency, fn) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < items.length) {
+      const idx = nextIndex++;
+      try {
+        results[idx] = await fn(items[idx], idx);
+      } catch (err) {
+        results[idx] = { error: err.message };
+      }
+    }
+  }
+
+  const workers = Math.min(Math.max(concurrency, 1), items.length || 1);
+  await Promise.all(Array.from({ length: workers }, () => worker()));
+  return results;
+}
+
+/** Old bulk-scan rows for unpaid orders — hide from default log list. */
+const SCAN_UNPAID_NOISE = ['PENDING', 'ATTEMPTED', 'CREATED', 'pending', 'attempted', 'created'];
+
+function applyScanNoiseFilter(filters, includeScanNoise) {
+  if (includeScanNoise) return filters;
+  const noiseFilter = {
+    source: { $in: ['scan', 'recover-api'] },
+    anomaly: { $ne: true },
+    success: false,
+    errorMessage: { $in: SCAN_UNPAID_NOISE },
+  };
+  if (filters.$and) {
+    filters.$and.push({ $nor: [noiseFilter] });
+  } else if (filters.$nor) {
+    filters.$nor.push(noiseFilter);
+  } else {
+    filters.$nor = [noiseFilter];
+  }
+  return filters;
+}
 
 export async function GET(request) {
   try {
@@ -49,6 +105,12 @@ export async function GET(request) {
 
     const limit = Math.min(parseInt(searchParams.get('limit') || '50', 10), 200);
     const offset = parseInt(searchParams.get('offset') || '0', 10);
+    const includeScanNoise = searchParams.get('includeScanNoise') === 'true';
+
+    // Hide pre-fix scan spam (unpaid PENDING/ATTEMPTED) unless explicitly requested.
+    if (!clientTxnId) {
+      applyScanNoiseFilter(filters, includeScanNoise);
+    }
 
     const [logs, totalCount, summaryAgg] = await Promise.all([
       PaymentOrderLog.find(filters).sort({ createdAt: -1 }).limit(limit).skip(offset).lean(),
@@ -106,10 +168,12 @@ export async function POST(request) {
 
     let hours = 48;
     let autoRecover = true;
+    let limit = 40;
     try {
       const body = await request.json();
       if (body?.hours) hours = Math.min(Math.max(Number(body.hours) || 48, 1), 168);
       if (body?.recover === false) autoRecover = false;
+      if (body?.limit) limit = Math.min(Math.max(Number(body.limit) || 40, 1), 100);
     } catch {
       /* empty body ok */
     }
@@ -117,76 +181,79 @@ export async function POST(request) {
     const since = new Date(Date.now() - hours * 60 * 60 * 1000);
     const anomalies = [];
     const recovered = [];
+    const scanErrors = [];
 
-    // Buy-now orders only — cart child rows (CART_*-0) have no gatewayOrderId.
+    // Buy-now orders only — skip rows that never reached a gateway (same as recover-pending cron).
     const pendingOrders = await Order.find({
       status: 'pending',
       clientTxnId: { $regex: /^ORDER_/ },
       createdAt: { $gte: since },
+      $or: [
+        { 'paymentDetails.gatewayAmount': { $gt: 0 } },
+        { gatewayOrderId: { $exists: true, $nin: [null, ''] } },
+      ],
     })
       .sort({ createdAt: -1 })
-      .limit(100)
-      .lean();
+      .limit(limit);
 
-    for (const orderDoc of pendingOrders) {
-      const order = await Order.findById(orderDoc._id);
-      if (!order || order.status !== 'pending') continue;
-
-      let probe;
+    const orderResults = await mapWithConcurrency(pendingOrders, 6, async (order) => {
       try {
-        probe = await probeGatewayPayment(order);
-      } catch {
-        continue;
-      }
+        if (!order || order.status !== 'pending') return null;
 
-      if (!probe.success) continue;
+        if (!autoRecover) {
+          return { kind: 'order', clientTxnId: order.clientTxnId, skipped: true };
+        }
 
-      if (autoRecover) {
-        const result = await confirmPendingOrderPayment(order, probe, { logSource: 'scan' });
+        const result = await recoverPendingOrderPayment(order, {
+          maxAttempts: 2,
+          delayMs: 400,
+          logSource: 'scan',
+          quiet: true,
+        });
+
         if (result.confirmed) {
-          recovered.push({
+          return {
+            kind: 'order',
+            recovered: true,
             orderId: String(order._id),
             clientTxnId: order.clientTxnId,
             productName: order.productName,
-            gatewayMethod: probe.method,
-            transactionId: probe.transactionId,
             alreadyProcessed: !!result.alreadyProcessed,
-          });
-          continue;
+          };
         }
+
+        if (result.anomaly) {
+          return {
+            kind: 'order',
+            anomaly: true,
+            orderId: String(order._id),
+            clientTxnId: order.clientTxnId,
+            productName: order.productName,
+            price: order.price,
+            createdAt: order.createdAt,
+            reason: result.reason || result.paymentStatus,
+          };
+        }
+
+        return null;
+      } catch (err) {
+        return { error: err.message, clientTxnId: order?.clientTxnId };
       }
+    });
 
-      const logger = PaymentOrderLogger.forOrder(order, 'scan');
-      logger.warning('Admin scan: gateway shows PAID but order still pending', {
-        clientTxnId: order.clientTxnId,
-        productName: order.productName,
-        price: order.price,
-        gatewayMethod: probe.method,
-        transactionId: probe.transactionId,
-        autoRecoverAttempted: autoRecover,
-      });
-      logger.setPaymentInfo({
-        method: probe.method,
-        gatewayStatus: 'SUCCESS',
-        transactionId: probe.transactionId,
-        gatewayOrderId: probe.gatewayOrderId,
-      });
-      const saved = await logger.save({
-        success: false,
-        anomaly: true,
-        errorMessage: autoRecover ? 'paid_but_order_pending_scan_recover_failed' : 'paid_but_order_pending_scan',
-      });
-
-      anomalies.push({
-        orderId: String(order._id),
-        clientTxnId: order.clientTxnId,
-        productName: order.productName,
-        price: order.price,
-        createdAt: order.createdAt,
-        gatewayMethod: probe.method,
-        transactionId: probe.transactionId,
-        logId: saved?._id ? String(saved._id) : null,
-      });
+    for (const row of orderResults) {
+      if (!row) continue;
+      if (row.error) {
+        scanErrors.push({ clientTxnId: row.clientTxnId, error: row.error });
+        continue;
+      }
+      if (row.recovered) {
+        recovered.push(row);
+        continue;
+      }
+      if (row.anomaly) {
+        anomalies.push(row);
+      }
     }
 
     const cartsRecovered = [];
@@ -198,7 +265,7 @@ export async function POST(request) {
       gatewayAmount: { $gt: 0 },
     })
       .sort({ createdAt: -1 })
-      .limit(100);
+      .limit(limit);
 
     for (const session of pendingSessions) {
       if (!autoRecover) {
@@ -225,7 +292,7 @@ export async function POST(request) {
             orderIds: result.orderIds?.map(String) || [],
             alreadyProcessed: !!result.alreadyProcessed,
           });
-        } else {
+        } else if (!isNormalUnpaidRecovery(result.reason)) {
           cartsAnomalies.push({
             kind: 'cart',
             sessionId: String(session._id),
@@ -253,7 +320,7 @@ export async function POST(request) {
       createdAt: { $gte: since },
     })
       .sort({ createdAt: -1 })
-      .limit(100);
+      .limit(limit);
 
     for (const recharge of pendingRecharges) {
       if (!autoRecover) {
@@ -280,7 +347,7 @@ export async function POST(request) {
             newBalance: result.newBalance,
             alreadyProcessed: !!result.alreadyProcessed,
           });
-        } else {
+        } else if (!isNormalUnpaidRecovery(result.reason)) {
           rechargesAnomalies.push({
             kind: 'recharge',
             rechargeId: String(recharge._id),
@@ -302,8 +369,10 @@ export async function POST(request) {
 
     const totalRecovered =
       recovered.length + cartsRecovered.length + rechargesRecovered.length;
+    /** Only gateway-paid-but-still-pending — not unpaid cart/recharge checkouts. */
     const totalAnomalies =
       anomalies.length + cartsAnomalies.length + rechargesAnomalies.length;
+    const orderAnomalyCount = anomalies.length;
 
     return NextResponse.json({
       success: true,
@@ -311,20 +380,29 @@ export async function POST(request) {
       scannedCarts: pendingSessions.length,
       scannedRecharges: pendingRecharges.length,
       hours,
+      limit,
       autoRecover,
       recoveredCount: totalRecovered,
       recovered,
       cartsRecovered,
       rechargesRecovered,
       anomalyCount: totalAnomalies,
+      orderAnomalyCount,
       anomalies,
       cartsAnomalies,
       rechargesAnomalies,
+      errors: scanErrors.length ? scanErrors : undefined,
     });
   } catch (error) {
     console.error('[PAYMENT-ORDER-LOGS] POST scan error:', error);
     return NextResponse.json(
-      { success: false, message: 'Scan failed', error: error.message },
+      {
+        success: false,
+        message: error.message?.includes('timeout')
+          ? 'Scan timed out — try again or reduce hours/limit'
+          : 'Scan failed',
+        error: error.message,
+      },
       { status: 500 }
     );
   }

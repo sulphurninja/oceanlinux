@@ -249,6 +249,14 @@ class NotificationService {
     );
   }
 
+  static async releaseExpiryReminderFlag(orderId, daysBefore = 2) {
+    await connectDB();
+    const field = daysBefore === 2 ? 'expiryReminder2dFor' : `expiryReminder${daysBefore}dFor`;
+    return Order.findByIdAndUpdate(orderId, {
+      $unset: { [`paymentDetails.${field}`]: '' },
+    });
+  }
+
   static async _claimRenewalEmailFlag(orderId, renewalTxnId) {
     await connectDB();
     if (!renewalTxnId) {
@@ -564,29 +572,34 @@ class NotificationService {
   }
 
   // Service expiry reminder notification
-  static async notifyServiceExpiring(userId, order, daysLeft) {
-    const notification = await this.create(
-      userId,
-      'service_expiring',
-      daysLeft <= 1 ? 'Service Expires Tomorrow' : `Service Expires in ${daysLeft} Days`,
-      `Your ${order.productName} (IP: ${order.ipAddress || 'N/A'}) will expire ${daysLeft <= 1 ? 'tomorrow' : `in ${daysLeft} days`}. Renew now to avoid service interruption.`,
-      { orderId: order._id, expiryDate: order.expiryDate, daysLeft },
-      {
-        actionUrl: `/dashboard/order/${order._id}`,
-        icon: daysLeft <= 1 ? 'alert-triangle' : 'clock',
-        priority: daysLeft <= 1 ? 'urgent' : daysLeft <= 3 ? 'high' : 'medium'
-      }
-    );
+  static async notifyServiceExpiring(userId, order, daysLeft, { awaitEmail = false } = {}) {
+    let notification = null;
+    try {
+      notification = await this.create(
+        userId,
+        'service_expiring',
+        daysLeft <= 1 ? 'Service Expires Tomorrow' : `Service Expires in ${daysLeft} Days`,
+        `Your ${order.productName} (IP: ${order.ipAddress || 'N/A'}) will expire ${daysLeft <= 1 ? 'tomorrow' : `in ${daysLeft} days`}. Renew now to avoid service interruption.`,
+        { orderId: order._id, expiryDate: order.expiryDate, daysLeft },
+        {
+          actionUrl: `/dashboard/order/${order._id}`,
+          icon: daysLeft <= 1 ? 'alert-triangle' : 'clock',
+          priority: daysLeft <= 1 ? 'urgent' : daysLeft <= 3 ? 'high' : 'medium',
+        }
+      );
+    } catch (error) {
+      console.error('[NOTIFICATION] In-app expiry alert failed (email will still send):', error.message);
+    }
 
-    this.sendEmailAsync(async (emailService) => {
+    const sendExpiryEmail = async (emailService) => {
       const user = await this.getUserDetails(userId);
       const toEmail = this.resolveCustomerEmail(user, order);
       if (!toEmail) {
         console.warn(`[NOTIFICATION] No email for expiry reminder on order ${order._id}`);
-        return;
+        return false;
       }
 
-      await emailService.sendExpiryReminderEmail(
+      const result = await emailService.sendExpiryReminderEmail(
         toEmail,
         user?.name || order.customerName || 'Customer',
         order._id.toString(),
@@ -595,52 +608,70 @@ class NotificationService {
         order.expiryDate,
         daysLeft
       );
+
+      if (!result?.success) {
+        throw new Error(result?.error || 'Expiry reminder email failed');
+      }
+
       console.log(`[NOTIFICATION] Expiry reminder email sent to ${toEmail} (${daysLeft}d)`);
-    });
+      return true;
+    };
+
+    if (awaitEmail) {
+      const emailService = new EmailService();
+      await sendExpiryEmail(emailService);
+    } else {
+      this.sendEmailAsync(sendExpiryEmail);
+    }
 
     return notification;
   }
 
   // Service renewal success notification
-  static async notifyRenewalSuccess(userId, order, newExpiryDate, renewalTxnId) {
+  static async notifyRenewalSuccess(userId, order, newExpiryDate, renewalTxnId, { awaitEmail = false } = {}) {
     const expiryLabel = new Date(newExpiryDate).toLocaleDateString('en-IN', {
       year: 'numeric',
       month: 'long',
       day: 'numeric',
     });
 
-    const notification = await this.create(
-      userId,
-      'renewal_success',
-      'Renewal Successful',
-      `Your ${order.productName} has been renewed successfully. New expiry: ${expiryLabel}`,
-      { orderId: order._id, newExpiryDate, renewalTxnId },
-      {
-        actionUrl: `/dashboard/order/${order._id}`,
-        icon: 'check-circle',
-        priority: 'high'
-      }
-    );
+    let notification = null;
+    try {
+      notification = await this.create(
+        userId,
+        'renewal_success',
+        'Renewal Successful',
+        `Your ${order.productName} has been renewed successfully. New expiry: ${expiryLabel}`,
+        { orderId: order._id, newExpiryDate, renewalTxnId },
+        {
+          actionUrl: `/dashboard/order/${order._id}`,
+          icon: 'check-circle',
+          priority: 'high',
+        }
+      );
+    } catch (error) {
+      console.error('[NOTIFICATION] Renewal in-app alert failed (email will still send):', error.message);
+    }
 
-    this.sendEmailAsync(async (emailService) => {
+    const sendRenewalEmail = async (emailService) => {
       const user = await this.getUserDetails(userId);
       const toEmail = this.resolveCustomerEmail(user, order);
       if (!toEmail) {
         console.warn(`[NOTIFICATION] No email for renewal success on order ${order._id}`);
-        return;
+        return false;
       }
 
       const claimed = await this._claimRenewalEmailFlag(order._id, renewalTxnId);
       if (!claimed) {
         console.log(`[NOTIFICATION] Renewal success email already sent for order ${order._id} (${renewalTxnId || 'no-txn'})`);
-        return;
+        return false;
       }
 
       const renewalAmount =
         order.renewalPayments?.find((rp) => rp.renewalTxnId === renewalTxnId)?.amount ||
         order.price;
 
-      await emailService.sendRenewalSuccessEmail(
+      const result = await emailService.sendRenewalSuccessEmail(
         toEmail,
         user?.name || order.customerName || 'Customer',
         order._id.toString(),
@@ -649,41 +680,97 @@ class NotificationService {
         order.ipAddress || 'Check dashboard',
         newExpiryDate
       );
+
+      if (!result?.success) {
+        throw new Error(result?.error || 'Renewal email failed');
+      }
+
       console.log(`[NOTIFICATION] Renewal success email sent to ${toEmail}`);
-    });
+      return true;
+    };
+
+    if (awaitEmail) {
+      const emailService = new EmailService();
+      await sendRenewalEmail(emailService);
+    } else {
+      this.sendEmailAsync(sendRenewalEmail);
+    }
 
     return notification;
   }
 
-  // Service suspended notification
-  static async notifyServiceSuspended(userId, order) {
-    const notification = await this.create(
-      userId,
-      'service_suspended',
-      '⚠️ Service Suspended',
-      `Your ${order.productName} (IP: ${order.ipAddress || 'N/A'}) has been suspended due to non-renewal. Renew now to restore access.`,
-      { orderId: order._id },
+  // Service suspended notification (sent when VPS expires / is suspended for non-renewal)
+  static async claimSuspensionEmailFlag(orderId, expiryDateIso) {
+    await connectDB();
+    return Order.findOneAndUpdate(
       {
-        actionUrl: `/dashboard/order/${order._id}`,
-        icon: 'alert-circle',
-        priority: 'urgent'
-      }
+        _id: orderId,
+        $or: [
+          { 'paymentDetails.suspensionEmailFor': { $exists: false } },
+          { 'paymentDetails.suspensionEmailFor': { $ne: expiryDateIso } },
+        ],
+      },
+      { $set: { 'paymentDetails.suspensionEmailFor': expiryDateIso } },
+      { new: true },
     );
+  }
 
-    // Send email notification
-    this.sendEmailAsync(async (emailService) => {
-      const user = await this.getUserDetails(userId);
-      if (user?.email) {
-        await emailService.sendServiceSuspendedEmail(
-          user.email,
-          user.name || 'Customer',
-          order._id.toString(),
-          order.productName,
-          order.ipAddress || 'N/A'
-        );
-        console.log(`[NOTIFICATION] Service suspended email sent to ${user.email}`);
-      }
+  static async releaseSuspensionEmailFlag(orderId) {
+    await connectDB();
+    return Order.findByIdAndUpdate(orderId, {
+      $unset: { 'paymentDetails.suspensionEmailFor': '' },
     });
+  }
+
+  static async notifyServiceSuspended(userId, order, { awaitEmail = false } = {}) {
+    let notification = null;
+    try {
+      notification = await this.create(
+        userId,
+        'service_suspended',
+        '⚠️ Service Suspended',
+        `Your ${order.productName} (IP: ${order.ipAddress || 'N/A'}) has been suspended due to non-renewal. Renew now to restore access.`,
+        { orderId: order._id },
+        {
+          actionUrl: `/dashboard/order/${order._id}`,
+          icon: 'alert-circle',
+          priority: 'urgent',
+        }
+      );
+    } catch (error) {
+      console.error('[NOTIFICATION] Suspension in-app alert failed (email will still send):', error.message);
+    }
+
+    const sendSuspensionEmail = async (emailService) => {
+      const user = await this.getUserDetails(userId);
+      const toEmail = this.resolveCustomerEmail(user, order);
+      if (!toEmail) {
+        console.warn(`[NOTIFICATION] No email for suspension notice on order ${order._id}`);
+        return false;
+      }
+
+      const result = await emailService.sendServiceSuspendedEmail(
+        toEmail,
+        user?.name || order.customerName || 'Customer',
+        order._id.toString(),
+        order.productName,
+        order.ipAddress || 'N/A'
+      );
+
+      if (!result?.success) {
+        throw new Error(result?.error || 'Suspension email failed');
+      }
+
+      console.log(`[NOTIFICATION] Service suspended email sent to ${toEmail}`);
+      return true;
+    };
+
+    if (awaitEmail) {
+      const emailService = new EmailService();
+      await sendSuspensionEmail(emailService);
+    } else {
+      this.sendEmailAsync(sendSuspensionEmail);
+    }
 
     return notification;
   }

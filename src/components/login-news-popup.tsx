@@ -34,6 +34,7 @@ import {
   POST_LOGIN_SPLASH_DONE_KEY,
   POST_LOGIN_SPLASH_EVENT,
 } from "@/lib/post-login";
+import { OCEAN_CELEBRATION_COMPLETE_EVENT } from "@/lib/oceanBirdFly";
 
 const typeMeta: Record<
   AnnouncementType,
@@ -167,15 +168,28 @@ export default function LoginNewsPopup() {
       }
     };
 
+    const scheduleAfterLoginBird = () => {
+      let done = false;
+      const run = () => {
+        if (done) return;
+        done = true;
+        window.removeEventListener(OCEAN_CELEBRATION_COMPLETE_EVENT, run);
+        clearTimeout(fallback);
+        loadPopup();
+      };
+      const fallback = window.setTimeout(run, 3200);
+      window.addEventListener(OCEAN_CELEBRATION_COMPLETE_EVENT, run, { once: true });
+    };
+
     const onSplashComplete = () => {
-      loadPopup();
+      scheduleAfterLoginBird();
     };
 
     const justLoggedIn = sessionStorage.getItem(JUST_LOGGED_IN_KEY) === "1";
     const splashDone = sessionStorage.getItem(POST_LOGIN_SPLASH_DONE_KEY) === "1";
 
     if (justLoggedIn && splashDone) {
-      loadPopup();
+      scheduleAfterLoginBird();
       return;
     }
 

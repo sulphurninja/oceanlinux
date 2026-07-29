@@ -23,7 +23,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Loader2, Plus, Ticket, ChevronRight } from 'lucide-react';
+import { Loader2, Plus, Ticket, ChevronRight, MessageCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { useSessionAlert } from '@/components/session-alert';
 import { dashboardFetch } from '@/lib/dashboardFetch';
@@ -117,6 +117,7 @@ export default function DashboardSupportTicketsPage() {
   };
 
   const openCount = tickets.filter((t) => !['resolved', 'closed'].includes(t.status)).length;
+  const unreadReplyCount = tickets.filter((t) => t.hasUnreadAdminReply).length;
 
   const raiseTicketDialog = (
     <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
@@ -226,6 +227,12 @@ export default function DashboardSupportTicketsPage() {
                     {openCount} open
                   </Badge>
                 )}
+                {unreadReplyCount > 0 && (
+                  <Badge variant="outline" className={cn(premiumBadge.warning, 'text-xs gap-1')}>
+                    <MessageCircle className="h-3 w-3" />
+                    {unreadReplyCount} new repl{unreadReplyCount === 1 ? 'y' : 'ies'}
+                  </Badge>
+                )}
               </div>
             ) : (
               <p className="text-sm premium-dashboard-subtitle">
@@ -246,20 +253,38 @@ export default function DashboardSupportTicketsPage() {
               const status = resolveStatus(ticket.status);
               const priority = resolvePriority(ticket.priority);
               const StatusIcon = status.icon;
+              const hasNewReply = !!ticket.hasUnreadAdminReply;
 
               return (
                 <Link
                   key={ticket._id}
                   href={`/dashboard/support/tickets/${ticket.ticketId}`}
-                  className="premium-dashboard-order-card block group"
+                  className={cn(
+                    'premium-dashboard-order-card block group',
+                    hasNewReply && 'ring-2 ring-amber-400/50 dark:ring-amber-500/40 bg-amber-50/30 dark:bg-amber-950/20',
+                  )}
                 >
                   <div className="p-4 sm:p-5">
                     <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:gap-6">
                       {/* Main info */}
                       <div className="min-w-0 flex-1 space-y-2">
-                        <h3 className="text-base sm:text-lg font-semibold premium-dashboard-title leading-snug break-words">
-                          {ticket.subject}
-                        </h3>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="text-base sm:text-lg font-semibold premium-dashboard-title leading-snug break-words">
+                            {ticket.subject}
+                          </h3>
+                          {hasNewReply && (
+                            <Badge
+                              variant="outline"
+                              className={cn(
+                                premiumBadge.warning,
+                                'text-xs gap-1 shrink-0 animate-pulse',
+                              )}
+                            >
+                              <MessageCircle className="h-3 w-3" />
+                              Reply received
+                            </Badge>
+                          )}
+                        </div>
                         <p className="text-xs sm:text-sm font-mono premium-dashboard-subtitle break-all">
                           {ticket.ticketId}
                         </p>

@@ -3,6 +3,7 @@ import SupportTicket from "@/models/supportTicketModel";
 import EmailService from "@/lib/sendgrid";
 import NotificationService from "@/services/notificationService";
 import { enforceAdmin } from '@/lib/apiSecurity';
+import { markTicketAdminReplyUnreadUpdate } from '@/lib/supportTicketQuery';
 
 const OPEN_STATUSES = ['open', 'in-progress', 'waiting-response'];
 
@@ -15,6 +16,7 @@ async function closeTicketWithAdminMessage(ticket, message, { sendEmail = true }
 
     ticket.status = 'closed';
     ticket.updatedAt = new Date();
+    Object.assign(ticket, markTicketAdminReplyUnreadUpdate());
     ticket.messages.push({
         author: 'admin',
         authorName: 'Support Team',

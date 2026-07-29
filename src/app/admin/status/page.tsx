@@ -118,7 +118,7 @@ export default function AdminStatusPage() {
   const [logSummary, setLogSummary] = useState<PaymentLogSummary | null>(null);
   const [logsLoading, setLogsLoading] = useState(false);
   const [scanLoading, setScanLoading] = useState(false);
-  const [logFilter, setLogFilter] = useState<"all" | "anomaly" | "success" | "failed">("all");
+  const [logFilter, setLogFilter] = useState<"all" | "anomaly" | "success" | "failed">("anomaly");
   const [txnFilter, setTxnFilter] = useState("");
   const [selectedLog, setSelectedLog] = useState<PaymentOrderLog | null>(null);
   const terminalRef = useRef<HTMLDivElement>(null);
@@ -148,6 +148,7 @@ export default function AdminStatusPage() {
       if (logFilter === "anomaly") params.set("anomaly", "true");
       if (logFilter === "success") params.set("success", "true");
       if (logFilter === "failed") params.set("success", "false");
+      if (logFilter === "all") params.set("includeScanNoise", "true");
       if (txnFilter.trim()) params.set("clientTxnId", txnFilter.trim());
 
       const res = await fetch(`/api/admin/payment-order-logs?${params}`, {
@@ -172,36 +173,46 @@ export default function AdminStatusPage() {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ hours: 72 }),
+        body: JSON.stringify({ hours: 72, limit: 40 }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => null);
+      if (!data) {
+        toast.error(
+          res.status === 504 || res.status === 502
+            ? "Scan timed out — server took too long. Try again in a minute."
+            : "Scan failed — invalid server response"
+        );
+        return;
+      }
       if (data.success) {
         const recovered = data.recoveredCount ?? 0;
         const carts = data.cartsRecovered?.length ?? 0;
         const recharges = data.rechargesRecovered?.length ?? 0;
         const orders = data.recovered?.length ?? 0;
-        const anomalies = data.anomalyCount ?? 0;
+        const anomalies = data.orderAnomalyCount ?? data.anomalyCount ?? 0;
         if (recovered > 0) {
           const parts = [];
           if (orders > 0) parts.push(`${orders} order(s)`);
           if (carts > 0) parts.push(`${carts} cart(s)`);
           if (recharges > 0) parts.push(`${recharges} wallet top-up(s)`);
           toast.success(
-            `Recovered ${parts.join(', ')}${anomalies > 0 ? ` — ${anomalies} still need manual check` : ''}`
+            `Recovered ${parts.join(', ')}${anomalies > 0 ? ` — ${anomalies} paid-but-pending need manual check` : ''}`
           );
         } else if (anomalies > 0) {
-          toast.warning(`Found ${anomalies} paid-but-pending order(s) — recovery failed, check logs`);
+          toast.warning(
+            `Found ${anomalies} paid-but-pending — gateway shows payment but order not confirmed. Check ⚠ Anomalies filter.`
+          );
         } else {
           toast.success(
-            `Scanned ${data.scanned ?? 0} orders, ${data.scannedCarts ?? 0} carts, ${data.scannedRecharges ?? 0} wallet top-ups — no mismatches found`
+            `Scanned ${data.scanned ?? 0} orders, ${data.scannedCarts ?? 0} carts, ${data.scannedRecharges ?? 0} wallet top-ups — all clear (unpaid/abandoned checkouts ignored)`
           );
         }
         await fetchPaymentLogs();
       } else {
-        toast.error(data.message || "Scan failed");
+        toast.error(data.message || data.error || "Scan failed");
       }
-    } catch {
-      toast.error("Scan failed");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Scan failed");
     } finally {
       setScanLoading(false);
     }
@@ -543,7 +554,7 @@ export default function AdminStatusPage() {
                       : "border-gray-700 text-gray-400"
                   }
                 >
-                  {f === "all" ? "All" : f === "anomaly" ? "⚠ Anomalies" : f}
+                  {f === "all" ? "All (incl. noise)" : f === "anomaly" ? "⚠ Anomalies" : f}
                 </Button>
               ))}
             </div>
@@ -553,6 +564,9 @@ export default function AdminStatusPage() {
               onChange={(e) => setTxnFilter(e.target.value)}
               className="max-w-xs bg-gray-900 border-gray-700 text-gray-200 font-mono text-sm"
             />
+            <p className="text-xs text-gray-500 w-full">
+              Default view hides old scan noise (unpaid PENDING/ATTEMPTED). Real issues → ⚠ Anomalies.
+            </p>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 min-h-[420px]">

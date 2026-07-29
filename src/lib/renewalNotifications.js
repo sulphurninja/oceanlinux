@@ -23,6 +23,7 @@ export async function notifyRenewalCompleted(orderOrId, newExpiryDate, renewalTx
     fresh,
     newExpiryDate,
     renewalTxnId,
+    { awaitEmail: true },
   );
 
   return { sent: true };

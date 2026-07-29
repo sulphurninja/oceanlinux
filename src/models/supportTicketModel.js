@@ -76,6 +76,15 @@ const supportTicketSchema = new mongoose.Schema({
     resolvedAt: {
         type: Date,
         default: null
+    },
+    /** True when support replied and the customer has not opened the ticket since. */
+    hasUnreadAdminReply: {
+        type: Boolean,
+        default: false
+    },
+    userLastReadAt: {
+        type: Date,
+        default: null
     }
 });
 

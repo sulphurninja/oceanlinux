@@ -417,54 +417,74 @@ export async function confirmPendingOrderPayment(order, gatewayResult, opts = {}
 /**
  * Poll gateway APIs (with short delays) and confirm when payment landed.
  */
+const UNPAID_GATEWAY_STATUSES = new Set(['PENDING', 'CREATED', 'ATTEMPTED']);
+
 export async function recoverPendingOrderPayment(order, opts = {}) {
-  const { maxAttempts = 4, delayMs = 2000, logSource } = opts;
+  const { maxAttempts = 4, delayMs = 2000, logSource, quiet = false } = opts;
   if (!order) return { confirmed: false, reason: 'order not found' };
 
-  const logger = logSource ? PaymentOrderLogger.forOrder(order, logSource) : null;
-  if (logger) {
-    logger.info('Payment recovery started', {
-      orderStatus: order.status,
-      clientTxnId: order.clientTxnId,
-      maxAttempts,
-      delayMs,
-    });
-  }
+  /** Lazy logger — bulk scan skips noise for normal unpaid orders. */
+  let logger = null;
+  const getLogger = () => {
+    if (!logSource) return null;
+    if (!logger) logger = PaymentOrderLogger.forOrder(order, logSource);
+    return logger;
+  };
 
   if (order.status === 'confirmed' || order.status === 'active') {
-    if (logger) {
-      logger.info('Order already confirmed');
-      await logger.save({ success: true });
+    if (!quiet) {
+      const lg = getLogger();
+      if (lg) {
+        lg.info('Order already confirmed');
+        await lg.save({ success: true });
+      }
     }
     return { confirmed: true, alreadyProcessed: true, order };
+  }
+
+  if (!quiet) {
+    const lg = getLogger();
+    if (lg) {
+      lg.info('Payment recovery started', {
+        orderStatus: order.status,
+        clientTxnId: order.clientTxnId,
+        maxAttempts,
+        delayMs,
+      });
+    }
   }
 
   let lastResult = { success: false, status: 'PENDING' };
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     if (attempt > 0) await sleep(delayMs);
     lastResult = await probeGatewayPayment(order);
-    if (logger) {
-      logger.debug(`Gateway probe attempt ${attempt + 1}/${maxAttempts}`, {
-        success: lastResult.success,
-        status: lastResult.status,
-        method: lastResult.method,
-      });
+    if (!quiet) {
+      const lg = getLogger();
+      if (lg) {
+        lg.debug(`Gateway probe attempt ${attempt + 1}/${maxAttempts}`, {
+          success: lastResult.success,
+          status: lastResult.status,
+          method: lastResult.method,
+        });
+      }
     }
     if (lastResult.success) {
-      const confirmResult = await confirmPendingOrderPayment(order, lastResult, { logger });
+      const confirmResult = await confirmPendingOrderPayment(order, lastResult, { logger: getLogger() });
       if (confirmResult.confirmed) {
-        if (logger) {
-          logger.success('Recovery confirmed order via gateway probe');
-          await logger.save({ success: true });
+        const lg = getLogger();
+        if (lg) {
+          lg.success('Recovery confirmed order via gateway probe');
+          await lg.save({ success: true });
         }
         return confirmResult;
       }
-      if (logger) {
-        logger.warning('Gateway SUCCESS but confirmPendingOrderPayment failed', {
+      const lg = getLogger();
+      if (lg) {
+        lg.warning('Gateway SUCCESS but confirmPendingOrderPayment failed', {
           reason: confirmResult.reason,
           paymentStatus: confirmResult.paymentStatus,
         });
-        await logger.save({
+        await lg.save({
           success: false,
           anomaly: true,
           errorMessage: confirmResult.reason || 'confirm_failed_despite_gateway_success',
@@ -472,7 +492,7 @@ export async function recoverPendingOrderPayment(order, opts = {}) {
       }
       return { ...confirmResult, anomaly: true };
     }
-    if (lastResult.status && !['PENDING', 'CREATED', 'ATTEMPTED'].includes(lastResult.status)) {
+    if (lastResult.status && !UNPAID_GATEWAY_STATUSES.has(lastResult.status)) {
       break;
     }
   }
@@ -485,35 +505,47 @@ export async function recoverPendingOrderPayment(order, opts = {}) {
     freshOrder.status !== 'confirmed' &&
     freshOrder.status !== 'active';
 
-  if (logger) {
-    if (isAnomaly) {
-      logger.warning('ANOMALY: Gateway shows PAID but order still pending after recovery', {
+  const unpaidStatus = lastResult.status || 'PENDING';
+  const isNormalUnpaid = !isAnomaly && UNPAID_GATEWAY_STATUSES.has(unpaidStatus);
+
+  if (isAnomaly) {
+    const lg = getLogger();
+    if (lg) {
+      lg.warning('ANOMALY: Gateway shows PAID but order still pending after recovery', {
         orderStatus: freshOrder?.status,
         gatewayMethod: finalProbe.method,
         transactionId: finalProbe.transactionId,
       });
-      logger.setPaymentInfo({
+      lg.setPaymentInfo({
         method: finalProbe.method,
         gatewayStatus: 'SUCCESS',
         transactionId: finalProbe.transactionId,
         gatewayOrderId: finalProbe.gatewayOrderId,
       });
-    } else {
-      logger.info('Recovery finished without confirming order', {
-        gatewayStatus: lastResult.status || 'PENDING',
-        orderStatus: freshOrder?.status || order.status,
+      await lg.save({
+        success: false,
+        anomaly: true,
+        errorMessage: 'paid_but_order_pending',
       });
     }
-    await logger.save({
-      success: false,
-      anomaly: isAnomaly,
-      errorMessage: isAnomaly ? 'paid_but_order_pending' : lastResult.status || 'PENDING',
-    });
+  } else if (!quiet && !isNormalUnpaid) {
+    const lg = getLogger();
+    if (lg) {
+      lg.info('Recovery finished without confirming order', {
+        gatewayStatus: unpaidStatus,
+        orderStatus: freshOrder?.status || order.status,
+      });
+      await lg.save({
+        success: false,
+        anomaly: false,
+        errorMessage: unpaidStatus,
+      });
+    }
   }
 
   return {
     confirmed: false,
-    paymentStatus: lastResult.status || 'PENDING',
+    paymentStatus: unpaidStatus,
     order: freshOrder || order,
     anomaly: isAnomaly,
   };

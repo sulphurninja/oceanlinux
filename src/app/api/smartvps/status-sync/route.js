@@ -3,7 +3,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 // Optional: let this run longer if needed (Vercel)
-export const maxDuration = 60; // seconds
+export const maxDuration = 120; // seconds
 
 import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
@@ -14,6 +14,10 @@ import IPStock from '@/models/ipStockModel';
 // If your SmartVpsAPI is CommonJS (module.exports = class ...),
 // require() is fine under Node runtime:
 const SmartVpsAPI = require('@/services/smartvpsApi');
+const {
+  extractIpFromAddress,
+  buildSmartVpsStatusOrderUpdates,
+} = require('@/lib/smartvpsOrderSync');
 
 // --- tiny logger
 const L = {
@@ -26,88 +30,54 @@ const L = {
   line: (msg = '') => console.log(`[SVPS-SYNC] ${msg}`),
 };
 
-// --- normalize SmartVPS' occasionally double-encoded JSON
-function normalizeSmartVpsResponse(payload) {
-  if (payload == null) return payload;
-  try {
-    if (typeof payload === 'string') {
-      try { return JSON.parse(payload); } catch {}
-      const unquoted = payload.replace(/^"+|"+$/g, '').replace(/\\"/g, '"');
-      try { return JSON.parse(unquoted); } catch {}
-    }
-    return payload;
-  } catch {
-    return payload;
-  }
-}
-
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 function isSmartVpsStock(ipStock) {
-  const tags = Array.isArray(ipStock?.tags) ? ipStock.tags.map(t => String(t).toLowerCase()) : [];
+  if (!ipStock) return false;
+  const tags = Array.isArray(ipStock?.tags) ? ipStock.tags.map((t) => String(t).toLowerCase()) : [];
   const provider = String(ipStock?.provider || '').toLowerCase();
   const name = String(ipStock?.name || '').toLowerCase();
-  return tags.includes('smartvps') || provider === 'smartvps' || name.includes('smartvps');
-}
-
-function extractIp(from) {
-  const text = typeof from === 'string' ? from : JSON.stringify(from || '');
-  const m = text.match(/\b(?:\d{1,3}\.){3}\d{1,3}\b/);
-  return m ? m[0] : null;
+  const hasSmartvpsConfig = !!(
+    ipStock?.defaultConfigurations?.smartvps ||
+    ipStock?.defaultConfigurations?.get?.('smartvps')
+  );
+  return (
+    tags.includes('smartvps') ||
+    tags.includes('ocean linux') ||
+    provider === 'smartvps' ||
+    name.includes('smartvps') ||
+    name.startsWith('🌊') ||
+    hasSmartvpsConfig
+  );
 }
 
 // --- update one order from SmartVPS status()
-async function refreshOneOrder(order, smartvpsApi) {
-  const ip = order?.ipAddress && extractIp(order.ipAddress);
+async function refreshOneOrder(order, smartvpsApi, { updateCreds = true } = {}) {
+  const ip = order?.ipAddress && extractIpFromAddress(order.ipAddress);
   if (!ip) {
     return { orderId: order._id.toString(), skipped: true, reason: 'No valid IP on order' };
   }
 
   L.kv('Checking status for IP', ip);
 
-  const raw = await smartvpsApi.status(ip);  // your client does POST { ip }
-  const normalized = normalizeSmartVpsResponse(raw);
-
+  const raw = await smartvpsApi.status(ip);
   L.kv('status(raw)', typeof raw === 'string' ? raw.slice(0, 500) : raw);
-  L.kv('status(normalized)', normalized);
 
-  let obj = normalized;
-  if (typeof obj === 'string') {
-    try { obj = JSON.parse(obj); } catch {
-      try {
-        const unquoted = obj.replace(/^"+|"+$/g, '').replace(/\\"/g, '"');
-        obj = JSON.parse(unquoted);
-      } catch { obj = {}; }
-    }
-  }
+  const { update, obj, hasCreds, panelExpiry, expirySynced } = buildSmartVpsStatusOrderUpdates(
+    order,
+    raw,
+    { updateCreds }
+  );
 
-  // Known SmartVPS keys (sometimes "Usernane" typo)
-  const username = obj.Usernane || obj.Username || order.username || null;
-  const password = obj.Password || order.password || null;
-  const os = obj.OS || order.os || undefined;
-  const expiryDate = obj.ExpiryDate ? new Date(obj.ExpiryDate) : order.expiryDate;
-  const machineStatus = obj.MachineStatus;
-  const powerStatus = obj.PowerStatus;
-  const actionStatus = obj.ActionStatus;
-
-  const hasCreds = Boolean(username && password);
-  const update = {
-    ...(hasCreds ? { username, password } : {}),
-    ...(os ? { os } : {}),
-    ...(expiryDate ? { expiryDate } : {}),
-    ...(machineStatus ? { machineStatus } : {}),
-    ...(powerStatus ? { powerStatus } : {}),
-    ...(actionStatus ? { actionStatus } : {}),
-    autoProvisioned: true,
-    provisioningStatus: hasCreds ? 'active' : (order.provisioningStatus || 'provisioning'),
-    provisioningError: '',
-    status: hasCreds ? 'active' : (order.status || 'active'),
-  };
+  L.kv('status(parsed)', obj);
 
   if (!hasCreds) {
     L.line('No credentials yet — keeping order active/provisioning, will try again later.');
   } else {
-    L.line(`Got credentials! user=${username}, pass=${String(password).substring(0,4)}****`);
+    L.line(`Got credentials! user=${update.username}, pass=${String(update.password).substring(0, 4)}****`);
+  }
+  if (panelExpiry) {
+    L.line(`Panel expiry synced: ${panelExpiry.toISOString()}`);
   }
 
   await Order.findByIdAndUpdate(order._id, update);
@@ -117,9 +87,11 @@ async function refreshOneOrder(order, smartvpsApi) {
     ip,
     updated: true,
     gotCredentials: hasCreds,
-    machineStatus,
-    powerStatus,
-    actionStatus,
+    expirySynced,
+    expiryDate: panelExpiry ? panelExpiry.toISOString() : null,
+    machineStatus: obj.MachineStatus,
+    powerStatus: obj.PowerStatus,
+    actionStatus: obj.ActionStatus,
   };
 }
 
@@ -130,9 +102,11 @@ async function refreshOneOrder(order, smartvpsApi) {
  * {
  *   "limit": 10,
  *   "sleepMs": 800,
- *   "onlyMissingCreds": true,
+ *   "onlyMissingCreds": false,
  *   "includeStatuses": ["active","confirmed"]
  * }
+ *
+ * Query (cron-friendly): ?limit=40&onlyMissingCreds=0
  */
 export async function POST(req) {
   const started = Date.now();
@@ -147,10 +121,22 @@ export async function POST(req) {
 
     const smartvpsApi = new SmartVpsAPI();
 
+    const url = new URL(req.url);
     const body = await req.json().catch(() => ({}));
-    const limit = Math.max(1, Math.min(50, Number(body?.limit ?? 10)));
-    const sleepMs = Math.max(0, Math.min(3000, Number(body?.sleepMs ?? 800)));
-    const onlyMissingCreds = body?.onlyMissingCreds !== false; // default true
+    const limit = Math.max(
+      1,
+      Math.min(50, Number(body?.limit ?? url.searchParams.get('limit') ?? 20))
+    );
+    const sleepMs = Math.max(
+      0,
+      Math.min(3000, Number(body?.sleepMs ?? url.searchParams.get('sleepMs') ?? 600))
+    );
+    const onlyMissingCredsRaw =
+      body?.onlyMissingCreds ?? url.searchParams.get('onlyMissingCreds');
+    const onlyMissingCreds =
+      onlyMissingCredsRaw === true ||
+      onlyMissingCredsRaw === '1' ||
+      onlyMissingCredsRaw === 'true';
     const includeStatuses = Array.isArray(body?.includeStatuses) && body.includeStatuses.length
       ? body.includeStatuses
       : ['active', 'confirmed'];
@@ -160,10 +146,10 @@ export async function POST(req) {
     L.kv('onlyMissingCreds', onlyMissingCreds);
     L.kv('includeStatuses', includeStatuses);
 
-    // Base query
+    // Base query — all SmartVPS orders with an IP (expiry + creds from panel)
     const baseQuery = {
       ipStockId: { $exists: true, $ne: null },
-      ipAddress: { $exists: true, $ne: null },
+      ipAddress: { $exists: true, $ne: null, $nin: [null, ''] },
       status: { $in: includeStatuses },
     };
     if (onlyMissingCreds) {
@@ -178,8 +164,8 @@ export async function POST(req) {
     }
 
     const candidates = await Order.find(baseQuery)
-      .sort({ updatedAt: 1 })
-      .limit(limit * 3);
+      .sort({ lastSyncTime: 1, updatedAt: 1 })
+      .limit(limit * 4);
 
     L.kv('candidateOrders(found)', candidates.length);
 
@@ -199,6 +185,7 @@ export async function POST(req) {
     L.kv('ipStocksLoaded', ipStocks.length);
 
     const smartvpsOrders = candidates.filter(o => {
+      if (String(o.provider || '').toLowerCase() === 'smartvps') return true;
       const s = ipStockMap.get(String(o.ipStockId));
       return isSmartVpsStock(s);
     }).slice(0, limit);
@@ -219,7 +206,7 @@ export async function POST(req) {
     for (let i = 0; i < smartvpsOrders.length; i++) {
       const order = smartvpsOrders[i];
       try {
-        const res = await refreshOneOrder(order, smartvpsApi);
+        const res = await refreshOneOrder(order, smartvpsApi, { updateCreds: true });
         results.push({ ok: true, ...res });
       } catch (err) {
         results.push({ ok: false, orderId: order._id.toString(), error: err.message });
@@ -230,11 +217,13 @@ export async function POST(req) {
     }
 
     const gotCreds = results.filter(r => r.ok && r.gotCredentials).length;
+    const expirySynced = results.filter(r => r.ok && r.expirySynced).length;
 
     return NextResponse.json({
       success: true,
       processed: results.length,
       gotCredentials: gotCreds,
+      expirySynced,
       results,
       tookMs: Date.now() - started,
     });
@@ -246,6 +235,6 @@ export async function POST(req) {
 }
 
 // Simple health check (helpful to verify on prod quickly)
-export async function GET() {
-  return NextResponse.json({ ok: true, name: 'smartvps/status-sync' });
+export async function GET(req) {
+  return POST(req);
 }

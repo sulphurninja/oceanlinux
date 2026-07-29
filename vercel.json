@@ -13,6 +13,10 @@
       "schedule": "*/10 * * * *"
     },
     {
+      "path": "/api/smartvps/status-sync?limit=40",
+      "schedule": "0 */4 * * *"
+    },
+    {
       "path": "/api/netbay/sync-orders",
       "schedule": "0 */6 * * *"
     },
@@ -31,6 +35,18 @@
     {
       "path": "/api/orders/expiry-reminders",
       "schedule": "0 4 * * *"
+    },
+    {
+      "path": "/api/orders/expiry-reminders",
+      "schedule": "30 12 * * *"
+    },
+    {
+      "path": "/api/orders/suspension-notices",
+      "schedule": "0 5 * * *"
+    },
+    {
+      "path": "/api/orders/suspension-notices",
+      "schedule": "30 13 * * *"
     },
     {
       "path": "/api/cart/checkout/sweep?minutes=30",

@@ -104,7 +104,7 @@ export function triggerPaymentSuccessBird(
   triggerOrderSuccessBird();
 }
 
-export function waitForCelebrationComplete(timeoutMs = 4800): Promise<void> {
+export function waitForCelebrationComplete(timeoutMs = 3200): Promise<void> {
   if (typeof window === 'undefined') return Promise.resolve();
 
   return new Promise((resolve) => {

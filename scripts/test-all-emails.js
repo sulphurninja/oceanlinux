@@ -6,8 +6,8 @@
  * Usage: node scripts/test-all-emails.js [email]
  * Default: sulphurninja@gmail.com
  * 
- * Make sure SMTP is configured in .env:
- * SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM_EMAIL
+ * Make sure one email provider is configured in .env:
+ * ZEPTOMAIL_API_KEY, RESEND_API_KEY, or SMTP_HOST/SMTP_USER/SMTP_PASS
  */
 
 require('dotenv').config();
@@ -32,7 +32,7 @@ async function testAllEmails() {
 
   if (!emailService.isConfigured) {
     console.error('❌ Email service not configured!');
-    console.error('   Set SMTP_HOST, SMTP_USER, SMTP_PASS in .env');
+    console.error('   Set ZEPTOMAIL_API_KEY, RESEND_API_KEY, or SMTP_HOST/USER/PASS in .env');
     process.exit(1);
   }
 

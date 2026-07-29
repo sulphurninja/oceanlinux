@@ -109,6 +109,17 @@ export function getDaysUntilExpiry(expiryDate) {
   return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 }
 
+/** Calendar days until expiry in IST (matches renewal UI / daily cron). */
+export function getDaysUntilExpiryIST(expiryDate) {
+  if (!expiryDate) return 0;
+  const ist = { timeZone: 'Asia/Kolkata' };
+  const todayKey = new Intl.DateTimeFormat('en-CA', ist).format(new Date());
+  const expiryKey = new Intl.DateTimeFormat('en-CA', ist).format(new Date(expiryDate));
+  const todayMs = new Date(`${todayKey}T00:00:00+05:30`).getTime();
+  const expiryMs = new Date(`${expiryKey}T00:00:00+05:30`).getTime();
+  return Math.round((expiryMs - todayMs) / (1000 * 60 * 60 * 24));
+}
+
 /** True when renewal is allowed (ADVPS + company manual use the same window). */
 export function isWithinRenewalWindow(expiryDate) {
   const daysLeft = getDaysUntilExpiry(expiryDate);

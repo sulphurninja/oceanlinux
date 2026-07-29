@@ -571,6 +571,20 @@ async function handleRenewalWebhook(renewalTxnId, payment, webhookStartTime) {
           console.log(`[WEBHOOK-RENEWAL] SmartVPS renewal result:`, providerRenewalResult);
           providerRenewalSuccess = true;
           logger.setProviderApiResult('smartvps', true, providerRenewalResult, null, apiDuration);
+          try {
+            const { extractIpFromAddress, parseSmartVpsExpiryDate } = require('@/lib/smartvpsOrderSync');
+            const statusIp = extractIpFromAddress(serviceIdentifier) || extractIpFromAddress(order.ipAddress);
+            if (statusIp) {
+              const statusRaw = await smartvpsApi.status(statusIp);
+              const panelExpiry = parseSmartVpsExpiryDate(statusRaw);
+              if (panelExpiry) {
+                newExpiryDate = panelExpiry;
+                console.log(`[WEBHOOK-RENEWAL] SmartVPS panel expiry after renew: ${panelExpiry.toISOString()}`);
+              }
+            }
+          } catch (statusErr) {
+            console.warn('[WEBHOOK-RENEWAL] Could not fetch SmartVPS expiry after renew:', statusErr.message);
+          }
         } catch (smartvpsError) {
           console.error(`[WEBHOOK-RENEWAL] SmartVPS renewal API failed:`, smartvpsError);
           logger.setProviderApiResult('smartvps', false, null, smartvpsError);

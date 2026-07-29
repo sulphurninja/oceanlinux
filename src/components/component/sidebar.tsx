@@ -53,6 +53,7 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
   const [open, setOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [cartCount, setCartCount] = useState<number>(0);
+  const [ticketUnreadCount, setTicketUnreadCount] = useState<number>(0);
   const router = useRouter();
   const pathname = usePathname();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
@@ -78,6 +79,32 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
     });
     return () => { cancelled = true; unsub(); };
   }, [user?.userType]);
+
+  const fetchTicketUnreadCount = React.useCallback(async () => {
+    try {
+      const res = await fetch('/api/support/tickets/unread-count', {
+        credentials: 'include',
+        cache: 'no-store',
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      setTicketUnreadCount(Number(data.count) || 0);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    fetchTicketUnreadCount();
+  }, [user, pathname, fetchTicketUnreadCount]);
+
+  useEffect(() => {
+    if (!user) return;
+    const onFocus = () => fetchTicketUnreadCount();
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [user, fetchTicketUnreadCount]);
 
   // Save collapsed state to localStorage
   const toggleCollapsed = () => {
@@ -187,6 +214,12 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
       href: '/dashboard/support/tickets',
       label: 'Raise Ticket',
       icon: Ticket,
+      badge:
+        ticketUnreadCount > 0
+          ? ticketUnreadCount === 1
+            ? 'New reply'
+            : `${ticketUnreadCount > 99 ? '99+' : ticketUnreadCount} replies`
+          : undefined,
     },
     // Conditionally add Reseller Wallet
     ...(user?.userType === 'reseller' ? [
@@ -296,10 +329,15 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
               )}
               title={isCollapsed && !isMobile ? item.label : undefined}
             >
-              <item.icon className={cn(
-                "flex-shrink-0 transition-transform group-hover:scale-110",
-                isCollapsed && !isMobile ? "h-5 w-5" : "h-[18px] w-[18px]"
-              )} />
+              <span className="relative shrink-0">
+                <item.icon className={cn(
+                  "flex-shrink-0 transition-transform group-hover:scale-110",
+                  isCollapsed && !isMobile ? "h-5 w-5" : "h-[18px] w-[18px]"
+                )} />
+                {item.href === '/dashboard/support/tickets' && ticketUnreadCount > 0 && isCollapsed && !isMobile && (
+                  <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-amber-400 ring-2 ring-[hsl(158_40%_8%)]" />
+                )}
+              </span>
               {(!isCollapsed || isMobile) && (
                 <>
                   <span className="flex-1">{item.label}</span>
@@ -307,9 +345,13 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
                     <Badge
                       className={cn(
                         "text-[10px] px-2 py-0 h-5 font-semibold border-0",
-                        isActive(item.href)
-                          ? "bg-emerald-400/20 text-emerald-200"
-                          : "bg-emerald-500/15 text-emerald-300"
+                        item.href === '/dashboard/support/tickets'
+                          ? isActive(item.href)
+                            ? "bg-amber-400/25 text-amber-100"
+                            : "bg-amber-500/20 text-amber-200"
+                          : isActive(item.href)
+                            ? "bg-emerald-400/20 text-emerald-200"
+                            : "bg-emerald-500/15 text-emerald-300"
                       )}
                     >
                       {item.badge}
@@ -442,15 +484,21 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
                 </Button>
               </Link>
             )}
-            <Button
-              onClick={() => router.push('/dashboard/support/tickets')}
-              variant="ghost"
-              size="icon"
-              className="h-9 w-9 text-white/70 hover:text-white hover:bg-white/[0.05]"
-              title="Raise Ticket"
-            >
-              <Ticket className="h-4 w-4" />
-            </Button>
+            <Link href="/dashboard/support/tickets" className="relative">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-9 w-9 text-white/70 hover:text-white hover:bg-white/[0.05] relative"
+                title="Raise Ticket"
+              >
+                <Ticket className="h-4 w-4" />
+                {ticketUnreadCount > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-[16px] flex items-center justify-center rounded-full bg-amber-500 text-amber-950 text-[9px] font-bold px-1 border-2 border-[hsl(158_40%_8%)]">
+                    {ticketUnreadCount > 99 ? '99+' : ticketUnreadCount}
+                  </span>
+                )}
+              </Button>
+            </Link>
             <ThemeToggle />
           </div>
         </div>

@@ -16,6 +16,7 @@ export interface SupportTicketRow {
   status: string;
   createdAt: string;
   updatedAt: string;
+  hasUnreadAdminReply?: boolean;
 }
 
 export interface SupportTicketMessage {

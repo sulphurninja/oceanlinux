@@ -1,9 +1,8 @@
 import connectDB from "@/lib/db";
 import SupportTicket from "@/models/supportTicketModel";
-import User from "@/models/userModel";
-import EmailService from "@/lib/sendgrid";
-import NotificationService from "@/services/notificationService"; // Add this import
+import NotificationService from "@/services/notificationService";
 import { enforceAdmin } from '@/lib/apiSecurity';
+import { markTicketAdminReplyUnreadUpdate } from '@/lib/supportTicketQuery';
 
 export async function GET(request, { params }) {
     try {
@@ -81,6 +80,7 @@ export async function PATCH(request, { params }) {
                     isInternal: false
                 }
             };
+            Object.assign(updateData, markTicketAdminReplyUnreadUpdate());
         }
 
         const ticket = await SupportTicket.findOneAndUpdate(
@@ -89,53 +89,21 @@ export async function PATCH(request, { params }) {
             { new: true }
         ).populate('userId', 'name email');
 
-        // Send email notification
-        try {
-            const emailService = new EmailService();
-
-            if (adminReply) {
-                await emailService.sendTicketReplyEmail(
-                    ticket.userId.email,
-                    ticket.userId.name,
-                    ticket.ticketId,
-                    ticket.subject,
-                    adminReply
-                );
-            }
-
-            if (status && status !== previousStatus) {
-                await emailService.sendTicketStatusUpdateEmail(
-                    ticket.userId.email,
-                    ticket.userId.name,
-                    ticket.ticketId,
-                    ticket.subject,
-                    previousStatus,
-                    status
-                );
-            }
-        } catch (emailError) {
-            console.error('Ticket email notification failed:', emailError);
-        }
-
-        // Send in-app notifications
+        // In-app + email via NotificationService only (avoids duplicate emails)
         try {
             const userId = ticket.userId._id;
 
-            // Send notification for admin reply
             if (adminReply) {
-                await NotificationService.notifyTicketReplied(userId, ticket, true); // true = from admin
+                await NotificationService.notifyTicketReplied(userId, ticket, true, adminReply);
             }
 
-            // Send notification for status change
             if (status && status !== previousStatus) {
                 await NotificationService.notifyTicketStatusChanged(userId, ticket, previousStatus, status);
             }
 
-            // Send special notification for resolved tickets
             if (status === 'resolved' && previousStatus !== 'resolved') {
                 await NotificationService.notifyTicketResolved(userId, ticket);
             }
-
         } catch (notificationError) {
             console.error('Ticket notification failed:', notificationError);
         }

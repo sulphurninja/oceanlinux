@@ -551,6 +551,21 @@ export async function POST(request) {
           console.log('[RENEWAL-CONFIRM] ✅ SmartVPS renewal API call completed successfully');
           console.log('[RENEWAL-CONFIRM] Service identifier', serviceIdentifier, 'has been renewed via SmartVPS API');
 
+          try {
+            const { extractIpFromAddress, parseSmartVpsExpiryDate } = require('@/lib/smartvpsOrderSync');
+            const statusIp = extractIpFromAddress(serviceIdentifier) || extractIpFromAddress(order.ipAddress);
+            if (statusIp) {
+              const statusRaw = await smartvpsApi.status(statusIp);
+              const panelExpiry = parseSmartVpsExpiryDate(statusRaw);
+              if (panelExpiry) {
+                newExpiryDate = panelExpiry;
+                console.log('[RENEWAL-CONFIRM] SmartVPS panel expiry after renew:', panelExpiry.toISOString());
+              }
+            }
+          } catch (statusErr) {
+            console.warn('[RENEWAL-CONFIRM] Could not fetch SmartVPS expiry after renew:', statusErr.message);
+          }
+
         } catch (smartvpsError) {
           const renewalEndTime = Date.now();
           const renewalDuration = renewalStartTime ? (renewalEndTime - renewalStartTime) : 0; // 🔧 SAFE CALCULATION
@@ -697,7 +712,13 @@ export async function POST(request) {
         const panelRenew = await executeResellerPanelUpstreamRenewal(order, { months: 1, Order });
         const apiDuration = Date.now() - apiStart;
 
-        providerRenewalResult = panelRenew.result || { error: panelRenew.error, vmId: panelRenew.vmId };
+        providerRenewalResult = panelRenew.result
+          ? {
+              ...panelRenew.result,
+              couponUsed: panelRenew.couponUsed ?? null,
+              panelPayableAmount: panelRenew.panelPayableAmount ?? null,
+            }
+          : { error: panelRenew.error, vmId: panelRenew.vmId, couponUsed: panelRenew.couponUsed ?? null };
         providerRenewalSuccess = panelRenew.success;
 
         newExpiryDate = await resolveRenewalExpiryFromPanel(order, newExpiryDate, { panelRenew });

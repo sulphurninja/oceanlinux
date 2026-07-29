@@ -664,7 +664,7 @@ html {
   .premium-dashboard [data-slot="card"] {
     background: var(--pd-card-bg);
     border-color: var(--pd-card-border);
-    backdrop-filter: blur(12px);
+    backdrop-filter: blur(6px);
     box-shadow:
       0 1px 0 var(--pd-card-inset) inset,
       var(--pd-card-shadow);
@@ -689,7 +689,7 @@ html {
 
   .premium-dashboard-topbar {
     background: var(--pd-topbar-bg);
-    backdrop-filter: blur(24px) saturate(1.2);
+    backdrop-filter: blur(12px) saturate(1.1);
     border-bottom: 1px solid var(--pd-topbar-border);
     box-shadow:
       0 1px 0 var(--pd-card-inset) inset,
@@ -2483,7 +2483,7 @@ html {
   }
 
   .premium-post-login-splash--exit {
-    animation: postLoginFadeOut 0.42s ease-in forwards;
+    animation: postLoginFadeOut 0.28s ease-in forwards;
   }
 
   .premium-post-login-card {
@@ -2516,12 +2516,12 @@ html {
     stroke: url(#postLoginGradient);
     stroke-dasharray: 327;
     stroke-dashoffset: 327;
-    animation: postLoginRing 2.6s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+    animation: postLoginRing 1.8s cubic-bezier(0.4, 0, 0.2, 1) forwards;
   }
 
   .premium-post-login-logo {
     @apply absolute inset-0 m-auto h-11 w-auto sm:h-12;
-    animation: postLoginLogoPulse 2.6s ease-in-out infinite;
+    animation: postLoginLogoPulse 1.8s ease-in-out infinite;
     transition: opacity 0.2s ease, transform 0.2s ease;
   }
 
@@ -2538,6 +2538,7 @@ html {
     pointer-events: none;
     z-index: 10050;
     overflow: hidden;
+    contain: layout style paint;
   }
 
   .ocean-celebrate-scrim {
@@ -2549,7 +2550,7 @@ html {
     background:
       radial-gradient(ellipse 80% 60% at 50% 42%, rgba(16, 80, 60, 0.28), transparent 62%),
       linear-gradient(165deg, rgba(4, 24, 18, 0.82), rgba(2, 12, 10, 0.92));
-    backdrop-filter: blur(14px) saturate(120%);
+    backdrop-filter: blur(6px) saturate(110%);
   }
 
   .ocean-celebrate-ambient {
@@ -2757,7 +2758,50 @@ html {
   .ocean-bird-fly-svg {
     display: block;
     overflow: visible;
-    filter: drop-shadow(0 6px 14px rgba(4, 47, 46, 0.38));
+    filter: drop-shadow(0 4px 10px rgba(4, 47, 46, 0.32));
+  }
+
+  .ocean-flying-bird-svg--auto-flap {
+    filter: drop-shadow(0 3px 8px rgba(4, 47, 46, 0.28));
+  }
+
+  .ocean-flying-bird-svg--auto-flap .ocean-bird-wing {
+    transform-box: fill-box;
+    transform-origin: 54px 40px;
+    animation: oceanBirdWingFlap 0.42s ease-in-out infinite;
+  }
+
+  .ocean-flying-bird-svg--auto-flap .ocean-bird-tail {
+    transform-box: fill-box;
+    transform-origin: 26px 48px;
+    animation: oceanBirdTailFlap 0.42s ease-in-out infinite;
+  }
+
+  @keyframes oceanBirdWingFlap {
+    0%, 100% { transform: translateY(0) rotate(-8deg); }
+    50% { transform: translateY(-3px) rotate(30deg); }
+  }
+
+  @keyframes oceanBirdTailFlap {
+    0%, 100% { transform: rotate(4deg); }
+    50% { transform: rotate(9deg); }
+  }
+
+  .ocean-soft-pulse {
+    animation: oceanSoftPulse 2.8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+
+  @keyframes oceanSoftPulse {
+    0%, 100% { transform: scale(1); opacity: 0.35; }
+    50% { transform: scale(1.35); opacity: 0; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ocean-soft-pulse,
+    .ocean-flying-bird-svg--auto-flap .ocean-bird-wing,
+    .ocean-flying-bird-svg--auto-flap .ocean-bird-tail {
+      animation: none !important;
+    }
   }
 
   [data-ocean-brand-logo].ocean-brand-logo--bird-landed {
@@ -2776,7 +2820,7 @@ html {
   .premium-post-login-bar-fill {
     @apply h-full rounded-full origin-left;
     background: linear-gradient(90deg, #10b981, #34d399, #6ee7b7);
-    animation: postLoginBarFill 2.6s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+    animation: postLoginBarFill 1.8s cubic-bezier(0.4, 0, 0.2, 1) forwards;
     box-shadow: 0 0 12px rgba(52, 211, 153, 0.45);
   }
 
@@ -3563,6 +3607,22 @@ html {
     background: rgba(255, 255, 255, 0.5);
     box-shadow: 0 0 8px rgba(34, 197, 94, 0.6);
     animation: particleFloat3d 4s ease-in-out infinite;
+  }
+
+  @media (max-width: 1023px) {
+    .hero-3d-particle--lite {
+      display: none;
+    }
+  }
+
+  @media (max-width: 768px) {
+    .ocean-celebrate-scrim {
+      backdrop-filter: none;
+    }
+
+    .ocean-celebrate-ambient {
+      display: none;
+    }
   }
 
   .tilt-3d-wrap {

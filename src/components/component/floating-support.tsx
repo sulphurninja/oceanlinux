@@ -46,7 +46,7 @@ const FloatingSupport = () => {
             />
 
             {/* Pulse animation ring */}
-            <div className="absolute inset-0 rounded-full bg-blue-400/30 animate-ping" />
+            <div className="absolute inset-0 rounded-full bg-blue-400/30 ocean-soft-pulse" />
           </div>
         </Button>
 

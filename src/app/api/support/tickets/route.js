@@ -2,7 +2,6 @@ import connectDB from "@/lib/db";
 import SupportTicket from "@/models/supportTicketModel";
 import User from "@/models/userModel";
 import { getDataFromToken } from "@/helper/getDataFromToken";
-import EmailService from '../../../../lib/sendgrid';
 import NotificationService from '@/services/notificationService';
 import { buildUserTicketFilter } from '@/lib/supportTicketQuery';
 
@@ -62,28 +61,12 @@ export async function POST(request) {
 
         await ticket.save();
 
-        // Create notification for ticket creation
+        // Create notification + email (single path — no duplicate send)
         try {
             await NotificationService.notifyTicketCreated(userId, ticket);
         } catch (notifError) {
             console.error('Failed to create ticket notification:', notifError);
         }
-
-
-        // Send ticket created email
-        try {
-            const emailService = new EmailService();
-            await emailService.sendTicketCreatedEmail(
-                user.email,
-                user.name,
-                ticket.ticketId,
-                ticket.subject,
-                ticket.category
-            );
-        } catch (emailError) {
-            console.error('Ticket created email failed:', emailError);
-        }
-
 
         return new Response(JSON.stringify({
             message: 'Support ticket created successfully',
@@ -121,7 +104,7 @@ export async function GET(request) {
         }
 
         const tickets = await SupportTicket.find(buildUserTicketFilter(userId))
-            .select('ticketId subject category priority status createdAt updatedAt')
+            .select('ticketId subject category priority status createdAt updatedAt hasUnreadAdminReply')
             .sort({ updatedAt: -1, createdAt: -1 })
             .lean();
 

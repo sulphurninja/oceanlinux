@@ -1,5 +1,7 @@
 "use client";
 
+import { cn } from "@/lib/utils";
+
 type Hero3DSceneProps = {
   parallaxX?: number;
   parallaxY?: number;
@@ -9,7 +11,7 @@ export default function Hero3DScene({ parallaxX = 0, parallaxY = 0 }: Hero3DScen
   const px = (n: number) => ({ transform: `translate3d(${parallaxX * n}px, ${parallaxY * n}px, 0)` });
 
   return (
-    <div className="hero-3d-scene pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
+    <div className="hero-3d-scene pointer-events-none absolute inset-0 overflow-hidden hidden lg:block" aria-hidden>
       {/* Perspective grid floor */}
       <div className="hero-3d-floor hidden sm:block" style={px(0.3)} />
 
@@ -30,12 +32,12 @@ export default function Hero3DScene({ parallaxX = 0, parallaxY = 0 }: Hero3DScen
       <div className="hero-3d-shape hero-3d-orb hero-3d-orb-2" style={px(-1)} />
       <div className="hero-3d-shape hero-3d-orb hero-3d-orb-3" style={px(0.4)} />
 
-      {/* Depth particles */}
+      {/* Depth particles — fewer on small screens via CSS */}
       <div className="hero-3d-particles">
         {Array.from({ length: 12 }).map((_, i) => (
           <span
             key={i}
-            className="hero-3d-particle"
+            className={cn("hero-3d-particle", i >= 6 && "hero-3d-particle--lite")}
             style={{
               left: `${8 + (i * 7.5) % 84}%`,
               top: `${12 + (i * 11) % 76}%`,

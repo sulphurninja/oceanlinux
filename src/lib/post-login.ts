@@ -4,7 +4,7 @@ export const POST_LOGIN_SPLASH_DONE_KEY = "postLoginSplashDone";
 export const POST_LOGIN_SPLASH_EVENT = "oceanlinux:post-login-splash-complete";
 export const LOGIN_POPUP_COMPLETE_EVENT = "oceanlinux:login-popup-complete";
 
-export const POST_LOGIN_SPLASH_MS = 2600;
+export const POST_LOGIN_SPLASH_MS = 1800;
 export const POST_LOGIN_LOADING_HTML_CLASS = "oceanlinux-post-login-loading";
 
 export function isPostLoginSplashPending(): boolean {
