@@ -58,6 +58,14 @@ const announcementSchema = new mongoose.Schema({
         type: Number,
         default: 0
     },
+    emailsFailed: {
+        type: Number,
+        default: 0
+    },
+    notificationCount: {
+        type: Number,
+        default: 0
+    },
     openCount: {
         type: Number,
         default: 0

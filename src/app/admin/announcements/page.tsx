@@ -84,6 +84,8 @@ interface Announcement {
   communityLink?: string;
   scheduledFor?: string;
   sentCount: number;
+  emailsFailed?: number;
+  notificationCount?: number;
   openCount: number;
   clickCount: number;
   sentAt?: string;
@@ -1174,35 +1176,35 @@ export default function AdminAnnouncementsPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Sent</CardTitle>
+                <CardTitle className="text-sm font-medium">Emails Sent</CardTitle>
                 <Mail className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{stats.totalSent.toLocaleString()}</div>
-                <p className="text-xs text-muted-foreground">Emails delivered</p>
+                <p className="text-xs text-muted-foreground">Successfully delivered</p>
               </CardContent>
             </Card>
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Opened</CardTitle>
+                <CardTitle className="text-sm font-medium">Email Opened</CardTitle>
                 <Eye className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{stats.totalOpened.toLocaleString()}</div>
                 <p className="text-xs text-muted-foreground">
-                  {stats.totalSent > 0 ? `${((stats.totalOpened / stats.totalSent) * 100).toFixed(1)}%` : '0%'} open rate
+                  {stats.totalSent > 0 ? `${((stats.totalOpened / stats.totalSent) * 100).toFixed(1)}%` : '0%'} unique users opened email
                 </p>
               </CardContent>
             </Card>
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Clicked</CardTitle>
+                <CardTitle className="text-sm font-medium">Website Visited</CardTitle>
                 <BarChart3 className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{stats.totalClicked.toLocaleString()}</div>
                 <p className="text-xs text-muted-foreground">
-                  {stats.totalSent > 0 ? `${((stats.totalClicked / stats.totalSent) * 100).toFixed(1)}%` : '0%'} click rate
+                  {stats.totalSent > 0 ? `${((stats.totalClicked / stats.totalSent) * 100).toFixed(1)}%` : '0%'} clicked link in email
                 </p>
               </CardContent>
             </Card>
@@ -1257,14 +1259,25 @@ export default function AdminAnnouncementsPage() {
                           <p className="text-muted-foreground mb-3 line-clamp-2">{announcement.content}</p>
 
                           {announcement.status === 'sent' && (
-                            <div className="flex items-center gap-6 text-sm text-muted-foreground">
+                            <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-muted-foreground">
                               <span className="flex items-center gap-1">
                                 <Mail className="w-4 h-4" />
-                                {announcement.sentCount} sent
+                                {announcement.sentCount} emails sent
                               </span>
+                              {(announcement.emailsFailed ?? 0) > 0 && (
+                                <span className="flex items-center gap-1 text-amber-600">
+                                  {announcement.emailsFailed} failed
+                                </span>
+                              )}
+                              {(announcement.notificationCount ?? 0) > 0 && (
+                                <span className="flex items-center gap-1">
+                                  <BellRing className="w-4 h-4" />
+                                  {announcement.notificationCount} in-app alerts
+                                </span>
+                              )}
                               <span className="flex items-center gap-1">
                                 <Eye className="w-4 h-4" />
-                                {announcement.openCount} opened
+                                {announcement.openCount} opened email
                                 {announcement.sentCount > 0 && (
                                   <span className="ml-1">
                                     ({((announcement.openCount / announcement.sentCount) * 100).toFixed(1)}%)
@@ -1272,8 +1285,13 @@ export default function AdminAnnouncementsPage() {
                                 )}
                               </span>
                               <span className="flex items-center gap-1">
-                                <BarChart3 className="w-4 h-4" />
-                                {announcement.clickCount} clicked
+                                <ExternalLink className="w-4 h-4" />
+                                {announcement.clickCount} visited website
+                                {announcement.sentCount > 0 && (
+                                  <span className="ml-1">
+                                    ({((announcement.clickCount / announcement.sentCount) * 100).toFixed(1)}%)
+                                  </span>
+                                )}
                               </span>
                             </div>
                           )}

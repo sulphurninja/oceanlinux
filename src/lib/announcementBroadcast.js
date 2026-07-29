@@ -68,6 +68,10 @@ export async function broadcastAnnouncement(announcement) {
               type: announcement.type || 'update',
               actionUrl: announcement.actionUrl,
               actionText: announcement.actionText || 'Learn More',
+            },
+            {
+              announcementId: announcement._id,
+              userId: user._id,
             }
           );
 

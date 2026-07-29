@@ -53,6 +53,8 @@ export async function POST(request, { params }) {
     announcement.status = 'sent';
     announcement.sentAt = new Date();
     announcement.sentCount = sendResults.emailsSent;
+    announcement.emailsFailed = sendResults.emailsFailed;
+    announcement.notificationCount = sendResults.notificationsSent;
     await announcement.save();
 
     return new Response(JSON.stringify({

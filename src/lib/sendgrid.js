@@ -977,7 +977,7 @@ class EmailService {
   }
 
   // ========== ANNOUNCEMENT ==========
-  async sendAnnouncementEmail(email, name, announcement) {
+  async sendAnnouncementEmail(email, name, announcement, tracking = null) {
     const { title, content: body, type = 'update', actionUrl, actionText } = announcement;
     const types = {
       'promotion': { emoji: '🎉', color: '#dc2626' },
@@ -987,6 +987,28 @@ class EmailService {
       'security': { emoji: '🛡️', color: '#dc2626' },
     };
     const t = types[type] || types['update'];
+
+    const {
+      buildAnnouncementOpenPixelUrl,
+      buildAnnouncementClickUrl,
+    } = require('./announcementTracking');
+
+    let trackedActionUrl = actionUrl;
+    let ctaLabel = actionText || 'Learn More';
+    if (tracking?.announcementId && tracking?.userId) {
+      const destination =
+        actionUrl ||
+        `${this.baseUrl}/dashboard`;
+      trackedActionUrl =
+        buildAnnouncementClickUrl(tracking.announcementId, tracking.userId, destination) ||
+        destination;
+      if (!actionUrl) ctaLabel = actionText || 'Visit OceanLinux';
+    }
+
+    const openPixel =
+      tracking?.announcementId && tracking?.userId
+        ? buildAnnouncementOpenPixelUrl(tracking.announcementId, tracking.userId)
+        : null;
     
     const content = `
       <div style="text-align:center;margin-bottom:32px;">
@@ -999,11 +1021,12 @@ class EmailService {
       
       <div style="color:#475569;font-size:15px;line-height:1.8;margin-bottom:32px;white-space:pre-line;">${body}</div>
       
-      ${actionUrl ? `
+      ${trackedActionUrl ? `
       <div style="text-align:center;">
-        <a href="${actionUrl}" style="display:inline-block;background:linear-gradient(135deg,#8b5cf6,#3b82f6);color:#ffffff;font-size:14px;font-weight:600;padding:14px 32px;border-radius:10px;text-decoration:none;">${actionText || 'Learn More'} →</a>
+        <a href="${trackedActionUrl}" style="display:inline-block;background:linear-gradient(135deg,#8b5cf6,#3b82f6);color:#ffffff;font-size:14px;font-weight:600;padding:14px 32px;border-radius:10px;text-decoration:none;">${ctaLabel} →</a>
       </div>
       ` : ''}
+      ${openPixel ? `<img src="${openPixel}" width="1" height="1" alt="" style="display:none;width:1px;height:1px;border:0;" />` : ''}
     `;
     return this.sendEmail({
       to: email,

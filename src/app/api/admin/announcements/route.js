@@ -118,6 +118,8 @@ export async function POST(request) {
         broadcastStats = await broadcastAnnouncement(announcement);
         announcement.status = 'sent';
         announcement.sentCount = broadcastStats.emailsSent;
+        announcement.emailsFailed = broadcastStats.emailsFailed;
+        announcement.notificationCount = broadcastStats.notificationsSent;
         announcement.sentAt = new Date();
         await announcement.save();
       }

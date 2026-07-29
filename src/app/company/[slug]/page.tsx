@@ -292,6 +292,32 @@ function isYesterday(d: Date) { const t = new Date(); t.setDate(t.getDate() - 1)
 function isThisWeek(d: Date) { const now = new Date(); const weekAgo = new Date(now); weekAgo.setDate(now.getDate() - 7); return d >= weekAgo; }
 function isThisMonth(d: Date) { const now = new Date(); return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); }
 
+function parseDateInput(value: string, endOfDay = false): Date | null {
+  if (!value) return null;
+  const [y, m, day] = value.split('-').map(Number);
+  if (!y || !m || !day) return null;
+  const date = new Date(y, m - 1, day);
+  if (endOfDay) date.setHours(23, 59, 59, 999);
+  else date.setHours(0, 0, 0, 0);
+  return date;
+}
+
+function isInCustomDateRange(d: Date, from: string, to: string) {
+  const start = parseDateInput(from, false);
+  const end = parseDateInput(to, true);
+  if (!start && !end) return true;
+  if (start && d < start) return false;
+  if (end && d > end) return false;
+  return true;
+}
+
+function formatCustomDateLabel(from: string, to: string) {
+  if (from && to) return `${from} → ${to}`;
+  if (from) return `From ${from}`;
+  if (to) return `Until ${to}`;
+  return 'Custom range';
+}
+
 export default function CompanyDashboard() {
   const params = useParams();
   const slug = params.slug as string;
@@ -341,6 +367,8 @@ export default function CompanyDashboard() {
   // Order filters
   const [searchTerm, setSearchTerm] = useState('');
   const [dateFilter, setDateFilter] = useState('all');
+  const [customDateFrom, setCustomDateFrom] = useState('');
+  const [customDateTo, setCustomDateTo] = useState('');
   const [sortBy, setSortBy] = useState('newest');
   const [deployOutdated, setDeployOutdated] = useState(false);
 
@@ -931,6 +959,8 @@ export default function CompanyDashboard() {
           case 'yesterday': return isYesterday(d);
           case 'week': return isThisWeek(d);
           case 'month': return isThisMonth(d);
+          case 'custom':
+            return isInCustomDateRange(d, customDateFrom, customDateTo);
           default: return true;
         }
       });
@@ -946,7 +976,21 @@ export default function CompanyDashboard() {
     });
 
     return result;
-  }, [visibleOrders, searchTerm, dateFilter, sortBy]);
+  }, [visibleOrders, searchTerm, dateFilter, customDateFrom, customDateTo, sortBy]);
+
+  const hasCustomDateRange = dateFilter === 'custom' && Boolean(customDateFrom || customDateTo);
+  const hasActiveOrderFilters =
+    Boolean(searchTerm) ||
+    dateFilter !== 'all' ||
+    sortBy !== 'newest';
+
+  const clearOrderFilters = () => {
+    setSearchTerm('');
+    setDateFilter('all');
+    setCustomDateFrom('');
+    setCustomDateTo('');
+    setSortBy('newest');
+  };
 
   const pendingRequestCount = useMemo(() => {
     if (requestStatusFilter === 'pending') return actionRequests.length;
@@ -1914,14 +1958,24 @@ export default function CompanyDashboard() {
                 <Input placeholder="Search orders..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-9 h-9" />
               </div>
               <div className="flex gap-2 flex-wrap">
-                <Select value={dateFilter} onValueChange={setDateFilter}>
-                  <SelectTrigger className="w-28 h-9 text-xs"><SelectValue /></SelectTrigger>
+                <Select
+                  value={dateFilter}
+                  onValueChange={(value) => {
+                    setDateFilter(value);
+                    if (value !== 'custom') {
+                      setCustomDateFrom('');
+                      setCustomDateTo('');
+                    }
+                  }}
+                >
+                  <SelectTrigger className="w-[7.5rem] h-9 text-xs"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Time</SelectItem>
                     <SelectItem value="today">Today</SelectItem>
                     <SelectItem value="yesterday">Yesterday</SelectItem>
                     <SelectItem value="week">This Week</SelectItem>
                     <SelectItem value="month">This Month</SelectItem>
+                    <SelectItem value="custom">Custom Date</SelectItem>
                   </SelectContent>
                 </Select>
                 <Select value={sortBy} onValueChange={setSortBy}>
@@ -1933,17 +1987,54 @@ export default function CompanyDashboard() {
                     <SelectItem value="status">Status</SelectItem>
                   </SelectContent>
                 </Select>
-                {(searchTerm || dateFilter !== 'all' || sortBy !== 'newest') && (
-                  <Button variant="ghost" size="sm" className="h-9 text-xs" onClick={() => { setSearchTerm(''); setDateFilter('all'); setSortBy('newest'); }}>
+                {hasActiveOrderFilters && (
+                  <Button variant="ghost" size="sm" className="h-9 text-xs" onClick={clearOrderFilters}>
                     Clear
                   </Button>
                 )}
               </div>
             </div>
 
+            {dateFilter === 'custom' && (
+              <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
+                <div className="flex-1 max-w-[11rem]">
+                  <Label htmlFor="order-date-from" className="text-[10px] text-muted-foreground mb-1 block">
+                    From date
+                  </Label>
+                  <Input
+                    id="order-date-from"
+                    type="date"
+                    value={customDateFrom}
+                    max={customDateTo || undefined}
+                    onChange={(e) => setCustomDateFrom(e.target.value)}
+                    className="h-9 text-xs"
+                  />
+                </div>
+                <div className="flex-1 max-w-[11rem]">
+                  <Label htmlFor="order-date-to" className="text-[10px] text-muted-foreground mb-1 block">
+                    To date
+                  </Label>
+                  <Input
+                    id="order-date-to"
+                    type="date"
+                    value={customDateTo}
+                    min={customDateFrom || undefined}
+                    onChange={(e) => setCustomDateTo(e.target.value)}
+                    className="h-9 text-xs"
+                  />
+                </div>
+                {hasCustomDateRange && (
+                  <p className="text-[10px] text-muted-foreground pb-2 sm:pb-2.5">
+                    Showing orders: {formatCustomDateLabel(customDateFrom, customDateTo)}
+                  </p>
+                )}
+              </div>
+            )}
+
             {/* Results count */}
             <p className="text-xs text-muted-foreground">
               {filteredOrders.length} of {visibleOrders.length} orders
+              {dateFilter === 'custom' && hasCustomDateRange ? ` (${formatCustomDateLabel(customDateFrom, customDateTo)})` : ''}
             </p>
 
             {/* Order cards */}
