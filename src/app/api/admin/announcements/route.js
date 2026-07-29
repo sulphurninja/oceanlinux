@@ -115,7 +115,22 @@ export async function POST(request) {
         announcement.status = 'sent';
         await announcement.save();
       } else {
-        broadcastStats = await broadcastAnnouncement(announcement);
+        try {
+          broadcastStats = await broadcastAnnouncement(announcement);
+        } catch (error) {
+          if (error.code === 'EMAIL_PROVIDER_UNAVAILABLE') {
+            await Announcement.findByIdAndDelete(announcement._id);
+            return new Response(
+              JSON.stringify({
+                message: error.message,
+                code: error.code,
+                health: error.health,
+              }),
+              { status: 503, headers: { 'Content-Type': 'application/json' } }
+            );
+          }
+          throw error;
+        }
         announcement.status = 'sent';
         announcement.sentCount = broadcastStats.emailsSent;
         announcement.emailsFailed = broadcastStats.emailsFailed;

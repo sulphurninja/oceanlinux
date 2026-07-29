@@ -48,7 +48,22 @@ export async function POST(request, { params }) {
 
     console.log(`[ANNOUNCEMENT] Sending announcement: ${announcement.title}`);
 
-    const sendResults = await broadcastAnnouncement(announcement);
+    let sendResults;
+    try {
+      sendResults = await broadcastAnnouncement(announcement);
+    } catch (error) {
+      if (error.code === 'EMAIL_PROVIDER_UNAVAILABLE') {
+        return new Response(
+          JSON.stringify({
+            message: error.message,
+            code: error.code,
+            health: error.health,
+          }),
+          { status: 503, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      throw error;
+    }
 
     announcement.status = 'sent';
     announcement.sentAt = new Date();

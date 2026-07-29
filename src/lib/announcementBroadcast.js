@@ -3,6 +3,7 @@ import Order from '@/models/orderModel';
 import NotificationService from '@/services/notificationService';
 
 const EmailService = require('@/lib/sendgrid');
+const { checkBulkEmailReadiness } = require('@/lib/emailProviderHealth');
 
 const BATCH_SIZE = 10;
 const BATCH_DELAY_MS = 1000;
@@ -37,11 +38,22 @@ export async function getAnnouncementAudienceUsers(targetAudience = 'all') {
 /**
  * Email + in-app notification blast for a normal (non-popup) announcement.
  */
-export async function broadcastAnnouncement(announcement) {
+export async function broadcastAnnouncement(announcement, { skipPreflight = false } = {}) {
   const emailService = new EmailService();
 
   if (!emailService.isConfigured) {
     console.error('[ANNOUNCEMENT] Email service not configured — emails will be skipped');
+  }
+
+  if (!skipPreflight) {
+    const health = await checkBulkEmailReadiness();
+    if (!health.ready) {
+      const err = new Error(health.summary);
+      err.code = 'EMAIL_PROVIDER_UNAVAILABLE';
+      err.health = health;
+      throw err;
+    }
+    console.log(`[ANNOUNCEMENT] Email provider ready: ${health.recommended}`);
   }
 
   const users = await getAnnouncementAudienceUsers(announcement.targetAudience);
@@ -76,7 +88,14 @@ export async function broadcastAnnouncement(announcement) {
           );
 
           if (emailResult?.success) {
-            emailsSent++;
+            if (emailResult.reliable === false) {
+              emailsFailed++;
+              if (sampleErrors.length < 5) {
+                sampleErrors.push(`${user.email}: SMTP accepted but bulk delivery not guaranteed`);
+              }
+            } else {
+              emailsSent++;
+            }
           } else {
             emailsFailed++;
             const errMsg = emailResult?.error || 'Unknown email error';

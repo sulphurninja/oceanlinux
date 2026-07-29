@@ -17,6 +17,7 @@
 const nodemailer = require('nodemailer');
 const { Resend } = require('resend');
 const emailProviderQuota = require('./emailProviderQuota');
+const { isZeptoQuotaError } = require('./emailProviderHealth');
 
 const ZEPTOMAIL_DEFAULT_API_URL = 'https://api.zeptomail.in/v1.1/email';
 
@@ -26,6 +27,30 @@ let zeptomailApiKey = null;
 let zeptomailApiUrl = ZEPTOMAIL_DEFAULT_API_URL;
 let transport = 'none'; // 'both' | 'zeptomail' | 'resend' | 'smtp' | 'none'
 let emailSendCounter = 0;
+let cachedProviderOrder = null;
+let cachedProviderOrderAt = 0;
+const PROVIDER_ORDER_CACHE_MS = 60_000;
+
+function smtpFallbackEnabled(allowSmtpFallback) {
+  if (allowSmtpFallback === false) return false;
+  return process.env.EMAIL_SMTP_FALLBACK !== 'false';
+}
+
+async function maybeSmtpFallback(payload, lastError, allowSmtpFallback) {
+  if (!smtpFallbackEnabled(allowSmtpFallback)) {
+    return { success: false, error: lastError, skippedSmtp: true };
+  }
+
+  const smtpResult = await sendViaSmtpPayload(payload);
+  if (smtpResult.success) {
+    console.warn(
+      `[EmailService] ⚠️ SMTP accepted (not bulk-safe) — ${smtpResult.messageId}. User inbox delivery not guaranteed.`
+    );
+    return { ...smtpResult, reliable: false };
+  }
+
+  return { success: false, error: smtpResult.error || lastError };
+}
 
 function zeptomailAuthHeader(key) {
   const trimmed = String(key).trim();
@@ -186,20 +211,32 @@ function initializeTransporter() {
   );
 }
 
-async function resolveBothProviderOrder() {
+async function resolveBothProviderOrder({ logQuota = true } = {}) {
   const strategy = (process.env.EMAIL_STRATEGY || 'round-robin').toLowerCase();
+  const now = Date.now();
 
   if (strategy === 'failover') return ['zeptomail', 'resend'];
 
   if (strategy === 'resend-quota' || strategy === 'daily-quota' || strategy === 'quota') {
+    if (cachedProviderOrder && now - cachedProviderOrderAt < PROVIDER_ORDER_CACHE_MS) {
+      return cachedProviderOrder;
+    }
+
     try {
       const status = await emailProviderQuota.getResendQuotaStatus();
-      console.log(
-        `[EmailService] Resend quota today: ${status.count}/${status.limit} (${status.remaining} left)`
-      );
-      if (status.remaining > 0) return ['resend', 'zeptomail'];
-      console.log('[EmailService] Resend daily quota reached — using ZeptoMail');
-      return ['zeptomail'];
+      const isCacheRefresh = !cachedProviderOrder || now - cachedProviderOrderAt >= PROVIDER_ORDER_CACHE_MS;
+      if (logQuota && isCacheRefresh) {
+        console.log(
+          `[EmailService] Resend quota today: ${status.count}/${status.limit} (${status.remaining} left)`
+        );
+      }
+      const order = status.remaining > 0 ? ['resend', 'zeptomail'] : ['zeptomail'];
+      if (status.remaining <= 0 && logQuota && isCacheRefresh) {
+        console.log('[EmailService] Resend daily quota reached — using ZeptoMail');
+      }
+      cachedProviderOrder = order;
+      cachedProviderOrderAt = now;
+      return order;
     } catch (error) {
       console.warn('[EmailService] Quota check failed, using ZeptoMail:', error.message);
       return ['zeptomail', 'resend'];
@@ -347,7 +384,7 @@ class EmailService {
     this.baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://oceanlinux.com';
   }
 
-  async sendEmail({ to, subject, html }) {
+  async sendEmail({ to, subject, html, allowSmtpFallback }) {
     if (!this.isConfigured) {
       return { success: false, error: 'Email service not configured' };
     }
@@ -362,7 +399,7 @@ class EmailService {
 
     // ---- Both providers: round-robin, quota, or failover ----
     if (this.transport === 'both' && zeptomailApiKey && resendClient) {
-      const order = await resolveBothProviderOrder();
+      const order = await resolveBothProviderOrder({ logQuota: emailSendCounter % 50 === 0 });
       let lastError = 'All email providers failed';
 
       for (const provider of order) {
@@ -372,7 +409,6 @@ class EmailService {
           try {
             reservedResend = await emailProviderQuota.reserveResendSlot();
             if (!reservedResend) {
-              console.log('[EmailService] Resend slot unavailable — trying next provider');
               continue;
             }
           } catch (error) {
@@ -401,6 +437,10 @@ class EmailService {
           }
 
           lastError = result.error;
+          if (provider === 'zeptomail' && isZeptoQuotaError(result.error)) {
+            console.error('[EmailService] ❌ ZeptoMail quota/limit hit:', result.error);
+            break;
+          }
           console.warn(`[EmailService] ⚠️ ${provider} failed: ${result.error}`);
         } catch (error) {
           if (reservedResend) {
@@ -415,13 +455,10 @@ class EmailService {
         }
       }
 
-      const smtpResult = await sendViaSmtpPayload(payload);
-      if (smtpResult.success) {
-        console.log(`[EmailService] ✅ Email sent via SMTP fallback - ${smtpResult.messageId}`);
-        return smtpResult;
-      }
+      const smtpResult = await maybeSmtpFallback(payload, lastError, allowSmtpFallback);
+      if (smtpResult.success) return smtpResult;
 
-      console.error('[EmailService] ❌ Resend/ZeptoMail/SMTP all failed');
+      console.error('[EmailService] ❌ Resend/ZeptoMail failed', smtpResult.skippedSmtp ? '(SMTP fallback disabled)' : '(SMTP also failed)');
       return { success: false, error: smtpResult.error || lastError };
     }
 
@@ -434,19 +471,13 @@ class EmailService {
           return result;
         }
         console.error('[EmailService] ❌ ZeptoMail rejected:', result.error);
-        const smtpResult = await sendViaSmtpPayload(payload);
-        if (smtpResult.success) {
-          console.log(`[EmailService] ✅ Email sent via SMTP fallback - ${smtpResult.messageId}`);
-          return smtpResult;
-        }
+        const smtpResult = await maybeSmtpFallback(payload, result.error, allowSmtpFallback);
+        if (smtpResult.success) return smtpResult;
         return result;
       } catch (error) {
         console.error('[EmailService] ❌ ZeptoMail exception:', error.message);
-        const smtpResult = await sendViaSmtpPayload(payload);
-        if (smtpResult.success) {
-          console.log(`[EmailService] ✅ Email sent via SMTP fallback - ${smtpResult.messageId}`);
-          return smtpResult;
-        }
+        const smtpResult = await maybeSmtpFallback(payload, error.message, allowSmtpFallback);
+        if (smtpResult.success) return smtpResult;
         return { success: false, error: error.message };
       }
     }
@@ -460,19 +491,13 @@ class EmailService {
           return result;
         }
         console.error('[EmailService] ❌ Resend rejected:', result.error);
-        const smtpResult = await sendViaSmtpPayload(payload);
-        if (smtpResult.success) {
-          console.log(`[EmailService] ✅ Email sent via SMTP fallback - ${smtpResult.messageId}`);
-          return smtpResult;
-        }
+        const smtpResult = await maybeSmtpFallback(payload, result.error, allowSmtpFallback);
+        if (smtpResult.success) return smtpResult;
         return result;
       } catch (error) {
         console.error('[EmailService] ❌ Resend exception:', error.message);
-        const smtpResult = await sendViaSmtpPayload(payload);
-        if (smtpResult.success) {
-          console.log(`[EmailService] ✅ Email sent via SMTP fallback - ${smtpResult.messageId}`);
-          return smtpResult;
-        }
+        const smtpResult = await maybeSmtpFallback(payload, error.message, allowSmtpFallback);
+        if (smtpResult.success) return smtpResult;
         return { success: false, error: error.message };
       }
     }
@@ -1034,6 +1059,7 @@ class EmailService {
       to: email,
       subject: `${t.emoji} ${title} - OceanLinux`,
       html: getTemplate(content, title),
+      allowSmtpFallback: false,
     });
   }
 
