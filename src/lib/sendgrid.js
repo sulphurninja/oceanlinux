@@ -100,7 +100,7 @@ function configureBoth() {
   return true;
 }
 
-function configureSmtp() {
+function configureSmtp({ setPrimaryTransport = true } = {}) {
   const smtpHost = process.env.SMTP_HOST;
   const smtpPort = process.env.SMTP_PORT || 465;
   const smtpUser = process.env.SMTP_USER;
@@ -110,21 +110,49 @@ function configureSmtp() {
   if (!smtpHost || !smtpUser || !smtpPass) return false;
 
   try {
-    transporter = nodemailer.createTransport({
-      host: smtpHost,
-      port: parseInt(smtpPort, 10),
-      secure: smtpSecure,
-      auth: { user: smtpUser, pass: smtpPass },
-      pool: true,
-      maxConnections: 5,
-    });
-    transport = 'smtp';
-    console.log(`[EmailService] ✅ Configured via SMTP: ${smtpHost}:${smtpPort}`);
-    transporter.verify().catch((err) => console.error('[EmailService] ❌', err.message));
+    if (!transporter) {
+      transporter = nodemailer.createTransport({
+        host: smtpHost,
+        port: parseInt(smtpPort, 10),
+        secure: smtpSecure,
+        auth: { user: smtpUser, pass: smtpPass },
+        pool: true,
+        maxConnections: 5,
+      });
+      transporter.verify().catch((err) => console.error('[EmailService] ❌ SMTP verify:', err.message));
+    }
+
+    if (setPrimaryTransport) {
+      transport = 'smtp';
+      console.log(`[EmailService] ✅ Configured via SMTP: ${smtpHost}:${smtpPort}`);
+    }
+
     return true;
   } catch (error) {
     console.error('[EmailService] ❌', error.message);
     return false;
+  }
+}
+
+function ensureSmtpFallback() {
+  return configureSmtp({ setPrimaryTransport: false });
+}
+
+async function sendViaSmtpPayload({ fromEmail, fromName, to, subject, html }) {
+  if (!ensureSmtpFallback() || !transporter) {
+    return { success: false, error: 'SMTP not configured', provider: 'smtp' };
+  }
+
+  try {
+    const result = await transporter.sendMail({
+      from: { name: fromName, address: fromEmail },
+      to,
+      subject,
+      html,
+    });
+    return { success: true, messageId: result.messageId, provider: 'smtp' };
+  } catch (error) {
+    return { success: false, error: error.message, provider: 'smtp' };
   }
 }
 
@@ -187,6 +215,12 @@ async function sendViaZeptoMail({ fromEmail, fromName, to, subject, html }) {
     email_address: { address },
   }));
 
+  // ZeptoMail only accepts senders verified in their agent — may differ from Resend.
+  const zeptoFrom =
+    process.env.ZEPTOMAIL_FROM ||
+    process.env.ZEPTOMAIL_FROM_EMAIL ||
+    fromEmail;
+
   const response = await fetch(zeptomailApiUrl, {
     method: 'POST',
     headers: {
@@ -195,7 +229,7 @@ async function sendViaZeptoMail({ fromEmail, fromName, to, subject, html }) {
       Authorization: zeptomailAuthHeader(zeptomailApiKey),
     },
     body: JSON.stringify({
-      from: { address: fromEmail, name: fromName },
+      from: { address: zeptoFrom, name: fromName },
       to: recipients,
       subject,
       htmlbody: html,
@@ -371,7 +405,7 @@ class EmailService {
         } catch (error) {
           if (reservedResend) {
             await emailProviderQuota.releaseResendSlot().catch(() => {});
-            if (emailProviderQuota.isResendMonthlyQuotaError(result.error)) {
+            if (emailProviderQuota.isResendMonthlyQuotaError(error.message)) {
               await emailProviderQuota.exhaustResendForToday('monthly-quota').catch(() => {});
               console.log('[EmailService] Resend monthly quota hit — ZeptoMail only for today');
             }
@@ -381,22 +415,38 @@ class EmailService {
         }
       }
 
-      console.error('[EmailService] ❌ Both providers failed');
-      return { success: false, error: lastError };
+      const smtpResult = await sendViaSmtpPayload(payload);
+      if (smtpResult.success) {
+        console.log(`[EmailService] ✅ Email sent via SMTP fallback - ${smtpResult.messageId}`);
+        return smtpResult;
+      }
+
+      console.error('[EmailService] ❌ Resend/ZeptoMail/SMTP all failed');
+      return { success: false, error: smtpResult.error || lastError };
     }
 
     // ---- ZeptoMail only ----
     if (this.transport === 'zeptomail' && zeptomailApiKey) {
       try {
         const result = await sendViaZeptoMail(payload);
-        if (!result.success) {
-          console.error('[EmailService] ❌ ZeptoMail rejected:', result.error);
+        if (result.success) {
+          console.log(`[EmailService] ✅ Email sent via ZeptoMail - ${result.messageId}`);
           return result;
         }
-        console.log(`[EmailService] ✅ Email sent via ZeptoMail - ${result.messageId}`);
+        console.error('[EmailService] ❌ ZeptoMail rejected:', result.error);
+        const smtpResult = await sendViaSmtpPayload(payload);
+        if (smtpResult.success) {
+          console.log(`[EmailService] ✅ Email sent via SMTP fallback - ${smtpResult.messageId}`);
+          return smtpResult;
+        }
         return result;
       } catch (error) {
         console.error('[EmailService] ❌ ZeptoMail exception:', error.message);
+        const smtpResult = await sendViaSmtpPayload(payload);
+        if (smtpResult.success) {
+          console.log(`[EmailService] ✅ Email sent via SMTP fallback - ${smtpResult.messageId}`);
+          return smtpResult;
+        }
         return { success: false, error: error.message };
       }
     }
@@ -405,14 +455,24 @@ class EmailService {
     if (this.transport === 'resend' && resendClient) {
       try {
         const result = await sendViaResend(payload);
-        if (!result.success) {
-          console.error('[EmailService] ❌ Resend rejected:', result.error);
+        if (result.success) {
+          console.log(`[EmailService] ✅ Email sent via Resend - ${result.messageId}`);
           return result;
         }
-        console.log(`[EmailService] ✅ Email sent via Resend - ${result.messageId}`);
+        console.error('[EmailService] ❌ Resend rejected:', result.error);
+        const smtpResult = await sendViaSmtpPayload(payload);
+        if (smtpResult.success) {
+          console.log(`[EmailService] ✅ Email sent via SMTP fallback - ${smtpResult.messageId}`);
+          return smtpResult;
+        }
         return result;
       } catch (error) {
         console.error('[EmailService] ❌ Resend exception:', error.message);
+        const smtpResult = await sendViaSmtpPayload(payload);
+        if (smtpResult.success) {
+          console.log(`[EmailService] ✅ Email sent via SMTP fallback - ${smtpResult.messageId}`);
+          return smtpResult;
+        }
         return { success: false, error: error.message };
       }
     }

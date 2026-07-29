@@ -417,7 +417,21 @@ export default function AdminAnnouncementsPage() {
 
       if (response.ok) {
         const result = await response.json();
-        toast.success(result?.message || (action === 'send' ? 'Announcement sent!' : 'Saved as draft'));
+        const stats = result?.stats;
+        if (action === 'send' && stats) {
+          if (stats.emailsFailed > 0) {
+            toast.warning(
+              `Emails: ${stats.emailsSent} sent, ${stats.emailsFailed} failed. Notifications: ${stats.notificationsSent}.`
+            );
+          } else {
+            toast.success(
+              result?.message ||
+                `Sent ${stats.emailsSent} emails and ${stats.notificationsSent} notifications`
+            );
+          }
+        } else {
+          toast.success(result?.message || (action === 'send' ? 'Announcement sent!' : 'Saved as draft'));
+        }
         setShowCreateDialog(false);
         setFormData({ ...emptyForm });
         fetchAnnouncements();
@@ -564,7 +578,14 @@ export default function AdminAnnouncementsPage() {
 
       if (response.ok) {
         const result = await response.json();
-        toast.success(result?.message || 'Announcement sent!');
+        const stats = result?.stats;
+        if (stats?.emailsFailed > 0) {
+          toast.warning(
+            `Emails: ${stats.emailsSent} sent, ${stats.emailsFailed} failed. Notifications: ${stats.notificationsSent}.`
+          );
+        } else {
+          toast.success(result?.message || 'Announcement sent!');
+        }
         fetchAnnouncements();
         fetchStats();
       } else {
