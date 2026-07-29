@@ -988,26 +988,28 @@ class EmailService {
     };
     const t = types[type] || types['update'];
 
-    const {
-      buildAnnouncementOpenPixelUrl,
-      buildAnnouncementClickUrl,
-    } = require('./announcementTracking');
+    const trackingId = (value) => {
+      const id = String(value || '').trim();
+      return /^[a-f0-9]{24}$/i.test(id) ? id : null;
+    };
 
     let trackedActionUrl = actionUrl;
     let ctaLabel = actionText || 'Learn More';
     if (tracking?.announcementId && tracking?.userId) {
-      const destination =
-        actionUrl ||
-        `${this.baseUrl}/dashboard`;
-      trackedActionUrl =
-        buildAnnouncementClickUrl(tracking.announcementId, tracking.userId, destination) ||
-        destination;
-      if (!actionUrl) ctaLabel = actionText || 'Visit OceanLinux';
+      const a = trackingId(tracking.announcementId);
+      const u = trackingId(tracking.userId);
+      if (a && u) {
+        const destination = actionUrl || `${this.baseUrl}/dashboard`;
+        trackedActionUrl = `${this.baseUrl}/api/announcements/track/click?a=${a}&u=${u}&to=${encodeURIComponent(destination)}`;
+        if (!actionUrl) ctaLabel = actionText || 'Visit OceanLinux';
+      }
     }
 
+    const aId = tracking?.announcementId ? trackingId(tracking.announcementId) : null;
+    const uId = tracking?.userId ? trackingId(tracking.userId) : null;
     const openPixel =
-      tracking?.announcementId && tracking?.userId
-        ? buildAnnouncementOpenPixelUrl(tracking.announcementId, tracking.userId)
+      aId && uId
+        ? `${this.baseUrl}/api/announcements/track/open?a=${aId}&u=${uId}`
         : null;
     
     const content = `

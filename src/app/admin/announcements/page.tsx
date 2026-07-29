@@ -284,6 +284,12 @@ function AnnouncementForm({
         </div>
 
         {formData.showAsLoginPopup && !formData.showOnOrderPage && (
+          <div className="rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-xs text-amber-900 dark:text-amber-200">
+            Login Popup mode is ON — <strong>no emails</strong> will be sent. Turn this off for an email announcement blast.
+          </div>
+        )}
+
+        {formData.showAsLoginPopup && !formData.showOnOrderPage && (
           <div className="space-y-2">
             <Label>Community Link (WhatsApp)</Label>
             <Input
@@ -405,6 +411,11 @@ export default function AdminAnnouncementsPage() {
   };
 
   const handleSubmit = async (action: 'draft' | 'send') => {
+    if (action === 'send' && formData.showAsLoginPopup && !formData.showOnOrderPage) {
+      toast.error('Login Popup is ON — emails nahi jayengi. "Show as Login Popup" band karke dubara bhejo.');
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       const response = await fetch('/api/admin/announcements', {
