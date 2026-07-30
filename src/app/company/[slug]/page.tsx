@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -318,8 +318,16 @@ function formatCustomDateLabel(from: string, to: string) {
   return 'Custom range';
 }
 
+const COMPANY_TABS = ['stocks', 'panelZones', 'bulkPromos', 'orders', 'requests', 'renewals'] as const;
+type CompanyTab = (typeof COMPANY_TABS)[number];
+
+function isCompanyTab(value: string | null): value is CompanyTab {
+  return Boolean(value && (COMPANY_TABS as readonly string[]).includes(value));
+}
+
 export default function CompanyDashboard() {
   const params = useParams();
+  const searchParams = useSearchParams();
   const slug = params.slug as string;
 
   const [authed, setAuthed] = useState(false);
@@ -333,7 +341,14 @@ export default function CompanyDashboard() {
   const [actionRequests, setActionRequests] = useState<ActionRequest[]>([]);
   const [renewalRequests, setRenewalRequests] = useState<RenewalRequestDoc[]>([]);
   const [pendingRenewalCount, setPendingRenewalCount] = useState(0);
-  const [tab, setTab] = useState<'stocks' | 'panelZones' | 'bulkPromos' | 'orders' | 'requests' | 'renewals'>('stocks');
+  const [tab, setTab] = useState<CompanyTab>('stocks');
+
+  useEffect(() => {
+    const requestedTab = searchParams.get('tab');
+    if (isCompanyTab(requestedTab)) {
+      setTab(requestedTab);
+    }
+  }, [searchParams]);
   const [savingStockId, setSavingStockId] = useState<string | null>(null);
   const [stockCountDrafts, setStockCountDrafts] = useState<Record<string, string>>({});
   const [inventoryBulkDrafts, setInventoryBulkDrafts] = useState<Record<string, string>>({});

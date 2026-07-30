@@ -27,7 +27,7 @@ fi
 echo "==> stop PM2 (free RAM for build)..."
 pm2 stop all 2>/dev/null || true
 
-echo "==> remove stray nested app..."
+echo "==> remove old nested folder (legacy duplicate app, not PM2 process)..."
 rm -rf oceanlinux-orders
 
 echo "==> wipe old build..."
@@ -44,16 +44,20 @@ if [ ! -d .next/server ]; then
 fi
 
 echo "==> restart PM2 from THIS directory..."
-pm2 delete oceanlinux 2>/dev/null || true
+pm2 delete oceanlinux oceanlinux-orders 2>/dev/null || true
 pm2 start ecosystem.config.cjs
 pm2 save
 
 sleep 3
-echo "==> verify live endpoint..."
+echo "==> verify live endpoints..."
 curl -s "http://127.0.0.1:3000/api/company/version" || true
 echo ""
 curl -sI "http://127.0.0.1:3000/api/company/orders" | grep -i "x-company-orders-filter" || true
+echo ""
+curl -sI "http://127.0.0.1:5655/orders" | head -5 || echo "WARN: port 5655 not responding — open AWS Security Group TCP 5655"
 
 echo ""
-echo "Done. Open https://oceanlinux.com/api/company/version"
-echo "Then hard-refresh the site (Ctrl+Shift+R)"
+echo "Done."
+echo "  Main site:  https://oceanlinux.com"
+echo "  Orders port: http://$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || echo YOUR_EC2_IP):5655/orders"
+echo "Hard-refresh browser (Ctrl+Shift+R)"

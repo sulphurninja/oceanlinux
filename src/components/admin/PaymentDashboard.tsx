@@ -21,6 +21,7 @@ import {
   Wallet,
   CreditCard,
   CalendarDays,
+  Info,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -29,15 +30,40 @@ type DailyRow = {
   label: string;
   vpsOrders: number;
   vpsRevenue: number;
-  gatewayAmount: number;
-  walletUsed: number;
+  vpsWalletOnly: number;
+  vpsGatewayOnly: number;
+  vpsMixed: number;
+  vpsCartOrders: number;
+  vpsGatewayAmount: number;
+  vpsWalletAmount: number;
+  cartCheckouts: number;
+  cartGatewayAmount: number;
+  cartWalletAmount: number;
   renewals: number;
   renewalRevenue: number;
-  renewalGateway: number;
+  renewalGatewayAmount: number;
+  renewalWalletAmount: number;
+  renewalGatewayCount: number;
+  renewalWalletCount: number;
   walletTopups: number;
   walletTopupAmount: number;
-  totalExternalIn: number;
+  gatewayCaptures: number;
+  gatewayCollected: number;
+  razorpayCaptures: number;
+  razorpayCollected: number;
+  razorpayVpsAmount: number;
+  razorpayCartAmount: number;
+  razorpayRenewalAmount: number;
+  razorpayTopupAmount: number;
+  otherGatewayCaptures: number;
+  otherGatewayCollected: number;
+  walletSpent: number;
+  walletAdded: number;
   totalBusiness: number;
+  gatewayAmount: number;
+  walletUsed: number;
+  renewalGateway: number;
+  totalExternalIn: number;
 };
 
 type PaymentDashboardData = {
@@ -45,8 +71,9 @@ type PaymentDashboardData = {
   today: DailyRow;
   last7: DailyRow[];
   daily: DailyRow[];
-  periodTotals: Omit<DailyRow, 'date' | 'label'>;
+  periodTotals: DailyRow;
   range: { from: string; to: string; days: number };
+  notes?: string[];
 };
 
 function formatInr(value: number) {
@@ -85,9 +112,204 @@ function StatCard({
       </CardHeader>
       <CardContent>
         <div className="text-2xl font-bold tracking-tight">{value}</div>
-        {hint ? <p className="text-xs text-muted-foreground mt-1">{hint}</p> : null}
+        {hint ? <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{hint}</p> : null}
       </CardContent>
     </Card>
+  );
+}
+
+function RazorpayReconcileCard({ row }: { row: DailyRow }) {
+  return (
+    <Card className="border-[#3395FF]/30 bg-gradient-to-br from-[#3395FF]/10 via-background to-[#072654]/5">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base flex items-center gap-2">
+          <CreditCard className="h-5 w-5 text-[#3395FF]" />
+          Razorpay — aaj ka hisaab
+        </CardTitle>
+        <CardDescription>
+          Razorpay dashboard se match karo: captured payments & collected amount
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+          <div>
+            <p className="text-xs text-muted-foreground">Razorpay captures</p>
+            <p className="text-2xl font-bold tabular-nums">{row.razorpayCaptures}</p>
+            <p className="text-xs text-muted-foreground">payments</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Razorpay collected</p>
+            <p className="text-2xl font-bold tabular-nums text-[#3395FF]">
+              {formatInr(row.razorpayCollected)}
+            </p>
+            <p className="text-xs text-muted-foreground">Collected Amount</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Cashfree / UPI</p>
+            <p className="text-2xl font-bold tabular-nums">
+              {row.otherGatewayCaptures} · {formatInr(row.otherGatewayCollected)}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Sab gateways total</p>
+            <p className="text-2xl font-bold tabular-nums text-emerald-600 dark:text-emerald-400">
+              {row.gatewayCaptures} · {formatInr(row.gatewayCollected)}
+            </p>
+          </div>
+        </div>
+
+        <div className="rounded-lg border bg-background/80 p-3 text-sm space-y-1.5">
+          <p className="font-medium text-foreground mb-2">Razorpay breakdown</p>
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Naye VPS (single buy)</span>
+            <span className="font-medium tabular-nums">{formatInr(row.razorpayVpsAmount)}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Cart checkout</span>
+            <span className="font-medium tabular-nums">{formatInr(row.razorpayCartAmount)}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Renewals</span>
+            <span className="font-medium tabular-nums">{formatInr(row.razorpayRenewalAmount)}</span>
+          </div>
+          <div className="flex justify-between border-t pt-1.5">
+            <span className="text-muted-foreground">Wallet top-up</span>
+            <span className="font-medium tabular-nums">{formatInr(row.razorpayTopupAmount)}</span>
+          </div>
+        </div>
+
+        <p className="text-xs text-muted-foreground leading-relaxed">
+          Razorpay app me <strong>Collected Amount</strong> aur <strong>captured payments</strong> yahi numbers
+          hone chahiye. Wallet-only orders yahan nahi aate — wo pehle top-up se ya balance se pay hote hain.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+function TodayBreakdown({ row }: { row: DailyRow }) {
+  const standaloneGateway = row.vpsGatewayAmount;
+  const standaloneWallet = row.vpsWalletAmount;
+  const cartItems = row.vpsCartOrders;
+
+  return (
+    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-medium">New VPS Sales</CardTitle>
+          <CardDescription>{row.vpsOrders} orders · {formatInr(row.vpsRevenue)}</CardDescription>
+        </CardHeader>
+        <CardContent className="text-sm space-y-1.5">
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Gateway only</span>
+            <span className="font-medium">{row.vpsGatewayOnly} · {formatInr(standaloneGateway)}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Wallet only</span>
+            <span className="font-medium">{row.vpsWalletOnly} · {formatInr(standaloneWallet)}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Wallet + Gateway</span>
+            <span className="font-medium">{row.vpsMixed} orders</span>
+          </div>
+          {cartItems > 0 ? (
+            <div className="flex justify-between border-t pt-1.5">
+              <span className="text-muted-foreground">Cart checkout items</span>
+              <span className="font-medium">
+                {cartItems} · {row.cartCheckouts} payment{row.cartCheckouts === 1 ? '' : 's'}
+              </span>
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-medium">Payment Gateway</CardTitle>
+          <CardDescription>
+            Razorpay {row.razorpayCaptures} · {formatInr(row.razorpayCollected)} · Other{' '}
+            {formatInr(row.otherGatewayCollected)}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="text-sm space-y-1.5">
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">New orders (single)</span>
+            <span className="font-medium">{formatInr(standaloneGateway)}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Cart checkouts</span>
+            <span className="font-medium">{formatInr(row.cartGatewayAmount)}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Renewals</span>
+            <span className="font-medium">
+              {row.renewalGatewayCount} · {formatInr(row.renewalGatewayAmount)}
+            </span>
+          </div>
+          <div className="flex justify-between border-t pt-1.5">
+            <span className="text-muted-foreground">Wallet top-ups</span>
+            <span className="font-medium">
+              {row.walletTopups} · {formatInr(row.walletTopupAmount)}
+            </span>
+          </div>
+          <div className="flex justify-between border-t pt-1.5 text-[#3395FF] font-medium">
+            <span>Razorpay total (match dashboard)</span>
+            <span>{row.razorpayCaptures} · {formatInr(row.razorpayCollected)}</span>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-medium">Wallet</CardTitle>
+          <CardDescription>Balance movement today</CardDescription>
+        </CardHeader>
+        <CardContent className="text-sm space-y-1.5">
+          <div className="flex justify-between text-emerald-700 dark:text-emerald-400">
+            <span>Added (top-ups)</span>
+            <span className="font-medium">+{formatInr(row.walletAdded)}</span>
+          </div>
+          <div className="flex justify-between text-amber-700 dark:text-amber-400">
+            <span>Spent on orders</span>
+            <span className="font-medium">−{formatInr(row.vpsWalletAmount + row.cartWalletAmount)}</span>
+          </div>
+          <div className="flex justify-between text-amber-700 dark:text-amber-400">
+            <span>Spent on renewals</span>
+            <span className="font-medium">−{formatInr(row.renewalWalletAmount)}</span>
+          </div>
+          <div className="flex justify-between border-t pt-1.5 font-medium">
+            <span>Total spent</span>
+            <span>{formatInr(row.walletSpent)}</span>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-medium">Renewals</CardTitle>
+          <CardDescription>
+            {row.renewals} renewals · {formatInr(row.renewalRevenue)}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="text-sm space-y-1.5">
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Via gateway</span>
+            <span className="font-medium">{row.renewalGatewayCount}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Via wallet</span>
+            <span className="font-medium">{row.renewalWalletCount}</span>
+          </div>
+          <div className="flex justify-between border-t pt-1.5 font-medium">
+            <span>Total business</span>
+            <span>{formatInr(row.totalBusiness)}</span>
+          </div>
+          <p className="text-xs text-muted-foreground pt-1">
+            VPS sold ({row.vpsOrders}) ≠ gateway captures ({row.gatewayCaptures}) when cart ya wallet use hota hai.
+          </p>
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 
@@ -120,7 +342,7 @@ export function PaymentDashboard() {
 
   const maxBar = useMemo(() => {
     if (!data?.last7?.length) return 1;
-    return Math.max(...data.last7.map((d) => d.totalExternalIn), 1);
+    return Math.max(...data.last7.map((d) => d.gatewayCollected), 1);
   }, [data]);
 
   if (loading && !data) {
@@ -152,7 +374,7 @@ export function PaymentDashboard() {
             <Badge variant="secondary" className="font-normal">IST</Badge>
           </div>
           <p className="text-sm text-muted-foreground">
-            Aaj ka sell + per-day gateway / wallet breakdown — {data.range.from} se {data.range.to}
+            Gateway captures, wallet top-ups, wallet spend, renewals — {data.range.from} se {data.range.to}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -179,28 +401,41 @@ export function PaymentDashboard() {
             <CalendarDays className="h-5 w-5 text-primary" />
             Aaj — {today.label}
           </CardTitle>
-          <CardDescription>India time (IST) ke hisaab se aaj ki sales & payments</CardDescription>
+          <CardDescription>India time (IST) — poora din ka payment report</CardDescription>
         </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-7">
             <StatCard
               title="VPS Sold"
               value={String(today.vpsOrders)}
-              hint={formatInr(today.vpsRevenue)}
+              hint={`Revenue ${formatInr(today.vpsRevenue)}`}
               icon={ShoppingCart}
               tone="blue"
             />
             <StatCard
-              title="Gateway In"
-              value={formatInr(today.gatewayAmount + today.renewalGateway)}
-              hint={`New orders ${formatInr(today.gatewayAmount)} + renewals ${formatInr(today.renewalGateway)}`}
+              title="Razorpay Today"
+              value={formatInr(today.razorpayCollected)}
+              hint={`${today.razorpayCaptures} captures — dashboard se match`}
+              icon={CreditCard}
+              tone="blue"
+            />
+            <StatCard
+              title="All Gateway"
+              value={formatInr(today.gatewayCollected)}
+              hint={`${today.gatewayCaptures} captures incl. Cashfree/UPI`}
               icon={CreditCard}
               tone="green"
             />
             <StatCard
-              title="Wallet Used"
-              value={formatInr(today.walletUsed)}
-              hint="Orders paid from wallet"
+              title="Wallet Added"
+              value={formatInr(today.walletAdded)}
+              hint={`${today.walletTopups} top-up${today.walletTopups === 1 ? '' : 's'}`}
+              icon={Wallet}
+            />
+            <StatCard
+              title="Wallet Spent"
+              value={formatInr(today.walletSpent)}
+              hint="Orders + renewals from balance"
               icon={Wallet}
               tone="amber"
             />
@@ -212,82 +447,66 @@ export function PaymentDashboard() {
               tone="violet"
             />
             <StatCard
-              title="Wallet Top-ups"
-              value={String(today.walletTopups)}
-              hint={formatInr(today.walletTopupAmount)}
-              icon={Wallet}
-            />
-            <StatCard
-              title="Total Cash In"
-              value={formatInr(today.totalExternalIn)}
-              hint="Gateway + top-ups"
+              title="Total Business"
+              value={formatInr(today.totalBusiness)}
+              hint="New sales + renewals"
               icon={IndianRupee}
               tone="green"
             />
+          </div>
+          <RazorpayReconcileCard row={today} />
+          <TodayBreakdown row={today} />
+        </CardContent>
+      </Card>
+
+      <Card className="border-amber-500/20 bg-amber-500/5">
+        <CardContent className="flex gap-3 py-4 text-sm text-muted-foreground">
+          <Info className="h-5 w-5 shrink-0 text-amber-600" />
+          <div className="space-y-1">
+            <p className="font-medium text-foreground">
+              Razorpay: {today.razorpayCaptures} captures · {formatInr(today.razorpayCollected)} — dashboard se match karo
+            </p>
+            <p>
+              <strong>VPS Sold</strong> ({today.vpsOrders}) har order line hai.{' '}
+              <strong>Razorpay captures</strong> ({today.razorpayCaptures}) sirf Razorpay se aaye unique payments.
+              Wallet-only, Cashfree/UPI alag count hote hain.
+            </p>
           </div>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Last 7 days — cash in</CardTitle>
-          <CardDescription>Har din kitna payment aaya (external gateway + wallet top-ups)</CardDescription>
+          <CardTitle className="text-base">Last 7 days — gateway collected</CardTitle>
+          <CardDescription>Unique payment captures ka total amount (orders + renewals + top-ups)</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           {data.last7.map((row) => (
-            <div key={row.date} className="grid grid-cols-[88px_1fr_96px] items-center gap-3">
+            <div key={row.date} className="grid grid-cols-[88px_1fr_120px] items-center gap-3">
               <div className="text-xs text-muted-foreground">
                 {row.date === today.date ? 'Today' : row.label.split(',')[0]}
               </div>
               <div className="h-3 rounded-full bg-muted overflow-hidden">
                 <div
                   className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-sky-500 transition-all"
-                  style={{ width: `${Math.max(4, (row.totalExternalIn / maxBar) * 100)}%` }}
+                  style={{ width: `${Math.max(4, (row.gatewayCollected / maxBar) * 100)}%` }}
                 />
               </div>
               <div className="text-right text-sm font-semibold tabular-nums">
-                {formatInr(row.totalExternalIn)}
+                {formatInr(row.gatewayCollected)}
+                <span className="block text-[10px] font-normal text-muted-foreground">
+                  {row.gatewayCaptures} captures
+                </span>
               </div>
             </div>
           ))}
         </CardContent>
       </Card>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <StatCard
-          title={`${days}-day VPS sales`}
-          value={String(periodTotals.vpsOrders)}
-          hint={formatInr(periodTotals.vpsRevenue)}
-          icon={ShoppingCart}
-          tone="blue"
-        />
-        <StatCard
-          title={`${days}-day gateway`}
-          value={formatInr(periodTotals.gatewayAmount + periodTotals.renewalGateway)}
-          hint={`Orders ${formatInr(periodTotals.gatewayAmount)} + renewals ${formatInr(periodTotals.renewalGateway)}`}
-          icon={CreditCard}
-          tone="green"
-        />
-        <StatCard
-          title={`${days}-day renewals`}
-          value={String(periodTotals.renewals)}
-          hint={formatInr(periodTotals.renewalRevenue)}
-          icon={TrendingUp}
-          tone="violet"
-        />
-        <StatCard
-          title={`${days}-day cash in`}
-          value={formatInr(periodTotals.totalExternalIn)}
-          hint={`Top-ups ${formatInr(periodTotals.walletTopupAmount)}`}
-          icon={IndianRupee}
-          tone="green"
-        />
-      </div>
-
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Per-day breakdown</CardTitle>
-          <CardDescription>Din-wise orders, revenue, gateway, wallet & renewals</CardDescription>
+          <CardDescription>Din-wise poora report</CardDescription>
         </CardHeader>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
@@ -297,11 +516,13 @@ export function PaymentDashboard() {
                   <TableHead>Date</TableHead>
                   <TableHead className="text-right">VPS</TableHead>
                   <TableHead className="text-right">VPS ₹</TableHead>
-                  <TableHead className="text-right">Gateway ₹ (incl. renew)</TableHead>
-                  <TableHead className="text-right">Wallet ₹</TableHead>
+                  <TableHead className="text-right">Captures</TableHead>
+                  <TableHead className="text-right">Razorpay</TableHead>
+                  <TableHead className="text-right">All GW ₹</TableHead>
+                  <TableHead className="text-right">Wallet +</TableHead>
+                  <TableHead className="text-right">Wallet −</TableHead>
                   <TableHead className="text-right">Renewals</TableHead>
-                  <TableHead className="text-right">Top-ups ₹</TableHead>
-                  <TableHead className="text-right">Cash In ₹</TableHead>
+                  <TableHead className="text-right">Business ₹</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -320,20 +541,26 @@ export function PaymentDashboard() {
                     </TableCell>
                     <TableCell className="text-right tabular-nums">{row.vpsOrders}</TableCell>
                     <TableCell className="text-right tabular-nums">{formatInr(row.vpsRevenue)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{row.gatewayCaptures}</TableCell>
+                    <TableCell className="text-right tabular-nums text-[#3395FF]">
+                      {row.razorpayCollected > 0
+                        ? `${row.razorpayCaptures} · ${formatInr(row.razorpayCollected)}`
+                        : '—'}
+                    </TableCell>
                     <TableCell className="text-right tabular-nums text-emerald-700 dark:text-emerald-400">
-                      {formatInr(row.gatewayAmount + row.renewalGateway)}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums text-amber-700 dark:text-amber-400">
-                      {formatInr(row.walletUsed)}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {row.renewals > 0 ? `${row.renewals} · ${formatInr(row.renewalRevenue)}` : '—'}
+                      {formatInr(row.gatewayCollected)}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {row.walletTopupAmount > 0 ? formatInr(row.walletTopupAmount) : '—'}
                     </TableCell>
+                    <TableCell className="text-right tabular-nums text-amber-700 dark:text-amber-400">
+                      {row.walletSpent > 0 ? formatInr(row.walletSpent) : '—'}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {row.renewals > 0 ? `${row.renewals} · ${formatInr(row.renewalRevenue)}` : '—'}
+                    </TableCell>
                     <TableCell className="text-right tabular-nums font-semibold">
-                      {formatInr(row.totalExternalIn)}
+                      {formatInr(row.totalBusiness)}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -342,6 +569,43 @@ export function PaymentDashboard() {
           </div>
         </CardContent>
       </Card>
+
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <StatCard
+          title={`${days}-day VPS sales`}
+          value={String(periodTotals.vpsOrders)}
+          hint={formatInr(periodTotals.vpsRevenue)}
+          icon={ShoppingCart}
+          tone="blue"
+        />
+        <StatCard
+          title={`${days}-day Razorpay`}
+          value={formatInr(periodTotals.razorpayCollected)}
+          hint={`${periodTotals.razorpayCaptures} captures`}
+          icon={CreditCard}
+          tone="blue"
+        />
+        <StatCard
+          title={`${days}-day all gateway`}
+          value={formatInr(periodTotals.gatewayCollected)}
+          hint={`${periodTotals.gatewayCaptures} captures`}
+          icon={CreditCard}
+          tone="green"
+        />
+        <StatCard
+          title={`${days}-day wallet added`}
+          value={formatInr(periodTotals.walletTopupAmount)}
+          hint={`${periodTotals.walletTopups} top-ups`}
+          icon={Wallet}
+        />
+        <StatCard
+          title={`${days}-day renewals`}
+          value={String(periodTotals.renewals)}
+          hint={formatInr(periodTotals.renewalRevenue)}
+          icon={TrendingUp}
+          tone="violet"
+        />
+      </div>
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 import WalletRecharge from '@/models/walletRechargeModel';
+import CheckoutSession from '@/models/checkoutSessionModel';
 import { requireAdmin } from '@/lib/adminAuth';
 const { buildAdminPaymentDashboard } = require('@/lib/adminPaymentDashboard');
 
@@ -26,7 +27,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const days = Math.min(Math.max(parseInt(searchParams.get('days') || '30', 10), 7), 90);
 
-    const dashboard = await buildAdminPaymentDashboard(Order, WalletRecharge, { days });
+    const dashboard = await buildAdminPaymentDashboard(Order, WalletRecharge, CheckoutSession, { days });
 
     return NextResponse.json(dashboard, { headers: NO_CACHE });
   } catch (error: any) {

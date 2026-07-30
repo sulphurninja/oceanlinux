@@ -56,13 +56,14 @@ if [ ! -d .next ]; then
 fi
 
 echo "==> start site..."
-pm2 delete oceanlinux 2>/dev/null || true
+pm2 delete oceanlinux oceanlinux-orders 2>/dev/null || true
 pm2 start ecosystem.config.cjs
 pm2 save
 
 sleep 4
 echo "==> health check..."
-curl -sf "http://127.0.0.1:3000/api/company/version" && echo "" || echo "WARN: local API not responding yet — wait 10s and: pm2 logs oceanlinux"
+curl -sf "http://127.0.0.1:3000/api/company/version" && echo "" || echo "WARN: port 3000 API not responding"
+curl -sfI "http://127.0.0.1:5655/orders" | head -3 || echo "WARN: port 5655 /orders not responding — open AWS SG TCP 5655"
 
 echo ""
 echo "Done. Check https://oceanlinux.com"
