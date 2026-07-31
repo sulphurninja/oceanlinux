@@ -28,7 +28,7 @@ const { getCompanyNetbayApiConfig } = require('@/lib/companyNetbayApi');
 const { getCompanyKurohostApiConfig } = require('@/lib/companyKurohostApi');
 const NetbayApi = require('@/services/netbayApi');
 const KurohostApi = require('@/services/kurohostApi');
-const { getCompanyJoyApiConfig } = require('@/lib/companyJoyApi');
+const { getCompanyJoyApiConfig, resolveJoyApiForOrder } = require('@/lib/companyJoyApi');
 const JoyApi = require('@/services/joyApi');
 const { applyJoyMachineToOrderUpdates } = require('@/lib/joyOrderSync');
 const { runNetbayPostRebuildFlow } = require('@/lib/netbayPostRebuildFlow');
@@ -230,20 +230,7 @@ async function runKurohostPowerAction(api, instanceId, action) {
  * company has no Joy automation enabled.
  */
 async function resolveCompanyJoyApi(order) {
-  if (!order?.ipStockId) return { config: null, companyName: null };
-  try {
-    const ipStock = await IPStock.findById(order.ipStockId).select('company').lean();
-    if (!ipStock?.company) return { config: null, companyName: null };
-    const company = await Company.findById(ipStock.company)
-      .select('joyApi name')
-      .lean();
-    if (!company) return { config: null, companyName: null };
-    const config = getCompanyJoyApiConfig(company);
-    return { config, companyName: company.name };
-  } catch (err) {
-    console.error('[SERVICE-ACTION] Company-Joy-API lookup failed:', err.message);
-    return { config: null, companyName: null };
-  }
+  return resolveJoyApiForOrder(order, { Company, IPStock });
 }
 
 /**

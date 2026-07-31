@@ -6,6 +6,9 @@ import { ensureOrderRenewalStockLink } from '@/lib/orderRenewalPricingServer';
 const { maybeSyncResellerOrderOnFetch } = require('@/lib/resellerApiOrderSync');
 const { syncSingleOrderExpiryFromPanel } = require('@/lib/companyResellerInventorySync');
 const { sanitizeOrderForCustomer } = require('@/lib/customerFacingErrors');
+const Company = require('@/models/companyModel');
+const IPStock = require('@/models/ipStockModel');
+const { resolveJoyApiForOrder } = require('@/lib/companyJoyApi');
 
 export async function GET(request, { params }) {
     try {
@@ -28,6 +31,19 @@ export async function GET(request, { params }) {
                 await ensureOrderRenewalStockLink(orderDoc);
                 order = await Order.findById(order._id).lean();
             }
+        }
+
+        const joyMatch = await resolveJoyApiForOrder(order, { Company, IPStock });
+        if (joyMatch.config) {
+            order = {
+                ...order,
+                companyAutomation: {
+                    enabled: true,
+                    provider: 'joy',
+                    companyName: joyMatch.companyName,
+                    matchedBy: joyMatch.matchedBy,
+                },
+            };
         }
 
         return NextResponse.json(sanitizeOrderForCustomer(order, { isAdmin: resolved.isAdmin }));

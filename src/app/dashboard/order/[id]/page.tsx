@@ -548,6 +548,10 @@ const OrderDetails = () => {
         } catch (ipStockError) {
           console.warn('[ORDER-DETAILS] Error fetching IPStock:', ipStockError);
         }
+      } else if (orderData.companyAutomation?.enabled) {
+        setIpStock({
+          companyAutomation: orderData.companyAutomation,
+        } as IPStock);
       } else {
         console.log('[ORDER-DETAILS] No ipStockId found in order');
       }
@@ -570,6 +574,9 @@ const OrderDetails = () => {
       if (!response.ok) throw new Error('Failed to fetch order');
       const data = await response.json();
       setOrder(data);
+      if (data.companyAutomation?.enabled && !data.ipStockId) {
+        setIpStock({ companyAutomation: data.companyAutomation } as IPStock);
+      }
     } catch (error) {
       console.error('Failed to fetch order:', error);
       toast.error('Failed to load order details');

@@ -10,7 +10,7 @@ import {
   LayoutDashboardIcon,
   LogOutIcon,
   Menu,
-  NotebookText,
+  Terminal,
   ReceiptIndianRupee,
   Store,
   ShoppingBag,
@@ -192,8 +192,8 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
     },
     {
       href: '/dashboard/scripts',
-      label: 'Scripts',
-      icon: NotebookText,
+      label: 'PuTTY / SSH',
+      icon: Terminal,
     },
     // Customer wallet + cart entries (hidden for resellers — they have
     // their own reseller wallet flow below).

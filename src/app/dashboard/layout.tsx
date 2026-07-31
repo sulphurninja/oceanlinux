@@ -340,8 +340,8 @@ export default function DashboardLayout({
                 icon: MessageCircle,
             },
             '/dashboard/scripts': {
-                title: 'Proxy Setup Scripts',
-                description: 'Find server scripts and installation assistance',
+                title: 'PuTTY / SSH',
+                description: 'Connect to your Linux server and run proxy setup',
                 icon: FileText,
                 // breadcrumb: [{ name: 'Dashboard', href: '/dashboard' }]
             },
