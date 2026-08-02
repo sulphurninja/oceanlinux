@@ -3,6 +3,7 @@
 const HostycareAPI = require('./hostycareApi');
 const SmartVpsAPI = require('./smartvpsApi');              // SmartVPS client (with its own logging)
 const AdvpsAPI = require('./advpsApi');
+const { buildAdvpsPurchaseEmailCandidates, isAdvpsEmailPurchaseError } = require('@/lib/advpsPurchaseEmail');
 const NetbayApi = require('./netbayApi');
 const KurohostApi = require('./kurohostApi');
 const connectDB = require('@/lib/db').default;
@@ -1203,32 +1204,63 @@ class AutoProvisioningService {
       let purchaseRes;
 
       if (isVps) {
-        let customerName = order.customerName || order.webhookCustomerName || '';
-        let customerEmail = order.customerEmail || order.webhookCustomerEmail || '';
+        // ADVPS purchase email = OceanLinux account holder (buyer), never admin/Razorpay guest email.
+        let customerName = 'Customer';
+        let customerEmail = '';
 
-        if (!customerName || !customerEmail) {
-          try {
-            const User = require('@/models/userModel').default;
-            const user = await User.findById(order.user).select('name email').lean();
-            if (user) {
-              customerName = customerName || user.name || 'Customer';
-              customerEmail = customerEmail || user.email || '';
-            }
-          } catch (e) {
-            L.line(`[ADVPS] Could not load user for customer info: ${e.message}`);
+        try {
+          const User = require('@/models/userModel').default;
+          const user = await User.findById(order.user).select('name email').lean();
+          if (user?.email) {
+            customerEmail = String(user.email).trim().toLowerCase();
+            customerName = user.name || customerName;
           }
+        } catch (e) {
+          L.line(`[ADVPS] Could not load user for customer info: ${e.message}`);
         }
 
         if (!customerEmail) {
-          throw new Error('Cannot purchase ADVPS VPS: no customer email available on order or user');
+          customerEmail = String(order.customerEmail || order.webhookCustomerEmail || '').trim().toLowerCase();
+          customerName = order.customerName || order.webhookCustomerName || customerName;
         }
 
-        L.line(`[ADVPS] Purchasing VPS: productId=${advpsProductId}, ram=${ramFormatted}, osId=${osId}, name=${customerName}, email=${customerEmail}`);
-        purchaseRes = await this.advpsApi.purchaseVps({
-          productId: advpsProductId, ram: ramFormatted, osId,
-          quantity: 1, name: customerName, email: customerEmail,
-          validity: 30, remark,
-        });
+        if (!customerEmail) {
+          throw new Error('Cannot purchase ADVPS VPS: no customer email on user account or order');
+        }
+
+        L.line(`[ADVPS] Buyer account email for purchase: ${customerEmail}`);
+
+        const emailCandidates = buildAdvpsPurchaseEmailCandidates(order._id, customerEmail);
+        purchaseRes = null;
+        let advpsPurchaseEmail = emailCandidates[0];
+
+        for (let i = 0; i < emailCandidates.length; i += 1) {
+          advpsPurchaseEmail = emailCandidates[i];
+          L.line(
+            `[ADVPS] Purchase email attempt ${i + 1}/${emailCandidates.length}: ${advpsPurchaseEmail}` +
+              (advpsPurchaseEmail === customerEmail ? ' (user\'s real email)' : ` (retry — account ${customerEmail})`)
+          );
+          try {
+            L.line(`[ADVPS] Purchasing VPS: productId=${advpsProductId}, ram=${ramFormatted}, osId=${osId}, name=${customerName}, email=${advpsPurchaseEmail}`);
+            purchaseRes = await this.advpsApi.purchaseVps({
+              productId: advpsProductId, ram: ramFormatted, osId,
+              quantity: 1, name: customerName, email: advpsPurchaseEmail,
+              validity: 30, remark,
+            });
+            break;
+          } catch (purchaseErr) {
+            const hasFallback = i < emailCandidates.length - 1;
+            if (hasFallback && isAdvpsEmailPurchaseError(purchaseErr)) {
+              L.line(`[ADVPS] Email rejected (${purchaseErr.message}) — trying fallback address`);
+              continue;
+            }
+            throw purchaseErr;
+          }
+        }
+
+        if (!purchaseRes) {
+          throw new Error('ADVPS VPS purchase failed: no valid customer email accepted');
+        }
       } else {
         L.line(`[ADVPS] Purchasing Linux: productId=${advpsProductId}, ram=${ramFormatted}, osId=${osId}`);
         purchaseRes = await this.advpsApi.purchaseLinux({

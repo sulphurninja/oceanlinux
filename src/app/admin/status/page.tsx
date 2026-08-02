@@ -516,9 +516,10 @@ export default function AdminStatusPage() {
             </div>
           </div>
           <p className="text-sm text-gray-400 mt-1">
-            Tracks when customer paid successfully but order stayed pending. Scan now{" "}
-            <strong className="text-green-400">auto-recovers</strong> buy-now orders, cart checkouts, and wallet top-ups. Use{" "}
-            <strong className="text-green-400">Copy log</strong> to share for debugging.
+            Tracks when customer paid successfully but order stayed pending.{" "}
+            <strong className="text-green-400">Auto-scan every 15 min</strong> (same as this button) when{" "}
+            <code className="text-xs">CRON_SECRET</code> + cron are configured. Manual scan still works anytime.{" "}
+            Recovers buy-now orders, cart checkouts, and wallet top-ups.
           </p>
         </CardHeader>
         <CardContent className="p-0 bg-gray-950">

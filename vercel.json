@@ -57,6 +57,10 @@
       "schedule": "0 3 * * *"
     },
     {
+      "path": "/api/admin/paid-but-pending-cron?hours=72&limit=40",
+      "schedule": "*/15 * * * *"
+    },
+    {
       "path": "/api/payment/recover-pending?minutes=120&limit=30",
       "schedule": "*/10 * * * *"
     },
