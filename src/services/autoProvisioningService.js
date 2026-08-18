@@ -1649,14 +1649,19 @@ class AutoProvisioningService {
       expiryDate = calculateCompanyExpiryDate();
     }
 
+    const { formatIpAddress } = await import('../lib/ipAddressHelper.js');
+    const displayIpAddress = ipAddress
+      ? formatIpAddress(ipAddress, 'netbay', orderOs)
+      : '';
+
     // 7) Update order. We treat "service id assigned" as the provisioning
     //    bar — IP/credentials sometimes lag behind by a poll cycle, in which
     //    case the cron will fetch them on the next pass.
-    const fullyProvisioned = !!(ipAddress && netbayServiceId);
+    const fullyProvisioned = !!(displayIpAddress && netbayServiceId);
     const updateData = {
       status: fullyProvisioned ? 'active' : 'confirmed',
       provisioningStatus: fullyProvisioned ? 'active' : 'provisioning',
-      provisioningError: fullyProvisioned ? '' : `PENDING: service placed, awaiting ${!ipAddress ? 'IP assignment' : 'credentials'}. Will retry automatically.`,
+      provisioningError: fullyProvisioned ? '' : `PENDING: service placed, awaiting ${!displayIpAddress ? 'IP assignment' : 'credentials'}. Will retry automatically.`,
       provider: 'netbay',
       netbayServiceId,
       netbayTaskId: netbayTaskId || undefined,
@@ -1664,7 +1669,7 @@ class AutoProvisioningService {
       netbayGroupTag: groupTag || undefined,
       username,
       password: password || order.password || '',
-      ipAddress: ipAddress || '',
+      ipAddress: displayIpAddress || '',
       autoProvisioned: true,
       os: orderOs,
       expiryDate,
@@ -1681,7 +1686,7 @@ class AutoProvisioningService {
     console.log(`   - Order ID: ${order._id}`);
     console.log(`   - Netbay Service: ${netbayServiceId}`);
     console.log(`   - Netbay Task: ${netbayTaskId || 'n/a'}`);
-    console.log(`   - IP: ${ipAddress || 'pending'}`);
+    console.log(`   - IP: ${displayIpAddress || 'pending'}`);
     console.log(`   - Username: ${username}`);
     console.log(`   - OS: ${orderOs}`);
     console.log(`   - Total Time: ${totalTime}ms`);
@@ -1691,7 +1696,7 @@ class AutoProvisioningService {
       success: fullyProvisioned,
       netbayPending: !fullyProvisioned,
       serviceId: netbayServiceId,
-      ipAddress: ipAddress || null,
+      ipAddress: displayIpAddress || null,
       credentials: { username, password },
       productId: planId || null,
       totalTime,
@@ -2339,6 +2344,47 @@ class AutoProvisioningService {
     }
 
     L.line(`[SMARTVPS] ✅ Will purchase specific IP: ${specificIpToBuy} with ${ram}GB RAM`);
+
+    const existingOwnedIp = String(order.ipAddress || '').trim();
+    if (existingOwnedIp && /^\d{1,3}(?:\.\d{1,3}){3}$/.test(existingOwnedIp)) {
+      L.line(`[SMARTVPS] Order already has IP ${existingOwnedIp} — syncing credentials, will NOT buy again`);
+      try {
+        const statusRaw = await this.withTimeout(
+          this.smartvpsApi.status(existingOwnedIp),
+          90000,
+          'SmartVPS status timeout (resume)'
+        );
+        const statusObj = this.normalizeSmartVpsResponse(statusRaw) || {};
+        const username = statusObj.Usernane || statusObj.Username || this.getLoginUsernameFromProductName(order.productName);
+        const password = statusObj.Password || order.password || '';
+        const os = statusObj.OS || targetOS;
+        const expiryDate = statusObj.ExpiryDate ? new Date(statusObj.ExpiryDate) : (order.expiryDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000));
+        await Order.findByIdAndUpdate(order._id, {
+          status: 'active',
+          provisioningStatus: 'active',
+          provider: 'smartvps',
+          username,
+          password,
+          ipAddress: existingOwnedIp,
+          autoProvisioned: true,
+          provisioningError: '',
+          os,
+          expiryDate,
+        });
+        return {
+          success: true,
+          alreadyProvisioned: true,
+          ipAddress: existingOwnedIp,
+          credentials: { username, password },
+          totalTime: Date.now() - startTime,
+        };
+      } catch (resumeErr) {
+        L.line(`[SMARTVPS] Resume-by-existing-IP failed: ${resumeErr.message} — will not buy a second VPS`);
+        throw new Error(
+          `SmartVPS already has IP ${existingOwnedIp} on this order. Credential sync failed: ${resumeErr.message}. Will not purchase another VPS.`
+        );
+      }
+    }
 
     // CRITICAL: Acquire lock to prevent race conditions
     // This ensures only ONE order provisions from this IP range at a time

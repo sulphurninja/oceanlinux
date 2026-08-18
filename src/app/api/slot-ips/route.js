@@ -91,6 +91,18 @@ export async function GET(request) {
 
   try {
     const admin = await requireAdmin(request);
+
+    if (admin) {
+      try {
+        const { purgeExpiredSlotIpHistory } = require('@/lib/slotIpExpiryCleanup');
+        void purgeExpiredSlotIpHistory({ olderThanDays: 30, dryRun: false }).catch((purgeErr) => {
+          console.error('[SLOT-IPS] Auto purge on admin fetch failed:', purgeErr.message);
+        });
+      } catch (purgeErr) {
+        console.error('[SLOT-IPS] Auto purge on admin fetch failed:', purgeErr.message);
+      }
+    }
+
     const packages = await SlotIPPackage.find({}).lean();
 
     const result = packages.map((pkg) =>

@@ -28,6 +28,24 @@ function isRetryableError(errorMessage) {
     );
 }
 
+function shouldSkipAutoRetry(order) {
+    const err = String(order.provisioningError || '');
+    if (/WRONG IP ASSIGNED|DO NOT provision|PROVISIONING BLOCKED/i.test(err)) {
+        return { skip: true, reason: 'safety_block' };
+    }
+    if (order.status === 'failed') {
+        return { skip: true, reason: 'order_status_failed' };
+    }
+    if (order.provisioningStatus === 'active' && order.ipAddress) {
+        return { skip: true, reason: 'already_active' };
+    }
+    const last = order.lastProvisionAttempt ? new Date(order.lastProvisionAttempt).getTime() : 0;
+    if (last && Date.now() - last < 4 * 60 * 1000) {
+        return { skip: true, reason: 'cooldown_4min' };
+    }
+    return { skip: false };
+}
+
 // Helper: Sleep/delay function
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
@@ -74,6 +92,22 @@ async function validateOrderConfiguration(order) {
         }
         
         console.log(`[VALIDATION] ✅ Found IPStock: ${ipStock.name}`);
+
+        const AutoProvisioningService = require('@/services/autoProvisioningService');
+        const provisioner = new AutoProvisioningService();
+        const isSmartVps =
+            order.provider === 'smartvps' ||
+            provisioner.isSmartVpsStock(ipStock, order);
+
+        if (isSmartVps) {
+            console.log(`[VALIDATION] ✅ SmartVPS / Ocean Linux stock — skip Hostycare product ID check`);
+            return {
+                valid: true,
+                productId: 'smartvps',
+                ipStock: ipStock.name,
+                isSmartVps: true,
+            };
+        }
         
         // STEP 2: Parse memory options from IPStock
         let memoryOptions = {};
@@ -306,7 +340,7 @@ async function acquireDatabaseLock() {
             ]
         })
         .sort({ createdAt: 1 }) // Oldest first
-        .limit(10); // Check up to 10 candidates
+        .limit(20);
         
         console.log(`[LOCK] 📊 Found ${candidateOrders.length} candidate orders`);
         
@@ -318,13 +352,26 @@ async function acquireDatabaseLock() {
         // Validate each candidate until we find one with proper configuration
         for (const candidate of candidateOrders) {
             console.log(`[LOCK] 🔍 Checking candidate order: ${candidate._id}`);
+
+            const skip = shouldSkipAutoRetry(candidate);
+            if (skip.skip) {
+                console.log(`[LOCK] ⏭️ Skip ${candidate._id}: ${skip.reason}`);
+                continue;
+            }
             
             const validation = await validateOrderConfiguration(candidate);
             
             if (!validation.valid) {
                 console.log(`[LOCK] ❌ Order ${candidate._id} failed validation: ${validation.reason}`);
+
+                const isSmartVpsLike =
+                    candidate.provider === 'smartvps' ||
+                    String(candidate.productName || '').includes('🌊');
+                if (isSmartVpsLike) {
+                    console.log(`[LOCK] ⏭️ Not marking SmartVPS order as CONFIG-failed — will retry next run`);
+                    continue;
+                }
                 
-                // Mark this order as failed permanently so it doesn't get picked up again
                 await Order.findByIdAndUpdate(candidate._id, {
                     provisioningStatus: 'failed',
                     provisioningError: `CONFIG: ${validation.reason}`,
@@ -332,7 +379,7 @@ async function acquireDatabaseLock() {
                 });
                 
                 console.log(`[LOCK] 🚫 Order ${candidate._id} marked as permanently failed due to config issues`);
-                continue; // Try next candidate
+                continue;
             }
             
             console.log(`[LOCK] ✅ Order ${candidate._id} passed validation, attempting to lock...`);
@@ -517,7 +564,7 @@ export async function POST(request) {
                 } else {
                     // Max retries reached or non-retryable error
                     const orderTime = Date.now() - orderStartTime;
-                    console.error(`[CRON-${cronId}] 💥 Order failed permanently after ${attempt} attempts`);
+                    console.error(`[CRON-${cronId}] 💥 This cron run failed after ${attempt} attempts (will retry on next schedule)`);
 
                     result = {
                         orderId: lockedOrder._id.toString(),

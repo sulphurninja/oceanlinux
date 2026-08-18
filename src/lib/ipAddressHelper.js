@@ -1,60 +1,80 @@
 /**
- * Helper function to format IP addresses for Windows Hostycare orders
- * Windows orders need port 49965 appended to the IP address
- * 
- * @param {string} ipAddress - The base IP address
- * @param {string} provider - The provider (hostycare, smartvps, etc.)
- * @param {string} os - The operating system
- * @returns {string} - The formatted IP address (with port if needed)
+ * Customer-facing IP formatting (Hostycare Windows :49965, Netbay Windows :5517).
+ * Management/API calls should use extractBaseIp() — never send display ports upstream.
  */
+
+export const HOSTYCARE_WINDOWS_PORT = 49965;
+export const NETBAY_DISPLAY_PORT = 5517;
+
+function isWindowsOs(os) {
+  return os && String(os).toLowerCase().includes('windows');
+}
+
 export function formatIpAddress(ipAddress, provider, os) {
-  // Return as-is if no IP address
   if (!ipAddress || ipAddress === 'Pending - Server being provisioned') {
     return ipAddress;
   }
 
-  // Check if this is a Hostycare Windows order
-  const isHostycare = provider === 'hostycare' || !provider; // default provider is hostycare
-  const isWindows = os && os.toLowerCase().includes('windows');
+  const prov = String(provider || '').toLowerCase();
 
-  // If it's Hostycare Windows and doesn't already have the port, add it
-  if (isHostycare && isWindows) {
-    // Check if port is already added
-    if (!ipAddress.includes(':49965')) {
-      return `${ipAddress}:49965`;
-    }
+  if (prov === 'netbay') {
+    const base = extractBaseIp(ipAddress);
+    if (!base) return ipAddress;
+    if (!isWindowsOs(os)) return base;
+    return `${base}:${NETBAY_DISPLAY_PORT}`;
+  }
+
+  const isHostycare = prov === 'hostycare' || !provider;
+
+  if (isHostycare && isWindowsOs(os)) {
+    const base = extractBaseIp(ipAddress);
+    if (!base) return ipAddress;
+    return `${base}:${HOSTYCARE_WINDOWS_PORT}`;
   }
 
   return ipAddress;
 }
 
 /**
- * Helper function to extract just the IP from an IP:port combination
- * 
- * @param {string} ipAddress - The IP address (may include port)
- * @returns {string} - Just the IP address without port
+ * Strip display port — use before Netbay/Hostycare/SmartVPS API or reachability checks.
  */
 export function extractBaseIp(ipAddress) {
   if (!ipAddress) return ipAddress;
-  
-  // Remove port if present
+
   const colonIndex = ipAddress.indexOf(':');
   if (colonIndex > -1) {
     return ipAddress.substring(0, colonIndex);
   }
-  
+
   return ipAddress;
 }
 
-/**
- * Check if an order needs port 49965 appended
- * 
- * @param {Object} order - The order object
- * @returns {boolean} - Whether the order needs port 49965
- */
 export function needsPort49965(order) {
   const isHostycare = order.provider === 'hostycare' || !order.provider;
-  const isWindows = order.os && order.os.toLowerCase().includes('windows');
-  return isHostycare && isWindows;
+  return isHostycare && isWindowsOs(order?.os);
 }
 
+export function needsPort5517(order) {
+  const isNetbay = order?.provider === 'netbay' || !!order?.netbayServiceId;
+  return isNetbay && isWindowsOs(order?.os);
+}
+
+export function formatIpForOrder(order, ipAddress) {
+  if (!ipAddress) return ipAddress;
+  if (needsPort5517(order)) {
+    return formatIpAddress(ipAddress, 'netbay', order?.os);
+  }
+  return formatIpAddress(ipAddress, order?.provider || 'hostycare', order?.os);
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    HOSTYCARE_WINDOWS_PORT,
+    NETBAY_DISPLAY_PORT,
+    formatIpAddress,
+    extractBaseIp,
+    needsPort49965,
+    needsPort5517,
+    formatIpForOrder,
+  };
+}

@@ -5,16 +5,18 @@
 
 const NetbayApi = require('@/services/netbayApi');
 const { pickNetbayExpiryDate } = require('@/lib/netbayOrderSync');
+const { formatIpAddress } = require('@/lib/ipAddressHelper.js');
 
 /**
  * @param {import('@/services/netbayApi')} api
  * @param {string} serviceId
  */
-async function fetchNetbayServiceCredentials(api, serviceId) {
+async function fetchNetbayServiceCredentials(api, serviceId, orderOs) {
   const detailRes = await api.getService(serviceId);
   const svc = NetbayApi.unwrapServiceResponse(detailRes);
+  const rawIp = NetbayApi.extractServiceIp(svc) || '';
   return {
-    ipAddress: NetbayApi.extractServiceIp(svc) || '',
+    ipAddress: rawIp ? formatIpAddress(rawIp, 'netbay', orderOs) : '',
     username: svc.username || '',
     password: svc.password || '',
     status: svc.status || '',
@@ -65,7 +67,7 @@ async function runNetbayPostRebuildFlow({
     }
   }
 
-  const creds = await fetchNetbayServiceCredentials(api, serviceId);
+  const creds = await fetchNetbayServiceCredentials(api, serviceId, (await Order.findById(orderId).select('os').lean())?.os);
   const update = {
     provisioningStatus: 'active',
     provisioningError: '',

@@ -3,9 +3,17 @@ import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 import { assignPanelCredentials } from '@/lib/panelCredentials';
 import { requireAdmin } from '@/lib/adminAuth';
+import IPStock from '@/models/ipStockModel';
+import Company from '@/models/companyModel';
 const AdvpsAPI = require('@/services/advpsApi');
 const WhatsAppService = require('@/services/whatsappService');
 const { syncAdvpsOrderCredentials } = require('@/lib/advpsOrderSync');
+const { getCompanyResellerApiConfig } = require('@/lib/companyResellerApi');
+const ResellerApi = require('@/services/resellerApi');
+const {
+  syncResellerVmCredentials,
+  resolveResellerVmForOrder,
+} = require('@/lib/resellerApiOrderSync');
 
 const ADMIN_ORDER_STATUSES = new Set(['pending', 'confirmed', 'active']);
 
@@ -176,8 +184,42 @@ export async function POST(request) {
       }
     }
 
-    const existingBeforeUpdate = await Order.findById(orderId).select('status provisioningStatus ipAddress user').lean();
+    const existingBeforeUpdate = await Order.findById(orderId).select(
+      'status provisioningStatus ipAddress user ipStockId resellerVmId username password os expiryDate provider'
+    ).lean();
     const wasActive = existingBeforeUpdate?.status === 'active' || existingBeforeUpdate?.provisioningStatus === 'active';
+
+    const ipChanged =
+      ipAddress &&
+      String(existingBeforeUpdate?.ipAddress || '').split(':')[0].trim() !==
+        String(ipAddress || '').split(':')[0].trim();
+
+    if (ipChanged && existingBeforeUpdate?.ipStockId) {
+      try {
+        const ipStock = await IPStock.findById(existingBeforeUpdate.ipStockId).select('company').lean();
+        const company = ipStock?.company
+          ? await Company.findById(ipStock.company).select('resellerApi name').lean()
+          : null;
+        const resellerCfg = getCompanyResellerApiConfig(company);
+        if (resellerCfg) {
+          const api = new ResellerApi(resellerCfg);
+          const draftOrder = { ...existingBeforeUpdate, ipAddress };
+          const found = await resolveResellerVmForOrder(api, draftOrder);
+          if (found?.vmId) {
+            const synced = await syncResellerVmCredentials(api, draftOrder, found.vmId);
+            updateFields.resellerVmId = String(synced.vmId || found.vmId);
+            updateFields.provider = 'reseller-api';
+            updateFields.ipAddress = synced.updates.ipAddress || ipAddress;
+            Object.assign(updateFields, synced.updates);
+          } else {
+            updateFields.resellerVmId = '';
+          }
+        }
+      } catch (resellerErr) {
+        console.warn('[ORDER-UPDATE] Reseller VM re-link after IP change failed:', resellerErr.message);
+        updateFields.resellerVmId = '';
+      }
+    }
 
     const updatedOrder = await Order.findByIdAndUpdate(
       orderId,

@@ -20,10 +20,16 @@ export async function GET(request, { params }) {
 
         let order = resolved.order;
 
-        const expirySync = await syncSingleOrderExpiryFromPanel(order, { force: true });
-        if (expirySync?.order) order = expirySync.order;
-
-        order = await maybeSyncResellerOrderOnFetch(order);
+        // Return DB order immediately. Panel calls were blocking the manage page
+        // for several seconds (felt like a hang).
+        void (async () => {
+            try {
+                await syncSingleOrderExpiryFromPanel(order, { force: false });
+                await maybeSyncResellerOrderOnFetch(order);
+            } catch (syncErr) {
+                console.warn('[orders/:id] background panel sync failed:', syncErr.message);
+            }
+        })();
 
         if (order?.ipStockId && ['active', 'confirmed'].includes(String(order.status || ''))) {
             const orderDoc = await Order.findById(order._id);

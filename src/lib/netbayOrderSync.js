@@ -3,6 +3,7 @@ const Company = require('@/models/companyModel').default;
 const Order = require('@/models/orderModel');
 const NetbayApi = require('@/services/netbayApi');
 const { getCompanyNetbayApiConfig } = require('@/lib/companyNetbayApi');
+const { formatIpAddress, extractBaseIp } = require('@/lib/ipAddressHelper.js');
 
 function pickNetbayExpiryDate(payload) {
   if (!payload || typeof payload !== 'object') return null;
@@ -58,7 +59,7 @@ function resolveNetbayPowerState(svc, { ipAddress, checkReachable } = {}) {
   const runningHints = ['running', 'on', 'active', 'started', 'online', 'up'];
   const stoppedHints = ['stopped', 'off', 'shutdown', 'offline', 'down', 'inactive'];
 
-  const ip = (ipAddress || NetbayApi.extractServiceIp(svc) || '').trim();
+  const ip = extractBaseIp(ipAddress || NetbayApi.extractServiceIp(svc) || '').trim();
 
   if (runningHints.includes(sl)) {
     return { powerState: 'running', rawStatus: raw };
@@ -101,8 +102,9 @@ function applyNetbayServiceToOrderUpdates(svc, order) {
 
   const freshIp = NetbayApi.extractServiceIp(svc);
   if (freshIp) {
-    if (freshIp !== order?.ipAddress) changes.push('ipAddress');
-    dbUpdates.ipAddress = freshIp;
+    const displayIp = formatIpAddress(freshIp, 'netbay', order?.os);
+    if (displayIp !== order?.ipAddress) changes.push('ipAddress');
+    dbUpdates.ipAddress = displayIp;
   }
 
   if (svc.username) {

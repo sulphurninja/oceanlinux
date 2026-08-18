@@ -2,11 +2,14 @@ import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 import { enforceCronSecret } from '@/lib/apiSecurity';
+const { deleteStaleNullExpiryOrders } = require('@/lib/cleanupNullExpiryOrders');
+const { purgeExpiredSlotIpHistory } = require('@/lib/slotIpExpiryCleanup');
 
 /**
  * DELETE old orders that are stuck or abandoned:
  * 1. Expired orders (3+ days past expiry)
  * 2. Pending/unconfirmed orders (3+ days old)
+ * 3. Orders with null expiry (30+ days since purchase)
  * 
  * NOTE: Failed orders are NEVER deleted (kept for audit/debugging purposes)
  * 
@@ -29,7 +32,9 @@ export async function POST(request) {
 
     const results = {
       expired: { count: 0, orders: [] },
-      pending: { count: 0, orders: [] }
+      pending: { count: 0, orders: [] },
+      nullExpiryStale: { count: 0, orders: [] },
+      slotIpStale: { count: 0, orders: [], ipsRemoved: 0 },
     };
 
     // 1. DELETE EXPIRED ORDERS (3+ days past expiry)
@@ -99,12 +104,32 @@ export async function POST(request) {
       console.log(`[CLEANUP-ALL]   ✨ No old pending orders found`);
     }
 
-    const totalDeleted = results.expired.count + results.pending.count;
+    // 4. DELETE ORDERS WITH NULL EXPIRY (30+ days since purchase)
+    console.log('\n[CLEANUP-ALL] 🗑️  Phase 4: Deleting stale orders with null expiry (30+ days old)...');
+    const nullExpiryResult = await deleteStaleNullExpiryOrders({ olderThanDays: 30, dryRun: false });
+    results.nullExpiryStale.count = nullExpiryResult.deletedCount;
+    results.nullExpiryStale.orders = nullExpiryResult.orders;
+    console.log(`[CLEANUP-ALL]   ✅ Deleted ${nullExpiryResult.deletedCount} null-expiry stale orders`);
+
+    // 5. PURGE SLOT IP history (30+ days): delete orders + remove IP rows from packages
+    console.log('\n[CLEANUP-ALL] 🗑️  Phase 5: Purging expired Slot IP orders + package rows (30+ days)...');
+    const slotIpResult = await purgeExpiredSlotIpHistory({ olderThanDays: 30, dryRun: false });
+    results.slotIpStale.count = slotIpResult.ordersDeleted;
+    results.slotIpStale.orders = slotIpResult.deletedOrders || [];
+    results.slotIpStale.ipsRemoved = slotIpResult.ipsRemoved || 0;
+    console.log(
+      `[CLEANUP-ALL]   ✅ Slot IP purge: ${slotIpResult.ordersDeleted} orders, ${slotIpResult.ipsRemoved} package IPs removed`
+    );
+
+    const totalDeleted = results.expired.count + results.pending.count + results.nullExpiryStale.count + results.slotIpStale.count;
     
     console.log('\n[CLEANUP-ALL] 📊 CLEANUP SUMMARY:');
     console.log(`[CLEANUP-ALL]   Expired orders deleted: ${results.expired.count}`);
     console.log(`[CLEANUP-ALL]   Failed orders preserved: ${failedOrdersCount} (never deleted)`);
     console.log(`[CLEANUP-ALL]   Pending orders deleted: ${results.pending.count}`);
+    console.log(`[CLEANUP-ALL]   Null-expiry stale deleted: ${results.nullExpiryStale.count}`);
+    console.log(`[CLEANUP-ALL]   Slot IP stale deleted: ${results.slotIpStale.count}`);
+    console.log(`[CLEANUP-ALL]   Slot IP rows removed: ${results.slotIpStale.ipsRemoved}`);
     console.log(`[CLEANUP-ALL]   Total deleted: ${totalDeleted}`);
     console.log(`[CLEANUP-ALL] ⏱️  Execution time: ${Date.now() - startTime}ms`);
     console.log("🧹".repeat(40) + "\n");
@@ -116,7 +141,10 @@ export async function POST(request) {
       breakdown: {
         expired: results.expired.count,
         failedPreserved: failedOrdersCount,
-        pending: results.pending.count
+        pending: results.pending.count,
+        nullExpiryStale: results.nullExpiryStale.count,
+        slotIpStale: results.slotIpStale.count,
+        slotIpRowsRemoved: results.slotIpStale.ipsRemoved,
       },
       details: results,
       timestamp: new Date().toISOString(),

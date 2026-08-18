@@ -9,6 +9,8 @@ const SlotIPSchema = new mongoose.Schema({
   allocated: { type: Boolean, default: false },
   orderId: { type: mongoose.Schema.Types.ObjectId, ref: 'Order', default: null },
   allocatedAt: { type: Date, default: null },
+  /** Set on first sale; never cleared — used for 30-day purge even if row was wrongly released */
+  soldAt: { type: Date, default: null },
 }, { _id: true });
 
 const SlotIPPackageSchema = new mongoose.Schema({

@@ -34,6 +34,10 @@ const { applyJoyMachineToOrderUpdates } = require('@/lib/joyOrderSync');
 const { runNetbayPostRebuildFlow } = require('@/lib/netbayPostRebuildFlow');
 const { applyNetbayServiceToOrderUpdates, resolveNetbayPowerState } = require('@/lib/netbayOrderSync');
 const {
+  syncResellerVmCredentials,
+  resolveResellerVmForOrder,
+} = require('@/lib/resellerApiOrderSync');
+const {
   applyKurohostInstanceToOrderUpdates,
   resolveKurohostPowerState,
   syncKurohostOrderFromApi,
@@ -277,6 +281,13 @@ async function syncResellerOrderPassword(resellerApi, order, orderId, vmId) {
     console.warn(`[SERVICE-ACTION] Reseller password sync failed (vmId=${vmId}): ${err.message}`);
     return { changed: false, password: order.password || null, error: err.message };
   }
+}
+
+async function applyResellerPanelSync(resellerApi, order, orderId, vmId) {
+  const synced = await syncResellerVmCredentials(resellerApi, order, vmId);
+  const updates = { ...synced.updates, resellerVmId: String(vmId) };
+  await Order.findByIdAndUpdate(orderId, updates);
+  return synced;
 }
 
 /**
@@ -1242,16 +1253,7 @@ export async function POST(request) {
             }, 500, action);
           }
 
-          const findVm = async () => {
-            const found = await resellerApi.findVmByIp(ipAddress);
-            if (!found) {
-              const message = `No VM visible for IP ${ipAddress} on the company's reseller panel (${resellerCfg.baseUrl}).`;
-              const err = new Error(message);
-              err.status = 404;
-              throw err;
-            }
-            return found;
-          };
+          const findVm = async () => resolveResellerVmForOrder(resellerApi, order);
 
           try {
             switch (action) {
@@ -1332,10 +1334,7 @@ export async function POST(request) {
                   found.vmId,
                   { overviewRaw: found.raw }
                 );
-                // Hostheaven rotates the password on reinstall — refresh it on
-                // every sync so the dashboard always shows working credentials.
-                const pwdSync = await syncResellerOrderPassword(resellerApi, order, orderId, found.vmId);
-                await Order.findByIdAndUpdate(orderId, { lastSyncTime: new Date() });
+                const synced = await applyResellerPanelSync(resellerApi, order, orderId, found.vmId);
                 return NextResponse.json({
                   success: true,
                   powerState,
@@ -1344,8 +1343,8 @@ export async function POST(request) {
                   provider: 'reseller-api',
                   vmId: found.vmId,
                   syncResult: {
-                    credentialsUpdated: pwdSync.changed,
-                    changes: pwdSync.changed ? ['password'] : [],
+                    credentialsUpdated: synced.changes.length > 0,
+                    changes: synced.changes,
                     lastSyncTime: new Date().toISOString(),
                   },
                   lastSync: new Date().toISOString(),
@@ -2516,7 +2515,7 @@ export async function GET(request) {
           }
 
           try {
-            const found = await resellerApi.findVmByIp(ipAddress);
+            const found = await resolveResellerVmForOrder(resellerApi, order);
             if (!found) {
               return actionJson({
                 success: false,
@@ -2529,11 +2528,7 @@ export async function GET(request) {
               { overviewRaw: found.raw }
             );
 
-            // Refresh the password too — Hostheaven rotates it on reinstall, and
-            // this GET is what the dashboard polls after a reinstall completes.
-            const pwdSync = await syncResellerOrderPassword(resellerApi, order, orderId, found.vmId);
-
-            await Order.findByIdAndUpdate(orderId, { lastSyncTime: new Date() });
+            const synced = await applyResellerPanelSync(resellerApi, order, orderId, found.vmId);
 
             return NextResponse.json({
               success: true,
@@ -2541,15 +2536,15 @@ export async function GET(request) {
               companyName: resellerCompanyName || null,
               serviceId: String(found.vmId),
               vmId: String(found.vmId),
-              ip: ipAddress,
+              ip: synced.updates.ipAddress || found.ip || order.ipAddress,
               status: powerState,
               powerState,
               rawStatus,
               powerSource: source,
               details: found.raw || null,
               syncResult: {
-                credentialsUpdated: pwdSync.changed,
-                changes: pwdSync.changed ? ['password'] : [],
+                credentialsUpdated: synced.changes.length > 0,
+                changes: synced.changes,
                 lastSyncTime: new Date().toISOString(),
               },
               lastSync: new Date().toISOString(),

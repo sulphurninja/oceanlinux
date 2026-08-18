@@ -163,7 +163,7 @@ export async function POST(request) {
       actualPaymentMethod = 'wallet';
       payment_id = order.pendingRenewal.walletTxnId;
       paymentVerified = true;
-      logger.setPaymentInfo('wallet', payment_id, renewalPrice);
+      logger.setPaymentInfo('wallet', payment_id, renewalPrice, renewalTxnId);
     } else if (
       order.pendingRenewal?.walletDeducted &&
       order.pendingRenewal?.walletTxnId &&
@@ -212,7 +212,7 @@ export async function POST(request) {
         logger.logSuccess('Razorpay payment verified');
         payment_id = razorpayPaymentId;
         paymentVerified = true;
-        logger.setPaymentInfo('razorpay', razorpayPaymentId, renewalPrice);
+        logger.setPaymentInfo('razorpay', razorpayPaymentId, renewalPrice, orderIdForSignature);
       } else {
         console.error('[RENEWAL-CONFIRM] ❌ Razorpay signature verification failed');
         console.error('[RENEWAL-CONFIRM] Expected signature format: order_id|payment_id');
@@ -246,7 +246,7 @@ export async function POST(request) {
       }
       payment_id = upiCheck.upi_txn_id || renewalTxnId;
       paymentVerified = true;
-      logger.setPaymentInfo('upi', payment_id, renewalPrice);
+      logger.setPaymentInfo('upi', payment_id, renewalPrice, renewalTxnId);
     } else if (!paymentVerified) {
       console.log('[RENEWAL-CONFIRM] Processing Cashfree renewal payment');
 
@@ -295,7 +295,7 @@ export async function POST(request) {
               logger.logSuccess('Cashfree payment verified');
               payment_id = payment.cf_payment_id;
               paymentVerified = true;
-              logger.setPaymentInfo('cashfree', payment.cf_payment_id, renewalPrice);
+              logger.setPaymentInfo('cashfree', payment.cf_payment_id, renewalPrice, renewalTxnId);
             } else {
               console.log('[RENEWAL-CONFIRM] ⏳ Payment status:', payment.payment_status);
               return NextResponse.json({

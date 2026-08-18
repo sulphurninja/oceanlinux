@@ -25,7 +25,7 @@ const ResellerApi = require('@/services/resellerApi');
 const { getCompanyJoyApiConfig } = require('@/lib/companyJoyApi');
 const { getCompanyKurohostApiConfig } = require('@/lib/companyKurohostApi');
 const { getCompanyResellerApiConfig } = require('@/lib/companyResellerApi');
-const { syncResellerVmCredentials } = require('@/lib/resellerApiOrderSync');
+const { syncResellerVmCredentials, resolveResellerVmForOrder } = require('@/lib/resellerApiOrderSync');
 const { applyJoyMachineToOrderUpdates } = require('@/lib/joyOrderSync');
 const {
   normalizeAdvpsPowerState,
@@ -672,14 +672,7 @@ async function runResellerApi(order, orderId, action, osType, ipStock) {
   }
 
   const api = new ResellerApi(cfg);
-  const findVm = async () => {
-    if (order.resellerVmId) {
-      return { vmId: String(order.resellerVmId), ip: ip || '', raw: null };
-    }
-    const found = await api.findVmByIp(ip);
-    if (!found) throw new Error(`No VM visible for IP ${ip} on ${cfg.baseUrl}`);
-    return found;
-  };
+  const findVm = async () => resolveResellerVmForOrder(api, order);
 
   switch (action) {
     case 'start': {

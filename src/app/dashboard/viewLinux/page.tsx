@@ -148,7 +148,7 @@ const ViewLinux = () => {
 
         const interval = setInterval(() => {
             fetchOrders(true);
-        }, 4000);
+        }, 15000);
 
         const timeout = setTimeout(() => clearInterval(interval), 3 * 60 * 1000);
         return () => {

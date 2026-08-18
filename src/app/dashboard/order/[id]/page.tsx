@@ -499,7 +499,7 @@ const OrderDetails = () => {
       } catch (e) {
         console.error('[ORDER-DETAILS] Post-payment poll failed:', e);
       }
-    }, 4000);
+    }, 12000);
 
     const timeout = setTimeout(() => clearInterval(interval), 3 * 60 * 1000);
     return () => {
@@ -1055,7 +1055,11 @@ const OrderDetails = () => {
       // SmartVPS status sync always writes panel expiry — reload order so UI matches DB.
       if (provider === 'smartvps') {
         await fetchOrder({ silent: true });
-      } else if (data.credentialsUpdated || data.syncResult?.credentialsUpdated) {
+      } else if (
+        data.credentialsUpdated ||
+        data.syncResult?.credentialsUpdated ||
+        (Array.isArray(data.syncResult?.changes) && data.syncResult.changes.length > 0)
+      ) {
         await fetchOrder({ silent: true });
         if (provider === 'netbay' && (data.credentialsUpdated || data.syncResult?.credentialsUpdated)) {
           setShowPassword(true);

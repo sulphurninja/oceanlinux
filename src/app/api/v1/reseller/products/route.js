@@ -2,7 +2,31 @@ import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import IPStock from '@/models/ipStockModel';
 import { authenticateReseller } from '@/lib/resellerAuth';
-import { formatResellerProduct } from '@/lib/resellerOrderApi';
+import {
+  formatResellerProduct,
+  formatResellerSlotProduct,
+  slotPackageInStock,
+} from '@/lib/resellerOrderApi';
+
+const SlotIPPackage = require('@/models/slotIpPackageModel');
+
+async function findResellerProductById(productId, reseller) {
+  const stock = await IPStock.findOne({
+    _id: productId,
+    available: true,
+    hiddenFromStore: { $ne: true },
+  });
+  if (stock) {
+    return { product: formatResellerProduct(stock, reseller), productType: 'vps' };
+  }
+
+  const slotPkg = await SlotIPPackage.findById(productId).lean();
+  if (slotPkg && slotPackageInStock(slotPkg)) {
+    return { product: formatResellerSlotProduct(slotPkg, reseller), productType: 'slotip' };
+  }
+
+  return null;
+}
 
 export async function GET(request) {
   await connectDB();
@@ -19,8 +43,8 @@ export async function GET(request) {
     const productId = searchParams.get('id') || searchParams.get('productId');
 
     if (productId) {
-      const stock = await IPStock.findOne({ _id: productId, available: true, hiddenFromStore: { $ne: true } });
-      if (!stock) {
+      const found = await findResellerProductById(productId, reseller);
+      if (!found) {
         return NextResponse.json(
           { success: false, message: 'Product not found or unavailable' },
           { status: 404 },
@@ -29,16 +53,30 @@ export async function GET(request) {
       return NextResponse.json({
         success: true,
         currency: reseller.wallet?.currency || 'INR',
-        product: formatResellerProduct(stock, reseller),
+        productType: found.productType,
+        product: found.product,
       });
     }
 
-    const stocks = await IPStock.find({ available: true, hiddenFromStore: { $ne: true } }).sort({ name: 1 });
-    const products = stocks.map((stock) => formatResellerProduct(stock, reseller));
+    const [stocks, slotPackages] = await Promise.all([
+      IPStock.find({ available: true, hiddenFromStore: { $ne: true } }).sort({ name: 1 }),
+      SlotIPPackage.find({ available: true }).sort({ name: 1 }).lean(),
+    ]);
+
+    const vpsProducts = stocks.map((stock) => formatResellerProduct(stock, reseller));
+    const slotProducts = slotPackages
+      .filter((pkg) => slotPackageInStock(pkg))
+      .map((pkg) => formatResellerSlotProduct(pkg, reseller));
+
+    const products = [...vpsProducts, ...slotProducts].sort((a, b) =>
+      String(a.name).localeCompare(String(b.name)),
+    );
 
     return NextResponse.json({
       success: true,
       count: products.length,
+      vpsCount: vpsProducts.length,
+      slotIpCount: slotProducts.length,
       currency: reseller.wallet?.currency || 'INR',
       products,
     });

@@ -86,11 +86,12 @@ class RenewalLogger {
     /**
      * Set payment information
      */
-    setPaymentInfo(paymentMethod, paymentId, amount) {
+    setPaymentInfo(paymentMethod, paymentId, amount, gatewayOrderId = null) {
         this.paymentInfo = {
             paymentMethod,
             paymentId,
-            amount
+            amount,
+            ...(gatewayOrderId ? { gatewayOrderId } : {}),
         };
         this.logInfo('Payment info recorded', this.paymentInfo);
     }

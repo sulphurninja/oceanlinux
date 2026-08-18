@@ -67,6 +67,7 @@ export default function AdminSlotIpsPage() {
   const [showEditDialog, setShowEditDialog] = useState(false);
   const [selectedPackage, setSelectedPackage] = useState<SlotIPPackage | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [purgingExpired, setPurgingExpired] = useState(false);
 
   // Create form
   const [name, setName] = useState('');
@@ -106,6 +107,37 @@ export default function AdminSlotIpsPage() {
   };
 
   useEffect(() => { fetchPackages(); }, []);
+
+  const purgeExpiredSlotIps = async () => {
+    const ok = await confirm({
+      title: 'Purge expired Slot IPs?',
+      description:
+        'Sell date se 30+ din purane Slot IP orders aur yahan ki IP rows delete ho jayengi. Jo abhi tak sell nahi hui, woh safe rahengi.',
+      confirmLabel: 'Purge expired',
+      destructive: true,
+    });
+    if (!ok) return;
+
+    setPurgingExpired(true);
+    try {
+      const res = await fetch('/api/admin/slot-ips/purge-expired', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ olderThanDays: 30 }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || 'Purge failed');
+      toast.success(
+        `Purged: ${data.ordersDeleted || 0} orders, ${data.ipsRemoved || 0} package IPs removed`
+      );
+      await fetchPackages();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to purge expired slot IPs');
+    } finally {
+      setPurgingExpired(false);
+    }
+  };
 
   const handleCreate = async () => {
     if (!name || !price || !bulkIps.trim()) {
@@ -213,6 +245,81 @@ export default function AdminSlotIpsPage() {
     }
   };
 
+  const handleDeleteIp = async (pkg: SlotIPPackage, ip: SlotIP) => {
+    const ok = await confirm({
+      title: 'Delete IP',
+      description: (
+        <>
+          Remove this IP from <strong>{pkg.name}</strong>?
+          <br />
+          <span className="font-mono text-xs break-all">{ip.proxy}</span>
+        </>
+      ),
+      confirmLabel: 'Delete IP',
+      destructive: true,
+    });
+    if (!ok) return;
+
+    try {
+      const res = await fetch(`/api/slot-ips/${pkg._id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ removeIpIds: [ip._id] }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        toast.success('IP removed');
+        fetchPackages();
+      } else {
+        toast.error(data.error || 'Failed to delete IP');
+      }
+    } catch {
+      toast.error('Failed to delete IP');
+    }
+  };
+
+  const handleRemoveDuplicates = async (pkg: SlotIPPackage) => {
+    const duplicateCount = getDuplicateIpCount(pkg.ips);
+    if (duplicateCount === 0) {
+      toast.info('No duplicate IPs found in this package');
+      return;
+    }
+
+    const ok = await confirm({
+      title: 'Remove Duplicate IPs',
+      description: (
+        <>
+          Remove <strong>{duplicateCount}</strong> duplicate available IP(s) from{' '}
+          <strong>{pkg.name}</strong>? The first occurrence of each IP will be kept.
+        </>
+      ),
+      confirmLabel: 'Remove Duplicates',
+      destructive: true,
+    });
+    if (!ok) return;
+
+    try {
+      const res = await fetch(`/api/slot-ips/${pkg._id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ removeDuplicates: true }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        if (data.removed > 0) {
+          toast.success(`Removed ${data.removed} duplicate IP(s)`);
+        } else {
+          toast.info('No removable duplicate IPs (allocated duplicates are kept)');
+        }
+        fetchPackages();
+      } else {
+        toast.error(data.error || 'Failed to remove duplicates');
+      }
+    } catch {
+      toast.error('Failed to remove duplicates');
+    }
+  };
+
   const handleDelete = async (pkg: SlotIPPackage) => {
     const ok = await confirm({
       title: 'Delete Package',
@@ -285,10 +392,23 @@ export default function AdminSlotIpsPage() {
         <div>
           <h1 className="text-2xl font-bold">Slot IP Packages</h1>
           <p className="text-muted-foreground text-sm mt-1">
-            Create and manage slot IP packages for customers
+            Sell hone ke 30 din baad order delete + yahan se IP row bhi auto hat jati hai. Unsold IPs safe rehti hain.
           </p>
         </div>
         <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void purgeExpiredSlotIps()}
+            disabled={purgingExpired || loading}
+          >
+            {purgingExpired ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <Trash2 className="h-4 w-4 mr-2" />
+            )}
+            Purge 30d+ expired
+          </Button>
           <Button variant="outline" size="sm" onClick={fetchPackages} disabled={loading}>
             <RefreshCw className={cn("h-4 w-4 mr-2", loading && "animate-spin")} />
             Refresh
@@ -362,6 +482,8 @@ export default function AdminSlotIpsPage() {
               onEdit={openEdit}
               onDelete={handleDelete}
               onAddIps={openAddIps}
+              onDeleteIp={handleDeleteIp}
+              onRemoveDuplicates={handleRemoveDuplicates}
             />
           ))}
         </div>
@@ -633,19 +755,56 @@ export default function AdminSlotIpsPage() {
   );
 }
 
+function getIpKey(ip: SlotIP) {
+  return (ip.proxy || `${ip.ip}:${ip.port}`).trim().toLowerCase();
+}
+
+function getDuplicateIpKeys(ips: SlotIP[]) {
+  const counts = new Map<string, number>();
+  for (const ip of ips) {
+    const key = getIpKey(ip);
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  return new Set([...counts.entries()].filter(([, count]) => count > 1).map(([key]) => key));
+}
+
+function getDuplicateIpCount(ips: SlotIP[]) {
+  const duplicateKeys = getDuplicateIpKeys(ips);
+  if (duplicateKeys.size === 0) return 0;
+
+  const seen = new Set<string>();
+  let removable = 0;
+  for (const ip of ips) {
+    const key = getIpKey(ip);
+    if (!duplicateKeys.has(key)) continue;
+    if (seen.has(key)) {
+      if (!ip.allocated) removable += 1;
+    } else {
+      seen.add(key);
+    }
+  }
+  return removable;
+}
+
 function PackageRow({
   pkg,
   onEdit,
   onDelete,
   onAddIps,
+  onDeleteIp,
+  onRemoveDuplicates,
 }: {
   pkg: SlotIPPackage;
   onEdit: (pkg: SlotIPPackage) => void;
   onDelete: (pkg: SlotIPPackage) => void;
   onAddIps: (pkg: SlotIPPackage) => void;
+  onDeleteIp: (pkg: SlotIPPackage, ip: SlotIP) => void;
+  onRemoveDuplicates: (pkg: SlotIPPackage) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [showIps, setShowIps] = useState(false);
+  const duplicateKeys = getDuplicateIpKeys(pkg.ips);
+  const duplicateCount = getDuplicateIpCount(pkg.ips);
 
   return (
     <Card className="overflow-hidden">
@@ -705,39 +864,81 @@ function PackageRow({
       {expanded && (
         <div className="border-t border-border p-4 bg-muted/10 space-y-4">
           <div className="flex gap-2 flex-wrap">
-            <Button variant="outline" size="sm" onClick={() => onAddIps(pkg)}>
+            <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); onAddIps(pkg); }}>
               <Plus className="h-4 w-4 mr-1" />
               Add IPs
             </Button>
-            <Button variant="outline" size="sm" onClick={() => onEdit(pkg)}>
+            <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); onEdit(pkg); }}>
               <Edit className="h-4 w-4 mr-1" />
               Edit
             </Button>
-            <Button variant="outline" size="sm" onClick={() => setShowIps(!showIps)}>
+            <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); setShowIps(!showIps); }}>
               {showIps ? <EyeOff className="h-4 w-4 mr-1" /> : <Eye className="h-4 w-4 mr-1" />}
               {showIps ? 'Hide' : 'Show'} IPs
             </Button>
-            <Button variant="destructive" size="sm" onClick={() => onDelete(pkg)}>
+            {duplicateCount > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-amber-300 text-amber-700 hover:bg-amber-50"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRemoveDuplicates(pkg);
+                }}
+              >
+                <AlertCircle className="h-4 w-4 mr-1" />
+                Remove {duplicateCount} Duplicate{duplicateCount > 1 ? 's' : ''}
+              </Button>
+            )}
+            <Button variant="destructive" size="sm" onClick={(e) => { e.stopPropagation(); onDelete(pkg); }}>
               <Trash2 className="h-4 w-4 mr-1" />
               Delete
             </Button>
           </div>
 
           {showIps && (
-            <div className="max-h-64 overflow-y-auto rounded-lg border border-border">
+            <div className="space-y-2">
+              {duplicateCount > 0 && (
+                <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                  <p>
+                    {duplicateCount} duplicate available IP(s) detected. Use &quot;Remove Duplicates&quot; or delete
+                    individual rows. Sold/allocated duplicates must be removed manually after unallocating.
+                  </p>
+                </div>
+              )}
+              <div className="max-h-64 overflow-y-auto rounded-lg border border-border">
               <table className="w-full text-sm">
                 <thead className="bg-muted/50 sticky top-0">
                   <tr>
                     <th className="text-left p-2 font-medium">#</th>
                     <th className="text-left p-2 font-medium">Proxy</th>
                     <th className="text-left p-2 font-medium">Status</th>
+                    <th className="text-right p-2 font-medium w-16">Action</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {pkg.ips.map((ip, i) => (
-                    <tr key={ip._id} className="border-t border-border">
+                  {pkg.ips.map((ip, i) => {
+                    const isDuplicate = duplicateKeys.has(getIpKey(ip));
+                    return (
+                    <tr
+                      key={ip._id}
+                      className={cn(
+                        'border-t border-border',
+                        isDuplicate && 'bg-amber-50/60'
+                      )}
+                    >
                       <td className="p-2 text-muted-foreground">{i + 1}</td>
-                      <td className="p-2 font-mono text-xs">{ip.proxy}</td>
+                      <td className="p-2 font-mono text-xs">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span>{ip.proxy}</span>
+                          {isDuplicate && (
+                            <Badge variant="outline" className="text-[10px] border-amber-300 text-amber-700">
+                              Duplicate
+                            </Badge>
+                          )}
+                        </div>
+                      </td>
                       <td className="p-2">
                         {ip.allocated ? (
                           <Badge variant="secondary" className="text-xs gap-1">
@@ -751,10 +952,26 @@ function PackageRow({
                           </Badge>
                         )}
                       </td>
+                      <td className="p-2 text-right">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+                          disabled={ip.allocated}
+                          title={ip.allocated ? 'Cannot delete sold IP' : 'Delete IP'}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onDeleteIp(pkg, ip);
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </td>
                     </tr>
-                  ))}
+                  )})}
                 </tbody>
               </table>
+              </div>
             </div>
           )}
 

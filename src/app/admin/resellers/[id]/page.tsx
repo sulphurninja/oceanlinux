@@ -14,18 +14,64 @@ import {
     CreditCard,
     Activity,
     Save,
-    TrendingUp,
+    Copy,
+    Eye,
 } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from 'sonner';
 import { useParams } from 'next/navigation';
+import {
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+    DialogDescription,
+} from '@/components/ui/dialog';
+import {
+    Table,
+    TableBody,
+    TableCell,
+    TableHead,
+    TableHeader,
+    TableRow,
+} from '@/components/ui/table';
+
+interface ResellerOrderSummary {
+    _id: string;
+    productName: string;
+    memory: string;
+    price: number;
+    status: string;
+    ipAddress?: string;
+    transactionId?: string;
+    clientTxnId?: string;
+    gatewayOrderId?: string;
+    paymentMethod?: string;
+    os?: string;
+    username?: string;
+    password?: string;
+    provisioningStatus?: string;
+    provider?: string;
+    endUserEmail?: string;
+    expiryDate?: string;
+    createdAt: string;
+}
 
 interface Transaction {
+    id: string;
     type: string;
     amount: number;
     description: string;
     createdAt: string;
+    previousBalance?: number;
+    newBalance?: number;
+    orderId?: string | null;
+    paymentSource?: string;
+    metadata?: Record<string, unknown> | null;
+    order?: ResellerOrderSummary | null;
 }
+
+const TXN_HISTORY_DAYS = 50;
 
 interface ResellerData {
     _id: string;
@@ -54,14 +100,7 @@ interface ResellerData {
     };
 }
 
-interface RecentOrder {
-    _id: string;
-    productName: string;
-    memory: string;
-    price: number;
-    status: string;
-    createdAt: string;
-}
+type RecentOrder = ResellerOrderSummary;
 
 interface IPStock {
     _id: string;
@@ -84,6 +123,8 @@ export default function ResellerDetailsPage() {
     const [ipStocks, setIpStocks] = useState<IPStock[]>([]);
     const [customPrices, setCustomPrices] = useState<Record<string, number>>({});
     const [recentOrders, setRecentOrders] = useState<RecentOrder[]>([]);
+    const [walletTransactions, setWalletTransactions] = useState<Transaction[]>([]);
+    const [selectedTxn, setSelectedTxn] = useState<Transaction | null>(null);
 
     useEffect(() => {
         fetchResellerDetails();
@@ -112,6 +153,7 @@ export default function ResellerDetailsPage() {
             if (data.success) {
                 setReseller(data.reseller);
                 setRecentOrders(data.recentOrders || []);
+                setWalletTransactions(data.walletTransactions || data.reseller.wallet?.transactions || []);
                 if (data.reseller.pricing?.globalMarkup) {
                     setPricing(data.reseller.pricing.globalMarkup);
                 }
@@ -193,6 +235,40 @@ export default function ResellerDetailsPage() {
         } catch (error) {
             toast.error('Failed to update status');
         }
+    };
+
+    const copyText = (label: string, value?: string | null) => {
+        if (!value) return;
+        navigator.clipboard.writeText(value);
+        toast.success(`${label} copied`);
+    };
+
+    const formatTxnType = (type: string) => {
+        switch (type) {
+            case 'recharge':
+                return 'Funds Added';
+            case 'deduction':
+                return 'Purchase / Deduction';
+            case 'refund':
+                return 'Refund';
+            case 'adjustment':
+                return 'Adjustment';
+            default:
+                return type;
+        }
+    };
+
+    const formatDateTime = (value?: string | null) => {
+        if (!value) return '—';
+        return new Date(value).toLocaleString('en-IN', {
+            day: '2-digit',
+            month: 'short',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: true,
+        });
     };
 
     if (loading || !reseller) {
@@ -287,43 +363,53 @@ export default function ResellerDetailsPage() {
                     <Card>
                         <CardHeader>
                             <CardTitle>Recent API Orders</CardTitle>
-                            <CardDescription>Product, rate, and status for each buy</CardDescription>
+                            <CardDescription>Last {TXN_HISTORY_DAYS} days — product, IP, txn id, and status</CardDescription>
                         </CardHeader>
                         <CardContent>
                             <div className="rounded-md border overflow-x-auto">
-                                <table className="w-full text-sm">
-                                    <thead className="bg-muted text-muted-foreground">
-                                        <tr>
-                                            <th className="p-3 text-left font-medium">Product</th>
-                                            <th className="p-3 text-left font-medium">Plan</th>
-                                            <th className="p-3 text-left font-medium">Rate</th>
-                                            <th className="p-3 text-left font-medium">Status</th>
-                                            <th className="p-3 text-left font-medium">Date</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
+                                <Table>
+                                    <TableHeader>
+                                        <TableRow>
+                                            <TableHead>Date &amp; Time</TableHead>
+                                            <TableHead>Product</TableHead>
+                                            <TableHead>Plan</TableHead>
+                                            <TableHead>IP</TableHead>
+                                            <TableHead>Txn ID</TableHead>
+                                            <TableHead>Rate</TableHead>
+                                            <TableHead>Status</TableHead>
+                                        </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
                                         {recentOrders.map((order) => (
-                                            <tr key={order._id} className="border-t">
-                                                <td className="p-3 font-medium">{order.productName}</td>
-                                                <td className="p-3">{order.memory || '—'}</td>
-                                                <td className="p-3 font-bold">₹{order.price?.toLocaleString()}</td>
-                                                <td className="p-3">
+                                            <TableRow key={order._id}>
+                                                <TableCell className="text-muted-foreground whitespace-nowrap">
+                                                    {formatDateTime(order.createdAt)}
+                                                </TableCell>
+                                                <TableCell className="font-medium max-w-[220px] truncate" title={order.productName}>
+                                                    {order.productName}
+                                                </TableCell>
+                                                <TableCell>{order.memory || '—'}</TableCell>
+                                                <TableCell className="font-mono text-xs">
+                                                    {order.ipAddress || 'Pending'}
+                                                </TableCell>
+                                                <TableCell className="font-mono text-xs max-w-[160px] truncate" title={order.clientTxnId || order.transactionId}>
+                                                    {order.clientTxnId || order.transactionId || '—'}
+                                                </TableCell>
+                                                <TableCell className="font-bold">₹{order.price?.toLocaleString()}</TableCell>
+                                                <TableCell>
                                                     <Badge variant="outline">{order.status}</Badge>
-                                                </td>
-                                                <td className="p-3 text-muted-foreground">
-                                                    {new Date(order.createdAt).toLocaleString()}
-                                                </td>
-                                            </tr>
+                                                </TableCell>
+                                            </TableRow>
                                         ))}
                                         {recentOrders.length === 0 && (
-                                            <tr>
-                                                <td colSpan={5} className="p-6 text-center text-muted-foreground">
-                                                    No orders yet
-                                                </td>
-                                            </tr>
+                                            <TableRow>
+                                                <TableCell colSpan={7} className="text-center text-muted-foreground py-6">
+                                                    No orders in the last {TXN_HISTORY_DAYS} days
+                                                </TableCell>
+                                            </TableRow>
                                         )}
-                                    </tbody>
-                                </table>
+                                    </TableBody>
+                                </Table>
                             </div>
                         </CardContent>
                     </Card>
@@ -331,37 +417,121 @@ export default function ResellerDetailsPage() {
                     <Card>
                         <CardHeader>
                             <CardTitle>Recent Transactions</CardTitle>
-                            <CardDescription>Recharges (+) and purchases (-) with rate in description</CardDescription>
+                            <CardDescription>
+                                Last {TXN_HISTORY_DAYS} days — click a row for full txn, payment source, and IP details
+                            </CardDescription>
                         </CardHeader>
                         <CardContent>
-                            <div className="space-y-4">
-                                {(reseller.wallet?.transactions || []).slice().reverse().slice(0, 10).map((txn, i) => (
-                                    <div key={i} className="flex items-center justify-between border-b pb-2 last:border-0">
-                                        <div className="flex items-center gap-3">
-                                            <div className={`p-2 rounded-full ${txn.type === 'deduction' ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>
-                                                {txn.type === 'deduction' ? <TrendingUp className="h-4 w-4 rotate-180" /> : <Wallet className="h-4 w-4" />}
-                                            </div>
-                                            <div>
-                                                <p className="font-medium capitalize">{txn.type === 'recharge' ? 'Funds Added' : txn.type}</p>
-                                                <p className="text-xs text-muted-foreground">{txn.description}</p>
-                                            </div>
-                                        </div>
-                                        <div className="text-right">
-                                            <p className={`font-bold ${txn.amount > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                                {txn.amount > 0 ? '+' : ''}₹{Math.abs(txn.amount).toLocaleString()}
-                                            </p>
-                                            <p className="text-xs text-muted-foreground">
-                                                {new Date(txn.createdAt).toLocaleDateString()}
-                                            </p>
-                                        </div>
-                                    </div>
-                                ))}
-                                {(!reseller.wallet?.transactions || reseller.wallet?.transactions.length === 0) && (
-                                    <p className="text-center text-muted-foreground py-4">No transactions yet</p>
-                                )}
+                            <div className="rounded-md border overflow-x-auto">
+                                <Table>
+                                    <TableHeader>
+                                        <TableRow>
+                                            <TableHead>Date &amp; Time</TableHead>
+                                            <TableHead>Type</TableHead>
+                                            <TableHead>Description</TableHead>
+                                            <TableHead>Payment Source</TableHead>
+                                            <TableHead>Amount</TableHead>
+                                            <TableHead className="text-right">Details</TableHead>
+                                        </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                        {walletTransactions.map((txn) => (
+                                            <TableRow
+                                                key={txn.id}
+                                                className="cursor-pointer hover:bg-muted/50"
+                                                onClick={() => setSelectedTxn(txn)}
+                                            >
+                                                <TableCell className="text-muted-foreground whitespace-nowrap">
+                                                    {formatDateTime(txn.createdAt)}
+                                                </TableCell>
+                                                <TableCell>
+                                                    <Badge variant={txn.type === 'deduction' ? 'destructive' : 'secondary'}>
+                                                        {formatTxnType(txn.type)}
+                                                    </Badge>
+                                                </TableCell>
+                                                <TableCell className="max-w-[280px] truncate" title={txn.description}>
+                                                    {txn.description || '—'}
+                                                </TableCell>
+                                                <TableCell>{txn.paymentSource || '—'}</TableCell>
+                                                <TableCell className={`font-bold ${txn.amount > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                                    {txn.amount > 0 ? '+' : ''}₹{Math.abs(txn.amount).toLocaleString()}
+                                                </TableCell>
+                                                <TableCell className="text-right">
+                                                    <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); setSelectedTxn(txn); }}>
+                                                        <Eye className="h-4 w-4" />
+                                                    </Button>
+                                                </TableCell>
+                                            </TableRow>
+                                        ))}
+                                        {walletTransactions.length === 0 && (
+                                            <TableRow>
+                                                <TableCell colSpan={6} className="text-center text-muted-foreground py-6">
+                                                    No transactions in the last {TXN_HISTORY_DAYS} days
+                                                </TableCell>
+                                            </TableRow>
+                                        )}
+                                    </TableBody>
+                                </Table>
                             </div>
                         </CardContent>
                     </Card>
+
+                    <Dialog open={!!selectedTxn} onOpenChange={(open) => !open && setSelectedTxn(null)}>
+                        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+                            <DialogHeader>
+                                <DialogTitle>Transaction Details</DialogTitle>
+                                <DialogDescription>
+                                    Full wallet transaction and linked order information
+                                </DialogDescription>
+                            </DialogHeader>
+                            {selectedTxn && (
+                                <div className="space-y-6 text-sm">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                        <DetailField label="Transaction ID" value={selectedTxn.id} onCopy={() => copyText('Transaction ID', selectedTxn.id)} />
+                                        <DetailField label="Date & Time" value={formatDateTime(selectedTxn.createdAt)} />
+                                        <DetailField label="Type" value={formatTxnType(selectedTxn.type)} />
+                                        <DetailField label="Payment Source" value={selectedTxn.paymentSource || '—'} />
+                                        <DetailField label="Amount" value={`${selectedTxn.amount > 0 ? '+' : ''}₹${Math.abs(selectedTxn.amount).toLocaleString()}`} />
+                                        <DetailField label="Balance After" value={selectedTxn.newBalance != null ? `₹${selectedTxn.newBalance.toLocaleString()}` : '—'} />
+                                    </div>
+
+                                    <div>
+                                        <p className="text-xs font-medium text-muted-foreground mb-1">Description</p>
+                                        <p className="rounded-md border bg-muted/30 p-3">{selectedTxn.description || '—'}</p>
+                                    </div>
+
+                                    {selectedTxn.order ? (
+                                        <div className="space-y-3 border-t pt-4">
+                                            <h4 className="font-semibold">Linked Order</h4>
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                                <DetailField label="Order ID" value={selectedTxn.order._id} onCopy={() => copyText('Order ID', selectedTxn.order?._id)} />
+                                                <DetailField label="Client Txn ID" value={selectedTxn.order.clientTxnId || '—'} onCopy={() => copyText('Client Txn ID', selectedTxn.order?.clientTxnId)} />
+                                                <DetailField label="Transaction ID" value={selectedTxn.order.transactionId || '—'} onCopy={() => copyText('Transaction ID', selectedTxn.order?.transactionId)} />
+                                                <DetailField label="Gateway Order ID" value={selectedTxn.order.gatewayOrderId || '—'} onCopy={() => copyText('Gateway Order ID', selectedTxn.order?.gatewayOrderId)} />
+                                                <DetailField label="IP Address" value={selectedTxn.order.ipAddress || 'Pending'} onCopy={() => copyText('IP', selectedTxn.order?.ipAddress)} />
+                                                <DetailField label="Product" value={selectedTxn.order.productName} />
+                                                <DetailField label="Plan / Memory" value={selectedTxn.order.memory || '—'} />
+                                                <DetailField label="OS" value={selectedTxn.order.os || '—'} />
+                                                <DetailField label="Rate" value={`₹${selectedTxn.order.price?.toLocaleString()}`} />
+                                                <DetailField label="Order Status" value={selectedTxn.order.status} />
+                                                <DetailField label="Provisioning" value={selectedTxn.order.provisioningStatus || '—'} />
+                                                <DetailField label="Provider" value={selectedTxn.order.provider || '—'} />
+                                                <DetailField label="End User Email" value={selectedTxn.order.endUserEmail || '—'} />
+                                                <DetailField label="Order Date" value={formatDateTime(selectedTxn.order.createdAt)} />
+                                                <DetailField label="Expiry" value={selectedTxn.order.expiryDate ? formatDateTime(selectedTxn.order.expiryDate) : '—'} />
+                                                <DetailField label="Username" value={selectedTxn.order.username || '—'} onCopy={() => copyText('Username', selectedTxn.order?.username)} />
+                                                <DetailField label="Password" value={selectedTxn.order.password || '—'} onCopy={() => copyText('Password', selectedTxn.order?.password)} />
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <p className="text-muted-foreground border-t pt-4">
+                                            No order linked to this transaction (usually a wallet recharge or adjustment).
+                                        </p>
+                                    )}
+                                </div>
+                            )}
+                        </DialogContent>
+                    </Dialog>
                 </TabsContent>
 
                 <TabsContent value="wallet">
@@ -533,6 +703,30 @@ export default function ResellerDetailsPage() {
                 </TabsContent>
 
             </Tabs>
+        </div>
+    );
+}
+
+function DetailField({
+    label,
+    value,
+    onCopy,
+}: {
+    label: string;
+    value: string;
+    onCopy?: () => void;
+}) {
+    return (
+        <div>
+            <p className="text-xs font-medium text-muted-foreground mb-1">{label}</p>
+            <div className="flex items-center gap-2">
+                <p className="font-mono text-xs break-all">{value}</p>
+                {onCopy && value && value !== '—' && value !== 'Pending' && (
+                    <Button type="button" variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={onCopy}>
+                        <Copy className="h-3.5 w-3.5" />
+                    </Button>
+                )}
+            </div>
         </div>
     );
 }

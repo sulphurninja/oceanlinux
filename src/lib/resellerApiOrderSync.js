@@ -462,23 +462,73 @@ async function waitForProvisionedVm(
   return { pending: true, lastOverview };
 }
 
+function cleanOrderIp(ip) {
+  return String(ip || '').split(':')[0].trim();
+}
+
+/**
+ * Resolve reseller-panel VM for an order.
+ * Order IP wins (admin manual IP change) — lookup by IP before stale resellerVmId.
+ */
+async function resolveResellerVmForOrder(resellerApi, order) {
+  const wantedIp = cleanOrderIp(order.ipAddress);
+
+  if (wantedIp) {
+    const foundByIp = await resellerApi.findVmByIp(wantedIp);
+    if (foundByIp) return foundByIp;
+  }
+
+  if (order.resellerVmId) {
+    const overviewRow = await resolveOverviewRowForVm(resellerApi, order.resellerVmId).catch(() => null);
+    const panelIp = overviewRow ? ResellerApi.extractOverviewRowIp(overviewRow) : null;
+    return {
+      vmId: String(order.resellerVmId),
+      ip: panelIp || wantedIp || '',
+      raw: overviewRow,
+    };
+  }
+
+  const err = new Error(
+    wantedIp
+      ? `No VM visible for IP ${wantedIp} on the company's reseller panel.`
+      : 'No IP address or VM id on order yet.'
+  );
+  err.status = 404;
+  throw err;
+}
+
 async function syncResellerVmCredentials(api, order, vmId) {
-  const details = await api.getVmDetails(vmId);
-  const overviewRow = await resolveOverviewRowForVm(api, vmId);
+  let effectiveVmId = vmId ? String(vmId) : null;
+  let resolved = null;
+  try {
+    resolved = await resolveResellerVmForOrder(api, order);
+    if (resolved?.vmId) effectiveVmId = String(resolved.vmId);
+  } catch {
+    // fall back to caller vmId when order has no resolvable IP yet
+  }
+  if (!effectiveVmId) {
+    throw new Error('No reseller VM id available for credential sync');
+  }
+
+  const details = await api.getVmDetails(effectiveVmId);
+  const overviewRow = await resolveOverviewRowForVm(api, effectiveVmId);
   const password = ResellerApi.extractVmPassword(details);
   const rawUsername = ResellerApi.extractVmUsername(details);
   const rawOs = ResellerApi.extractVmOs(details);
   const username = normalizePanelUsernameForOrder(rawUsername, order.productName, order.username);
   const os = normalizePanelOsForOrder(rawOs, order.productName, order.os);
-  const ip =
+  const panelIp =
     ResellerApi.extractOverviewRowIp(overviewRow) ||
     details?.ipAddress ||
     details?.ip ||
-    order.ipAddress ||
     null;
+  const orderIp = cleanOrderIp(order.ipAddress);
+  const resolvedIp = cleanOrderIp(resolved?.ip);
+  // Admin/customer order IP wins when it maps to a live VM on the panel.
+  const ip = orderIp || resolvedIp || cleanOrderIp(panelIp) || null;
   const expiryDate = ResellerApi.extractVmExpiryDate(overviewRow, details);
 
-  const updates = { lastSyncTime: new Date() };
+  const updates = { lastSyncTime: new Date(), resellerVmId: effectiveVmId };
   const changes = [];
 
   if (password && password !== order.password) {
@@ -489,7 +539,7 @@ async function syncResellerVmCredentials(api, order, vmId) {
     updates.username = username;
     changes.push('username');
   }
-  if (ip && ip !== order.ipAddress) {
+  if (ip && cleanOrderIp(ip) !== orderIp) {
     updates.ipAddress = ip;
     changes.push('ipAddress');
   }
@@ -502,7 +552,7 @@ async function syncResellerVmCredentials(api, order, vmId) {
     changes.push('os');
   }
 
-  return { updates, changes, details };
+  return { updates, changes, details, vmId: effectiveVmId };
 }
 
 function isCouponRenewFailure(err) {
@@ -882,10 +932,11 @@ async function completeResellerPendingOrder(order, ipStock, { api: existingApi =
 
   if (order.resellerVmId && !ipLooksWrong) {
     try {
-      const synced = await syncResellerVmCredentials(api, order, order.resellerVmId);
+      const resolved = await resolveResellerVmForOrder(api, order);
+      const synced = await syncResellerVmCredentials(api, order, resolved.vmId);
       if (synced.updates.ipAddress || synced.updates.password) {
         provisioned = {
-          vmId: String(order.resellerVmId),
+          vmId: String(synced.vmId || resolved.vmId),
           ip: synced.updates.ipAddress || order.ipAddress,
           password: synced.updates.password || order.password,
           username: synced.updates.username || order.username,
@@ -902,18 +953,46 @@ async function completeResellerPendingOrder(order, ipStock, { api: existingApi =
     ipLooksWrong ||
     !(await provisionedMatchesOrderLocationAsync(api, provisioned, locationCtx))
   ) {
-    provisioned = await waitForProvisionedVm(api, {
-      resellerOrderId: order.resellerOrderId || null,
-      resellerGroupId: order.resellerGroupId || null,
-      resellerVmId: ipLooksWrong ? null : (order.resellerVmId || null),
-      purchaseStartedAt,
-      excludeOrderId: order._id,
-      order,
-      expectedZoneId: locationCtx.expectedZoneId,
-      expectedIpPrefix: locationCtx.expectedIpPrefix,
-      maxWaitMs: 90_000,
-      pollMs: 3000,
-    });
+    const orderIp = cleanOrderIp(order.ipAddress);
+    if (orderIp && order.password) {
+      try {
+        const foundByOrderIp = await api.findVmByIp(orderIp);
+        if (foundByOrderIp?.vmId) {
+          const synced = await syncResellerVmCredentials(api, order, foundByOrderIp.vmId);
+          provisioned = {
+            vmId: String(synced.vmId || foundByOrderIp.vmId),
+            ip: orderIp,
+            password: synced.updates.password || order.password,
+            username: synced.updates.username || order.username,
+            os: synced.updates.os || order.os,
+            expiryDate: synced.updates.expiryDate || order.expiryDate,
+          };
+        }
+      } catch (_) {
+        // fall through to overview poll
+      }
+    }
+
+    if (
+      !provisioned?.ip ||
+      !provisioned?.password ||
+      (ipLooksWrong && !cleanOrderIp(order.ipAddress)) ||
+      (!(provisioned?.ip && cleanOrderIp(order.ipAddress) === cleanOrderIp(provisioned.ip)) &&
+        !(await provisionedMatchesOrderLocationAsync(api, provisioned, locationCtx)))
+    ) {
+      provisioned = await waitForProvisionedVm(api, {
+        resellerOrderId: order.resellerOrderId || null,
+        resellerGroupId: order.resellerGroupId || null,
+        resellerVmId: ipLooksWrong ? null : (order.resellerVmId || null),
+        purchaseStartedAt,
+        excludeOrderId: order._id,
+        order,
+        expectedZoneId: locationCtx.expectedZoneId,
+        expectedIpPrefix: ipLooksWrong ? null : locationCtx.expectedIpPrefix,
+        maxWaitMs: 90_000,
+        pollMs: 3000,
+      });
+    }
   }
 
   if (provisioned?.pending) {
@@ -938,7 +1017,11 @@ async function completeResellerPendingOrder(order, ipStock, { api: existingApi =
     order.username
   );
   const os = normalizePanelOsForOrder(provisioned.os, order.productName, order.os);
-  const ipAddress = provisioned.ip || order.ipAddress || '';
+  const orderIpLocked = cleanOrderIp(order.ipAddress);
+  const ipAddress =
+    orderIpLocked && order.password
+      ? orderIpLocked
+      : (provisioned.ip || order.ipAddress || '');
   const password = provisioned.password || order.password || '';
   const fullyProvisioned = !!(ipAddress && (password || provisioned.vmId));
 
@@ -1032,6 +1115,7 @@ const RESELLER_FETCH_SYNC_COOLDOWN_MS = 8000;
 
 /**
  * When customer opens manage order, pull IP/credentials from panel if still missing.
+ * Never re-provision when IP+password exist (admin may have moved VM to another IP block).
  */
 async function maybeSyncResellerOrderOnFetch(order) {
   if (!order) return order;
@@ -1053,7 +1137,29 @@ async function maybeSyncResellerOrderOnFetch(order) {
     locationCtx.expectedIpPrefix &&
     !ipMatchesOrderedRange(ip, locationCtx.expectedIpPrefix);
 
-  if (ip && pwd && !ipLooksWrong) return order;
+  if (ip && pwd) {
+    if (!ipLooksWrong) return order;
+
+    // IP outside product prefix (admin reassigned) — sync by order IP only, never reprovision old range
+    try {
+      const Company = (await import('@/models/companyModel')).default;
+      const Order = (await import('@/models/orderModel')).default;
+      const company = await Company.findById(ipStock.company).select('resellerApi name').lean();
+      const cfg = getCompanyResellerApiConfig(company);
+      if (!cfg) return order;
+
+      const api = new ResellerApi(cfg);
+      const resolved = await resolveResellerVmForOrder(api, order);
+      const synced = await syncResellerVmCredentials(api, order, resolved.vmId);
+      if (synced.changes.length) {
+        await Order.findByIdAndUpdate(order._id, synced.updates);
+      }
+      return await Order.findById(order._id).lean();
+    } catch (err) {
+      console.warn('[RESELLER-SYNC] Reassigned-IP credential sync failed:', err.message);
+      return order;
+    }
+  }
 
   const lastAttempt = order.lastProvisionAttempt
     ? new Date(order.lastProvisionAttempt).getTime()
@@ -1083,6 +1189,7 @@ module.exports = {
   validateCreatedVmId,
   waitForProvisionedVm,
   syncResellerVmCredentials,
+  resolveResellerVmForOrder,
   renewResellerPanelVm,
   completeResellerPendingOrder,
   syncStuckResellerPendingOrders,

@@ -16,6 +16,7 @@ async function allocateSlotIpForOrder(order) {
           'ips.$.allocated': true,
           'ips.$.orderId': order._id,
           'ips.$.allocatedAt': new Date(),
+          'ips.$.soldAt': new Date(),
         },
       },
       { new: true }

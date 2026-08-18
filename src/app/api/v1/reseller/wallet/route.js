@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import { authenticateReseller } from '@/lib/resellerAuth';
+import { fetchEnrichedWalletTransactions } from '@/lib/resellerWalletTransactions';
 
 export async function GET(request) {
   await connectDB();
@@ -11,11 +12,7 @@ export async function GET(request) {
   }
 
   const { reseller } = auth;
-
-  const transactions = (reseller.wallet?.transactions || [])
-    .slice()
-    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-    .slice(0, 50);
+  const transactions = await fetchEnrichedWalletTransactions(reseller);
 
   return NextResponse.json({
     success: true,

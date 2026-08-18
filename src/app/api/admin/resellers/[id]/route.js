@@ -3,6 +3,10 @@ import connectDB from '@/lib/db';
 import Reseller from '@/models/resellerModel';
 import Order from '@/models/orderModel';
 import { enforceAdmin } from '@/lib/apiSecurity';
+import {
+    RESELLER_TXN_HISTORY_DAYS,
+    fetchEnrichedWalletTransactions,
+} from '@/lib/resellerWalletTransactions';
 
 export async function GET(request, { params }) {
     const denied = await enforceAdmin(request);
@@ -17,18 +21,39 @@ export async function GET(request, { params }) {
             return NextResponse.json({ success: false, message: 'Reseller not found' }, { status: 404 });
         }
 
-        // Calculate real-time stats
+        const cutoff = new Date();
+        cutoff.setDate(cutoff.getDate() - RESELLER_TXN_HISTORY_DAYS);
+
         const totalOrders = await Order.countDocuments({ resellerId: id });
-        const orders = await Order.find({ resellerId: id }).sort({ createdAt: -1 }).limit(5);
+
+        const recentOrders = await Order.find({
+            resellerId: id,
+            createdAt: { $gte: cutoff },
+        })
+            .sort({ createdAt: -1 })
+            .select(
+                'productName memory price status ipAddress transactionId clientTxnId gatewayOrderId paymentMethod os provisioningStatus expiryDate createdAt'
+            )
+            .lean();
+
+        const walletTransactions = await fetchEnrichedWalletTransactions(reseller);
+
+        const resellerJson = reseller.toObject();
+        resellerJson.wallet = {
+            ...resellerJson.wallet,
+            transactions: walletTransactions,
+        };
 
         return NextResponse.json({
             success: true,
-            reseller,
+            reseller: resellerJson,
             stats: {
                 totalOrders,
-                walletBalance: reseller.wallet.balance
+                walletBalance: reseller.wallet.balance,
             },
-            recentOrders: orders
+            recentOrders,
+            walletTransactions,
+            transactionHistoryDays: RESELLER_TXN_HISTORY_DAYS,
         });
     } catch (error) {
         return NextResponse.json({ success: false, message: error.message }, { status: 500 });

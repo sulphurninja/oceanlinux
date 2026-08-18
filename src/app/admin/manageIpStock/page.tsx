@@ -19,7 +19,8 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import Link from 'next/link';
-import { X, ExternalLink, Zap, BookOpen, Copy, RefreshCw, Loader2, Cloud, EyeOff, Eye, Globe } from 'lucide-react';
+import { X, ExternalLink, Zap, BookOpen, Copy, RefreshCw, Loader2, Cloud, EyeOff, Eye, Globe, Tags } from 'lucide-react';
+import { Checkbox } from '@/components/ui/checkbox';
 import { ResellerZonePicker, buildResellerZoneConfig } from '@/components/admin/ResellerZonePicker';
 
 interface MemoryOptionDetails {
@@ -51,6 +52,18 @@ interface IPStock {
     defaultConfigurations?: Record<string, any>;
     company?: string | null;
 }
+
+interface BulkPromoDraft {
+    code: string;
+    discount: string;
+    discountType: 'percentage' | 'fixed';
+}
+
+const emptyBulkPromoDraft = (): BulkPromoDraft => ({
+    code: '',
+    discount: '',
+    discountType: 'fixed',
+});
 
 interface CompanyOption {
     _id: string;
@@ -196,6 +209,10 @@ const ManageIpStock = () => {
     const [unhideOutDialogOpen, setUnhideOutDialogOpen] = useState(false);
     const [hidingOutOfStock, setHidingOutOfStock] = useState(false);
     const [unhidingOutOfStock, setUnhidingOutOfStock] = useState(false);
+    const [selectedStockIds, setSelectedStockIds] = useState<string[]>([]);
+    const [bulkPromoDialogOpen, setBulkPromoDialogOpen] = useState(false);
+    const [bulkPromoDrafts, setBulkPromoDrafts] = useState<BulkPromoDraft[]>([emptyBulkPromoDraft()]);
+    const [applyingBulkPromos, setApplyingBulkPromos] = useState(false);
 
     const outOfStockVisibleCount = ipStocks.filter(
         (stock) => !stock.hiddenFromStore && isStockOutOfStock(stock, companies)
@@ -816,6 +833,107 @@ const ManageIpStock = () => {
         }
     };
 
+    const allStockIds = ipStocks.map((stock) => stock._id);
+    const allSelected = ipStocks.length > 0 && selectedStockIds.length === ipStocks.length;
+    const someSelected = selectedStockIds.length > 0 && !allSelected;
+
+    const toggleStockSelection = (stockId: string, checked: boolean) => {
+        setSelectedStockIds((prev) =>
+            checked ? Array.from(new Set([...prev, stockId])) : prev.filter((id) => id !== stockId)
+        );
+    };
+
+    const toggleSelectAllStocks = (checked: boolean) => {
+        setSelectedStockIds(checked ? allStockIds : []);
+    };
+
+    const openBulkPromoDialog = () => {
+        if (selectedStockIds.length === 0) {
+            toast.error('Pehle kam se kam ek IP stock select karo');
+            return;
+        }
+        setBulkPromoDrafts([emptyBulkPromoDraft()]);
+        setBulkPromoDialogOpen(true);
+    };
+
+    const addBulkPromoDraftRow = () => {
+        setBulkPromoDrafts((prev) => [...prev, emptyBulkPromoDraft()]);
+    };
+
+    const updateBulkPromoDraft = (index: number, patch: Partial<BulkPromoDraft>) => {
+        setBulkPromoDrafts((prev) =>
+            prev.map((row, i) => (i === index ? { ...row, ...patch } : row))
+        );
+    };
+
+    const removeBulkPromoDraftRow = (index: number) => {
+        setBulkPromoDrafts((prev) => {
+            if (prev.length <= 1) return [emptyBulkPromoDraft()];
+            return prev.filter((_, i) => i !== index);
+        });
+    };
+
+    const applyBulkPromos = async () => {
+        const promos = bulkPromoDrafts
+            .map((row) => ({
+                code: row.code.trim().toUpperCase(),
+                discount: parseFloat(row.discount),
+                discountType: row.discountType,
+                isActive: true,
+            }))
+            .filter((row) => row.code);
+
+        if (selectedStockIds.length === 0) {
+            toast.error('Select at least one IP stock plan');
+            return;
+        }
+        if (promos.length === 0) {
+            toast.error('Add at least one promo code');
+            return;
+        }
+
+        for (const promo of promos) {
+            if (!Number.isFinite(promo.discount) || promo.discount < 0) {
+                toast.error(`Invalid discount for ${promo.code}`);
+                return;
+            }
+            if (promo.discountType === 'percentage' && promo.discount > 100) {
+                toast.error(`Percentage for ${promo.code} cannot exceed 100%`);
+                return;
+            }
+        }
+
+        const codes = promos.map((p) => p.code);
+        if (new Set(codes).size !== codes.length) {
+            toast.error('Duplicate promo codes — har code ek hi baar add karo');
+            return;
+        }
+
+        setApplyingBulkPromos(true);
+        try {
+            const r = await fetch('/api/ipstock/bulk-promos', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({
+                    stockIds: selectedStockIds,
+                    promos,
+                }),
+            });
+            const j = await r.json();
+            if (!r.ok || !j.success) throw new Error(j.error || 'Bulk promo apply failed');
+
+            await reloadIpStocks();
+            setBulkPromoDialogOpen(false);
+            setBulkPromoDrafts([emptyBulkPromoDraft()]);
+            toast.success(j.message || `Promos applied to ${j.updatedCount} plan(s)`);
+        } catch (e: unknown) {
+            toast.error(e instanceof Error ? e.message : 'Failed to apply bulk promos');
+        } finally {
+            setApplyingBulkPromos(false);
+        }
+    };
+
     const getHostycareStatus = (memoryOptions: Record<string, MemoryOptionDetails>) => {
         const totalConfigs = Object.keys(memoryOptions).length;
         const configuredCount = Object.values(memoryOptions).filter(option => option.hostycareProductId).length;
@@ -834,6 +952,17 @@ const ManageIpStock = () => {
             <div className='h-[63px] flex gap-2 items-center justify-between border dark:border-none-b p-4'>
                 <h1 className='text-xl'>Manage IP Stock</h1>
                 <div className="flex items-center gap-2">
+                    <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="gap-1.5"
+                        onClick={openBulkPromoDialog}
+                        disabled={selectedStockIds.length === 0}
+                    >
+                        <Tags className="h-4 w-4" />
+                        Bulk Promos ({selectedStockIds.length})
+                    </Button>
                     <Button
                         type="button"
                         variant="outline"
@@ -877,6 +1006,13 @@ const ManageIpStock = () => {
                 <Table className='w-full border dark:border-none'>
                     <TableHeader>
                         <TableRow>
+                            <TableHead className="w-10">
+                                <Checkbox
+                                    checked={allSelected ? true : someSelected ? 'indeterminate' : false}
+                                    onCheckedChange={(checked) => toggleSelectAllStocks(checked === true)}
+                                    aria-label="Select all IP stocks"
+                                />
+                            </TableHead>
                             <TableHead>Name</TableHead>
                             <TableHead>Type</TableHead>
                             <TableHead>Region</TableHead>
@@ -895,7 +1031,14 @@ const ManageIpStock = () => {
 
                     <TableBody>
                         {ipStocks.map(stock => (
-                            <TableRow key={stock._id}>
+                            <TableRow key={stock._id} data-selected={selectedStockIds.includes(stock._id)}>
+                                <TableCell>
+                                    <Checkbox
+                                        checked={selectedStockIds.includes(stock._id)}
+                                        onCheckedChange={(checked) => toggleStockSelection(stock._id, checked === true)}
+                                        aria-label={`Select ${stock.name}`}
+                                    />
+                                </TableCell>
                                 <TableCell>
                                     <div>
                                         <div className="font-medium">{stock.name}</div>
@@ -1739,6 +1882,100 @@ const ManageIpStock = () => {
                             <Button onClick={handleClone} disabled={cloning || !cloneName.trim()} className="gap-1.5">
                                 <Copy className="h-3.5 w-3.5" />
                                 {cloning ? 'Cloning…' : 'Create clone'}
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+
+                <Dialog open={bulkPromoDialogOpen} onOpenChange={setBulkPromoDialogOpen}>
+                    <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+                        <DialogHeader>
+                            <DialogTitle>Bulk Promos</DialogTitle>
+                            <DialogDescription>
+                                Selected {selectedStockIds.length} plan(s). Same promo code pehle se ho to naya discount update ho jayega; nahi ho to add ho jayega.
+                            </DialogDescription>
+                        </DialogHeader>
+
+                        <div className="space-y-3">
+                            {bulkPromoDrafts.map((row, index) => (
+                                <div key={index} className="grid grid-cols-12 gap-2 items-center">
+                                    <Input
+                                        type="text"
+                                        placeholder="Promo code (e.g. OCEAN50)"
+                                        value={row.code}
+                                        onChange={(e) => updateBulkPromoDraft(index, { code: e.target.value })}
+                                        className="col-span-4"
+                                    />
+                                    <Select
+                                        value={row.discountType}
+                                        onValueChange={(value: 'percentage' | 'fixed') =>
+                                            updateBulkPromoDraft(index, { discountType: value })
+                                        }
+                                    >
+                                        <SelectTrigger className="col-span-3">
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="fixed">₹ Fixed</SelectItem>
+                                            <SelectItem value="percentage">% Off</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                    <Input
+                                        type="number"
+                                        placeholder={row.discountType === 'fixed' ? 'Amount ₹' : '%'}
+                                        min="0"
+                                        max={row.discountType === 'percentage' ? '100' : undefined}
+                                        value={row.discount}
+                                        onChange={(e) => updateBulkPromoDraft(index, { discount: e.target.value })}
+                                        className="col-span-3"
+                                    />
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        className="col-span-2"
+                                        onClick={() => removeBulkPromoDraftRow(index)}
+                                    >
+                                        Remove
+                                    </Button>
+                                </div>
+                            ))}
+
+                            <Button type="button" variant="outline" size="sm" onClick={addBulkPromoDraftRow}>
+                                + Add another promo
+                            </Button>
+
+                            <div className="rounded-md border p-3 bg-muted/30 max-h-40 overflow-y-auto">
+                                <p className="text-xs font-medium mb-2">Selected plans</p>
+                                <ul className="text-xs text-muted-foreground space-y-1">
+                                    {ipStocks
+                                        .filter((stock) => selectedStockIds.includes(stock._id))
+                                        .map((stock) => (
+                                            <li key={stock._id} className="truncate">{stock.name}</li>
+                                        ))}
+                                </ul>
+                            </div>
+                        </div>
+
+                        <DialogFooter>
+                            <Button
+                                variant="ghost"
+                                onClick={() => setBulkPromoDialogOpen(false)}
+                                disabled={applyingBulkPromos}
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                onClick={() => void applyBulkPromos()}
+                                disabled={applyingBulkPromos || selectedStockIds.length === 0}
+                                className="gap-1.5"
+                            >
+                                {applyingBulkPromos ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                    <Tags className="h-4 w-4" />
+                                )}
+                                Apply to {selectedStockIds.length} plan(s)
                             </Button>
                         </DialogFooter>
                     </DialogContent>

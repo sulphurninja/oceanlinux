@@ -5,6 +5,11 @@ const {
   resolveUsernameForOs,
   defaultUsernameForOs,
 } = require('@/lib/companyInventory');
+const {
+  buildInventoryOwnerMaps,
+  groupOrdersByIp,
+  shouldSyncPanelDataToOrder,
+} = require('@/lib/orderIpOwnership');
 
 const EXPIRY_FETCH_COOLDOWN_MS = 5 * 60 * 1000;
 
@@ -236,9 +241,13 @@ async function syncCompanyOrderExpiriesFromPanelIndex(ipIndex, stockDocs, api = 
 
   const orders = await Order.find({
     ipStockId: { $in: stockIds },
-    status: { $nin: ['cancelled', 'failed'] },
+    status: { $nin: ['cancelled', 'failed', 'expired', 'superseded'] },
     ipAddress: { $exists: true, $ne: '' },
-  }).select('_id ipAddress expiryDate inventoryItemId ipStockId resellerVmId');
+  }).select('_id ipAddress expiryDate inventoryItemId ipStockId resellerVmId createdAt renewalPayments status');
+
+  const { ownerByIp, ownerByItemId } = buildInventoryOwnerMaps(stockDocs);
+  const ordersByIp = groupOrdersByIp(orders);
+  const syncCtx = { ownerByIp, ownerByItemId, ordersByIp };
 
   const updated = [];
   const skipped = [];
@@ -247,6 +256,15 @@ async function syncCompanyOrderExpiriesFromPanelIndex(ipIndex, stockDocs, api = 
   for (const order of orders) {
     const ip = cleanIpAddress(order.ipAddress);
     if (!ip) continue;
+
+    if (!shouldSyncPanelDataToOrder(order, syncCtx)) {
+      skipped.push({
+        orderId: String(order._id),
+        ipAddress: ip,
+        reason: 'not_current_ip_owner',
+      });
+      continue;
+    }
 
     const entry = ipIndex.get(ip);
     if (!entry) {
@@ -331,12 +349,17 @@ async function syncSingleOrderExpiryFromPanel(order, { force = false, companyDoc
   const Order = (await import('@/models/orderModel')).default;
   const Company = (await import('@/models/companyModel')).default;
 
-  const ipStock = await IPStock.findById(order.ipStockId).select('company').lean();
+  const ipStock = await IPStock.findById(order.ipStockId).select('company inventoryItems').lean();
   if (!ipStock?.company) return { order, synced: false };
 
   const company =
     companyDoc || (await Company.findById(ipStock.company).select('resellerApi name').lean());
   if (!getCompanyResellerApiConfig(company)) return { order, synced: false };
+
+  const { ownerByIp, ownerByItemId } = buildInventoryOwnerMaps([ipStock]);
+  if (!shouldSyncPanelDataToOrder(order, { ownerByIp, ownerByItemId })) {
+    return { order, synced: false, reason: 'not_current_ip_owner' };
+  }
 
   if (!force && order.lastSyncTime) {
     const age = Date.now() - new Date(order.lastSyncTime).getTime();
@@ -398,8 +421,11 @@ async function syncUserHostheavenOrderExpiries(orders) {
   const stockIds = [...new Set(orders.map((o) => String(o.ipStockId || '')).filter(Boolean))];
   if (!stockIds.length) return { orders, updated: 0, extended: 0 };
 
-  const stocks = await IPStock.find({ _id: { $in: stockIds } }).select('company').lean();
+  const stocks = await IPStock.find({ _id: { $in: stockIds } }).select('company inventoryItems').lean();
   const stockToCompany = new Map(stocks.map((s) => [String(s._id), String(s.company)]));
+  const { ownerByIp, ownerByItemId } = buildInventoryOwnerMaps(stocks);
+  const ordersByIp = groupOrdersByIp(orders);
+  const syncCtx = { ownerByIp, ownerByItemId, ordersByIp };
 
   const companyIds = [...new Set(stocks.map((s) => String(s.company)).filter(Boolean))];
   const companies = await Company.find({ _id: { $in: companyIds } }).select('resellerApi name').lean();
@@ -436,6 +462,8 @@ async function syncUserHostheavenOrderExpiries(orders) {
       const ip = cleanIpAddress(order.ipAddress);
       const entry = ipIndex.get(ip);
       if (!entry?.expiryDate) continue;
+
+      if (!shouldSyncPanelDataToOrder(order, syncCtx)) continue;
 
       if (!panelExpiryExtendsCustomer(order.expiryDate, entry.expiryDate)) continue;
 

@@ -33,16 +33,13 @@ export async function GET(request) {
             });
         }
 
-        let orders = await Order.find({ user: userId }).lean().sort({ createdAt: -1 });
+        const orders = await Order.find({ user: userId }).lean().sort({ createdAt: -1 });
 
-        try {
-            const synced = await syncUserHostheavenOrderExpiries(orders);
-            if (synced.updated > 0) {
-                orders = synced.orders;
-            }
-        } catch (syncErr) {
+        // Do not block the manage-orders list on Hostheaven. Panel sync can take
+        // many seconds and made the page feel hung / laggy.
+        void syncUserHostheavenOrderExpiries(orders).catch((syncErr) => {
             console.warn('[orders/me] Hostheaven expiry extend sync failed:', syncErr.message);
-        }
+        });
 
         const safeOrders = sanitizeOrdersForCustomer(orders, { isAdmin: isAdminUser(user) });
 

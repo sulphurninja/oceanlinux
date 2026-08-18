@@ -43,6 +43,7 @@ const renewalLogSchema = new mongoose.Schema({
     paymentInfo: {
         paymentMethod: String,
         paymentId: String,
+        gatewayOrderId: String,
         amount: Number
     },
 
@@ -71,7 +72,12 @@ const renewalLogSchema = new mongoose.Schema({
     // Final result
     newExpiryDate: { type: Date },
     errorMessage: { type: String },
-    errorStack: { type: String }
+    errorStack: { type: String },
+
+    // Admin marked upstream renewal done manually (after API failure)
+    manualConfirmedAt: { type: Date },
+    manualConfirmedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    manualConfirmNote: { type: String, default: '' },
 
 }, { timestamps: true });
 
@@ -80,5 +86,8 @@ renewalLogSchema.index({ createdAt: -1 });
 renewalLogSchema.index({ success: 1, createdAt: -1 });
 renewalLogSchema.index({ 'orderContext.provider': 1 });
 renewalLogSchema.index({ startTime: -1 });
+renewalLogSchema.index({ 'orderContext.ipAddress': 1 });
+renewalLogSchema.index({ 'paymentInfo.gatewayOrderId': 1 });
+renewalLogSchema.index({ manualConfirmedAt: 1 });
 
 export default mongoose.models.RenewalLog || mongoose.model('RenewalLog', renewalLogSchema);

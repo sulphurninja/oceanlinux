@@ -446,7 +446,7 @@ export default function DashboardLayout({
 
                     {/* Main Content Area */}
                     <div className={cn(
-                        "premium-dashboard-content-wrap transition-[padding] duration-300 min-w-0 overflow-x-hidden",
+                        "premium-dashboard-content-wrap min-w-0 overflow-x-hidden",
                         sidebarCollapsed ? "lg:pl-16" : "lg:pl-64"
                     )}>
                         {/* Top Navigation Bar */}

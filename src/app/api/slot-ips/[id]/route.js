@@ -32,6 +32,83 @@ export async function PUT(request, { params }) {
     const { id } = await params;
     const body = await request.json();
 
+    if (body.removeIpIds && Array.isArray(body.removeIpIds)) {
+      const pkg = await SlotIPPackage.findById(id);
+      if (!pkg) {
+        return NextResponse.json({ error: 'Package not found' }, { status: 404 });
+      }
+
+      const idsToRemove = new Set(body.removeIpIds.map(String));
+      const blocked = pkg.ips.filter(
+        (ip) => idsToRemove.has(ip._id.toString()) && ip.allocated
+      );
+
+      if (blocked.length > 0) {
+        return NextResponse.json(
+          {
+            error: `Cannot delete ${blocked.length} allocated IP(s). Only available IPs can be removed.`,
+            blockedIps: blocked.map((ip) => ip.proxy),
+          },
+          { status: 400 }
+        );
+      }
+
+      const before = pkg.ips.length;
+      pkg.ips = pkg.ips.filter((ip) => !idsToRemove.has(ip._id.toString()));
+      const removed = before - pkg.ips.length;
+
+      if (removed === 0) {
+        return NextResponse.json({ error: 'No matching IPs found to remove' }, { status: 400 });
+      }
+
+      await pkg.save();
+
+      return NextResponse.json({
+        success: true,
+        package: pkg,
+        removed,
+      });
+    }
+
+    if (body.removeDuplicates) {
+      const pkg = await SlotIPPackage.findById(id);
+      if (!pkg) {
+        return NextResponse.json({ error: 'Package not found' }, { status: 404 });
+      }
+
+      const seen = new Set();
+      const removeIds = new Set();
+
+      for (const ip of pkg.ips) {
+        const key = ip.proxy?.trim().toLowerCase() || `${ip.ip}:${ip.port}`;
+        if (seen.has(key)) {
+          if (!ip.allocated) {
+            removeIds.add(ip._id.toString());
+          }
+        } else {
+          seen.add(key);
+        }
+      }
+
+      const before = pkg.ips.length;
+      pkg.ips = pkg.ips.filter((ip) => !removeIds.has(ip._id.toString()));
+      const removed = before - pkg.ips.length;
+
+      if (removed > 0) {
+        await pkg.save();
+      }
+
+      return NextResponse.json({
+        success: true,
+        package: pkg,
+        removed,
+        skippedAllocatedDuplicates: pkg.ips.filter((ip) => {
+          const key = ip.proxy?.trim().toLowerCase() || `${ip.ip}:${ip.port}`;
+          return ip.allocated && seen.has(key);
+        }).length,
+      });
+    }
+
     if (body.addIps) {
       const lines = body.addIps.split('\n').filter(l => l.trim());
       const newIps = [];

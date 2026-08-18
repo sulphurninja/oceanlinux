@@ -1,4 +1,5 @@
 const IPStock = require('@/models/ipStockModel');
+const { detachSupersededIpOrders } = require('@/lib/orderIpOwnership');
 // orderModel uses `export default`, so the interop namespace must be unwrapped.
 const Order = require('@/models/orderModel').default;
 
@@ -484,6 +485,25 @@ async function allocateCompanyInventoryForOrder(order) {
     order.autoProvisioned = true;
     order.inventoryDecremented = true;
     await order.save();
+
+    try {
+      const detach = await detachSupersededIpOrders({
+        ipStockId: order.ipStockId,
+        inventoryItemId: item._id,
+        ipAddress: item.ipAddress,
+        currentOrderId: order._id,
+      });
+      if (detach.detached > 0) {
+        console.log(
+          `[companyInventory] Detached ${detach.detached} superseded order(s) for IP ${item.ipAddress} → order ${order._id}`
+        );
+      }
+    } catch (detachErr) {
+      console.error(
+        `[companyInventory] detachSupersededIpOrders failed for order ${order._id}:`,
+        detachErr.message
+      );
+    }
 
     try {
       await syncStockCountFromInventory(order.ipStockId);
