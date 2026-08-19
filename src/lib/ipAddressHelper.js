@@ -21,8 +21,6 @@ export function formatIpAddress(ipAddress, provider, os) {
     return ipAddress;
   }
 
-  const prov = String(provider || '').toLowerCase();
-
   if (prov === 'netbay') {
     const base = extractBaseIp(ipAddress);
     if (!base) return ipAddress;
