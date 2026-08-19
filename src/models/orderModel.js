@@ -98,6 +98,7 @@ const orderSchema = new mongoose.Schema({
     provisioningError: { type: String, default: '' },
     autoProvisioned: { type: Boolean, default: false },
     lastProvisionAttempt: { type: Date }, // Track when last provisioning was attempted
+    upstreamBuyAttempted: { type: Boolean, default: false }, // true after first provider buy/create — never buy a 2nd VPS
     paymentMethod: { type: String }, // upi, cashfree, razorpay
     paymentDetails: { type: mongoose.Schema.Types.Mixed }, // Store payment-specific details
 

@@ -3,7 +3,7 @@ import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 import { authenticateReseller } from '@/lib/resellerAuth';
 import { sanitizeResellerOrder } from '@/lib/resellerOrderApi';
-import { getResellerManagementCapabilities, loadOrderIpStock } from '@/lib/resellerServerManage';
+import { getResellerManagementCapabilities, loadOrderIpStock, withLiveOsOptions } from '@/lib/resellerServerManage';
 
 export async function GET(request, { params }) {
   await connectDB();
@@ -23,7 +23,11 @@ export async function GET(request, { params }) {
     }
 
     const ipStock = await loadOrderIpStock(order);
-    const management = getResellerManagementCapabilities(order, ipStock);
+    const management = await withLiveOsOptions(
+      order,
+      ipStock,
+      getResellerManagementCapabilities(order, ipStock)
+    );
     // Reseller does not need internal provider name — strip it from API response
     const { _provider, ...publicManagement } = management;
 

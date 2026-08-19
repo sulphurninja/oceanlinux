@@ -41,7 +41,7 @@ export async function GET() {
       manage: {
         method: 'POST',
         path: '/orders/manage',
-        description: 'start | stop | restart | reinstall | changeos',
+        description: 'start | stop | restart | reinstall | templates | changeos',
         body: { orderId: 'required', action: UNIVERSAL_ACTIONS.join('|'), osType: 'optional' },
       },
       renew: {

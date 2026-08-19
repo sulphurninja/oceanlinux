@@ -148,7 +148,7 @@ def build():
     pdf.h2("GET /orders")
     pdf.body("List all your orders with price, IP, credentials, expiry.")
     pdf.h2("GET /orders/{orderId}")
-    pdf.body("Single order + management.supportedActions (what you can do with this server).")
+    pdf.body("Single order + management.osTemplates (live OS list, same as OceanLinux reinstall dropdown).")
 
     pdf.h1("7. Server Status (Online / Offline)")
     pdf.h2("GET /orders/{orderId}/status")
@@ -187,13 +187,16 @@ def build():
         "restart - Reboot server",
         "status  - Get power state",
         "sync    - Sync credentials",
-        "reinstall - Format / rebuild OS (osType required for some products)",
+        "templates - Live OS list (Windows 2022/2025, Ubuntu — same as Ocean panel)",
+        "reinstall - Rebuild OS (osType = template id or name from osTemplates)",
         "changeos  - Change OS (SmartVPS products)",
     ]:
         pdf.bullet(a)
     pdf.ln(2)
+    pdf.body("List OS templates:")
+    pdf.code_block('{ "orderId": "65b...", "action": "templates" }')
     pdf.body("Reinstall example:")
-    pdf.code_block('{ "orderId": "65b...", "action": "reinstall", "osType": "ubuntu" }')
+    pdf.code_block('{ "orderId": "65b...", "action": "reinstall", "osType": "Windows Server 2025" }')
     pdf.body("After reinstall: wait 3-5 min, then POST /orders/{id}/sync for new password.")
 
     pdf.h1("10. Renew")

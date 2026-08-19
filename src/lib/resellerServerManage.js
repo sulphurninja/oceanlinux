@@ -49,7 +49,7 @@ const {
 const { toUserFacingNetbayError } = require('@/lib/netbayApiErrors');
 const { runKurohostPostReinstallFlow } = require('@/lib/kurohostPostReinstallFlow');
 
-export const UNIVERSAL_ACTIONS = ['start', 'stop', 'restart', 'status', 'sync', 'reinstall', 'changeos'];
+export const UNIVERSAL_ACTIONS = ['start', 'stop', 'restart', 'status', 'sync', 'templates', 'reinstall', 'changeos'];
 
 const POWER_ACTIONS = new Set(['start', 'stop', 'restart', 'status', 'sync']);
 const OS_ACTIONS = new Set(['reinstall', 'changeos']);
@@ -57,7 +57,7 @@ const OS_ACTIONS = new Set(['reinstall', 'changeos']);
 /** Per-provider capability matrix — extend when adding new providers. */
 const PROVIDER_CAPABILITIES = {
   advps: {
-    supported: [...UNIVERSAL_ACTIONS.filter((a) => a !== 'changeos'), 'changeos'],
+    supported: UNIVERSAL_ACTIONS.filter((a) => a !== 'changeos').concat(['changeos']),
     reinstallRequiresOs: true,
     changeosRequiresOs: true,
     osOptions: ['ubuntu', 'centos', 'windows'],
@@ -78,21 +78,21 @@ const PROVIDER_CAPABILITIES = {
     notes: 'Power actions only. Reinstall/change OS not available via API for this product type.',
   },
   netbay: {
-    supported: ['start', 'stop', 'restart', 'status', 'sync', 'reinstall', 'changeos'],
+    supported: ['start', 'stop', 'restart', 'status', 'sync', 'templates', 'reinstall', 'changeos'],
     reinstallRequiresOs: false,
     changeosRequiresOs: false,
     osOptions: ['ubuntu', 'centos', 'windows'],
     notes: 'reinstall/changeos trigger Netbay rebuild. osType optional.',
   },
   kurohost: {
-    supported: ['start', 'stop', 'restart', 'status', 'sync', 'reinstall'],
+    supported: ['start', 'stop', 'restart', 'status', 'sync', 'templates', 'reinstall'],
     reinstallRequiresOs: true,
     changeosRequiresOs: false,
     osOptions: [],
-    notes: 'KuroHost Cloud — power actions, OS reinstall (RUNNING/STOPPED), status sync.',
+    notes: 'KuroHost Cloud — power actions, OS reinstall. Use GET /orders/{id} osTemplates (same list as Ocean panel).',
   },
   company: {
-    supported: ['start', 'stop', 'restart', 'status', 'sync', 'reinstall'],
+    supported: ['start', 'stop', 'restart', 'status', 'sync', 'templates', 'reinstall'],
     reinstallRequiresOs: true,
     changeosRequiresOs: true,
     osOptions: ['ubuntu', 'centos', 'windows'],
@@ -106,11 +106,11 @@ const PROVIDER_CAPABILITIES = {
     notes: 'Joy Services — power actions + status only. OS reinstall/change is not exposed by the Joy connect API.',
   },
   'reseller-api': {
-    supported: ['start', 'stop', 'restart', 'status', 'sync', 'reinstall'],
+    supported: ['start', 'stop', 'restart', 'status', 'sync', 'templates', 'reinstall'],
     reinstallRequiresOs: true,
     changeosRequiresOs: false,
     osOptions: ['ubuntu', 'centos', 'windows'],
-    notes: 'PrimeVPS / Hostheaven panel — full UserSide.pdf manage API.',
+    notes: 'PrimeVPS / Hostheaven panel — osTemplates are the live ISO list (Windows 2022/2025, Ubuntu, etc.), same as Ocean reinstall.',
   },
   oceanlinux: {
     supported: [],
@@ -203,10 +203,169 @@ export function getResellerManagementCapabilities(order, ipStock = null) {
     reinstallRequiresOs: caps.reinstallRequiresOs,
     changeosRequiresOs: caps.changeosRequiresOs,
     osOptions: caps.osOptions,
+    osTemplates: (caps.osOptions || []).map((name) => ({ id: name, name })),
     notes: caps.notes,
     provisioned,
     // Internal — optional for debugging; resellers can ignore
     _provider: provider,
+  };
+}
+
+function flattenIsoLikeList(items, { idKeys = ['id', 'isoId', 'templateId', 'osTemplateId'], nameKeys = ['isoName', 'name', 'label', 'osType'] } = {}) {
+  const out = [];
+  if (!Array.isArray(items)) return out;
+  for (const item of items) {
+    if (!item || typeof item !== 'object') continue;
+    let id = null;
+    for (const k of idKeys) {
+      if (item[k] != null && String(item[k]).trim() !== '') {
+        id = String(item[k]);
+        break;
+      }
+    }
+    if (!id && typeof item.name === 'string' && item.name.trim()) id = String(item.name).trim();
+    if (!id) continue;
+    let name = '';
+    for (const k of nameKeys) {
+      if (item[k] != null && String(item[k]).trim() !== '') {
+        name = String(item[k]).trim();
+        break;
+      }
+    }
+    out.push({
+      id,
+      name: name || id,
+      isWindows: !!item.isWindows,
+    });
+  }
+  return out;
+}
+
+function resolveOsTemplateId(templates, osType) {
+  if (osType == null || String(osType).trim() === '') return null;
+  const list = Array.isArray(templates) ? templates : [];
+  const wanted = String(osType).trim();
+  const lower = wanted.toLowerCase();
+
+  const byId = list.find((t) => String(t.id) === wanted);
+  if (byId) return byId.id;
+
+  const byNameExact = list.find((t) => String(t.name).toLowerCase() === lower);
+  if (byNameExact) return byNameExact.id;
+
+  const year = (lower.match(/\b(2012|2016|2019|2022|2025)\b/) || [])[0];
+  if (year) {
+    const yearHits = list.filter((t) => new RegExp(`\\b${year}\\b`).test(String(t.name)));
+    if (yearHits.length === 1) return yearHits[0].id;
+    const winYear = yearHits.find((t) => /windows/i.test(t.name));
+    if (winYear) return winYear.id;
+    if (yearHits.length) return yearHits[0].id;
+  }
+
+  if (lower === '11' || /\bwin(dows)?\s*11\b/.test(lower)) {
+    const win11 = list.find((t) => /windows?\s*11|\bwin\s*11\b/i.test(t.name));
+    if (win11) return win11.id;
+  }
+
+  if (lower.includes('windows') || lower === 'windows-2022') {
+    return (
+      list.find((t) => /windows.*2022|2022.*windows/i.test(t.name)) ||
+      list.find((t) => /windows/i.test(t.name) || t.isWindows)
+    )?.id || null;
+  }
+  if (lower.includes('centos')) {
+    return list.find((t) => /centos/i.test(t.name))?.id || null;
+  }
+  if (lower.includes('ubuntu')) {
+    return (
+      list.find((t) => /ubuntu\s*22|ubuntu22/i.test(t.name)) ||
+      list.find((t) => /ubuntu/i.test(t.name))
+    )?.id || null;
+  }
+
+  const includesHits = list.filter((t) => {
+    const n = String(t.name).toLowerCase();
+    return n.includes(lower) || (lower.length >= 4 && lower.includes(n));
+  });
+  if (includesHits.length === 1) return includesHits[0].id;
+  if (includesHits.length > 1) {
+    includesHits.sort((a, b) => String(b.name).length - String(a.name).length);
+    return includesHits[0].id;
+  }
+
+  return null;
+}
+
+function classifyIsoLike(item) {
+  if (!item) return { family: null, username: null, osLabel: null };
+  const haystack = [item.isoName, item.name, item.osType, item.label]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  const label = item.isoName || item.name || item.label || null;
+  if (item.isWindows || /\b(windows|win\s*server|win\s*11|server\s*201[269]|server\s*202[0-9])\b/.test(haystack)) {
+    return { family: 'windows', username: 'Administrator', osLabel: label };
+  }
+  if (/\b(ubuntu|debian|centos|rocky|almalinux|alma|fedora|rhel|redhat|linux)\b/.test(haystack)) {
+    return { family: 'linux', username: 'root', osLabel: label };
+  }
+  return { family: null, username: null, osLabel: label };
+}
+
+async function fetchLiveOsTemplates(provider, order, ipStock) {
+  try {
+    if (provider === 'reseller-api') {
+      const cfg = getCompanyResellerApiConfig(ipStock?.company);
+      if (!cfg) return [];
+      const api = new ResellerApi(cfg);
+      const { vmId } = await resolveResellerVmForOrder(api, order);
+      const { isos } = await api.getVmIsos(vmId);
+      return flattenIsoLikeList(isos);
+    }
+    if (provider === 'kurohost') {
+      const cfg = getCompanyKurohostApiConfig(ipStock?.company);
+      if (!cfg) return [];
+      const api = new KurohostApi(cfg);
+      const zoneId = order.kurohostZoneId;
+      const osRes = await api.listOsTemplates(zoneId ? { cloudZoneId: zoneId } : undefined);
+      const items = osRes?.items || [];
+      return flattenIsoLikeList(items, {
+        idKeys: ['id'],
+        nameKeys: ['name', 'label'],
+      }).map((t) => {
+        const raw = items.find((i) => String(i?.id) === String(t.id));
+        return { ...t, isWindows: !!(raw && raw.isWindows) };
+      });
+    }
+    if (provider === 'netbay') {
+      const cfg = ipStock?.company?.netbayApi;
+      if (!cfg?.baseUrl || !cfg?.apiKey) return [];
+      const api = new NetbayApi(cfg);
+      const osRes = await api.listOs({});
+      const osList = osRes?.data?.os || osRes?.data || [];
+      return flattenIsoLikeList(Array.isArray(osList) ? osList : [], {
+        idKeys: ['name', 'id'],
+        nameKeys: ['name', 'label', 'id'],
+      });
+    }
+  } catch (err) {
+    console.warn(`[RESELLER-MANAGE] Live OS catalog failed (${provider}):`, err.message);
+  }
+  return [];
+}
+
+/**
+ * Overlay live OS templates (same catalog OceanLinux reinstall uses) onto
+ * static capability osOptions. Falls back to ubuntu/centos/windows if fetch fails.
+ */
+export async function withLiveOsOptions(order, ipStock, capabilities) {
+  const provider = capabilities?._provider || resolveResellerManageProvider(order, ipStock);
+  const live = await fetchLiveOsTemplates(provider, order, ipStock);
+  if (!live.length) return capabilities;
+  return {
+    ...capabilities,
+    osOptions: live.map((t) => t.name),
+    osTemplates: live,
   };
 }
 
@@ -256,10 +415,11 @@ function actionNotSupported(action, capabilities) {
 function missingOsType(action, capabilities) {
   return {
     success: false,
-    message: `osType is required for "${action}" on this product. Options: ${capabilities.osOptions.join(', ') || 'contact support'}`,
+    message: `osType is required for "${action}" on this product. Options: ${(capabilities.osOptions || []).join(', ') || 'contact support'}`,
     code: 'OS_TYPE_REQUIRED',
     supportedActions: capabilities.supportedActions,
     osOptions: capabilities.osOptions,
+    osTemplates: capabilities.osTemplates || (capabilities.osOptions || []).map((name) => ({ id: name, name })),
   };
 }
 
@@ -488,7 +648,17 @@ async function runNetbay(order, orderId, action, osType, ipStock) {
     }
     case 'reinstall':
     case 'changeos': {
-      const osPayload = osType ? String(osType) : null;
+      const live = await fetchLiveOsTemplates('netbay', order, ipStock);
+      const resolved = resolveOsTemplateId(live, osType);
+      const osPayload = resolved
+        || (live.length && osType ? null : (osType ? String(osType) : null));
+      if (osType && live.length && !resolved) {
+        return missingOsType(action, {
+          ...PROVIDER_CAPABILITIES.netbay,
+          osOptions: live.map((t) => t.name),
+        });
+      }
+      const chosen = live.find((t) => String(t.id) === String(resolved)) || live.find((t) => t.name === osPayload);
       const apiRes = await api.rebuild(sid, osPayload ? { os: osPayload } : {});
       const taskId = apiRes?.data?.taskId || null;
       await Order.findByIdAndUpdate(orderId, {
@@ -496,6 +666,12 @@ async function runNetbay(order, orderId, action, osType, ipStock) {
         lastActionTime: new Date(),
         provisioningStatus: 'provisioning',
         ...(taskId ? { netbayTaskId: taskId } : {}),
+        ...(chosen?.name
+          ? {
+              os: chosen.name,
+              username: /windows/i.test(chosen.name) ? 'Administrator' : 'root',
+            }
+          : {}),
       });
 
       if (taskId) {
@@ -557,10 +733,17 @@ async function runKurohost(order, orderId, action, _osType, ipStock) {
       return { success: true, message: 'Status retrieved', data: { powerState, instance: inst } };
     }
     case 'reinstall': {
-      const osTemplateId = String(_osType || '').trim();
+      const live = await fetchLiveOsTemplates('kurohost', order, ipStock);
+      const resolved = resolveOsTemplateId(live, _osType);
+      const osTemplateId = resolved || (live.length ? '' : String(_osType || '').trim());
       if (!osTemplateId) {
-        return missingOsType(action, PROVIDER_CAPABILITIES.kurohost);
+        return missingOsType(action, {
+          ...PROVIDER_CAPABILITIES.kurohost,
+          osOptions: live.length ? live.map((t) => t.name) : PROVIDER_CAPABILITIES.kurohost.osOptions,
+        });
       }
+      const chosen = live.find((t) => String(t.id) === String(osTemplateId));
+      const isWindows = !!(chosen?.isWindows || /windows|win\s*server/i.test(chosen?.name || ''));
       const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789@#&$';
       let newPassword = '';
       for (let i = 0; i < 20; i++) {
@@ -574,7 +757,8 @@ async function runKurohost(order, orderId, action, _osType, ipStock) {
         provisioningStatus: 'provisioning',
         provisioningError: 'Reinstall in progress — fetching new password…',
         password: newPassword,
-        username: 'root',
+        username: isWindows ? 'Administrator' : 'root',
+        ...(chosen?.name ? { os: chosen.name } : {}),
         ...(jobId ? { kurohostJobId: jobId } : {}),
       });
       void runKurohostPostReinstallFlow({
@@ -721,21 +905,38 @@ async function runResellerApi(order, orderId, action, osType, ipStock) {
       };
     }
     case 'reinstall': {
-      const isoId = osType;
-      if (!isoId) {
-        return missingOsType(action, PROVIDER_CAPABILITIES['reseller-api']);
-      }
       const { vmId } = await findVm();
+      let isos = [];
+      try {
+        const fetched = await api.getVmIsos(vmId);
+        isos = fetched?.isos || [];
+      } catch (isoErr) {
+        console.warn('[RESELLER-MANAGE] ISO catalog lookup failed:', isoErr.message);
+      }
+      const templates = flattenIsoLikeList(isos);
+      const resolved = resolveOsTemplateId(templates, osType);
+      const isoId = resolved || (templates.length ? '' : (osType ? String(osType).trim() : ''));
+      if (!isoId) {
+        return missingOsType(action, {
+          ...PROVIDER_CAPABILITIES['reseller-api'],
+          osOptions: templates.length ? templates.map((t) => t.name) : PROVIDER_CAPABILITIES['reseller-api'].osOptions,
+        });
+      }
+      const chosenIso = (isos || []).find((i) => String(i?.id) === String(isoId)) || null;
+      const cls = classifyIsoLike(chosenIso);
       await api.rebuild(vmId, isoId);
-      await Order.findByIdAndUpdate(orderId, {
+      const dbSet = {
         lastAction: 'reinstall',
         lastActionTime: new Date(),
         provisioningStatus: 'provisioning',
-      });
+      };
+      if (cls.osLabel) dbSet.os = cls.osLabel;
+      if (cls.username) dbSet.username = cls.username;
+      await Order.findByIdAndUpdate(orderId, dbSet);
       return {
         success: true,
-        message: 'Reinstall submitted — sync after a few minutes for new password',
-        data: { vmId, isoId },
+        message: `Reinstall submitted (${cls.osLabel || isoId}) — sync after a few minutes for new password`,
+        data: { vmId, isoId, os: cls.osLabel || null },
       };
     }
     default:
@@ -796,6 +997,22 @@ export async function executeResellerServerAction({ order, orderId, action, osTy
     };
   }
 
+  if (normalized === 'templates') {
+    const liveCaps = await withLiveOsOptions(order, ipStock, capabilities);
+    return {
+      success: true,
+      message: liveCaps.osTemplates?.length
+        ? 'OS templates loaded — same list as OceanLinux reinstall'
+        : 'No OS templates available for this product',
+      data: {
+        osTemplates: liveCaps.osTemplates || [],
+        osOptions: liveCaps.osOptions || [],
+      },
+      action: 'templates',
+      supportedActions: capabilities.supportedActions,
+    };
+  }
+
   if (!capabilities.supportedActions.includes(normalized)) {
     return actionNotSupported(normalized, capabilities);
   }
@@ -804,7 +1021,10 @@ export async function executeResellerServerAction({ order, orderId, action, osTy
     const needsOs =
       (normalized === 'reinstall' && capabilities.reinstallRequiresOs) ||
       (normalized === 'changeos' && capabilities.changeosRequiresOs);
-    if (needsOs && !osType) return missingOsType(normalized, capabilities);
+    if (needsOs && !osType) {
+      const liveCaps = await withLiveOsOptions(order, ipStock, capabilities);
+      return missingOsType(normalized, liveCaps);
+    }
   }
 
   const provider = resolveResellerManageProvider(order, ipStock);

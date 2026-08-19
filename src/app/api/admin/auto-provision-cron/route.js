@@ -3,12 +3,17 @@ import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 const AutoProvisioningService = require('@/services/autoProvisioningService');
 const WhatsAppService = require('@/services/whatsappService');
-import { enforceCronSecret } from '@/lib/apiSecurity';
+/**
+ * Auto-provision cron — retries FAILED paid orders for every provider
+ * (SmartVPS, Hostycare, ADVPS, Netbay, KuroHost, reseller panel).
+ * Schedule: every 5 minutes. Window: 24h from order createdAt.
+ * Same OceanLinux order is never double-bought in parallel (DB lock + IP/service-id resume).
+ */
 
 // Configuration
 const CONFIG = {
-    maxRetries: 3,
-    retryDelayMs: 5000, // 5 seconds between retries
+    maxRetries: 1, // one provision/buy per cron tick — next try after 5 min, not 2–4 buys in one run
+    retryWindowMs: 24 * 60 * 60 * 1000, // stop auto-retry 24h after order created
     maxProcessingTime: 540000, // 9 minutes (AWS Lambda 15min limit buffer)
     lockTimeoutMs: 1200000, // 20 minutes - if a lock is older than this, consider it stale
     retryableErrors: [
@@ -17,7 +22,20 @@ const CONFIG = {
         'Service temporarily unavailable',
         'Connection timeout',
         'API rate limit',
-        'Server is busy'
+        'Server is busy',
+        'did not return an assigned IP',
+        'Lock acquisition failed',
+        'Cannot provision',
+        'ipstock failed',
+        'No package matching',
+        'try again',
+        'out of stock',
+        'no available',
+        'rate limit',
+        'ECONNRESET',
+        'ETIMEDOUT',
+        'timeout',
+        'temporarily',
     ]
 };
 
@@ -38,6 +56,10 @@ function shouldSkipAutoRetry(order) {
     }
     if (order.provisioningStatus === 'active' && order.ipAddress) {
         return { skip: true, reason: 'already_active' };
+    }
+    const created = order.createdAt ? new Date(order.createdAt).getTime() : 0;
+    if (created && Date.now() - created > CONFIG.retryWindowMs) {
+        return { skip: true, reason: 'retry_window_24h' };
     }
     const last = order.lastProvisionAttempt ? new Date(order.lastProvisionAttempt).getTime() : 0;
     if (last && Date.now() - last < 4 * 60 * 1000) {
@@ -94,22 +116,27 @@ async function validateOrderConfiguration(order) {
         console.log(`[VALIDATION] ✅ Found IPStock: ${ipStock.name}`);
 
         const AutoProvisioningService = require('@/services/autoProvisioningService');
+        const { isResellerApiStock } = require('@/lib/resellerApiStockConfig');
         const provisioner = new AutoProvisioningService();
-        const isSmartVps =
-            order.provider === 'smartvps' ||
-            provisioner.isSmartVpsStock(ipStock, order);
 
-        if (isSmartVps) {
-            console.log(`[VALIDATION] ✅ SmartVPS / Ocean Linux stock — skip Hostycare product ID check`);
-            return {
-                valid: true,
-                productId: 'smartvps',
-                ipStock: ipStock.name,
-                isSmartVps: true,
-            };
+        if (provisioner.isSmartVpsStock(ipStock, order)) {
+            return { valid: true, productId: 'smartvps', ipStock: ipStock.name, provider: 'smartvps' };
         }
-        
-        // STEP 2: Parse memory options from IPStock
+        if (provisioner.isAdvpsStock(ipStock, order)) {
+            return { valid: true, productId: 'advps', ipStock: ipStock.name, provider: 'advps' };
+        }
+        if (provisioner.isNetbayStock(ipStock, order)) {
+            return { valid: true, productId: 'netbay', ipStock: ipStock.name, provider: 'netbay' };
+        }
+        if (provisioner.isKurohostStock(ipStock, order)) {
+            return { valid: true, productId: 'kurohost', ipStock: ipStock.name, provider: 'kurohost' };
+        }
+        if (isResellerApiStock(ipStock, order)) {
+            return { valid: true, productId: 'reseller-api', ipStock: ipStock.name, provider: 'reseller-api' };
+        }
+
+        // Hostycare: need memoryOptions + hostycareProductId
+
         let memoryOptions = {};
         
         console.log(`[VALIDATION] 🧠 Raw memoryOptions:`, ipStock.memoryOptions);
@@ -302,6 +329,7 @@ async function acquireDatabaseLock() {
         console.log('[LOCK] 🔍 Finding and validating orders for locking...');
         
         // Get candidate orders (not locked)
+        const cooldownCutoff = new Date(Date.now() - 4 * 60 * 1000);
         const candidateOrders = await Order.find({
             $and: [
                 { status: 'confirmed' },
@@ -310,6 +338,31 @@ async function acquireDatabaseLock() {
                         { slotIpPackageId: { $exists: false } },
                         { slotIpPackageId: null },
                         { slotIpPackageId: '' },
+                    ],
+                },
+                {
+                    $or: [
+                        { createdAt: { $gte: new Date(Date.now() - CONFIG.retryWindowMs) } },
+                        { createdAt: { $exists: false } },
+                    ],
+                },
+                {
+                    $or: [
+                        { lastProvisionAttempt: { $exists: false } },
+                        { lastProvisionAttempt: null },
+                        { lastProvisionAttempt: { $lt: cooldownCutoff } },
+                    ],
+                },
+                {
+                    $or: [
+                        { provisioningError: { $exists: false } },
+                        { provisioningError: null },
+                        { provisioningError: '' },
+                        {
+                            provisioningError: {
+                                $not: /WRONG IP ASSIGNED|DO NOT provision|PROVISIONING BLOCKED/i,
+                            },
+                        },
                     ],
                 },
                 {
@@ -328,7 +381,6 @@ async function acquireDatabaseLock() {
                     $or: [
                         { provisioningStatus: { $ne: 'provisioning' } },
                         { provisioningStatus: { $exists: false } },
-                        // Also include stale locks (older than 20 minutes)
                         {
                             $and: [
                                 { provisioningStatus: 'provisioning' },
@@ -339,8 +391,8 @@ async function acquireDatabaseLock() {
                 }
             ]
         })
-        .sort({ createdAt: 1 }) // Oldest first
-        .limit(20);
+        .sort({ createdAt: 1 })
+        .limit(40);
         
         console.log(`[LOCK] 📊 Found ${candidateOrders.length} candidate orders`);
         
@@ -362,23 +414,7 @@ async function acquireDatabaseLock() {
             const validation = await validateOrderConfiguration(candidate);
             
             if (!validation.valid) {
-                console.log(`[LOCK] ❌ Order ${candidate._id} failed validation: ${validation.reason}`);
-
-                const isSmartVpsLike =
-                    candidate.provider === 'smartvps' ||
-                    String(candidate.productName || '').includes('🌊');
-                if (isSmartVpsLike) {
-                    console.log(`[LOCK] ⏭️ Not marking SmartVPS order as CONFIG-failed — will retry next run`);
-                    continue;
-                }
-                
-                await Order.findByIdAndUpdate(candidate._id, {
-                    provisioningStatus: 'failed',
-                    provisioningError: `CONFIG: ${validation.reason}`,
-                    autoProvisioned: true
-                });
-                
-                console.log(`[LOCK] 🚫 Order ${candidate._id} marked as permanently failed due to config issues`);
+                console.log(`[LOCK] ❌ Order ${candidate._id} failed validation: ${validation.reason} — skip this run, will retry later`);
                 continue;
             }
             
@@ -438,12 +474,11 @@ async function acquireDatabaseLock() {
 // Helper: Release database lock by updating order status
 async function releaseDatabaseLock(orderId, finalStatus, error = '') {
     try {
-        const updateData = {
+        await Order.findByIdAndUpdate(orderId, {
             provisioningStatus: finalStatus,
-            provisioningError: error
-        };
-
-        await Order.findByIdAndUpdate(orderId, updateData);
+            provisioningError: error,
+            lastProvisionAttempt: new Date(),
+        });
         console.log(`[LOCK] Released lock for order ${orderId} with status: ${finalStatus}`);
     } catch (updateError) {
         console.error(`[LOCK] Error releasing lock for order ${orderId}:`, updateError);
@@ -479,165 +514,122 @@ export async function POST(request) {
 
         // ADVPS "assignment pending" follow-up: /api/admin/advps-pending-cron (separate schedule; saves ADVPS rate limit)
 
-        // STEP 1: Try to acquire a database lock on a VALIDATED order
-        console.log(`[CRON-${cronId}] 🔒 STEP 1: Attempting to acquire lock on validated order...`);
-        
-        const lockedOrder = await acquireDatabaseLock();
-        
-        if (!lockedOrder) {
-            console.log(`[CRON-${cronId}] ⏸️ No valid orders available for provisioning`);
-            return NextResponse.json({
-                success: true,
-                message: 'No valid orders available for provisioning (all processed, locked, or lack proper configuration)',
-                processed: 0,
-                cronId,
-                timestamp: new Date().toISOString()
-            });
-        }
-
-        console.log(`[CRON-${cronId}] 🔓 Lock acquired for VALIDATED order: ${lockedOrder._id}`);
-        console.log(`[CRON-${cronId}] 📦 Product: ${lockedOrder.productName}`);
-        console.log(`[CRON-${cronId}] 💾 Memory: ${lockedOrder.memory}`);
-        console.log(`[CRON-${cronId}] 💰 Price: ₹${lockedOrder.price}`);
-        console.log(`[CRON-${cronId}] 🆔 Product ID: ${lockedOrder._validationInfo.productId}`);
-
-        // STEP 2: Process the locked order with retry logic
-        console.log(`[CRON-${cronId}] 🚀 STEP 2: Processing validated and locked order...`);
-
         const provisioningService = new AutoProvisioningService();
+        const results = [];
+        const maxOrdersPerRun = 5;
         let totalRetries = 0;
-        let result = null;
 
-        const orderStartTime = Date.now();
-        let attempt = 1;
-        let success = false;
-        let lastError = null;
+        for (let n = 0; n < maxOrdersPerRun; n++) {
+            if (Date.now() - startTime > CONFIG.maxProcessingTime) break;
 
-        // Retry loop for this single order
-        while (attempt <= CONFIG.maxRetries && !success) {
-            // Check if we're running out of time
-            const elapsedTime = Date.now() - startTime;
-            if (elapsedTime > CONFIG.maxProcessingTime) {
-                console.log(`[CRON-${cronId}] ⏰ Approaching time limit, stopping processing`);
-                lastError = new Error('Processing time limit reached');
+            const lockedOrder = await acquireDatabaseLock();
+            if (!lockedOrder) {
+                if (n === 0) {
+                    console.log(`[CRON-${cronId}] ⏸️ No valid orders available for provisioning`);
+                    return NextResponse.json({
+                        success: true,
+                        message: 'No valid orders available for provisioning (all processed, locked, or lack proper configuration)',
+                        processed: 0,
+                        cronId,
+                        timestamp: new Date().toISOString()
+                    });
+                }
                 break;
             }
 
-            try {
-                console.log(`[CRON-${cronId}] 🚀 Attempt ${attempt}/${CONFIG.maxRetries}`);
+            console.log(`[CRON-${cronId}] 🔓 Lock acquired (${n + 1}/${maxOrdersPerRun}): ${lockedOrder._id} — ${lockedOrder.productName}`);
 
-                const provisionResult = await provisioningService.provisionServer(lockedOrder._id.toString());
+            const orderStartTime = Date.now();
+            let attempt = 1;
+            let success = false;
+            let lastError = null;
+            let result = null;
 
-                if (provisionResult.success) {
-                    success = true;
-                    const orderTime = Date.now() - orderStartTime;
-                    console.log(`[CRON-${cronId}] ✅ Order provisioned successfully in ${orderTime}ms`);
-
-                    result = {
-                        orderId: lockedOrder._id.toString(),
-                        success: true,
-                        attempts: attempt,
-                        processingTime: orderTime,
-                        serviceId: provisionResult.serviceId,
-                        ipAddress: provisionResult.ipAddress,
-                        productId: lockedOrder._validationInfo.productId
-                    };
-
-                    if (!provisionResult.alreadyProvisioned) {
-                        WhatsAppService.notifyOrderViaWhatsApp(lockedOrder.user, lockedOrder).catch(() => {});
-                    }
-
-                } else {
-                    throw new Error(provisionResult.error || 'Unknown provisioning error');
-                }
-
-            } catch (error) {
-                lastError = error;
-                console.error(`[CRON-${cronId}] ❌ Attempt ${attempt} failed:`, error.message);
-
-                // Check if error is retryable
-                if (attempt < CONFIG.maxRetries && isRetryableError(error.message)) {
-                    console.log(`[CRON-${cronId}] 🔄 Error is retryable, waiting ${CONFIG.retryDelayMs}ms...`);
-                    await sleep(CONFIG.retryDelayMs);
-                    attempt++;
-                    totalRetries++;
-                } else {
-                    // Max retries reached or non-retryable error
-                    const orderTime = Date.now() - orderStartTime;
-                    console.error(`[CRON-${cronId}] 💥 This cron run failed after ${attempt} attempts (will retry on next schedule)`);
-
-                    result = {
-                        orderId: lockedOrder._id.toString(),
-                        success: false,
-                        attempts: attempt,
-                        processingTime: orderTime,
-                        error: error.message,
-                        retryable: isRetryableError(error.message),
-                        productId: lockedOrder._validationInfo.productId
-                    };
-
-                    // Release lock with failed status
-                    await releaseDatabaseLock(
-                        lockedOrder._id, 
-                        'failed', 
-                        `CRON: ${error.message}`
-                    );
+            while (attempt <= CONFIG.maxRetries && !success) {
+                if (Date.now() - startTime > CONFIG.maxProcessingTime) {
+                    lastError = new Error('Processing time limit reached');
                     break;
                 }
+
+                try {
+                    console.log(`[CRON-${cronId}] 🚀 ${lockedOrder._id} attempt ${attempt}/${CONFIG.maxRetries}`);
+                    const provisionResult = await provisioningService.provisionServer(lockedOrder._id.toString());
+                    if (provisionResult.success) {
+                        success = true;
+                        result = {
+                            orderId: lockedOrder._id.toString(),
+                            success: true,
+                            attempts: attempt,
+                            processingTime: Date.now() - orderStartTime,
+                            serviceId: provisionResult.serviceId,
+                            ipAddress: provisionResult.ipAddress,
+                            productId: lockedOrder._validationInfo.productId
+                        };
+                        if (!provisionResult.alreadyProvisioned) {
+                            WhatsAppService.notifyOrderViaWhatsApp(lockedOrder.user, lockedOrder).catch(() => {});
+                        }
+                    } else {
+                        throw new Error(provisionResult.error || 'Unknown provisioning error');
+                    }
+                } catch (error) {
+                    lastError = error;
+                    console.error(`[CRON-${cronId}] ❌ ${lockedOrder._id} attempt ${attempt} failed:`, error.message);
+                    if (attempt < CONFIG.maxRetries && isRetryableError(error.message)) {
+                        await sleep(CONFIG.retryDelayMs);
+                        attempt++;
+                        totalRetries++;
+                    } else {
+                        result = {
+                            orderId: lockedOrder._id.toString(),
+                            success: false,
+                            attempts: attempt,
+                            processingTime: Date.now() - orderStartTime,
+                            error: error.message,
+                            retryable: isRetryableError(error.message),
+                            productId: lockedOrder._validationInfo.productId
+                        };
+                        await releaseDatabaseLock(lockedOrder._id, 'failed', `CRON: ${error.message}`);
+                        break;
+                    }
+                }
             }
+
+            if (!success && !result) {
+                result = {
+                    orderId: lockedOrder._id.toString(),
+                    success: false,
+                    attempts: attempt,
+                    processingTime: Date.now() - orderStartTime,
+                    error: lastError?.message || 'Processing timeout',
+                    retryable: false,
+                    productId: lockedOrder._validationInfo.productId
+                };
+                await releaseDatabaseLock(
+                    lockedOrder._id,
+                    'failed',
+                    `CRON: Processing timeout after ${attempt} attempts`
+                );
+            }
+
+            results.push(result);
         }
 
-        // Handle timeout case
-        if (!success && !result) {
-            const orderTime = Date.now() - orderStartTime;
-            result = {
-                orderId: lockedOrder._id.toString(),
-                success: false,
-                attempts: attempt,
-                processingTime: orderTime,
-                error: lastError?.message || 'Processing timeout',
-                retryable: false,
-                productId: lockedOrder._validationInfo.productId
-            };
-
-            await releaseDatabaseLock(
-                lockedOrder._id, 
-                'failed', 
-                `CRON: Processing timeout after ${attempt} attempts`
-            );
-        }
-        
-        // STEP 3: Generate summary
         const totalTime = Date.now() - startTime;
         const summary = {
-            successful: result?.success ? 1 : 0,
-            failed: result?.success ? 0 : 1,
+            successful: results.filter((r) => r?.success).length,
+            failed: results.filter((r) => r && !r.success).length,
             retries: totalRetries,
             totalTime,
-            processed: 1
+            processed: results.length
         };
 
-        console.log("\n" + "🎯".repeat(80));
-        console.log(`[CRON-${cronId}] 🎯 PROCESSING COMPLETED`);
-        console.log(`   - Order: ${lockedOrder._id}`);
-        console.log(`   - Product ID: ${lockedOrder._validationInfo.productId}`);
-        console.log(`   - Result: ${result?.success ? 'SUCCESS' : 'FAILED'}`);
-        console.log(`   - Attempts: ${result?.attempts || 0}`);
-        console.log(`   - Total retries: ${summary.retries}`);
-        console.log(`   - Processing time: ${result?.processingTime || 0}ms`);
-        console.log(`   - Total time: ${summary.totalTime}ms`);
-        if (!result?.success) {
-            console.log(`   - Error: ${result?.error}`);
-        }
-        console.log("🎯".repeat(80));
+        console.log(`[CRON-${cronId}] 🎯 DONE processed=${summary.processed} ok=${summary.successful} fail=${summary.failed} time=${totalTime}ms`);
 
         return NextResponse.json({
             success: true,
-            message: result?.success 
-                ? `Successfully provisioned order ${lockedOrder._id} with product ID ${lockedOrder._validationInfo.productId}` 
-                : `Failed to provision order ${lockedOrder._id}: ${result?.error}`,
+            message: `Processed ${summary.processed} order(s): ${summary.successful} ok, ${summary.failed} failed`,
             summary,
-            result,
+            results,
             cronId,
             timestamp: new Date().toISOString()
         });

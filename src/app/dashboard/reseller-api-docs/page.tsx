@@ -176,7 +176,7 @@ curl -X POST "${baseUrl}/orders/manage" \\
                                 <li><code>GET /orders/{`{orderId}`}</code> — Order detail + capabilities</li>
                                 <li><code>GET /orders/{`{orderId}`}/status</code> — Online/offline (OceanLinux se)</li>
                                 <li><code>POST /orders/{`{orderId}`}/sync</code> — IP/username/password sync</li>
-                                <li><code>POST /orders/manage</code> — start/stop/restart/reinstall</li>
+                                <li><code>POST /orders/manage</code> — start/stop/restart/reinstall/templates</li>
                                 <li><code>GET /orders/{`{orderId}`}/renew</code> — Renewal price check</li>
                                 <li><code>POST /orders/{`{orderId}`}/renew</code> — Renew service</li>
                             </ul>
@@ -351,7 +351,7 @@ curl -X POST "${baseUrl}/orders/manage" \\
                                 <Badge className="bg-blue-600 hover:bg-blue-700">GET</Badge>
                                 <CardTitle className="text-xl font-mono">/orders/{`{orderId}`}</CardTitle>
                             </div>
-                            <CardDescription>Single order detail — IP & credentials after provisioning</CardDescription>
+                            <CardDescription>Single order detail — credentials + live OS templates for reinstall</CardDescription>
                         </CardHeader>
                         <CardContent>
                             <CodeBlock code={`
@@ -366,9 +366,23 @@ curl -X POST "${baseUrl}/orders/manage" \\
     "username": "root",
     "password": "your-password",
     "os": "Ubuntu 22"
+  },
+  "management": {
+    "available": true,
+    "supportedActions": ["start", "stop", "restart", "status", "sync", "templates", "reinstall"],
+    "reinstallRequiresOs": true,
+    "osOptions": ["Windows Server 2022", "Windows Server 2025", "Ubuntu 22.04"],
+    "osTemplates": [
+      { "id": "12", "name": "Windows Server 2022" },
+      { "id": "18", "name": "Windows Server 2025" },
+      { "id": "4", "name": "Ubuntu 22.04" }
+    ]
   }
 }
                             `} />
+                            <p className="text-sm text-muted-foreground mt-2">
+                                <code>osTemplates</code> Ocean panel ke reinstall dropdown jaisi live list hai (2022, 2025, Ubuntu, etc.). Reinstall ke liye <code>osType</code> me <code>id</code> ya <code>name</code> bhejo.
+                            </p>
                         </CardContent>
                     </Card>
 
@@ -424,15 +438,15 @@ curl -X POST "${baseUrl}/orders/manage" \\
                                 <Badge className="bg-green-600 hover:bg-green-700">POST</Badge>
                                 <CardTitle className="text-xl font-mono">/orders/manage</CardTitle>
                             </div>
-                            <CardDescription>Server actions: start, stop, restart, status, format, changeos, sync</CardDescription>
+                            <CardDescription>Server actions: start, stop, restart, status, templates, reinstall, changeos, sync</CardDescription>
                         </CardHeader>
                         <CardContent>
                             <h4 className="font-semibold text-sm mb-2">Request Body</h4>
                             <CodeBlock code={`
 {
   "orderId": "65b...",
-  "action": "status",
-  "osType": "ubuntu"
+  "action": "reinstall",
+  "osType": "Windows Server 2025"
 }
                             `} />
 
@@ -442,11 +456,15 @@ curl -X POST "${baseUrl}/orders/manage" \\
                                 <li><code>stop</code> — VPS stop</li>
                                 <li><code>restart</code> — Restart</li>
                                 <li><code>status</code> — Online/offline (<code>powerState: running|stopped</code>)</li>
-                                <li><code>format</code> — Reset VPS (SmartVPS) ya reinstall OS (ADVPS — <code>osType</code> required)</li>
-                                <li><code>reinstall</code> — ADVPS products ke liye (same as format)</li>
-                                <li><code>changeos</code> — OS change (SmartVPS only)</li>
-                                <li><code>sync</code> — Provider se status sync</li>
+                                <li><code>templates</code> — Live OS list (same as Ocean reinstall: 2022, 2025, Ubuntu, …)</li>
+                                <li><code>reinstall</code> — Rebuild OS — <code>osType</code> = template id ya name from <code>osTemplates</code></li>
+                                <li><code>format</code> — Alias of reinstall</li>
+                                <li><code>changeos</code> — OS change (SmartVPS)</li>
+                                <li><code>sync</code> — Provider se status / password sync</li>
                             </ul>
+                            <CodeBlock code={`
+{ "orderId": "65b...", "action": "templates" }
+                            `} />
 
                             <h4 className="font-semibold text-sm mt-4 mb-2">Status response</h4>
                             <CodeBlock code={`

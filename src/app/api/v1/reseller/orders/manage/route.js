@@ -5,7 +5,6 @@ import { authenticateReseller } from '@/lib/resellerAuth';
 import {
   UNIVERSAL_ACTIONS,
   executeResellerServerAction,
-  getResellerManagementCapabilities,
   loadOrderIpStock,
   normalizeResellerAction,
 } from '@/lib/resellerServerManage';
@@ -112,16 +111,17 @@ export async function GET(request) {
     requestBody: {
       orderId: 'required — your order ID from POST /orders',
       action: `one of: ${UNIVERSAL_ACTIONS.join(', ')}`,
-      osType: 'required for reinstall/changeos on some products — check GET /orders/{orderId} → management.osOptions',
+      osType: 'required for reinstall/changeos on some products — use template id or name from GET /orders/{orderId} → management.osTemplates (same OS list as OceanLinux reinstall)',
     },
     flow: [
-      '1. GET /orders/{orderId} → read management.supportedActions for that server',
-      '2. POST /orders/manage with orderId + action (+ osType if needed)',
-      '3. If action not supported, response includes supportedActions — no guesswork',
+      '1. GET /orders/{orderId} → read management.osTemplates (Windows 2022/2025, Ubuntu, etc.)',
+      '2. POST /orders/manage with action=templates to refresh the same list',
+      '3. POST /orders/manage with action=reinstall and osType = template id or name',
     ],
     examples: {
       status: { orderId: 'ORDER_ID', action: 'status' },
-      reinstall: { orderId: 'ORDER_ID', action: 'reinstall', osType: 'ubuntu' },
+      templates: { orderId: 'ORDER_ID', action: 'templates' },
+      reinstall: { orderId: 'ORDER_ID', action: 'reinstall', osType: 'Windows Server 2022' },
       changeos: { orderId: 'ORDER_ID', action: 'changeos', osType: 'ubuntu' },
     },
   });

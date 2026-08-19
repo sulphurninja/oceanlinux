@@ -299,7 +299,12 @@ GET /orders/{orderId}
     "available": true,
     "supportedActions": ["start", "stop", "restart", "status", "sync", "reinstall"],
     "reinstallRequiresOs": true,
-    "osOptions": ["ubuntu", "centos", "windows"]
+    "osOptions": ["Windows Server 2022", "Windows Server 2025", "Ubuntu 22.04"],
+    "osTemplates": [
+      { "id": "12", "name": "Windows Server 2022" },
+      { "id": "18", "name": "Windows Server 2025" },
+      { "id": "4", "name": "Ubuntu 22.04" }
+    ]
   }
 }
 ```
@@ -382,8 +387,7 @@ Content-Type: application/json
 ```json
 {
   "orderId": "65b123...",
-  "action": "start",
-  "osType": "ubuntu"
+  "action": "start"
 }
 ```
 
@@ -394,7 +398,8 @@ Content-Type: application/json
 | `restart` | Reboot | No |
 | `status` | Get power state | No |
 | `sync` | Sync credentials | No |
-| `reinstall` | Format / rebuild OS | Yes (for some products) |
+| `reinstall` | Format / rebuild OS | Yes (for some products) — use `osTemplates` from GET order |
+| `templates` | List OS templates (same as OceanLinux reinstall dropdown) | No |
 | `changeos` | Change OS | Yes (SmartVPS products) |
 
 **Aliases:** `format` → `reinstall`, `reboot` → `restart`
@@ -408,8 +413,14 @@ Content-Type: application/json
 **Reinstall example:**
 
 ```json
-{ "orderId": "65b123...", "action": "reinstall", "osType": "ubuntu" }
+{ "orderId": "65b123...", "action": "templates" }
 ```
+
+```json
+{ "orderId": "65b123...", "action": "reinstall", "osType": "Windows Server 2022" }
+```
+
+`osType` can be the template **id** or **name** from `management.osTemplates` (same OS list as OceanLinux panel reinstall — e.g. 2022, 2025, Ubuntu). Generic `ubuntu` / `windows` still map to a matching template.
 
 After reinstall, wait 3–5 minutes then call `POST /orders/{orderId}/sync` for the new password.
 

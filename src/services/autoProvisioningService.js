@@ -544,6 +544,18 @@ class AutoProvisioningService {
     return isSmartVps;
   }
 
+  /** One OceanLinux order = at most one provider buy/create. Stock checks may retry. */
+  async ensureSingleBuy(order, label) {
+    const fresh = await Order.findById(order._id).select('upstreamBuyAttempted ipAddress').lean();
+    if (fresh?.upstreamBuyAttempted) {
+      throw new Error(
+        `${label}: purchase already attempted for this order. Will not buy a second VPS.`
+      );
+    }
+    await Order.findByIdAndUpdate(order._id, { upstreamBuyAttempted: true });
+    order.upstreamBuyAttempted = true;
+  }
+
   // SmartVPS response normalizer
   normalizeSmartVpsResponse(payload) {
     if (payload == null) return payload;
@@ -1198,6 +1210,7 @@ class AutoProvisioningService {
       advpsOrderId = existingAdvpsOrderId;
       initialPassword = order.password || '';
     } else {
+      await this.ensureSingleBuy(order, 'ADVPS');
       // --- Place the purchase ---
       const ramFormatted = String(ram).replace(/(\d+)\s*gb/i, '$1 GB');
       const remark = `Auto-provisioned order ${order._id}`;
@@ -1509,6 +1522,7 @@ class AutoProvisioningService {
 
     // 4) Purchase (skip if we already have a serviceId from a previous attempt)
     if (!netbayServiceId) {
+      await this.ensureSingleBuy(order, 'Netbay');
       planId = this.resolveNetbayPlanId({
         planByMemory: stockCfg.planByMemory,
         ram: order.memory,
@@ -1740,6 +1754,7 @@ class AutoProvisioningService {
     }
 
     if (!kurohostInstanceId) {
+      await this.ensureSingleBuy(order, 'KuroHost');
       cloudFlavorId = cloudFlavorId || resolveKurohostFlavorId(stockCfg, ram);
       if (!cloudFlavorId) {
         throw new Error(`No KuroHost flavor mapped for RAM "${ram}". Configure flavorByMemory in manageIpStock.`);
@@ -1927,6 +1942,7 @@ class AutoProvisioningService {
       : Date.now();
 
     if (!resellerVmId && !resellerOrderId) {
+      await this.ensureSingleBuy(order, 'Reseller panel');
       let priceIds = resolvePriceIdsForMemory(stockCfg, order.memory);
       let effectivePlanType = resolveEffectiveResellerPlanType(stockCfg, priceIds);
       if (!priceIds?.cpuPriceId) {
@@ -2345,6 +2361,8 @@ class AutoProvisioningService {
 
     L.line(`[SMARTVPS] ✅ Will purchase specific IP: ${specificIpToBuy} with ${ram}GB RAM`);
 
+    await this.ensureSingleBuy(order, 'SmartVPS');
+
     const existingOwnedIp = String(order.ipAddress || '').trim();
     if (existingOwnedIp && /^\d{1,3}(?:\.\d{1,3}){3}$/.test(existingOwnedIp)) {
       L.line(`[SMARTVPS] Order already has IP ${existingOwnedIp} — syncing credentials, will NOT buy again`);
@@ -2421,7 +2439,9 @@ class AutoProvisioningService {
     try {
       // Buy VPS with timeout and retry logic
       let buyRes, boughtIp;
-      const maxRetries = 3;
+      // One buyVps per provision run. Same-run retries can create extra VPS if
+      // the first call actually purchased but the response had no IP.
+      const maxRetries = 1;
       let lastError;
       let safetyCheckFailed = false; // Flag to track if safety check failed
 
@@ -2778,6 +2798,13 @@ class AutoProvisioningService {
       fields: this.toPlainObject(memoryConfig.fields || ipStock.defaultConfigurations || {}),
       configurations: this.toPlainObject(memoryConfig.configurations || ipStock.defaultConfigurations || {})
     };
+
+    if (order.hostycareServiceId) {
+      L.line(`[HOSTYCARE] Service already exists (${order.hostycareServiceId}) — will not create a second VPS`);
+      throw new Error('Hostycare: service already created for this order. Will not buy a second VPS.');
+    }
+
+    await this.ensureSingleBuy(order, 'Hostycare');
 
     try {
       L.line('[HOSTYCARE] createServer(payload) …');

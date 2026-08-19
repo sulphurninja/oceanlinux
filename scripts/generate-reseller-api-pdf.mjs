@@ -88,7 +88,7 @@ doc.text('OS: Ubuntu 22 | CentOS 7 | Windows 2022 64. Poll GET /orders/{id} unti
 
 section(doc, '6. Orders', [
   'GET /orders — list all orders with price, IP, credentials',
-  'GET /orders/{orderId} — detail + management.supportedActions',
+  'GET /orders/{orderId} — detail + management.osTemplates (live OS list, same as Ocean reinstall)',
 ]);
 
 section(doc, '7. Status — GET /orders/{orderId}/status', []);
@@ -115,10 +115,12 @@ doc.addPage();
 section(doc, '9. Manage — POST /orders/manage', []);
 code(doc, `{ "orderId": "65b...", "action": "start" }`);
 section(doc, 'Actions:', [
-  'start | stop | restart | status | sync',
-  'reinstall — format/rebuild (osType: ubuntu/centos/windows)',
+  'start | stop | restart | status | sync | templates',
+  'templates — live OS list (Windows 2022/2025, Ubuntu, etc. — same as Ocean panel)',
+  'reinstall — rebuild; osType = template id or name from osTemplates',
   'changeos — change OS (SmartVPS products)',
 ]);
+code(doc, `{ "orderId": "65b...", "action": "reinstall", "osType": "Windows Server 2025" }`);
 doc.text('After reinstall: wait 3-5 min → POST /orders/{id}/sync for new password.', { lineGap: 3 });
 
 section(doc, '10. Renew', [
