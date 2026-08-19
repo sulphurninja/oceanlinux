@@ -10,9 +10,17 @@ const connectDB = require('@/lib/db').default;
 const Order = require('@/models/orderModel').default;
 const IPStock = require('@/models/ipStockModel');
 const Company = require('@/models/companyModel').default;
-const { getCompanyNetbayApiConfig } = require('@/lib/companyNetbayApi');
+const { getCompanyNetbayApiConfig, resolveNetbayCouponForMemory } = require('@/lib/companyNetbayApi');
+const { parseNetbayGroupTags } = require('@/lib/netbayGroupTags');
 const { getCompanyKurohostApiConfig } = require('@/lib/companyKurohostApi');
 const { generateSecurePassword } = require('@/lib/securePassword');
+const {
+  isNetbayProxyStock,
+  resolveNetbayProxyTemplate,
+  generateNetbayProxyUser,
+  generateNetbayProxyPass,
+  proxyDisplayIp,
+} = require('@/lib/netbayProxy');
 const {
   readKurohostStockConfig,
   resolveKurohostFlavorId,
@@ -196,6 +204,8 @@ class AutoProvisioningService {
       defaultOs,
       variantStock: cfg.variantStock || {},
       lastStockSync: cfg.lastStockSync || null,
+      productType: cfg.productType || cfg.appType || 'vm',
+      proxyTemplate: cfg.proxyTemplate || '',
     };
   }
 
@@ -1439,6 +1449,187 @@ class AutoProvisioningService {
     };
   }
 
+  async provisionViaNetbayProxy(order, ipStock, startTime, { cfg, stockCfg, api }) {
+    L.head(`NETBAY PROXY PATH — order ${order._id}`);
+
+    let netbayProxyId = order.netbayProxyId || '';
+    let netbayTaskId = order.netbayTaskId || '';
+    let planId = order.netbayPlanId || '';
+    let groupTag = order.netbayGroupTag || '';
+    if (!groupTag) {
+      const series = parseNetbayGroupTags(stockCfg);
+      groupTag = series.length === 1 ? series[0] : (stockCfg.groupTag || '');
+    }
+    const osName = resolveNetbayProxyTemplate(stockCfg);
+
+    if (!netbayProxyId) {
+      await this.ensureSingleBuy(order, 'Netbay-proxy');
+      planId = this.resolveNetbayPlanId({
+        planByMemory: stockCfg.planByMemory,
+        ram: order.memory,
+      });
+      if (!planId) {
+        throw new Error(
+          `Netbay proxy planId not configured for memory "${order.memory}" on IPStock "${ipStock.name}". ` +
+          `Set Product type to HTTP Proxy and paste a proxy Plan ID from the Netbay catalog.`
+        );
+      }
+
+      const companyDoc = await Company.findById(ipStock.company).select('netbayApi').lean();
+      const useLiveStockApi = companyDoc?.netbayApi?.enabled && companyDoc?.netbayApi?.useLiveStockApi === true;
+      if (useLiveStockApi) {
+        const stockProbe = await api.isProxyStockAvailable({
+          planId,
+          os: osName,
+          groupTag: groupTag || undefined,
+        });
+        if (stockProbe.available === false && !stockProbe.skipped) {
+          throw new Error('No proxy capacity available at this location right now.');
+        }
+        if ((stockProbe.skipped || stockProbe.available === null) && stockProbe.rateLimited) {
+          L.line('[NETBAY-PROXY] Stock check skipped (rate limit) — continuing');
+        }
+      }
+
+      const proxyUser = generateNetbayProxyUser(order);
+      const proxyPass = generateNetbayProxyPass();
+      const purchaseBody = {
+        planId,
+        os: osName,
+        months: 1,
+        proxyUser,
+        proxyPass,
+        proxyPort: 3128,
+      };
+      if (groupTag) purchaseBody.groupTag = groupTag;
+      const netbayCoupon = resolveNetbayCouponForMemory(cfg, order.memory);
+      if (netbayCoupon) purchaseBody.couponCode = netbayCoupon;
+
+      L.line(`[NETBAY-PROXY] POST /proxies/purchase plan=${planId} os=${osName} coupon=${netbayCoupon || '-'}`);
+      let purchaseRes;
+      try {
+        purchaseRes = await api.purchaseProxy(purchaseBody);
+      } catch (err) {
+        throw new Error(`Proxy purchase failed: ${err.message}`);
+      }
+      const data = purchaseRes?.data || {};
+      netbayProxyId = NetbayApi.extractProxyId(data) || data.proxyId || '';
+      netbayTaskId = data.taskId || '';
+      if (!netbayProxyId) {
+        throw new Error(`Netbay proxy purchase did not return a proxyId. Response: ${JSON.stringify(purchaseRes).slice(0, 400)}`);
+      }
+
+      const previewCreds = NetbayApi.extractProxyCredentials(data) || {
+        host: '',
+        port: 3128,
+        user: proxyUser,
+        pass: proxyPass,
+      };
+
+      await Order.findByIdAndUpdate(order._id, {
+        netbayProxyId,
+        netbayTaskId,
+        netbayPlanId: planId,
+        netbayGroupTag: groupTag || undefined,
+        netbayAppType: 'proxy',
+        provider: 'netbay',
+        autoProvisioned: true,
+        username: previewCreds.user || proxyUser,
+        password: previewCreds.pass || proxyPass,
+        ipAddress: proxyDisplayIp(previewCreds),
+        os: order.os || 'Ubuntu 22',
+      });
+    } else {
+      L.line(`[NETBAY-PROXY] Resuming — proxyId=${netbayProxyId}, taskId=${netbayTaskId}`);
+    }
+
+    if (netbayTaskId) {
+      try {
+        const taskTerminal = await api.waitForTask(netbayTaskId, {
+          maxWaitMs: 180_000,
+          pollIntervalMs: 4_000,
+          proxy: true,
+        });
+        if (taskTerminal?.status === 'FAILED') {
+          const errMsg = taskTerminal?.error || taskTerminal?.message || 'Netbay proxy task FAILED';
+          await Order.findByIdAndUpdate(order._id, {
+            provisioningStatus: 'failed',
+            provisioningError: `Provisioning failed: ${errMsg}`,
+          });
+          throw new Error(`Provisioning failed: ${errMsg}`);
+        }
+      } catch (err) {
+        if (String(err.message || '').startsWith('Provisioning failed')) throw err;
+        L.line(`[NETBAY-PROXY] Task poll failed: ${err.message} — will fetch proxy anyway`);
+      }
+    }
+
+    let creds = null;
+    let expiryDate = null;
+    try {
+      const detailRes = await api.getProxy(netbayProxyId);
+      const proxy = NetbayApi.unwrapProxyResponse(detailRes);
+      creds = NetbayApi.extractProxyCredentials(proxy);
+      expiryDate = pickNetbayExpiryDate(proxy);
+    } catch (err) {
+      L.line(`[NETBAY-PROXY] getProxy failed: ${err.message}`);
+    }
+
+    if (!expiryDate) {
+      const { calculateCompanyExpiryDate } = await import('@/lib/expiryHelper');
+      expiryDate = calculateCompanyExpiryDate();
+    }
+
+    const displayIp = proxyDisplayIp(creds);
+    const fullyProvisioned = !!(displayIp && netbayProxyId && creds?.user && creds?.pass);
+
+    const updateData = {
+      status: fullyProvisioned ? 'active' : 'confirmed',
+      provisioningStatus: fullyProvisioned ? 'active' : 'provisioning',
+      provisioningError: fullyProvisioned
+        ? ''
+        : 'PENDING: proxy placed, awaiting credentials. Will retry automatically.',
+      provider: 'netbay',
+      netbayProxyId,
+      netbayAppType: 'proxy',
+      netbayTaskId: netbayTaskId || undefined,
+      netbayPlanId: planId || undefined,
+      netbayGroupTag: groupTag || undefined,
+      username: creds?.user || order.username || '',
+      password: creds?.pass || order.password || '',
+      ipAddress: displayIp || order.ipAddress || '',
+      autoProvisioned: true,
+      expiryDate,
+      serverDetails: {
+        lastUpdated: new Date(),
+        rawDetails: {
+          ...(order.serverDetails?.rawDetails || {}),
+          netbayProxy: true,
+          formattedCreds: creds?.formattedCreds || '',
+          httpUrl: creds?.httpUrl || '',
+          proxyPort: creds?.port || 3128,
+        },
+      },
+    };
+    if (!fullyProvisioned) {
+      updateData.provisioningLockId = undefined;
+      updateData.lastProvisionAttempt = new Date();
+    }
+    await Order.findByIdAndUpdate(order._id, updateData);
+
+    const totalTime = Date.now() - startTime;
+    return {
+      success: fullyProvisioned,
+      netbayPending: !fullyProvisioned,
+      serviceId: netbayProxyId,
+      ipAddress: displayIp || null,
+      credentials: { username: creds?.user, password: creds?.pass },
+      productId: planId || null,
+      totalTime,
+      ...(fullyProvisioned ? {} : { error: `Netbay proxy ${netbayProxyId} pending credentials` }),
+    };
+  }
+
   // --- NETBAY PATH ---------------------------------------------------------
   //
   // Netbay (https://api.netbayhosts.in) is an external reseller API like
@@ -1484,10 +1675,18 @@ class AutoProvisioningService {
     const stockCfg = this.readNetbayStockConfig(ipStock);
     L.kv('[NETBAY] Stock config', stockCfg);
 
+    if (isNetbayProxyStock(stockCfg, ipStock, order)) {
+      return this.provisionViaNetbayProxy(order, ipStock, startTime, { cfg, stockCfg, api: new NetbayApi(cfg) });
+    }
+
     let netbayServiceId = order.netbayServiceId || '';
     let netbayTaskId = order.netbayTaskId || '';
     let planId = order.netbayPlanId || '';
-    let groupTag = order.netbayGroupTag || stockCfg.groupTag || '';
+    let groupTag = order.netbayGroupTag || '';
+    if (!groupTag) {
+      const series = parseNetbayGroupTags(stockCfg);
+      groupTag = series.length === 1 ? series[0] : (stockCfg.groupTag || '');
+    }
 
     // Map OS into the order's enum values for downstream UI
     const orderOs = isWindowsProduct ? 'Windows 2022 64' : 'Ubuntu 22';
@@ -1578,6 +1777,11 @@ class AutoProvisioningService {
         months: 1,
       };
       if (groupTag) purchaseBody.groupTag = groupTag;
+      const netbayCoupon = resolveNetbayCouponForMemory(cfg, order.memory);
+      if (netbayCoupon) {
+        purchaseBody.couponCode = netbayCoupon;
+        L.line(`[NETBAY] Purchase coupon ${netbayCoupon}`);
+      }
 
       L.line(`[NETBAY] POST /services/purchase ${JSON.stringify(purchaseBody)}`);
       let purchaseRes;

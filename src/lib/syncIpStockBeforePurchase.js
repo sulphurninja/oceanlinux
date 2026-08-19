@@ -177,7 +177,7 @@ async function loadCompanyForStock(stock) {
 /**
  * Live-sync one IPStock row from ADVPS/SmartVPS/Netbay (if applicable) and verify purchasable.
  */
-export async function refreshAndVerifyIpStockPurchase(ipStockId, memory) {
+export async function refreshAndVerifyIpStockPurchase(ipStockId, memory, { groupTag } = {}) {
   await connectDB();
 
   let stock = await IPStock.findById(ipStockId);
@@ -258,7 +258,7 @@ export async function refreshAndVerifyIpStockPurchase(ipStockId, memory) {
   }
 
   if (netbayLive && memory && !isNetbayVariantInStock(stock, memory, company)) {
-    const liveVerify = await verifyNetbayMemoryInStock(stock, memory);
+    const liveVerify = await verifyNetbayMemoryInStock(stock, memory, { groupTag });
     if (!liveVerify.ok) {
       return {
         ok: false,
@@ -348,7 +348,7 @@ export async function refreshAndVerifySlotIpPurchase(slotIpPackageId, quantity =
   };
 }
 
-export async function refreshAndVerifyPurchase({ ipStockId, slotIpPackageId, memory, quantity }) {
+export async function refreshAndVerifyPurchase({ ipStockId, slotIpPackageId, memory, quantity, groupTag }) {
   if (slotIpPackageId) {
     return refreshAndVerifySlotIpPurchase(slotIpPackageId, quantity);
   }
@@ -359,5 +359,5 @@ export async function refreshAndVerifyPurchase({ ipStockId, slotIpPackageId, mem
       synced: false,
     };
   }
-  return refreshAndVerifyIpStockPurchase(ipStockId, memory);
+  return refreshAndVerifyIpStockPurchase(ipStockId, memory, { groupTag });
 }

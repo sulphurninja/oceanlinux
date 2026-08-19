@@ -1,18 +1,32 @@
 'use client'
 
-import React, { createContext, useContext, useEffect, useState, ReactNode, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, ReactNode, useCallback, useRef } from 'react';
 import { usePathname } from 'next/navigation';
 import { useSessionAlert } from '@/components/session-alert';
 import { redirectToLogin } from '@/lib/redirectToLogin';
 
 // Define a type for the user state
+type BillingAddress = {
+    line?: string;
+    city?: string;
+    state?: string;
+    pincode?: string;
+    country?: string;
+};
+
 type User = {
     name: string;
     email: string;
-    id: string;
+    id?: string;
+    _id?: string;
     isAdmin?: boolean;
     createdAt?: string;
     stats?: any;
+    phone?: string;
+    avatar?: string;
+    isVerified?: boolean;
+    userType?: 'customer' | 'reseller' | 'admin';
+    billingAddress?: BillingAddress;
 } | null;
 
 // Define the context type
@@ -38,10 +52,14 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     const [isLoading, setIsLoading] = useState(true);
     const pathname = usePathname();
     const { showAlert } = useSessionAlert();
+    const pathnameRef = useRef(pathname);
+    const showAlertRef = useRef(showAlert);
+    pathnameRef.current = pathname;
+    showAlertRef.current = showAlert;
 
-    const fetchUser = useCallback(async () => {
+    const fetchUser = useCallback(async (opts?: { silent?: boolean }) => {
         try {
-            setIsLoading(true);
+            if (!opts?.silent) setIsLoading(true);
             const res = await fetch('/api/users/me', {
                 credentials: 'include'
             });
@@ -55,26 +73,28 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
             // Handle different error statuses
             const errorData = await res.json().catch(() => ({}));
             const errorCode = errorData.code || '';
+            const path = pathnameRef.current;
+            const alert = showAlertRef.current;
             
             if (res.status === 401) {
                 // Don't redirect or show alert if already on login page
-                if (pathname === '/login' || pathname === '/signup') {
+                if (path === '/login' || path === '/signup') {
                     setUser(null);
                     return;
                 }
                 
                 // Store current path for redirect after login
-                if (pathname && pathname !== '/login') {
-                    localStorage.setItem('redirectAfterLogin', pathname);
+                if (path && path !== '/login') {
+                    localStorage.setItem('redirectAfterLogin', path);
                 }
                 
                 // Show appropriate message based on error code
                 if (errorCode === 'SESSION_EXPIRED' || errorData.message?.includes('expired')) {
-                    showAlert('session_expired');
+                    alert('session_expired');
                 } else if (errorCode === 'NO_TOKEN') {
-                    showAlert('action_requires_login', 'Please log in to access your dashboard.');
+                    alert('action_requires_login', 'Please log in to access your dashboard.');
                 } else {
-                    showAlert('unauthorized');
+                    alert('unauthorized');
                 }
                 
                 setUser(null);
@@ -87,17 +107,17 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
             
             // Network error
             if (error instanceof TypeError && error.message.includes('fetch')) {
-                showAlert('network_error');
+                showAlertRef.current('network_error');
             }
             
             setUser(null);
         } finally {
-            setIsLoading(false);
+            if (!opts?.silent) setIsLoading(false);
         }
-    }, [pathname, showAlert]);
+    }, []);
 
     const refreshUser = useCallback(async () => {
-        await fetchUser();
+        await fetchUser({ silent: true });
     }, [fetchUser]);
 
     const logout = useCallback(async () => {
@@ -118,15 +138,15 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         fetchUser();
     }, [fetchUser]);
 
-    // Periodic token check (every 5 minutes)
+    // Periodic token check (every 5 minutes) — skip while the tab is hidden
     useEffect(() => {
         const checkInterval = setInterval(() => {
+            if (typeof document !== 'undefined' && document.hidden) return;
             if (user) {
-                // Silently check if session is still valid
                 fetch('/api/users/me', { credentials: 'include' })
                     .then(res => {
                         if (res.status === 401) {
-                            showAlert('session_expired');
+                            showAlertRef.current('session_expired');
                             setUser(null);
                         }
                     })
@@ -134,10 +154,10 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
                         // Ignore network errors in background check
                     });
             }
-        }, 5 * 60 * 1000); // 5 minutes
+        }, 5 * 60 * 1000);
 
         return () => clearInterval(checkInterval);
-    }, [user, showAlert]);
+    }, [user]);
 
     return (
         <AuthContext.Provider value={{ 

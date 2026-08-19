@@ -19,6 +19,7 @@ import Link from 'next/link';
 import axios from 'axios';
 import { toast } from 'sonner';
 import { ResellerZonePicker, buildResellerZoneConfig } from '@/components/admin/ResellerZonePicker';
+import { parseGroupTagList } from '@/lib/netbayGroupTags';
 
 const ALL_RAM_OPTIONS = ['1GB', '2GB', '4GB', '6GB', '8GB', '12GB', '16GB', '32GB'] as const;
 const DEFAULT_MEMORY_SIZES = ['2GB', '4GB', '8GB', '16GB'];
@@ -298,7 +299,7 @@ const IPStockFormWithParams = () => {
         if (nextZoneIds.length === 1 && !name.trim()) {
             const zone = panelZones.find((z) => Number(z.id) === Number(nextZoneIds[0]));
             if (zone) {
-                const suffix = serverType === 'VPS' ? 'Windows VPS' : 'Linux';
+                const suffix = serverType === 'VPS' ? 'Windows VPS' : serverType === 'Proxy' ? 'Proxy' : 'Linux';
                 setName(`${zone.name} ${suffix}`);
             }
         }
@@ -366,19 +367,22 @@ const IPStockFormWithParams = () => {
         const planByMemory = Object.fromEntries(
             Object.entries(netbayPlanIds).filter(([, id]) => id.trim())
         );
+        const groupTags = parseGroupTagList(netbayGroupTag);
         const hasNetbayConfig =
-            netbayGroupTag.trim() ||
+            groupTags.length > 0 ||
             Object.keys(planByMemory).length > 0 ||
             netbayDefaultOsLinux.trim() ||
             netbayDefaultOsWindows.trim();
 
-        if (hasNetbayConfig) {
+        if (hasNetbayConfig || serverType === 'Proxy') {
             defaultConfigurations.netbay = {
-                ...(netbayGroupTag.trim() ? { groupTag: netbayGroupTag.trim() } : {}),
+                ...(groupTags.length ? { groupTag: groupTags[0], groupTags } : {}),
                 ...(Object.keys(planByMemory).length > 0 ? { planByMemory } : {}),
+                ...(serverType === 'Proxy' ? { productType: 'proxy' } : {}),
                 defaultOs: {
                     ...(netbayDefaultOsLinux.trim() ? { Linux: netbayDefaultOsLinux.trim() } : {}),
                     ...(netbayDefaultOsWindows.trim() ? { Windows: netbayDefaultOsWindows.trim() } : {}),
+                    ...(serverType === 'Proxy' ? { Proxy: 'PROXY' } : {}),
                 },
             };
         }
@@ -499,8 +503,12 @@ const IPStockFormWithParams = () => {
                                     <SelectContent>
                                         <SelectItem value="Linux">Linux</SelectItem>
                                         <SelectItem value="VPS">VPS</SelectItem>
+                                        <SelectItem value="Proxy">Proxy (Premium IP Proxies)</SelectItem>
                                     </SelectContent>
-                                </Select>
+                                    </Select>
+                                <p className="text-xs text-gray-500 mt-1">
+                                    Proxy type customer store ke Premium IP Proxies section me dikhega.
+                                </p>
                             </div>
 
                             <div className="mb-4">
@@ -566,15 +574,15 @@ const IPStockFormWithParams = () => {
                                     </div>
 
                                     <div>
-                                        <Label className="text-sm">Group Tag (IP series, optional):</Label>
-                                        <Input
-                                            type="text"
-                                            placeholder="e.g. 103.157"
+                                        <Label className="text-sm">IP series (group tags):</Label>
+                                        <textarea
+                                            className="mt-1 flex min-h-[88px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono"
+                                            placeholder={"103.157\n161.248\n103.15"}
                                             value={netbayGroupTag}
                                             onChange={(e) => setNetbayGroupTag(e.target.value)}
                                         />
                                         <p className="text-xs text-gray-500 mt-1">
-                                            Customer ko is series ki IP milegi (e.g. 103.157.x.x). Blank = any available IP.
+                                            Ek product, kai series. Har line ya comma alag series. Customer store pe series select karega.
                                         </p>
                                     </div>
 

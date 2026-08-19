@@ -18,8 +18,8 @@ function pickNetbayExpiryDate(payload) {
 }
 
 async function resolveNetbayApiForOrder(order) {
-  if (!order?.netbayServiceId) {
-    return { api: null, config: null, error: 'No Netbay service ID on order' };
+  if (!order?.netbayServiceId && !order?.netbayProxyId) {
+    return { api: null, config: null, error: 'No Netbay service/proxy ID on order' };
   }
 
   if (!order?.ipStockId) {

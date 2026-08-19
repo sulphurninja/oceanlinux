@@ -147,8 +147,9 @@ const ViewLinux = () => {
         if (!needsDeliveryPoll) return;
 
         const interval = setInterval(() => {
-            fetchOrders(true);
-        }, 15000);
+            if (typeof document !== 'undefined' && document.hidden) return;
+            fetchOrders(true, true);
+        }, 20000);
 
         const timeout = setTimeout(() => clearInterval(interval), 3 * 60 * 1000);
         return () => {
@@ -157,11 +158,13 @@ const ViewLinux = () => {
         };
     }, [needsDeliveryPoll]);
 
-    const fetchOrders = async (isRefresh = false) => {
-        if (isRefresh) {
-            setRefreshing(true);
-        } else {
-            setLoading(true);
+    const fetchOrders = async (isRefresh = false, silent = false) => {
+        if (!silent) {
+            if (isRefresh) {
+                setRefreshing(true);
+            } else {
+                setLoading(true);
+            }
         }
 
         try {
@@ -186,12 +189,14 @@ const ViewLinux = () => {
             setOrders(data);
         } catch (error) {
             console.error('Failed to fetch orders:', error);
-            toast.error('Could not load your servers. Please try again.');
+            if (!silent) toast.error('Could not load your servers. Please try again.');
         } finally {
-            if (isRefresh) {
-                setRefreshing(false);
-            } else {
-                setLoading(false);
+            if (!silent) {
+                if (isRefresh) {
+                    setRefreshing(false);
+                } else {
+                    setLoading(false);
+                }
             }
         }
     };

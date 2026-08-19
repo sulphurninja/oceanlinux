@@ -38,7 +38,7 @@ const IPStockSchema = new mongoose.Schema({
   }],
   serverType: {
     type: String,
-    enum: ['VPS', 'Linux'],
+    enum: ['VPS', 'Linux', 'Proxy'],
     required: true,
     default: 'Linux'
   },

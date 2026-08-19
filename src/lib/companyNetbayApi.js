@@ -49,7 +49,47 @@ function getCompanyNetbayApiConfig(company) {
     baseUrl,
     apiKey,
     apiSecret,
+    couponCode: String(cfg.couponCode || '').trim().toUpperCase(),
+    couponByMemory: normalizeNetbayCouponByMemory(cfg.couponByMemory),
   };
+}
+
+function normalizeNetbayCouponByMemory(raw) {
+  if (!raw || typeof raw !== 'object') return {};
+  const plain = raw instanceof Map ? Object.fromEntries(raw) : raw;
+  const out = {};
+  for (const [key, value] of Object.entries(plain)) {
+    if (typeof value === 'string' && value.trim()) {
+      out[String(key).trim()] = value.trim().toUpperCase();
+    }
+  }
+  return out;
+}
+
+function parseMemoryGb(memory) {
+  const m = String(memory || '').match(/(\d+)/);
+  return m ? Number(m[1]) : null;
+}
+
+/**
+ * RAM-specific coupon first (4GB / 8GB / 16GB), then company fallback coupon.
+ * Does not reuse another RAM's code when only one tier is filled.
+ */
+function resolveNetbayCouponForMemory(cfg, memory) {
+  if (!cfg) return '';
+  const byMem = normalizeNetbayCouponByMemory(cfg.couponByMemory);
+  const gb = parseMemoryGb(memory);
+
+  if (gb != null) {
+    const exact = byMem[`${gb}GB`] || byMem[`${gb}gb`] || byMem[`${gb} GB`];
+    if (exact) return String(exact).trim().toUpperCase();
+
+    for (const [key, value] of Object.entries(byMem)) {
+      if (parseMemoryGb(key) === gb && value) return String(value).trim().toUpperCase();
+    }
+  }
+
+  return String(cfg.couponCode || '').trim().toUpperCase();
 }
 
 function hasCompanyNetbayApi(company) {
@@ -68,4 +108,5 @@ module.exports = {
   getCompanyNetbayApiConfig,
   hasCompanyNetbayApi,
   companyUsesNetbayLiveStock,
+  resolveNetbayCouponForMemory,
 };

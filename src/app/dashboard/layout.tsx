@@ -42,10 +42,10 @@ import {
     ShoppingCart,
 } from 'lucide-react';
 import Link from 'next/link';
-import { useRouter, usePathname } from 'next/navigation';
-import { useState, useEffect, Suspense, useCallback } from 'react';
+import { usePathname } from 'next/navigation';
+import { useState, useEffect, Suspense, useRef } from 'react';
 import { toast } from 'sonner';
-import { AuthProvider } from '@/contexts/AuthContext';
+import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { SessionAlertProvider } from '@/components/session-alert';
 import FloatingSupport from '@/components/component/floating-support';
 import LoginNewsPopup from '@/components/login-news-popup';
@@ -108,10 +108,22 @@ export default function DashboardLayout({
 }: {
     children: React.ReactNode;
 }) {
-    const router = useRouter();
+    return (
+        <SessionAlertProvider>
+            <AuthProvider>
+                <DashboardChrome>{children}</DashboardChrome>
+            </AuthProvider>
+        </SessionAlertProvider>
+    );
+}
+
+function DashboardChrome({
+    children,
+}: {
+    children: React.ReactNode;
+}) {
     const pathname = usePathname();
-    const [user, setUser] = useState<UserData | null>(null);
-    const [loading, setLoading] = useState(true);
+    const { user, setUser, isLoading: loading } = useAuth();
     const [showPhoneDialog, setShowPhoneDialog] = useState(false);
     const [phoneNumber, setPhoneNumber] = useState('+91 ');
     const [isSavingPhone, setIsSavingPhone] = useState(false);
@@ -119,10 +131,28 @@ export default function DashboardLayout({
     const [addressForm, setAddressForm] = useState({ line: '', city: '', state: '', pincode: '' });
     const [isSavingAddress, setIsSavingAddress] = useState(false);
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+    const profilePrompted = useRef(false);
 
     useEffect(() => {
-        fetchUserData();
-    }, []);
+        if (!user || profilePrompted.current) return;
+        profilePrompted.current = true;
+        const addr = user.billingAddress || {};
+        const addressComplete = !!(addr.line && addr.city && addr.state && addr.pincode);
+        if (!addressComplete) {
+            setAddressForm({
+                line: addr.line || '',
+                city: addr.city || '',
+                state: addr.state || '',
+                pincode: addr.pincode || '',
+            });
+            setTimeout(() => setShowAddressDialog(true), 1000);
+        } else if (!user.phone) {
+            const dismissed = sessionStorage.getItem('phonePromptDismissed');
+            if (!dismissed) {
+                setTimeout(() => setShowPhoneDialog(true), 1200);
+            }
+        }
+    }, [user]);
 
     useEffect(() => {
         const saved = localStorage.getItem('sidebar-collapsed');
@@ -150,40 +180,6 @@ export default function DashboardLayout({
             document.documentElement.classList.remove('premium-dashboard-active');
         };
     }, []);
-
-    const fetchUserData = async () => {
-        try {
-            const response = await dashboardFetch('/api/users/me');
-            if (response.ok) {
-                const userData = await response.json();
-                setUser(userData);
-
-                // Billing address is mandatory (needed for GST-correct invoices).
-                // Prompt for it first; only fall back to the optional phone prompt
-                // once the address is on file.
-                const addr = userData.billingAddress || {};
-                const addressComplete = !!(addr.line && addr.city && addr.state && addr.pincode);
-                if (!addressComplete) {
-                    setAddressForm({
-                        line: addr.line || '',
-                        city: addr.city || '',
-                        state: addr.state || '',
-                        pincode: addr.pincode || '',
-                    });
-                    setTimeout(() => setShowAddressDialog(true), 1000);
-                } else if (!userData.phone) {
-                    const dismissed = sessionStorage.getItem('phonePromptDismissed');
-                    if (!dismissed) {
-                        setTimeout(() => setShowPhoneDialog(true), 1200);
-                    }
-                }
-            }
-        } catch (error) {
-            console.error('Error fetching user data:', error);
-        } finally {
-            setLoading(false);
-        }
-    };
 
     const handleSavePhone = async () => {
         const cleaned = phoneNumber.replace(/\s+/g, '');
@@ -431,8 +427,6 @@ export default function DashboardLayout({
     const orderNewsOrderId = pathname.match(/^\/dashboard\/order\/([^/]+)/)?.[1] ?? null;
 
     return (
-        <SessionAlertProvider>
-            <AuthProvider>
                 <div className="premium-dashboard min-h-screen">
                     <PremiumPostLoginSplash autoFromSession />
                     <LoginNewsPopup />
@@ -749,7 +743,5 @@ export default function DashboardLayout({
                     </Dialog>
 
                 </div>
-            </AuthProvider>
-        </SessionAlertProvider>
     );
 }

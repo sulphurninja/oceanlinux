@@ -35,8 +35,12 @@ interface CatalogResponse {
   label?: string;
   plans?: NetbayPlan[];
   os?: NetbayOs[];
+  proxyPlans?: NetbayPlan[];
+  proxyTemplates?: NetbayOs[];
   plansError?: string | null;
   osError?: string | null;
+  proxyPlansError?: string | null;
+  proxyTemplatesError?: string | null;
   error?: string;
 }
 
@@ -98,6 +102,8 @@ export default function NetbayCatalogPage() {
 
   const plans = filterPlans(data?.plans || []);
   const os = filterOs(data?.os || []);
+  const proxyPlans = filterPlans(data?.proxyPlans || []);
+  const proxyTemplates = filterOs(data?.proxyTemplates || []);
 
   return (
     <div className="p-6 space-y-6">
@@ -286,6 +292,96 @@ export default function NetbayCatalogPage() {
             </CardContent>
           </Card>
 
+          <Card>
+            <CardHeader className="flex-row items-center justify-between">
+              <CardTitle className="text-lg flex items-center gap-2">
+                HTTP Proxy plans
+                <Badge variant="outline">{proxyPlans.length}{search ? ` of ${data.proxyPlans?.length || 0}` : ''}</Badge>
+              </CardTitle>
+              {data.proxyPlansError && (
+                <span className="text-xs text-red-600">{data.proxyPlansError}</span>
+              )}
+            </CardHeader>
+            <CardContent className="overflow-x-auto">
+              {proxyPlans.length === 0 ? (
+                <div className="py-8 text-center text-sm text-muted-foreground">
+                  No proxy plans (or catalog fetch failed).
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Plan ID</TableHead>
+                      <TableHead>Name</TableHead>
+                      <TableHead>Category</TableHead>
+                      <TableHead className="text-right">Copy</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {proxyPlans.map((p) => (
+                      <TableRow key={p.id}>
+                        <TableCell>
+                          <code className="text-xs bg-muted px-1.5 py-0.5 rounded">{p.id}</code>
+                        </TableCell>
+                        <TableCell className="font-medium">{p.name}</TableCell>
+                        <TableCell>
+                          {p.osCategory ? <Badge variant="secondary">{p.osCategory}</Badge> : '—'}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button size="sm" variant="ghost" className="h-7 gap-1.5" onClick={() => copyToClipboard(String(p.id), 'proxy plan ID')}>
+                            <Copy className="h-3.5 w-3.5" />
+                            ID
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex-row items-center justify-between">
+              <CardTitle className="text-lg flex items-center gap-2">
+                Proxy templates
+                <Badge variant="outline">{proxyTemplates.length}</Badge>
+              </CardTitle>
+              {data.proxyTemplatesError && (
+                <span className="text-xs text-red-600">{data.proxyTemplatesError}</span>
+              )}
+            </CardHeader>
+            <CardContent className="overflow-x-auto">
+              {proxyTemplates.length === 0 ? (
+                <div className="py-8 text-center text-sm text-muted-foreground">No proxy templates.</div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Name</TableHead>
+                      <TableHead>Category</TableHead>
+                      <TableHead className="text-right">Copy</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {proxyTemplates.map((o) => (
+                      <TableRow key={o.id}>
+                        <TableCell className="font-medium">{o.name}</TableCell>
+                        <TableCell>{o.category ? <Badge variant="secondary">{o.category}</Badge> : '—'}</TableCell>
+                        <TableCell className="text-right">
+                          <Button size="sm" variant="ghost" className="h-7 gap-1.5" onClick={() => copyToClipboard(o.name, 'template name')}>
+                            <Copy className="h-3.5 w-3.5" />
+                            Name
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+
           <div className="rounded-md border bg-muted/30 p-4 text-xs text-muted-foreground">
             <p className="font-medium text-foreground mb-1">How to use these values</p>
             <ul className="space-y-1 list-disc pl-4">
@@ -300,8 +396,7 @@ export default function NetbayCatalogPage() {
                 if you paste an OS ID on IP Stock, we resolve it from this catalog automatically.
               </li>
               <li>
-                <strong>Group Tag</strong> (location filter, e.g. <code>103.157</code>) goes on the IP Stock
-                itself, not per-RAM. It's optional — leave blank to let Netbay pick any available IP.
+                For <strong>HTTP Proxy</strong> stocks, set Product type to HTTP Proxy, paste a <strong>Proxy plan ID</strong> per RAM row, and template name <code>PROXY</code>. Purchase uses <code>POST /api/v1/proxies/purchase</code>.
               </li>
             </ul>
           </div>

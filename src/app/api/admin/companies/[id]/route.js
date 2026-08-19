@@ -63,6 +63,8 @@ function normalizeNetbayApiEntry(v) {
     apiKey: typeof v?.apiKey === 'string' ? v.apiKey.trim() : '',
     apiSecret: typeof v?.apiSecret === 'string' ? v.apiSecret : '',
     useLiveStockApi,
+    couponCode: typeof v?.couponCode === 'string' ? v.couponCode.trim().toUpperCase() : '',
+    couponByMemory: normalizeResellerCouponByMemory(v?.couponByMemory),
   };
 }
 

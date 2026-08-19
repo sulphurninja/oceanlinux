@@ -69,6 +69,9 @@ interface CompanyNetbayApi {
   apiKey: string;
   apiSecret: string;
   useLiveStockApi?: boolean;
+  /** Fallback coupon when no 4GB/8GB/16GB code is set. */
+  couponCode?: string;
+  couponByMemory?: Record<string, string>;
 }
 
 interface CompanyKurohostApi {
@@ -147,6 +150,8 @@ const EMPTY_NETBAY_API = (): CompanyNetbayApi => ({
   apiKey: '',
   apiSecret: '',
   useLiveStockApi: false,
+  couponCode: '',
+  couponByMemory: {},
 });
 
 // Defaults pre-filled when a company has no Netbay config saved yet — only
@@ -159,6 +164,8 @@ const NETBAY_API_DIALOG_DEFAULTS: CompanyNetbayApi = {
   apiKey: '',
   apiSecret: '',
   useLiveStockApi: false,
+  couponCode: '',
+  couponByMemory: {},
 };
 
 const EMPTY_KUROHOST_API = (): CompanyKurohostApi => ({
@@ -765,6 +772,8 @@ export default function CompaniesPage() {
       apiKey: r?.apiKey || '',
       apiSecret: r?.apiSecret || '',
       useLiveStockApi: r?.useLiveStockApi === true,
+      couponCode: r?.couponCode || '',
+      couponByMemory: { ...(r?.couponByMemory || {}) },
     });
     setNetbayTestResult(null);
     setShowNetbaySecret(false);
@@ -788,6 +797,17 @@ export default function CompaniesPage() {
 
   const updateNetbayField = <K extends keyof CompanyNetbayApi>(key: K, value: CompanyNetbayApi[K]) => {
     setNetbayForm(prev => ({ ...prev, [key]: value }));
+    setNetbayTestResult(null);
+  };
+
+  const updateNetbayCouponForMemory = (memory: string, code: string) => {
+    setNetbayForm((prev) => ({
+      ...prev,
+      couponByMemory: {
+        ...(prev.couponByMemory || {}),
+        [memory]: code.trim().toUpperCase(),
+      },
+    }));
     setNetbayTestResult(null);
   };
 
@@ -1311,10 +1331,16 @@ export default function CompaniesPage() {
                         let host = n.baseUrl || 'api.netbayhosts.in';
                         try { if (n.baseUrl) host = new URL(n.baseUrl).host; } catch { /* keep as-is */ }
                         const stockMode = n.useLiveStockApi ? 'API stock' : 'Manual stock';
+                        const c4 = n.couponByMemory?.['4GB'] || n.couponByMemory?.['4gb'];
+                        const c8 = n.couponByMemory?.['8GB'] || n.couponByMemory?.['8gb'];
+                        const c16 = n.couponByMemory?.['16GB'] || n.couponByMemory?.['16gb'];
+                        const promo = (c4 || c8 || c16 || n.couponCode)
+                          ? ` · ${[c4 ? `4GB:${c4}` : '', c8 ? `8GB:${c8}` : '', c16 ? `16GB:${c16}` : '', (!c4 && !c8 && !c16 && n.couponCode) ? n.couponCode : ''].filter(Boolean).join(' ')}`
+                          : '';
                         return (
                           <Badge variant="outline" className="gap-1 text-amber-600 border-amber-200">
                             <Zap className="h-3 w-3" />
-                            Netbay: {host} · {stockMode}
+                            Netbay: {host} · {stockMode}{promo}
                           </Badge>
                         );
                       }
@@ -2214,6 +2240,55 @@ export default function CompaniesPage() {
                     </button>
                   </div>
                 </div>
+              </div>
+
+              <div className="rounded-md border border-amber-200/70 bg-amber-50/50 dark:bg-amber-950/20 dark:border-amber-900/40 p-3 space-y-3">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="h-4 w-4 text-amber-600 shrink-0" />
+                  <Label className="text-sm font-medium">Panel coupon (buy + renew)</Label>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <Label className="text-xs">4GB coupon</Label>
+                    <Input
+                      placeholder="e.g. NB4GB"
+                      value={netbayForm.couponByMemory?.['4GB'] || ''}
+                      onChange={(e) => updateNetbayCouponForMemory('4GB', e.target.value)}
+                      className="mt-1 font-mono text-xs uppercase"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs">8GB coupon</Label>
+                    <Input
+                      placeholder="e.g. NB8GB"
+                      value={netbayForm.couponByMemory?.['8GB'] || ''}
+                      onChange={(e) => updateNetbayCouponForMemory('8GB', e.target.value)}
+                      className="mt-1 font-mono text-xs uppercase"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs">16GB coupon</Label>
+                    <Input
+                      placeholder="e.g. NB16GB"
+                      value={netbayForm.couponByMemory?.['16GB'] || ''}
+                      onChange={(e) => updateNetbayCouponForMemory('16GB', e.target.value)}
+                      className="mt-1 font-mono text-xs uppercase"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <Label className="text-xs">Fallback coupon (if RAM coupon empty)</Label>
+                  <Input
+                    placeholder="e.g. SAVE50"
+                    value={netbayForm.couponCode || ''}
+                    onChange={(e) => updateNetbayField('couponCode', e.target.value.toUpperCase())}
+                    className="mt-1 font-mono text-xs uppercase"
+                  />
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  8GB order → 8GB code. Agar us RAM ka field khali hai to fallback use hota hai.
+                  Sent as <code>couponCode</code> on purchase and renew.
+                </p>
               </div>
 
               {netbayTestResult && (

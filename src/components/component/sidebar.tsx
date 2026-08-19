@@ -31,7 +31,7 @@ import { Separator } from "@/components/ui/separator";
 import { toast } from 'sonner';
 import { ThemeToggle } from '@/components/ui/theme-toggle';
 import { Wallet } from 'lucide-react';
-import { fetchCart, subscribeCart, type CartSnapshot } from '@/lib/cartClient';
+import { subscribeCart, type CartSnapshot } from '@/lib/cartClient';
 
 interface NavItem {
   href: string;
@@ -70,14 +70,10 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
   // in sync after add-to-cart / checkout completion anywhere in the app.
   useEffect(() => {
     if (user?.userType === 'reseller' || user?.userType === 'admin') return;
-    let cancelled = false;
-    fetchCart()
-      .then((snap) => { if (!cancelled) setCartCount(snap.itemCount || 0); })
-      .catch(() => { /* unauthenticated — ignore */ });
     const unsub = subscribeCart((snap: CartSnapshot | null) => {
       if (snap) setCartCount(snap.itemCount || 0);
     });
-    return () => { cancelled = true; unsub(); };
+    return () => unsub();
   }, [user?.userType]);
 
   const fetchTicketUnreadCount = React.useCallback(async () => {
@@ -97,13 +93,16 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
   useEffect(() => {
     if (!user) return;
     fetchTicketUnreadCount();
-  }, [user, pathname, fetchTicketUnreadCount]);
-
-  useEffect(() => {
-    if (!user) return;
+    const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      fetchTicketUnreadCount();
+    }, 120000);
     const onFocus = () => fetchTicketUnreadCount();
     window.addEventListener('focus', onFocus);
-    return () => window.removeEventListener('focus', onFocus);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', onFocus);
+    };
   }, [user, fetchTicketUnreadCount]);
 
   // Save collapsed state to localStorage

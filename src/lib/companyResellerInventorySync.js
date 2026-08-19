@@ -406,8 +406,8 @@ async function syncSingleOrderExpiryFromPanel(order, { force = false, companyDoc
 }
 
 /**
- * On dashboard order list — if Hostheaven panel expiry is later, extend customer orders.
- * Uses one overview fetch per company (not one API call per order).
+ * On dashboard order list — mirror Prime / Hostheaven expiry onto the customer order
+ * (extend or shorten). One overview fetch per company.
  */
 async function syncUserHostheavenOrderExpiries(orders) {
   if (!Array.isArray(orders) || !orders.length) {
@@ -465,7 +465,7 @@ async function syncUserHostheavenOrderExpiries(orders) {
 
       if (!shouldSyncPanelDataToOrder(order, syncCtx)) continue;
 
-      if (!panelExpiryExtendsCustomer(order.expiryDate, entry.expiryDate)) continue;
+      if (!shouldApplyPanelExpiryToCustomer(order.expiryDate, entry.expiryDate)) continue;
 
       await Order.findByIdAndUpdate(order._id, {
         expiryDate: entry.expiryDate,
@@ -485,7 +485,7 @@ async function syncUserHostheavenOrderExpiries(orders) {
       const fresh = { ...order, expiryDate: entry.expiryDate };
       orderById.set(String(order._id), fresh);
       updated += 1;
-      extended += 1;
+      if (panelExpiryExtendsCustomer(order.expiryDate, entry.expiryDate)) extended += 1;
     }
   }
 
@@ -497,7 +497,8 @@ async function syncUserHostheavenOrderExpiries(orders) {
 }
 
 /**
- * After panel renew — prefer panel expiry, especially when panel already has more validity.
+ * After panel renew — Prime / Hostheaven expiry is source of truth for the customer.
+ * Never invent an Ocean +30d date when the panel date is known (or panel renew failed).
  */
 async function resolveRenewalExpiryFromPanel(order, calculatedExpiry, { panelRenew = null } = {}) {
   if (panelRenew?.success && panelRenew.newExpiryDate) {
@@ -506,33 +507,29 @@ async function resolveRenewalExpiryFromPanel(order, calculatedExpiry, { panelRen
 
   let panelExpiry = panelRenew?.newExpiryDate || null;
 
-  if (!order?.ipAddress || !order?.ipStockId) {
-    return panelExpiry || calculatedExpiry;
+  if (order?.ipAddress && order?.ipStockId) {
+    try {
+      const IPStock = require('@/models/ipStockModel');
+      const Company = (await import('@/models/companyModel')).default;
+      const ipStock = await IPStock.findById(order.ipStockId).select('company').lean();
+      if (ipStock?.company) {
+        const company = await Company.findById(ipStock.company).select('resellerApi name').lean();
+        if (getCompanyResellerApiConfig(company)) {
+          const panel = await fetchResellerExpiryByIp(company, order.ipAddress);
+          panelExpiry = panel?.expiryDate || panelExpiry;
+        }
+      }
+    } catch {
+      // keep whatever panelExpiry we already have
+    }
   }
 
-  try {
-    const IPStock = require('@/models/ipStockModel');
-    const Company = (await import('@/models/companyModel')).default;
-    const ipStock = await IPStock.findById(order.ipStockId).select('company').lean();
-    if (!ipStock?.company) return panelExpiry || calculatedExpiry;
-
-    const company = await Company.findById(ipStock.company).select('resellerApi name').lean();
-    if (!getCompanyResellerApiConfig(company)) return panelExpiry || calculatedExpiry;
-
-    const panel = await fetchResellerExpiryByIp(company, order.ipAddress);
-    panelExpiry = panel?.expiryDate || panelExpiry;
-  } catch {
-    // keep calculated fallback
-  }
-
-  const calcMs = expiryMs(calculatedExpiry);
-  const panelMs = expiryMs(panelExpiry);
-
-  if (panelMs != null && (calcMs == null || panelMs > calcMs)) {
+  if (expiryMs(panelExpiry) != null) {
     return panelExpiry;
   }
-  if (panelMs != null && panelMs !== calcMs) {
-    return panelExpiry;
+
+  if (panelRenew && panelRenew.success === false) {
+    return order?.expiryDate || calculatedExpiry;
   }
 
   return calculatedExpiry;

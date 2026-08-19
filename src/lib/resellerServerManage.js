@@ -47,6 +47,7 @@ const {
   configureAdvpsServiceIp,
 } = require('@/lib/advpsOrderSync');
 const { toUserFacingNetbayError } = require('@/lib/netbayApiErrors');
+const { isNetbayProxyOrder, applyNetbayProxyToOrderUpdates } = require('@/lib/netbayProxy');
 const { runKurohostPostReinstallFlow } = require('@/lib/kurohostPostReinstallFlow');
 
 export const UNIVERSAL_ACTIONS = ['start', 'stop', 'restart', 'status', 'sync', 'templates', 'reinstall', 'changeos'];
@@ -155,7 +156,7 @@ function hasNativeServiceId(order, provider) {
     case 'hostycare':
       return !!order.hostycareServiceId;
     case 'netbay':
-      return !!order.netbayServiceId;
+      return !!(order.netbayServiceId || order.netbayProxyId);
     case 'kurohost':
       return !!order.kurohostInstanceId;
     case 'reseller-api':
@@ -182,7 +183,7 @@ export function resolveResellerManageProvider(order, ipStock = null) {
   if (upstream === 'oceanlinux' && order.hostycareServiceId) return 'hostycare';
   if (upstream === 'oceanlinux' && (order.smartvpsServiceId || order.ipAddress)) return 'smartvps';
   if (upstream === 'oceanlinux' && order.advpsServiceId) return 'advps';
-  if (upstream === 'oceanlinux' && order.netbayServiceId) return 'netbay';
+  if (upstream === 'oceanlinux' && (order.netbayServiceId || order.netbayProxyId)) return 'netbay';
   if (upstream === 'oceanlinux' && order.kurohostInstanceId) return 'kurohost';
 
   return upstream in PROVIDER_CAPABILITIES ? upstream : 'oceanlinux';
@@ -197,16 +198,20 @@ export function getResellerManagementCapabilities(order, ipStock = null) {
       ? hasNativeServiceId(order, provider)
       : !!ip || hasNativeServiceId(order, provider);
 
+  const isProxy = provider === 'netbay' && isNetbayProxyOrder(order);
+  const supported = isProxy ? ['status', 'sync'] : caps.supported;
+
   return {
-    available: caps.supported.length > 0 && provisioned,
-    supportedActions: caps.supported,
-    reinstallRequiresOs: caps.reinstallRequiresOs,
-    changeosRequiresOs: caps.changeosRequiresOs,
-    osOptions: caps.osOptions,
-    osTemplates: (caps.osOptions || []).map((name) => ({ id: name, name })),
-    notes: caps.notes,
+    available: supported.length > 0 && provisioned,
+    supportedActions: supported,
+    reinstallRequiresOs: isProxy ? false : caps.reinstallRequiresOs,
+    changeosRequiresOs: isProxy ? false : caps.changeosRequiresOs,
+    osOptions: isProxy ? [] : caps.osOptions,
+    osTemplates: isProxy ? [] : (caps.osOptions || []).map((name) => ({ id: name, name })),
+    notes: isProxy
+      ? 'NetBay HTTP proxy — credential sync only (host:port:user:pass).'
+      : caps.notes,
     provisioned,
-    // Internal — optional for debugging; resellers can ignore
     _provider: provider,
   };
 }
@@ -610,13 +615,27 @@ async function runHostycare(order, orderId, action) {
 }
 
 async function runNetbay(order, orderId, action, osType, ipStock) {
-  if (!order.netbayServiceId) return { success: false, message: 'Server is not provisioned yet. Please try again shortly.' };
+  if (!order.netbayServiceId && !order.netbayProxyId) {
+    return { success: false, message: 'Server is not provisioned yet. Please try again shortly.' };
+  }
   const cfg = ipStock?.company?.netbayApi;
   if (!cfg?.baseUrl || !cfg?.apiKey) {
     return { success: false, message: 'Server management is not available for this product.' };
   }
 
   const api = new NetbayApi(cfg);
+
+  if (isNetbayProxyOrder(order)) {
+    if (!['status', 'sync'].includes(action)) {
+      return { success: false, message: 'HTTP proxy products only support credential sync.' };
+    }
+    const detailRes = await api.getProxy(order.netbayProxyId);
+    const proxy = NetbayApi.unwrapProxyResponse(detailRes);
+    const applied = applyNetbayProxyToOrderUpdates(proxy, order);
+    await Order.findByIdAndUpdate(orderId, applied.dbUpdates);
+    return { success: true, message: 'Proxy credentials synced', data: { powerState: 'running', proxy } };
+  }
+
   const sid = order.netbayServiceId;
 
   switch (action) {

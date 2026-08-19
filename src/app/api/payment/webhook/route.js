@@ -702,6 +702,9 @@ async function handleRenewalWebhook(renewalTxnId, payment, webhookStartTime) {
         logger.setProviderApiResult('reseller-api', false, null, panelErr);
         providerRenewalResult = { error: panelErr.message };
         providerRenewalSuccess = false;
+        newExpiryDate = await resolveRenewalExpiryFromPanel(order, newExpiryDate, {
+          panelRenew: { success: false },
+        });
       }
     } else {
       console.log(`[WEBHOOK-RENEWAL] ${provider} renewal - no API call needed`);

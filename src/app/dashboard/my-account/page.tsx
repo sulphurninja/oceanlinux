@@ -222,7 +222,7 @@ const MyAccount = () => {
     const fetchUserData = async () => {
         try {
             setLoading(true);
-            const response = await dashboardFetch('/api/users/me', { cache: 'no-store', credentials: 'include' });
+            const response = await dashboardFetch('/api/users/me?stats=1', { cache: 'no-store', credentials: 'include' });
             if (response.status === 401) {
                 const authData = await response.json().catch(() => ({}));
                 const code = authData.code || '';

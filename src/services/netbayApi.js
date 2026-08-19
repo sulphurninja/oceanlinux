@@ -16,8 +16,12 @@
  *   - stop(serviceId)
  *   - reboot(serviceId)
  *   - rebuild(serviceId, { os })      (returns { taskId })
- *   - getRenewalPricing(serviceId)    (unit price for renew)
- *   - renewService(serviceId, { months }) (extend VM — deducts Netbay wallet)
+ *   - getRenewalPricing / renewService
+ *   - Proxy apps: listProxies, getProxy, purchaseProxy, checkProxyStock,
+ *     listProxyPlans, listProxyTemplates, proxyTaskStatus, updateProxyConfig,
+ *     getProxyRenewalPricing, renewProxy
+ *   - start / stop / reboot / rebuild
+ *   - taskStatus / waitForTask
  *   - taskStatus(taskId)              (poll until COMPLETED | FAILED)
  *   - test()                          (cheap auth probe — list plans)
  *
@@ -236,14 +240,16 @@ class NetbayApi {
    *   data.status     (PENDING)
    *
    * Required: planId, os  (os = template *name* from GET /api/v1/os — not osId)
-   * Optional: months (1-36, default 1), groupTag, callbackUrl
+   * Optional: months (1-36, default 1), groupTag, couponCode, callbackUrl
    */
-  async purchaseService({ planId, os, months, groupTag, callbackUrl }) {
+  async purchaseService({ planId, os, months, groupTag, couponCode, callbackUrl }) {
     if (!planId) throw new Error('NetbayApi.purchaseService: planId is required');
     if (!os) throw new Error('NetbayApi.purchaseService: os is required');
     const body = { planId, os };
     if (months) body.months = Number(months);
     if (groupTag) body.groupTag = String(groupTag);
+    const coupon = String(couponCode || '').trim().toUpperCase();
+    if (coupon) body.couponCode = coupon;
     if (callbackUrl) body.callbackUrl = String(callbackUrl);
     return this._request('/api/v1/services/purchase', { method: 'POST', body });
   }
@@ -328,12 +334,15 @@ class NetbayApi {
   }
 
   /** POST renew — extends service for `months` (min 1), deducts Netbay wallet. */
-  async renewService(serviceId, { months = 1 } = {}) {
+  async renewService(serviceId, { months = 1, couponCode } = {}) {
     if (!serviceId) throw new Error('NetbayApi.renewService: serviceId is required');
     const m = Math.max(1, Math.floor(Number(months) || 1));
+    const body = { months: m };
+    const coupon = String(couponCode || '').trim().toUpperCase();
+    if (coupon) body.couponCode = coupon;
     return this._request(`/api/v1/services/${encodeURIComponent(serviceId)}/renew`, {
       method: 'POST',
-      body: { months: m },
+      body,
     });
   }
 
@@ -389,26 +398,195 @@ class NetbayApi {
    * @param {number} [opts.maxWaitMs=180000]   give up after this long
    * @param {number} [opts.pollIntervalMs=4000]
    */
-  async waitForTask(taskId, { maxWaitMs = 180_000, pollIntervalMs = 4_000 } = {}) {
+  async waitForTask(taskId, { maxWaitMs = 180_000, pollIntervalMs = 4_000, proxy = false } = {}) {
     const deadline = Date.now() + maxWaitMs;
     let lastStatus = 'PENDING';
     let lastTask = null;
     while (Date.now() < deadline) {
       try {
-        const res = await this.taskStatus(taskId);
+        const res = proxy ? await this.proxyTaskStatus(taskId) : await this.taskStatus(taskId);
         const task = res?.data || res;
         lastTask = task;
         lastStatus = task?.status || lastStatus;
         if (lastStatus === 'COMPLETED' || lastStatus === 'FAILED') return task;
       } catch (err) {
-        // Transient errors are tolerated unless they're 4xx (client problems
-        // that won't self-heal). Treat 4xx as terminal.
         if (err.status && err.status >= 400 && err.status < 500) throw err;
         console.warn(`[NetbayApi] waitForTask poll error (continuing): ${err.message}`);
       }
       await new Promise(r => setTimeout(r, pollIntervalMs));
     }
     return lastTask || { status: lastStatus, taskId, _timedOut: true };
+  }
+
+  // ----------------------------- HTTP proxies -----------------------------
+
+  async listProxies() {
+    return this._request('/api/v1/proxies');
+  }
+
+  async getProxy(proxyId) {
+    if (!proxyId) throw new Error('NetbayApi.getProxy: proxyId is required');
+    return this._request(`/api/v1/proxies/${encodeURIComponent(proxyId)}`);
+  }
+
+  /**
+   * POST /api/v1/proxies/purchase — Applications/proxy plans only.
+   */
+  async purchaseProxy({
+    planId,
+    os = 'PROXY',
+    months,
+    groupTag,
+    couponCode,
+    callbackUrl,
+    proxyUser,
+    proxyPass,
+    proxyPort,
+  }) {
+    if (!planId) throw new Error('NetbayApi.purchaseProxy: planId is required');
+    if (!os) throw new Error('NetbayApi.purchaseProxy: os is required');
+    const body = { planId, os: String(os) };
+    if (months) body.months = Number(months);
+    if (groupTag) body.groupTag = String(groupTag);
+    const coupon = String(couponCode || '').trim().toUpperCase();
+    if (coupon) body.couponCode = coupon;
+    if (callbackUrl) body.callbackUrl = String(callbackUrl);
+    if (proxyUser) body.proxyUser = String(proxyUser);
+    if (proxyPass) body.proxyPass = String(proxyPass);
+    if (proxyPort != null && proxyPort !== '') body.proxyPort = Number(proxyPort);
+    return this._request('/api/v1/proxies/purchase', { method: 'POST', body });
+  }
+
+  async checkProxyStock({ planId, os, groupTag }) {
+    if (!planId) throw new Error('NetbayApi.checkProxyStock: planId is required');
+    if (!os) throw new Error('NetbayApi.checkProxyStock: os is required');
+    const query = { planId, os: String(os) };
+    if (groupTag) query.groupTag = String(groupTag);
+    return this._request('/api/v1/proxies/stock', { query });
+  }
+
+  async isProxyStockAvailable({ planId, os, groupTag }) {
+    if (!isStockCheckAllowed()) {
+      return {
+        available: null,
+        skipped: true,
+        rateLimited: true,
+        reason: 'Stock API rate limit — using cached availability',
+        details: null,
+        message: 'Stock check deferred (rate limit)',
+      };
+    }
+    try {
+      const res = await this.checkProxyStock({ planId, os, groupTag });
+      const data = res?.data || {};
+      return {
+        available: data.available === true,
+        reason: data.reason || null,
+        details: data.details || null,
+        message: res?.message || null,
+      };
+    } catch (err) {
+      if (err.status === 503) {
+        const body = err.body?.data || err.body || {};
+        return {
+          available: false,
+          skipped: false,
+          reason: body.reason || err.body?.message || 'No proxy capacity available',
+          details: body.details || null,
+          message: err.body?.message || err.message,
+        };
+      }
+      if (err.status === 429) {
+        markStockRateLimited(rateLimitState.resetAt ? rateLimitState.resetAt / 1000 : null);
+        return {
+          available: null,
+          skipped: true,
+          rateLimited: true,
+          reason: err.message || 'Rate limit exceeded',
+          details: null,
+          message: err.message,
+        };
+      }
+      if (err.status >= 500) {
+        return {
+          available: null,
+          skipped: true,
+          reason: err.message,
+          details: null,
+          message: err.message,
+        };
+      }
+      throw err;
+    }
+  }
+
+  async listProxyPlans() {
+    return this._request('/api/v1/proxies/plans');
+  }
+
+  async listProxyTemplates() {
+    return this._request('/api/v1/proxies/templates');
+  }
+
+  async proxyTaskStatus(taskId) {
+    if (!taskId) throw new Error('NetbayApi.proxyTaskStatus: taskId is required');
+    return this._request(`/api/v1/proxies/tasks/${encodeURIComponent(taskId)}`);
+  }
+
+  async updateProxyConfig(proxyId, { proxyUser, proxyPass, proxyPort } = {}) {
+    if (!proxyId) throw new Error('NetbayApi.updateProxyConfig: proxyId is required');
+    const body = {};
+    if (proxyUser) body.proxyUser = String(proxyUser);
+    if (proxyPass) body.proxyPass = String(proxyPass);
+    if (proxyPort != null && proxyPort !== '') body.proxyPort = Number(proxyPort);
+    return this._request(`/api/v1/proxies/${encodeURIComponent(proxyId)}/config`, {
+      method: 'POST',
+      body,
+    });
+  }
+
+  async getProxyRenewalPricing(proxyId) {
+    if (!proxyId) throw new Error('NetbayApi.getProxyRenewalPricing: proxyId is required');
+    return this._request(`/api/v1/proxies/${encodeURIComponent(proxyId)}/renewal-pricing`);
+  }
+
+  async renewProxy(proxyId, { months = 1, couponCode } = {}) {
+    if (!proxyId) throw new Error('NetbayApi.renewProxy: proxyId is required');
+    const m = Math.max(1, Math.floor(Number(months) || 1));
+    const body = { months: m };
+    const coupon = String(couponCode || '').trim().toUpperCase();
+    if (coupon) body.couponCode = coupon;
+    return this._request(`/api/v1/proxies/${encodeURIComponent(proxyId)}/renew`, {
+      method: 'POST',
+      body,
+    });
+  }
+
+  static unwrapProxyResponse(res) {
+    if (!res || typeof res !== 'object') return null;
+    return res.data?.proxy || res.proxy || res.data || res;
+  }
+
+  static extractProxyId(data) {
+    if (!data || typeof data !== 'object') return '';
+    return String(data.proxyId || data.id || data._id || '').trim();
+  }
+
+  static extractProxyCredentials(src) {
+    if (!src || typeof src !== 'object') return null;
+    const creds = src.credentials && typeof src.credentials === 'object' ? src.credentials : src;
+    const host = String(creds.host || creds.ip || creds.ipAddress || '').split(':')[0].trim();
+    const port = Number(creds.port || creds.proxyPort || 0) || null;
+    const user = String(creds.user || creds.username || creds.proxyUser || '').trim();
+    const pass = String(creds.pass || creds.password || creds.proxyPass || '').trim();
+    if (!host && !user) return null;
+    const formatted =
+      creds.formattedCreds ||
+      (host && port && user && pass ? `${host}:${port}:${user}:${pass}` : '');
+    const httpUrl =
+      creds.httpUrl ||
+      (host && port && user && pass ? `http://${user}:${pass}@${host}:${port}` : '');
+    return { host, port, user, pass, formattedCreds: formatted, httpUrl };
   }
 
   // ----------------------------- helpers -----------------------------

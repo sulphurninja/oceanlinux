@@ -39,9 +39,35 @@ const NotificationBell = () => {
     const router = useRouter();
 
     useEffect(() => {
-        fetchNotifications();
-        const interval = setInterval(fetchNotifications, 30000);
-        return () => clearInterval(interval);
+        let cancelled = false;
+
+        const load = async (background = false) => {
+            if (typeof document !== 'undefined' && document.hidden) return;
+            try {
+                if (!background) setLoading(true);
+                const response = await fetch('/api/notifications?limit=10');
+                if (!response.ok || cancelled) return;
+                const data = await response.json();
+                setNotifications(data.notifications);
+                setUnreadCount(data.unreadCount);
+            } catch (error) {
+                console.error('Error fetching notifications:', error);
+            } finally {
+                if (!cancelled && !background) setLoading(false);
+            }
+        };
+
+        load(false);
+        const interval = setInterval(() => load(true), 60000);
+        const onVisibility = () => {
+            if (!document.hidden) load(true);
+        };
+        document.addEventListener('visibilitychange', onVisibility);
+        return () => {
+            cancelled = true;
+            clearInterval(interval);
+            document.removeEventListener('visibilitychange', onVisibility);
+        };
     }, []);
 
     const fetchNotifications = async () => {

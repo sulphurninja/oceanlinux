@@ -44,6 +44,7 @@ const {
 } = require('@/lib/kurohostOrderSync');
 const { mapKurohostOsLabel, runKurohostPostReinstallFlow } = require('@/lib/kurohostPostReinstallFlow');
 const { toUserFacingNetbayError } = require('@/lib/netbayApiErrors');
+const { isNetbayProxyOrder, applyNetbayProxyToOrderUpdates } = require('@/lib/netbayProxy');
 const { sanitizeCustomerApiPayload, customerServiceErrorMessage } = require('@/lib/customerFacingErrors');
 
 function actionJson(body, status = 200, action = null) {
@@ -659,7 +660,7 @@ export async function POST(request) {
     // Netbay actions are addressed by serviceId, not IP — so missing IP
     // shouldn't block the request. Every other provider in this route still
     // requires an IP for VM lookup.
-    const orderIsNetbay = order.provider === 'netbay' || !!order.netbayServiceId;
+    const orderIsNetbay = order.provider === 'netbay' || !!order.netbayServiceId || !!order.netbayProxyId;
     const orderIsKurohost = order.provider === 'kurohost' || !!order.kurohostInstanceId;
     if (!ipAddress && !orderIsNetbay && !orderIsKurohost) {
       return actionJson({
@@ -683,7 +684,7 @@ export async function POST(request) {
       order.smartvpsDetails?.ip ||
       (order.productName && order.productName.includes('🌊'))
     );
-    const isNetbay = order.provider === 'netbay' || !!order.netbayServiceId;
+    const isNetbay = order.provider === 'netbay' || !!order.netbayServiceId || !!order.netbayProxyId;
     const isKurohost = order.provider === 'kurohost' || !!order.kurohostInstanceId;
     const hasHostycareService = !!order.hostycareServiceId;
 
@@ -916,7 +917,7 @@ export async function POST(request) {
       }
       // `templates` is a catalog lookup that doesn't require a service id —
       // every other Netbay action is service-bound.
-      if (!order.netbayServiceId && action !== 'templates') {
+      if (!order.netbayServiceId && !order.netbayProxyId && action !== 'templates') {
         return actionJson({
           success: false,
           error: 'This server is still being set up. Please try again in a minute.',
@@ -936,6 +937,33 @@ export async function POST(request) {
       }
 
       try {
+        const isProxy = isNetbayProxyOrder(order);
+        if (isProxy && !['status', 'sync', 'templates'].includes(action)) {
+          return actionJson({
+            success: false,
+            error: 'HTTP proxy products only support credential sync. Power/rebuild is not available.',
+          }, 400, action);
+        }
+        if (isProxy && (action === 'status' || action === 'sync')) {
+          const detailRes = await netbayApi.getProxy(order.netbayProxyId);
+          const proxy = NetbayApi.unwrapProxyResponse(detailRes);
+          const applied = applyNetbayProxyToOrderUpdates(proxy, order);
+          await Order.findByIdAndUpdate(orderId, applied.dbUpdates);
+          return NextResponse.json({
+            success: true,
+            powerState: 'running',
+            provider: 'netbay',
+            serviceId: order.netbayProxyId,
+            credentialsUpdated: applied.changes.includes('password') || applied.changes.includes('username') || applied.changes.includes('ipAddress'),
+            expiryDate: applied.dbUpdates.expiryDate || order.expiryDate || null,
+            syncResult: {
+              credentialsUpdated: applied.changes.length > 0,
+              expiryUpdated: applied.changes.includes('expiryDate'),
+              changes: applied.changes,
+              lastSyncTime: applied.dbUpdates.lastSyncTime.toISOString(),
+            },
+          });
+        }
         switch (action) {
           case 'start': {
             const apiRes = await netbayApi.start(order.netbayServiceId);
@@ -2370,8 +2398,32 @@ export async function GET(request) {
 
     // 1a-pre) Netbay branch — Netbay carries its own serviceId per order,
     //         so we go straight to /services/:id without any IP-based lookup.
-    if ((order.provider === 'netbay' || !!order.netbayServiceId)) {
+    if ((order.provider === 'netbay' || !!order.netbayServiceId || !!order.netbayProxyId)) {
       const { config: netbayCfg, companyName: netbayCompanyName } = await resolveCompanyNetbayApi(order);
+      if (netbayCfg && order.netbayProxyId && isNetbayProxyOrder(order)) {
+        try {
+          const api = new NetbayApi(netbayCfg);
+          const detailRes = await api.getProxy(order.netbayProxyId);
+          const proxy = NetbayApi.unwrapProxyResponse(detailRes);
+          const applied = applyNetbayProxyToOrderUpdates(proxy, order);
+          await Order.findByIdAndUpdate(orderId, applied.dbUpdates);
+          return NextResponse.json({
+            success: true,
+            provider: 'netbay',
+            companyName: netbayCompanyName || null,
+            serviceId: order.netbayProxyId,
+            ip: applied.dbUpdates.ipAddress || ipAddress,
+            status: 'running',
+            powerState: 'running',
+            details: proxy,
+            credentialsUpdated: applied.changes.includes('password') || applied.changes.includes('username') || applied.changes.includes('ipAddress'),
+            expiryDate: applied.dbUpdates.expiryDate || order.expiryDate || null,
+            lastSync: applied.dbUpdates.lastSyncTime.toISOString(),
+          });
+        } catch (netbayErr) {
+          console.warn('[SERVICE-ACTION][GET] Netbay proxy fetch failed:', netbayErr.message);
+        }
+      }
       if (netbayCfg && order.netbayServiceId) {
         console.log(`[SERVICE-ACTION][GET] Using Netbay API for order=${orderId} (serviceId=${order.netbayServiceId}, baseUrl=${netbayCfg.baseUrl})`);
         try {

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import mongoose from 'mongoose';
 import Order from '@/models/orderModel';
 import User from '@/models/userModel';
 import Reseller from '@/models/resellerModel';
@@ -9,109 +10,138 @@ export async function GET(request: NextRequest) {
   try {
     await connectDB();
 
-    // Check if token exists
     const token = request.cookies.get('token')?.value;
     if (!token) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Get user ID from token using your helper function
-    let userId;
+    let userId: string;
     try {
       userId = getDataFromToken(request);
-    } catch (error) {
+    } catch {
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
     }
 
     const { searchParams } = new URL(request.url);
     const timeframe = searchParams.get('timeframe') || '30d';
 
-    // Calculate date range based on timeframe
     const now = new Date();
     const daysAgo = timeframe === '7d' ? 7 : timeframe === '30d' ? 30 : 90;
     const startDate = new Date(now.getTime() - (daysAgo * 24 * 60 * 60 * 1000));
+    const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 5, 1);
+    const userOid = new mongoose.Types.ObjectId(String(userId));
+    const userMatch = {
+      $in: [userOid, String(userId)],
+    };
 
-    // Get user's orders using the userId from token
-    const allOrders = await Order.find({ user: userId })
-      .sort({ createdAt: -1 })
-      .lean();
+    const [agg] = await Order.aggregate([
+      { $match: { user: userMatch } },
+      {
+        $facet: {
+          totals: [
+            {
+              $group: {
+                _id: null,
+                totalOrders: { $sum: 1 },
+                totalSpent: { $sum: { $ifNull: ['$price', 0] } },
+                pendingOrders: {
+                  $sum: { $cond: [{ $eq: ['$status', 'pending'] }, 1, 0] },
+                },
+                failedOrders: {
+                  $sum: { $cond: [{ $eq: ['$status', 'failed'] }, 1, 0] },
+                },
+                completedOrders: {
+                  $sum: { $cond: [{ $eq: ['$status', 'completed'] }, 1, 0] },
+                },
+                activeServices: {
+                  $sum: {
+                    $cond: [
+                      {
+                        $or: [
+                          { $eq: ['$status', 'completed'] },
+                          { $eq: ['$provisioningStatus', 'active'] },
+                        ],
+                      },
+                      1,
+                      0,
+                    ],
+                  },
+                },
+              },
+            },
+          ],
+          recent: [
+            { $match: { createdAt: { $gte: startDate } } },
+            { $sort: { createdAt: -1 } },
+            { $limit: 10 },
+            {
+              $project: {
+                productName: 1,
+                memory: 1,
+                price: 1,
+                status: 1,
+                provisioningStatus: 1,
+                createdAt: 1,
+              },
+            },
+          ],
+          monthly: [
+            { $match: { createdAt: { $gte: sixMonthsAgo } } },
+            { $project: { price: 1, createdAt: 1 } },
+          ],
+        },
+      },
+    ]);
 
-    const recentOrders = await Order.find({
-      user: userId,
-      createdAt: { $gte: startDate }
-    })
-      .sort({ createdAt: -1 })
-      .limit(10)
-      .limit(10)
-      .lean();
+    const totals = agg?.totals?.[0] || {};
+    const recentOrders = agg?.recent || [];
+    const monthlyRows = agg?.monthly || [];
 
-    // Check for reseller status
-    const user = await User.findById(userId);
+    const monthlySpending = [];
+    for (let i = 0; i < 6; i++) {
+      const monthStart = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const monthEnd = new Date(now.getFullYear(), now.getMonth() - i + 1, 0, 23, 59, 59, 999);
+      const monthTotal = monthlyRows.reduce((sum: number, order: { price?: number; createdAt: Date }) => {
+        const orderDate = new Date(order.createdAt);
+        if (orderDate >= monthStart && orderDate <= monthEnd) {
+          return sum + (order.price || 0);
+        }
+        return sum;
+      }, 0);
+      monthlySpending.push(monthTotal);
+    }
+
+    const user = await User.findById(userId).select('userType resellerId').lean();
     let resellerInfo = null;
 
     if (user?.userType === 'reseller' && user?.resellerId) {
-      const reseller = await Reseller.findById(user.resellerId);
+      const reseller = await Reseller.findById(user.resellerId)
+        .select('wallet stats.totalSpent')
+        .lean();
       if (reseller) {
         resellerInfo = {
           balance: reseller.wallet?.balance || 0,
           currency: reseller.wallet?.currency || 'INR',
           creditLimit: reseller.wallet?.creditLimit || 0,
-          totalSpent: reseller.stats?.totalSpent || 0
+          totalSpent: reseller.stats?.totalSpent || 0,
         };
       }
     }
 
-    // Calculate stats
-    const totalOrders = allOrders.length;
-    const activeServices = allOrders.filter(order =>
-      order.status === 'completed' || order.provisioningStatus === 'active'
-    ).length;
-
-    const totalSpent = allOrders.reduce((sum, order) => sum + (order.price || 0), 0);
-    const pendingOrders = allOrders.filter(order => order.status === 'pending').length;
-
-    // Order status breakdown
-    const orderStatusBreakdown = {
-      completed: allOrders.filter(order => order.status === 'completed').length,
-      pending: allOrders.filter(order => order.status === 'pending').length,
-      failed: allOrders.filter(order => order.status === 'failed').length,
-    };
-
-    // Monthly spending (last 6 months)
-    const monthlySpending = [];
-    for (let i = 0; i < 6; i++) {
-      const monthStart = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const monthEnd = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
-
-      const monthOrders = allOrders.filter(order => {
-        const orderDate = new Date(order.createdAt);
-        return orderDate >= monthStart && orderDate <= monthEnd;
-      });
-
-      const monthTotal = monthOrders.reduce((sum, order) => sum + (order.price || 0), 0);
-      monthlySpending.push(monthTotal);
-    }
-
-    const stats = {
-      totalOrders,
-      activeServices,
-      totalSpent,
-      pendingOrders,
-      recentOrders: recentOrders.map(order => ({
-        _id: order._id,
-        productName: order.productName,
-        memory: order.memory,
-        price: order.price,
-        status: order.status,
-        provisioningStatus: order.provisioningStatus,
-        createdAt: order.createdAt,
-      })),
+    return NextResponse.json({
+      totalOrders: totals.totalOrders || 0,
+      activeServices: totals.activeServices || 0,
+      totalSpent: totals.totalSpent || 0,
+      pendingOrders: totals.pendingOrders || 0,
+      recentOrders,
       monthlySpending,
-      orderStatusBreakdown,
+      orderStatusBreakdown: {
+        completed: totals.completedOrders || 0,
+        pending: totals.pendingOrders || 0,
+        failed: totals.failedOrders || 0,
+      },
       resellerWallet: resellerInfo,
-    };
-
-    return NextResponse.json(stats);
+    });
   } catch (error) {
     console.error('Dashboard stats error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

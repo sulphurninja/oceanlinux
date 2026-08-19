@@ -419,6 +419,9 @@ export default function CartPage() {
                           {line.memory && line.memory !== 'Slot IP' && (
                             <Badge variant="secondary">{line.memory}</Badge>
                           )}
+                          {line.netbayGroupTag && (
+                            <Badge variant="outline" className="font-mono">{line.netbayGroupTag}</Badge>
+                          )}
                         </div>
                         {invalid && (
                           <div className="mt-2 flex items-center gap-2 text-sm text-destructive">

@@ -32,6 +32,7 @@ interface IpStockProps extends BaseProps {
   memory: string;
   os?: string;
   promoCode?: string;
+  netbayGroupTag?: string;
 }
 
 interface SlotIpProps extends BaseProps {
@@ -69,6 +70,7 @@ export default function AddToCartButton(props: Props) {
           memory: props.memory,
           os: props.os,
           promoCode: props.promoCode,
+          netbayGroupTag: props.netbayGroupTag,
           quantity: 1,
         });
       } else {

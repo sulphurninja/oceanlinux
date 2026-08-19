@@ -21,7 +21,19 @@ export function broadcastWallet(summary: WalletSummary | null) {
   window.dispatchEvent(new CustomEvent(WALLET_UPDATED_EVENT, { detail: summary }));
 }
 
+let walletInflight: Promise<WalletSummary | null> | null = null;
+
 export async function fetchWalletSummary(): Promise<WalletSummary | null> {
+  if (walletInflight) return walletInflight;
+  walletInflight = loadWalletSummary();
+  try {
+    return await walletInflight;
+  } finally {
+    walletInflight = null;
+  }
+}
+
+async function loadWalletSummary(): Promise<WalletSummary | null> {
   try {
     const res = await fetch('/api/wallet', { credentials: 'include' });
     if (!res.ok) return null;

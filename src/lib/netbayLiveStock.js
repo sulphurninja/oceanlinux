@@ -15,6 +15,7 @@ const NetbayApi = require('@/services/netbayApi');
 const { getCompanyNetbayApiConfig, companyUsesNetbayLiveStock } = require('@/lib/companyNetbayApi');
 const { toPlainConfigurations } = require('@/lib/advpsLiveStock');
 const { usesNetbayLiveStock } = require('@/lib/ipStockAvailability');
+const { parseNetbayGroupTags } = require('@/lib/netbayGroupTags');
 
 const LOG = '[NETBAY-LIVE-STOCK]';
 
@@ -82,10 +83,14 @@ function readNetbayStockConfig(ipStock) {
       ? Object.fromEntries(cfg.defaultOs)
       : (cfg.defaultOs || {});
 
+  const groupTags = parseNetbayGroupTags(cfg);
   return {
-    groupTag: cfg.groupTag || '',
+    groupTag: groupTags[0] || cfg.groupTag || '',
+    groupTags,
     planByMemory,
     defaultOs,
+    productType: cfg.productType || cfg.appType || 'vm',
+    proxyTemplate: cfg.proxyTemplate || '',
   };
 }
 
@@ -156,10 +161,35 @@ async function getNetbayApiForStock(stock) {
   return { api: new NetbayApi(cfg), companyName: company?.name || '' };
 }
 
-async function checkNetbayVariantStock(api, { stockCfg, memory, ipStock, isWindows }, osListCache) {
+function listingGroupTag(stockCfg, requested) {
+  const req = String(requested || '').trim();
+  if (req) return req;
+  const tags = stockCfg.groupTags || parseNetbayGroupTags(stockCfg);
+  if (tags.length === 1) return tags[0];
+  // Multiple series: listing checks any IP; checkout verifies the chosen series.
+  if (tags.length > 1) return undefined;
+  return stockCfg.groupTag || undefined;
+}
+
+async function checkNetbayVariantStock(api, { stockCfg, memory, ipStock, isWindows, groupTag }, osListCache) {
   const planId = resolveNetbayPlanId({ planByMemory: stockCfg.planByMemory, ram: memory });
   if (!planId) {
     return { available: false, reason: `Netbay plan not configured for ${memory}` };
+  }
+
+  const isProxy =
+    String(stockCfg.productType || '').toLowerCase() === 'proxy' ||
+    String(stockCfg.appType || '').toLowerCase() === 'proxy';
+  const resolvedTag = listingGroupTag(stockCfg, groupTag);
+
+  if (isProxy) {
+    const osName = String(stockCfg.proxyTemplate || stockCfg.defaultOs?.Proxy || 'PROXY').trim() || 'PROXY';
+    const result = await api.isProxyStockAvailable({
+      planId,
+      os: osName,
+      groupTag: resolvedTag || undefined,
+    });
+    return { ...result, planId, os: osName, groupTag: resolvedTag || null };
   }
 
   const osName = await resolveNetbayOsName(api, { stockCfg, isWindows }, osListCache);
@@ -170,7 +200,7 @@ async function checkNetbayVariantStock(api, { stockCfg, memory, ipStock, isWindo
   const result = await api.isServiceStockAvailable({
     planId,
     os: osName,
-    groupTag: stockCfg.groupTag || undefined,
+    groupTag: resolvedTag || undefined,
   });
 
   return {
@@ -178,7 +208,7 @@ async function checkNetbayVariantStock(api, { stockCfg, memory, ipStock, isWindo
     planId,
     os: osName,
     memory,
-    groupTag: stockCfg.groupTag || null,
+    groupTag: resolvedTag || null,
   };
 }
 
@@ -229,7 +259,7 @@ async function syncNetbayIpStockRow(stock, { force = false, sharedCheckCache = n
         { stockCfg, isWindows },
         osListCache
       );
-      const cacheKey = stockCheckKey({ planId, os: osName, groupTag: stockCfg.groupTag });
+      const cacheKey = stockCheckKey({ planId, os: osName, groupTag: listingGroupTag(stockCfg) });
 
       let result;
       if (planId && osName && checkCache.has(cacheKey)) {
@@ -386,7 +416,7 @@ async function syncNetbayIpStockRow(stock, { force = false, sharedCheckCache = n
 }
 
 /** Verify a specific memory tier is in stock upstream before checkout. */
-async function verifyNetbayMemoryInStock(stock, memory, { preferCache = false } = {}) {
+async function verifyNetbayMemoryInStock(stock, memory, { preferCache = false, groupTag } = {}) {
   if (!isNetbayIpStock(stock)) {
     return { ok: true, skipped: true };
   }
@@ -409,7 +439,8 @@ async function verifyNetbayMemoryInStock(stock, memory, { preferCache = false } 
   const cached = defaults.variantStock?.[memory];
   const cacheFresh = isRecentStockSync(defaults.lastStockSync);
 
-  if (preferCache && cacheFresh && cached?.available === true) {
+  const requestedTag = String(groupTag || '').trim();
+  if (preferCache && cacheFresh && cached?.available === true && !requestedTag) {
     return { ok: true, result: cached, fromCache: true };
   }
 
@@ -418,7 +449,7 @@ async function verifyNetbayMemoryInStock(stock, memory, { preferCache = false } 
   try {
     const result = await checkNetbayVariantStock(
       ctx.api,
-      { stockCfg, memory, ipStock: stock, isWindows },
+      { stockCfg, memory, ipStock: stock, isWindows, groupTag: requestedTag },
       {}
     );
 

@@ -32,14 +32,29 @@ export async function GET(request) {
             });
         }
 
-        // Get user's orders for statistics
-        const orders = await Order.find({ user: userId }).lean();
+        const accountCreated = new Date(user.createdAt || user._id.getTimestamp());
+        const accountAge = Math.floor((new Date() - accountCreated) / (1000 * 60 * 60 * 24));
+        const includeStats = new URL(request.url).searchParams.get('stats') === '1';
 
-        // Calculate real statistics
+        // Session / layout only needs the user document. Full order stats are
+        // expensive and belong on My Account (?stats=1) or /api/dashboard/stats.
+        if (!includeStats) {
+            return new Response(JSON.stringify({
+                ...user,
+                stats: { accountAge },
+            }), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' }
+            });
+        }
+
+        const orders = await Order.find({ user: userId })
+            .select('price status provisioningStatus createdAt productName renewalPayments.amount')
+            .lean()
+            .maxTimeMS(8000);
+
         const totalOrders = orders.length;
         const totalSpent = orders.reduce((sum, order) => sum + (order.price || 0), 0);
-
-        // Calculate total from renewal payments as well
         const renewalSpent = orders.reduce((sum, order) => {
             if (order.renewalPayments && order.renewalPayments.length > 0) {
                 return sum + order.renewalPayments.reduce((renewalSum, renewal) => renewalSum + (renewal.amount || 0), 0);
@@ -47,43 +62,26 @@ export async function GET(request) {
             return sum;
         }, 0);
 
-        const totalSpentIncludingRenewals = totalSpent + renewalSpent;
-
-        // Calculate account age
-        const accountCreated = new Date(user.createdAt || user._id.getTimestamp());
-        const accountAge = Math.floor((new Date() - accountCreated) / (1000 * 60 * 60 * 24));
-
-        // Get recent orders for activity
         const recentOrders = orders
             .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
             .slice(0, 5);
 
-        // Count orders by status
-        const ordersByStatus = {
-            completed: orders.filter(order => order.status === 'completed').length,
-            pending: orders.filter(order => order.status === 'pending' || order.status === 'confirmed').length,
-            failed: orders.filter(order => order.status === 'failed').length,
-            active: orders.filter(order => order.provisioningStatus === 'active').length
-        };
-
-        // Calculate average order value
-        const averageOrderValue = totalOrders > 0 ? totalSpent / totalOrders : 0;
-
-        // Get last login (this would typically be tracked separately)
-        const lastLogin = new Date(); // For now, use current time
-
-        // Enhanced user object with real statistics
         const userWithStats = {
             ...user,
             stats: {
                 totalOrders,
                 totalSpent,
-                totalSpentIncludingRenewals,
+                totalSpentIncludingRenewals: totalSpent + renewalSpent,
                 renewalSpent,
                 accountAge,
-                lastLogin,
-                averageOrderValue,
-                ordersByStatus,
+                lastLogin: new Date(),
+                averageOrderValue: totalOrders > 0 ? totalSpent / totalOrders : 0,
+                ordersByStatus: {
+                    completed: orders.filter(order => order.status === 'completed').length,
+                    pending: orders.filter(order => order.status === 'pending' || order.status === 'confirmed').length,
+                    failed: orders.filter(order => order.status === 'failed').length,
+                    active: orders.filter(order => order.provisioningStatus === 'active').length
+                },
                 recentOrders: recentOrders.map(order => ({
                     _id: order._id,
                     productName: order.productName,
@@ -95,7 +93,6 @@ export async function GET(request) {
             }
         };
 
-        // Return user data with real statistics
         return new Response(JSON.stringify(userWithStats), {
             status: 200,
             headers: { 'Content-Type': 'application/json' }

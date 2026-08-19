@@ -30,6 +30,7 @@ export interface CartLine {
   os: string;
   quantity: number;
   promoCode: string;
+  netbayGroupTag?: string;
   addedAt: string;
   pricing: CartLinePricing;
 }
@@ -60,11 +61,21 @@ async function jsonOrThrow<T>(res: Response): Promise<T> {
   return data as T;
 }
 
+let cartInflight: Promise<CartSnapshot> | null = null;
+
 export async function fetchCart(): Promise<CartSnapshot> {
-  const res = await fetch('/api/cart', { credentials: 'include' });
-  const data = await jsonOrThrow<{ cart: CartSnapshot }>(res);
-  broadcast(data.cart);
-  return data.cart;
+  if (cartInflight) return cartInflight;
+  cartInflight = (async () => {
+    const res = await fetch('/api/cart', { credentials: 'include' });
+    const data = await jsonOrThrow<{ cart: CartSnapshot }>(res);
+    broadcast(data.cart);
+    return data.cart;
+  })();
+  try {
+    return await cartInflight;
+  } finally {
+    cartInflight = null;
+  }
 }
 
 export async function addToCart(payload: {
@@ -75,6 +86,7 @@ export async function addToCart(payload: {
   os?: string;
   quantity?: number;
   promoCode?: string;
+  netbayGroupTag?: string;
 }): Promise<CartSnapshot> {
   const res = await fetch('/api/cart', {
     method: 'POST',

@@ -2799,7 +2799,37 @@ html {
   @media (prefers-reduced-motion: reduce) {
     .ocean-soft-pulse,
     .ocean-flying-bird-svg--auto-flap .ocean-bird-wing,
-    .ocean-flying-bird-svg--auto-flap .ocean-bird-tail {
+    .ocean-flying-bird-svg--auto-flap .ocean-bird-tail,
+    .hero-premium-badge-dot,
+    .animate-hero-glow {
+      animation: none !important;
+    }
+  }
+
+  /* Live backdrop-filter on every card/topbar is expensive on scroll (desktop too) */
+  html.premium-dashboard-active .premium-dashboard-card,
+  html.premium-dashboard-active .premium-dashboard-welcome,
+  html.premium-dashboard-active .premium-dashboard-topbar,
+  html.premium-dashboard-active .premium-order-detail-header,
+  html.premium-dashboard-active .premium-dashboard-sidebar,
+  html.premium-dashboard-active .premium-dashboard-mobile-header {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+
+  /* Phone/tablet: drop live blur on every card — major source of scroll lag */
+  @media (max-width: 1023px) {
+    html.premium-dashboard-active .premium-dashboard-card,
+    html.premium-dashboard-active .premium-dashboard-welcome,
+    html.premium-dashboard-active .premium-dashboard-topbar,
+    html.premium-dashboard-active .premium-order-detail-header,
+    html.premium-dashboard-active .premium-dashboard-sidebar {
+      backdrop-filter: none !important;
+      -webkit-backdrop-filter: none !important;
+    }
+
+    .ocean-soft-pulse,
+    .hero-premium-badge-dot {
       animation: none !important;
     }
   }

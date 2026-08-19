@@ -117,7 +117,23 @@ import { isOrderAwaitingDelivery, isOrderPaid, hasOrderBeenDelivered, shouldPoll
 import { openRazorpayModal } from '@/lib/razorpayCheckout';
 import { triggerRenewalSuccessBird } from '@/lib/oceanBirdFly';
 
+function isNetbayHttpProxyOrder(order: { netbayAppType?: string; netbayProxyId?: string } | null | undefined) {
+  return order?.netbayAppType === 'proxy' || !!order?.netbayProxyId;
+}
+
 function parseSlotIpConnection(order: Order): SlotIpConnection | null {
+  const rawDetails = order.serverDetails?.rawDetails as { formattedCreds?: string; proxyPort?: number | string; httpUrl?: string } | undefined;
+  const formatted = String(rawDetails?.formattedCreds || '').trim();
+  if (formatted.split(':').length >= 4) {
+    const parts = formatted.split(':');
+    return {
+      ip: parts[0],
+      port: parts[1],
+      username: parts[2],
+      password: parts.slice(3).join(':'),
+    };
+  }
+
   const raw = (order.ipAddress || '').trim();
   if (!raw) return null;
 
@@ -145,7 +161,7 @@ function parseSlotIpConnection(order: Order): SlotIpConnection | null {
 
   return {
     ip: raw,
-    port: '',
+    port: rawDetails?.proxyPort != null ? String(rawDetails.proxyPort) : '',
     username: order.username || '',
     password: order.password || '',
   };
@@ -172,6 +188,8 @@ interface Order {
   advpsServiceId?: string;
   advpsOrderId?: string;
   netbayServiceId?: string;
+  netbayProxyId?: string;
+  netbayAppType?: string;
   kurohostInstanceId?: string;
   netbayPlanId?: string;
   netbayTaskId?: string;
@@ -186,6 +204,12 @@ interface Order {
       osType?: string;
       osLabel?: string;
       startedAt?: string;
+    };
+    rawDetails?: {
+      formattedCreds?: string;
+      httpUrl?: string;
+      proxyPort?: number;
+      netbayProxy?: boolean;
     };
   };
   lastAction?: string;
@@ -422,7 +446,7 @@ const OrderDetails = () => {
       const hasNativeServiceId = (provider === 'hostycare' && order.hostycareServiceId) ||
         (provider === 'smartvps' && (order.smartvpsServiceId || order.ipAddress)) ||
         (provider === 'advps' && order.advpsServiceId) ||
-        (provider === 'netbay' && order.netbayServiceId) ||
+        (provider === 'netbay' && (order.netbayServiceId || order.netbayProxyId)) ||
         (provider === 'kurohost' && order.kurohostInstanceId);
       const isCompanyAutomated = hasCompanyAnyAutomation(ipStock) &&
         (provider === 'oceanlinux' || !hasNativeServiceId);
@@ -436,7 +460,7 @@ const OrderDetails = () => {
         fetchPendingRequest();
       }
     }
-  }, [order?.hostycareServiceId, order?.smartvpsServiceId, order?.advpsServiceId, order?.netbayServiceId, order?.kurohostInstanceId, order?.ipAddress, ipStock, loading]);
+  }, [order?.hostycareServiceId, order?.smartvpsServiceId, order?.advpsServiceId, order?.netbayServiceId, order?.netbayProxyId, order?.kurohostInstanceId, order?.ipAddress, ipStock, loading]);
 
   // Auto-refresh while ADVPS or SmartVPS is provisioning (poll every 15s)
   useEffect(() => {
@@ -607,7 +631,7 @@ const OrderDetails = () => {
     if (order.provider === 'advps') return 'advps';
     if (order.provider === 'smartvps') return 'smartvps';
 
-    if (order.netbayServiceId) return 'netbay';
+    if (order.netbayServiceId || order.netbayProxyId || order.netbayAppType === 'proxy') return 'netbay';
     if (order.kurohostInstanceId) return 'kurohost';
     if (order.advpsServiceId) return 'advps';
     if (order.hostycareServiceId) return 'hostycare';
@@ -862,7 +886,7 @@ const OrderDetails = () => {
 
   // Check if server management actions are available
   const isServerManagementAvailable = (order: Order, ipStock: IPStock | null): boolean => {
-    if (isSlotIpOrder(order)) return false;
+    if (isSlotIpOrder(order) || isNetbayHttpProxyOrder(order)) return false;
 
     const provider = getProviderFromOrder(order, ipStock);
 
@@ -950,7 +974,7 @@ const OrderDetails = () => {
    */
   const isOrderCompanyAutomated = (orderArg: Order | null, stock: IPStock | null): boolean => {
     if (!orderArg) return false;
-    if (isSlotIpOrder(orderArg)) return false;
+    if (isSlotIpOrder(orderArg) || isNetbayHttpProxyOrder(orderArg)) return false;
     if (!hasCompanyAnyAutomation(stock)) return false;
     const prov = getProviderFromOrder(orderArg, stock);
     if (prov === 'oceanlinux') return true;
@@ -1017,7 +1041,7 @@ const OrderDetails = () => {
     const isHostycare = provider === 'hostycare' && order.hostycareServiceId;
     const isSmartVPS = provider === 'smartvps' && (order.smartvpsServiceId || order.ipAddress);
     const isAdvps = provider === 'advps' && order.advpsServiceId;
-    const isNetbay = provider === 'netbay' && !!order.netbayServiceId;
+    const isNetbay = provider === 'netbay' && !!(order.netbayServiceId || order.netbayProxyId);
     const isKurohost = provider === 'kurohost' && !!order.kurohostInstanceId;
     const isCompanyAuto = hasCompanyAnyAutomation(ipStock) &&
       (provider === 'oceanlinux' || (!isHostycare && !isSmartVPS && !isAdvps && !isNetbay && !isKurohost));
@@ -2324,12 +2348,15 @@ const OrderDetails = () => {
   const provider = getProviderFromOrder(order, ipStock);
   const canManageServer = isServerManagementAvailable(order, ipStock);
   const slotIpOrder = isSlotIpOrder(order);
-  const slotIpConnection = slotIpOrder ? parseSlotIpConnection(order) : null;
-  const hasConnectionDetails = slotIpOrder
+  const netbayProxyOrder = isNetbayHttpProxyOrder(order);
+  const proxyStyleOrder = slotIpOrder || netbayProxyOrder;
+  const slotIpConnection = proxyStyleOrder ? parseSlotIpConnection(order) : null;
+  const hasConnectionDetails = proxyStyleOrder
     ? !!(slotIpConnection?.ip && slotIpConnection?.username)
     : !!(order.ipAddress && order.username);
   const usesLivePowerUi =
     !slotIpOrder &&
+    !netbayProxyOrder &&
     (provider === 'hostycare' ||
     provider === 'smartvps' ||
     (provider === 'advps' && !!order.advpsServiceId) ||
@@ -2809,16 +2836,16 @@ const OrderDetails = () => {
                         <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
                           <Network className="h-4 w-4 text-primary" />
                         </div>
-                        {slotIpOrder ? 'Proxy Connection Details' : 'Connection Details'}
+                        {proxyStyleOrder ? 'Proxy Connection Details' : 'Connection Details'}
                       </CardTitle>
                       <CardDescription className="text-xs lg:text-sm">
-                        {slotIpOrder
-                          ? 'Use these credentials to connect to your slot IP proxy'
+                        {proxyStyleOrder
+                          ? 'Use these credentials to connect: IP, port, username, and password'
                           : 'Use these credentials to connect to your server'}
                       </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-3">
-                      {slotIpOrder && slotIpConnection ? (
+                      {proxyStyleOrder && slotIpConnection ? (
                         <>
                           {/* Slot IP — IP */}
                           <div className="space-y-2">
@@ -2944,13 +2971,25 @@ const OrderDetails = () => {
                             variant="outline"
                             className="w-full gap-2 h-9 text-sm"
                             onClick={() => {
-                              const proxy = `${slotIpConnection.ip}:${slotIpConnection.port}:${slotIpConnection.username}:${slotIpConnection.password}`;
+                              const proxy =
+                                String(order.serverDetails?.rawDetails?.formattedCreds || '').trim() ||
+                                `${slotIpConnection.ip}:${slotIpConnection.port}:${slotIpConnection.username}:${slotIpConnection.password}`;
                               copyToClipboard(proxy, 'Proxy String');
                             }}
                           >
                             {copied === 'Proxy String' ? <Check className="h-4 w-4 text-primary" /> : <Copy className="h-4 w-4" />}
                             Copy Full Proxy String
                           </Button>
+                          {order.serverDetails?.rawDetails?.httpUrl ? (
+                            <Button
+                              variant="outline"
+                              className="w-full gap-2 h-9 text-sm"
+                              onClick={() => copyToClipboard(String(order.serverDetails?.rawDetails?.httpUrl), 'HTTP URL')}
+                            >
+                              {copied === 'HTTP URL' ? <Check className="h-4 w-4 text-primary" /> : <Copy className="h-4 w-4" />}
+                              Copy HTTP URL
+                            </Button>
+                          ) : null}
                         </>
                       ) : (
                         <>
@@ -3758,6 +3797,8 @@ const OrderDetails = () => {
                             <p className="text-xs text-muted-foreground mb-2">
                               {slotIpOrder
                                 ? 'This is a Slot IP proxy order. Use the connection details above — start, stop, and server controls are not available.'
+                                : netbayProxyOrder
+                                  ? 'This is an HTTP proxy. Use IP, port, username, and password above — start, stop, and reinstall are not available.'
                                 : provider === 'oceanlinux'
                                   ? 'This service is directly managed by OceanLinux. Server management tools are not available through this interface.'
                                   : 'This service is offered with a partner provider.'}

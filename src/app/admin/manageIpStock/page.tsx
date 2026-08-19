@@ -22,6 +22,7 @@ import Link from 'next/link';
 import { X, ExternalLink, Zap, BookOpen, Copy, RefreshCw, Loader2, Cloud, EyeOff, Eye, Globe, Tags } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ResellerZonePicker, buildResellerZoneConfig } from '@/components/admin/ResellerZonePicker';
+import { parseGroupTagList, parseNetbayGroupTags } from '@/lib/netbayGroupTags';
 
 interface MemoryOptionDetails {
     price: number;
@@ -152,16 +153,24 @@ function isStockOutOfStock(stock: IPStock, companies: CompanyOption[]): boolean 
 
 function readNetbayConfig(stock: IPStock | null): {
     groupTag: string;
+    groupTags: string[];
     planByMemory: Record<string, string>;
     defaultOs: { Linux?: string; Windows?: string };
+    productType: 'vm' | 'proxy';
+    proxyTemplate: string;
 } {
     const cfg: any = stock?.defaultConfigurations?.netbay || {};
     const planByMemory = (cfg?.planByMemory && typeof cfg.planByMemory === 'object') ? { ...cfg.planByMemory } : {};
     const defaultOs = (cfg?.defaultOs && typeof cfg.defaultOs === 'object') ? { ...cfg.defaultOs } : {};
+    const productType = cfg?.productType === 'proxy' || cfg?.appType === 'proxy' ? 'proxy' : 'vm';
+    const groupTags = parseNetbayGroupTags(cfg);
     return {
-        groupTag: cfg?.groupTag || '',
+        groupTag: groupTags[0] || cfg?.groupTag || '',
+        groupTags,
         planByMemory,
         defaultOs,
+        productType,
+        proxyTemplate: cfg?.proxyTemplate || '',
     };
 }
 
@@ -569,20 +578,36 @@ const ManageIpStock = () => {
 
     // -------------- Netbay configuration helpers --------------
     const updateNetbayConfig = (
-        next: Partial<{ groupTag: string; planByMemory: Record<string, string>; defaultOs: { Linux?: string; Windows?: string } }>
+        next: Partial<{
+            groupTag: string;
+            groupTags: string[];
+            planByMemory: Record<string, string>;
+            defaultOs: { Linux?: string; Windows?: string };
+            productType: 'vm' | 'proxy';
+            proxyTemplate: string;
+        }>
     ) => {
         if (!currentStock) return;
         const existing = readNetbayConfig(currentStock);
         const merged = {
             groupTag: next.groupTag ?? existing.groupTag,
+            groupTags: next.groupTags ?? existing.groupTags,
             planByMemory: next.planByMemory ?? existing.planByMemory,
             defaultOs: next.defaultOs ?? existing.defaultOs,
+            productType: next.productType ?? existing.productType,
+            proxyTemplate: next.proxyTemplate ?? existing.proxyTemplate,
         };
+        const groupTags = parseGroupTagList(merged.groupTags);
+        merged.groupTags = groupTags;
+        merged.groupTag = groupTags[0] || '';
         const isEmpty =
             !merged.groupTag &&
+            groupTags.length === 0 &&
             Object.values(merged.planByMemory || {}).filter(Boolean).length === 0 &&
             !merged.defaultOs?.Linux &&
-            !merged.defaultOs?.Windows;
+            !merged.defaultOs?.Windows &&
+            merged.productType !== 'proxy' &&
+            !merged.proxyTemplate;
         const nextDefaults = { ...(currentStock.defaultConfigurations || {}) } as Record<string, any>;
         if (isEmpty) {
             delete nextDefaults.netbay;
@@ -1285,15 +1310,34 @@ const ManageIpStock = () => {
 
                                 <div>
                                     <Label>Server Type:</Label>
-                                    <Select value={currentStock.serverType} onValueChange={(value) => setCurrentStock({ ...currentStock, serverType: value })}>
+                                    <Select
+                                        value={currentStock.serverType}
+                                        onValueChange={(value) => {
+                                            if (!currentStock) return;
+                                            const existing = readNetbayConfig(currentStock);
+                                            const nextDefaults = { ...(currentStock.defaultConfigurations || {}) } as Record<string, any>;
+                                            if (value === 'Proxy') {
+                                                nextDefaults.netbay = { ...existing, productType: 'proxy' };
+                                            }
+                                            setCurrentStock({
+                                                ...currentStock,
+                                                serverType: value,
+                                                defaultConfigurations: nextDefaults,
+                                            });
+                                        }}
+                                    >
                                         <SelectTrigger>
                                             <SelectValue />
                                         </SelectTrigger>
                                         <SelectContent>
                                             <SelectItem value="Linux">Linux</SelectItem>
                                             <SelectItem value="VPS">VPS</SelectItem>
+                                            <SelectItem value="Proxy">Proxy (Premium IP Proxies)</SelectItem>
                                         </SelectContent>
                                     </Select>
+                                    <p className="text-xs text-muted-foreground mt-1">
+                                        Proxy type store pe Premium IP Proxies section me dikhega, Linux/Windows me nahi.
+                                    </p>
                                 </div>
 
                                 <div>
@@ -1432,17 +1476,79 @@ const ManageIpStock = () => {
                                         </div>
 
                                         <div>
-                                            <Label className="text-sm">Group Tag (location filter, optional):</Label>
+                                            <Label className="text-sm">Product type:</Label>
+                                            <select
+                                                className="mt-1 w-full h-9 rounded-md border border-input bg-background px-3 text-sm"
+                                                value={readNetbayConfig(currentStock).productType}
+                                                onChange={(e) => {
+                                                    const productType = e.target.value as 'vm' | 'proxy';
+                                                    if (!currentStock) return;
+                                                    const existing = readNetbayConfig(currentStock);
+                                                    const merged = { ...existing, productType };
+                                                    const nextDefaults = { ...(currentStock.defaultConfigurations || {}) } as Record<string, any>;
+                                                    nextDefaults.netbay = merged;
+                                                    setCurrentStock({
+                                                        ...currentStock,
+                                                        serverType: productType === 'proxy' ? 'Proxy' : currentStock.serverType,
+                                                        defaultConfigurations: nextDefaults,
+                                                    });
+                                                }}
+                                            >
+                                                <option value="vm">VPS (POST /services/purchase)</option>
+                                                <option value="proxy">HTTP Proxy (POST /proxies/purchase)</option>
+                                            </select>
+                                            <p className="text-xs text-gray-500 mt-1">
+                                                Proxy uses Applications plans from the catalog. Do not paste a VPS plan ID here.
+                                            </p>
+                                        </div>
+
+                                        <div>
+                                            <Label className="text-sm">IP series (group tags):</Label>
+                                            <p className="text-xs text-gray-500 mt-1 mb-2">
+                                                Ek product pe kai series. Customer buy pe series choose karega.
+                                                Example: 103.157, 161.248, 103.15 — comma ya new line se add karo.
+                                            </p>
+                                            <div className="flex flex-wrap gap-1.5 mb-2">
+                                                {readNetbayConfig(currentStock).groupTags.map((tag) => (
+                                                    <Badge key={tag} variant="secondary" className="gap-1 pr-1">
+                                                        {tag}
+                                                        <button
+                                                            type="button"
+                                                            className="rounded-sm p-0.5 hover:bg-black/10"
+                                                            onClick={() => {
+                                                                const next = readNetbayConfig(currentStock).groupTags.filter((t: string) => t !== tag);
+                                                                updateNetbayConfig({ groupTags: next, groupTag: next[0] || '' });
+                                                            }}
+                                                            aria-label={`Remove ${tag}`}
+                                                        >
+                                                            <X className="h-3 w-3" />
+                                                        </button>
+                                                    </Badge>
+                                                ))}
+                                            </div>
                                             <Input
                                                 type="text"
-                                                placeholder="e.g. 103.157"
-                                                value={readNetbayConfig(currentStock).groupTag}
-                                                onChange={(e) => updateNetbayConfig({ groupTag: e.target.value })}
+                                                placeholder="103.157 then Enter"
+                                                onKeyDown={(e) => {
+                                                    if (e.key !== 'Enter' && e.key !== ',') return;
+                                                    e.preventDefault();
+                                                    const value = (e.currentTarget as HTMLInputElement).value;
+                                                    const added = parseGroupTagList(value);
+                                                    if (!added.length) return;
+                                                    const existing = readNetbayConfig(currentStock).groupTags;
+                                                    const next = Array.from(new Set([...existing, ...added]));
+                                                    updateNetbayConfig({ groupTags: next, groupTag: next[0] || '' });
+                                                    (e.currentTarget as HTMLInputElement).value = '';
+                                                }}
+                                                onBlur={(e) => {
+                                                    const added = parseGroupTagList(e.target.value);
+                                                    if (!added.length) return;
+                                                    const existing = readNetbayConfig(currentStock).groupTags;
+                                                    const next = Array.from(new Set([...existing, ...added]));
+                                                    updateNetbayConfig({ groupTags: next, groupTag: next[0] || '' });
+                                                    e.target.value = '';
+                                                }}
                                             />
-                                            <p className="text-xs text-gray-500 mt-1">
-                                                Sent as <code>groupTag</code> in the purchase request. Leave blank to
-                                                let Netbay pick any available IP.
-                                            </p>
                                         </div>
 
                                         <div className="space-y-2">
@@ -1467,46 +1573,63 @@ const ManageIpStock = () => {
                                             )}
                                             <p className="text-xs text-gray-500 mt-1">
                                                 Each RAM tier maps to one Netbay Plan ID. Leave a row blank to disable
-                                                Netbay auto-provisioning for that size.
+                                                Netbay auto-provisioning for that size. For HTTP Proxy, paste Applications plan IDs here.
                                             </p>
                                         </div>
 
-                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                        {readNetbayConfig(currentStock).productType === 'proxy' ? (
                                             <div>
-                                                <Label className="text-xs">Default Linux OS (optional):</Label>
+                                                <Label className="text-xs">Proxy template name:</Label>
                                                 <Input
                                                     type="text"
-                                                    placeholder="Auto from catalog"
-                                                    value={readNetbayConfig(currentStock).defaultOs.Linux || ''}
-                                                    onChange={(e) => {
-                                                        const cfg = readNetbayConfig(currentStock);
-                                                        updateNetbayConfig({
-                                                            defaultOs: { ...cfg.defaultOs, Linux: e.target.value },
-                                                        });
-                                                    }}
+                                                    placeholder="PROXY"
+                                                    value={readNetbayConfig(currentStock).proxyTemplate}
+                                                    onChange={(e) => updateNetbayConfig({ proxyTemplate: e.target.value })}
                                                 />
+                                                <p className="text-[11px] text-muted-foreground mt-1">
+                                                    Must match catalog Applications template name (usually <code>PROXY</code>).
+                                                </p>
                                             </div>
-                                            <div>
-                                                <Label className="text-xs">Default Windows OS (optional):</Label>
-                                                <Input
-                                                    type="text"
-                                                    placeholder="Windows Server 2022"
-                                                    value={readNetbayConfig(currentStock).defaultOs.Windows || ''}
-                                                    onChange={(e) => {
-                                                        const cfg = readNetbayConfig(currentStock);
-                                                        updateNetbayConfig({
-                                                            defaultOs: { ...cfg.defaultOs, Windows: e.target.value },
-                                                        });
-                                                    }}
-                                                />
-                                            </div>
-                                        </div>
-                                        <p className="text-[11px] text-muted-foreground">
-                                            OS values must match the names exactly as they appear in Netbay&apos;s
-                                            Leave blank to auto-pick from catalog. You can paste the template{' '}
-                                            <strong>Name</strong> or <strong>OS ID</strong> — purchase sends the name; ID is resolved from catalog.
-                                            <code> Windows Server 2022</code> when blank.
-                                        </p>
+                                        ) : (
+                                            <>
+                                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                                    <div>
+                                                        <Label className="text-xs">Default Linux OS (optional):</Label>
+                                                        <Input
+                                                            type="text"
+                                                            placeholder="Auto from catalog"
+                                                            value={readNetbayConfig(currentStock).defaultOs.Linux || ''}
+                                                            onChange={(e) => {
+                                                                const cfg = readNetbayConfig(currentStock);
+                                                                updateNetbayConfig({
+                                                                    defaultOs: { ...cfg.defaultOs, Linux: e.target.value },
+                                                                });
+                                                            }}
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <Label className="text-xs">Default Windows OS (optional):</Label>
+                                                        <Input
+                                                            type="text"
+                                                            placeholder="Windows Server 2022"
+                                                            value={readNetbayConfig(currentStock).defaultOs.Windows || ''}
+                                                            onChange={(e) => {
+                                                                const cfg = readNetbayConfig(currentStock);
+                                                                updateNetbayConfig({
+                                                                    defaultOs: { ...cfg.defaultOs, Windows: e.target.value },
+                                                                });
+                                                            }}
+                                                        />
+                                                    </div>
+                                                </div>
+                                                <p className="text-[11px] text-muted-foreground">
+                                                    OS values must match the names exactly as they appear in Netbay&apos;s
+                                                    Leave blank to auto-pick from catalog. You can paste the template{' '}
+                                                    <strong>Name</strong> or <strong>OS ID</strong> — purchase sends the name; ID is resolved from catalog.
+                                                    <code> Windows Server 2022</code> when blank.
+                                                </p>
+                                            </>
+                                        )}
                                     </div>
                                 )}
 

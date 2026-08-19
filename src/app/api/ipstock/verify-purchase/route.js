@@ -24,10 +24,10 @@ export async function POST(request) {
     if (rateLimited) return rateLimited;
 
     const body = await request.json();
-    const { ipStockId, memory } = body || {};
+    const { ipStockId, memory, groupTag } = body || {};
     slotIpPackageId = body?.slotIpPackageId;
 
-    const result = await refreshAndVerifyPurchase({ ipStockId, slotIpPackageId, memory });
+    const result = await refreshAndVerifyPurchase({ ipStockId, slotIpPackageId, memory, groupTag });
 
     if (!result.ok) {
       result.message = customerStockUnavailableMessage(result.message, {

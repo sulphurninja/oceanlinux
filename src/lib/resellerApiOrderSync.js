@@ -154,14 +154,39 @@ function buildRenewBody(vmId, order, stockCfg, priceIds, { couponCode, planType 
   return body;
 }
 
-async function resolveVmId(api, order) {
-  if (order.resellerVmId) return String(order.resellerVmId);
-  const ip = order.ipAddress ||
+function isVmMissingOnPanel(err) {
+  const status = Number(err?.status || 0);
+  const msg = String(err?.body?.error || err?.message || '').toLowerCase();
+  return (
+    status === 404 ||
+    msg.includes('vm not found') ||
+    msg.includes('virtual machine not found') ||
+    (msg.includes('not found') && msg.includes('vm'))
+  );
+}
+
+async function resolveVmId(api, order, { skipStored = false } = {}) {
+  const ip =
+    order.ipAddress ||
     order.serverDetails?.rawDetails?.ips?.[0] ||
     order.serviceDetails?.ipAddress;
+
+  if (!skipStored && order.resellerVmId) {
+    try {
+      await api.getVmDetails(String(order.resellerVmId));
+      return String(order.resellerVmId);
+    } catch (err) {
+      if (!isVmMissingOnPanel(err)) throw err;
+      console.warn(
+        `[RESELLER-RENEW] Stored VM ${order.resellerVmId} not on panel (${err.message}) — GET /api/users/orders/overview by IP`
+      );
+    }
+  }
+
   if (!ip) return null;
-  const found = await api.findVmByIp(ip);
-  return found?.vmId || null;
+  api.invalidateVmIpCache(ip);
+  const found = await api.findVmByIp(ip, { skipCache: true });
+  return found?.vmId ? String(found.vmId) : null;
 }
 
 function extractOverviewVmId(row) {
@@ -681,6 +706,13 @@ async function renewResellerPanelVm({ api, order, ipStock, Order, companyCoupon 
     return { success: false, error: 'No VM found on reseller panel for this order' };
   }
 
+  const previousVmId = order.resellerVmId ? String(order.resellerVmId) : '';
+  if (Order && previousVmId !== String(vmId)) {
+    await Order.findByIdAndUpdate(order._id, { resellerVmId: vmId });
+    order.resellerVmId = vmId;
+    console.log(`[RESELLER-RENEW] Corrected resellerVmId ${previousVmId || '(none)'} → ${vmId} via Prime GET /api/users/orders/overview`);
+  }
+
   const overviewRow = await resolveOverviewRowForVm(api, vmId);
   const panelPlanType = overviewPlanType(overviewRow);
   const renewPlanType = panelPlanType || stockCfg.planType || 'SHARED';
@@ -777,6 +809,18 @@ async function renewResellerPanelVm({ api, order, ipStock, Order, companyCoupon 
       }
     }
   } catch (calcErr) {
+    if (isVmMissingOnPanel(calcErr)) {
+      const liveId = await resolveVmId(api, { ...order, resellerVmId: null }, { skipStored: true });
+      if (liveId && String(liveId) !== String(vmId)) {
+        return {
+          success: false,
+          error: `Hostheaven VM ${vmId} not found — live VM is ${liveId} (IP lookup). Retry renewal.`,
+          vmId: liveId,
+          upstreamCoupon,
+          couponUsed: null,
+        };
+      }
+    }
     if (upstreamCoupon) {
       return {
         success: false,

@@ -22,6 +22,8 @@ import { getRazorpayClient } from '@/lib/razorpayClient';
 import crypto from 'crypto';
 const { resolvePromoForPrice, getMemoryOption, normalizePromoCode } = require('@/lib/promoCode');
 const { defaultOsForProduct } = require('@/lib/orderOs');
+const { resolveNetbayPurchaseGroupTag } = require('@/lib/netbayGroupTags');
+const { toPlainConfigurations } = require('@/lib/advpsLiveStock');
 
 // Initialize Cashfree with your credentials
 Cashfree.XClientId = process.env.CASHFREE_APP_ID;
@@ -85,10 +87,12 @@ export async function POST(request) {
       slotIpPackageId,
       paymentMethod = 'razorpay',
       useWallet = false,
+      netbayGroupTag: requestedGroupTag,
     } = reqBody;
 
     let originalPrice, price, promoDiscount = 0;
     let isSlotIpPurchase = false;
+    let resolvedNetbayGroupTag = '';
 
     if (slotIpPackageId) {
       // ===== SLOT IP PURCHASE FLOW =====
@@ -155,7 +159,7 @@ export async function POST(request) {
         );
       }
 
-      const liveStock = await refreshAndVerifyPurchase({ ipStockId, memory });
+      const liveStock = await refreshAndVerifyPurchase({ ipStockId, memory, groupTag: requestedGroupTag });
       if (!liveStock.ok) {
         return NextResponse.json(
           {
@@ -182,6 +186,13 @@ export async function POST(request) {
           { status: 400 }
         );
       }
+
+      const netbayCfg = toPlainConfigurations(ipStock.defaultConfigurations)?.netbay || {};
+      const seriesPick = resolveNetbayPurchaseGroupTag(netbayCfg, requestedGroupTag);
+      if (!seriesPick.ok) {
+        return NextResponse.json({ message: seriesPick.error }, { status: 400 });
+      }
+      resolvedNetbayGroupTag = seriesPick.groupTag || '';
 
       originalPrice = memoryOption.price;
       price = originalPrice;
@@ -486,6 +497,9 @@ export async function POST(request) {
       orderData.provider = 'slotip';
     } else {
       orderData.ipStockId = ipStockId;
+      if (resolvedNetbayGroupTag) {
+        orderData.netbayGroupTag = resolvedNetbayGroupTag;
+      }
     }
     
     const newOrder = await Order.create(orderData);

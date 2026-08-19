@@ -32,6 +32,7 @@ const cartItemSchema = new mongoose.Schema({
   },
   quantity: { type: Number, default: 1, min: 1, max: 10 },
   promoCode: { type: String, default: '' },
+  netbayGroupTag: { type: String, default: '' },
   addedAt: { type: Date, default: Date.now },
 }, { _id: true });
 

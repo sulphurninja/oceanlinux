@@ -732,6 +732,9 @@ export async function POST(request) {
         providerRenewalResult = { error: panelErr.message };
         providerRenewalSuccess = false;
         logger.setProviderApiResult('reseller-api', false, null, panelErr);
+        newExpiryDate = await resolveRenewalExpiryFromPanel(order, newExpiryDate, {
+          panelRenew: { success: false },
+        });
       }
       console.log('[RENEWAL-CONFIRM] === RESELLER PANEL RENEWAL END ===');
     } else {

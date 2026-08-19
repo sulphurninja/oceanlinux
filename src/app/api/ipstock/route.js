@@ -188,11 +188,8 @@ export async function POST(request) {
 }
 // GET method - fetch all IP stocks
 export async function GET(request) {
-    console.log('[IPSTOCK-API] GET request received');
-
     try {
         await connectDB();
-        console.log('[IPSTOCK-API] Database connected');
 
         const { searchParams } = new URL(request.url);
         const includeHidden =
@@ -216,10 +213,8 @@ export async function GET(request) {
             );
         }
         const ipStocks = await dbQuery;
-        console.log(`[IPSTOCK-API] Found ${ipStocks?.length || 0} IP stocks`);
 
         if (!ipStocks) {
-            console.log('[IPSTOCK-API] No IP stocks found (null result)');
             return new Response(JSON.stringify([]), {
                 status: 200,
                 headers: { 'Content-Type': 'application/json' }
@@ -230,7 +225,6 @@ export async function GET(request) {
             ? enrichIpStocksForStore(await enrichIpStocksWithProviderModes(ipStocks))
             : await enrichIpStocksWithProviderModes(ipStocks);
         const jsonResponse = JSON.stringify(enriched);
-        console.log(`[IPSTOCK-API] Response size: ${jsonResponse.length} bytes`);
 
         return new Response(jsonResponse, {
             status: 200,

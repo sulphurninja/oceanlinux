@@ -93,6 +93,7 @@ export async function POST(request) {
       memory: item.memory,
       slotIpPackageId: item.slotIpPackageId,
       quantity: item.quantity,
+      groupTag: item.netbayGroupTag,
     });
     if (!live.ok) {
       return NextResponse.json({
@@ -133,6 +134,7 @@ export async function POST(request) {
     unitPrice: lp.unitPrice,
     unitDiscount: lp.unitDiscount,
     promoCode: item.promoCode || '',
+    netbayGroupTag: item.netbayGroupTag || '',
   }));
 
   const paymentMethodLabel = walletApplied === priced.total
@@ -216,6 +218,7 @@ export async function POST(request) {
           orderData.provider = 'slotip';
         } else {
           orderData.ipStockId = snap.ipStockId;
+          if (snap.netbayGroupTag) orderData.netbayGroupTag = snap.netbayGroupTag;
         }
         const order = await Order.create(orderData);
         orderIds.push(order._id);

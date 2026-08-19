@@ -16,6 +16,12 @@ export function formatIpAddress(ipAddress, provider, os) {
   }
 
   const prov = String(provider || '').toLowerCase();
+  const osStr = String(os || '');
+  if (prov === 'netbay' && /proxy/i.test(osStr)) {
+    return ipAddress;
+  }
+
+  const prov = String(provider || '').toLowerCase();
 
   if (prov === 'netbay') {
     const base = extractBaseIp(ipAddress);
@@ -55,12 +61,16 @@ export function needsPort49965(order) {
 }
 
 export function needsPort5517(order) {
+  if (order?.netbayAppType === 'proxy' || order?.netbayProxyId) return false;
   const isNetbay = order?.provider === 'netbay' || !!order?.netbayServiceId;
   return isNetbay && isWindowsOs(order?.os);
 }
 
 export function formatIpForOrder(order, ipAddress) {
   if (!ipAddress) return ipAddress;
+  if (order?.netbayAppType === 'proxy' || order?.netbayProxyId) {
+    return ipAddress;
+  }
   if (needsPort5517(order)) {
     return formatIpAddress(ipAddress, 'netbay', order?.os);
   }

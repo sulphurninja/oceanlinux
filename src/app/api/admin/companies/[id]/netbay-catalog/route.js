@@ -34,13 +34,21 @@ export async function GET(request, { params }) {
 
   try {
     const api = new NetbayApi(cfg);
-    const [plansRes, osRes] = await Promise.all([
+    const [plansRes, osRes, proxyPlansRes, proxyTemplatesRes] = await Promise.all([
       api.listPlans({ category }).catch(err => ({ _error: err.message })),
       api.listOs({ category }).catch(err => ({ _error: err.message })),
+      api.listProxyPlans().catch(err => ({ _error: err.message })),
+      api.listProxyTemplates().catch(err => ({ _error: err.message })),
     ]);
 
     const plans = (plansRes && !plansRes._error) ? (plansRes?.data?.plans || []) : [];
     const os = (osRes && !osRes._error) ? (osRes?.data?.os || []) : [];
+    const proxyPlans = (proxyPlansRes && !proxyPlansRes._error)
+      ? (proxyPlansRes?.data?.plans || [])
+      : [];
+    const proxyTemplates = (proxyTemplatesRes && !proxyTemplatesRes._error)
+      ? (proxyTemplatesRes?.data?.templates || [])
+      : [];
 
     return NextResponse.json({
       success: true,
@@ -48,8 +56,12 @@ export async function GET(request, { params }) {
       label: cfg.label || '',
       plans,
       os,
+      proxyPlans,
+      proxyTemplates,
       plansError: plansRes?._error || null,
       osError: osRes?._error || null,
+      proxyPlansError: proxyPlansRes?._error || null,
+      proxyTemplatesError: proxyTemplatesRes?._error || null,
     });
   } catch (err) {
     return NextResponse.json({

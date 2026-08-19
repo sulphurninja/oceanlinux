@@ -74,6 +74,7 @@ import { premiumBadge } from "@/lib/premium-badges";
 import Link from "next/link";
 import AddToCartButton from "@/components/cart/AddToCartButton";
 import { fetchWalletSummary } from "@/lib/walletClient";
+import { parseNetbayGroupTags } from "@/lib/netbayGroupTags";
 import { customerStockUnavailableMessage } from "@/lib/customerStockMessages";
 import { openRazorpayModal } from "@/lib/razorpayCheckout";
 import { PurchaseDisclaimerNotice } from "@/components/purchase/PurchaseDisclaimerNotice";
@@ -282,8 +283,16 @@ function formatTagGroupTitle(tag: string) {
   return tag;
 }
 
+/** HTTP proxy IP stocks — storefront Premium IP Proxies tab (not Linux/Windows). */
+function isProxyCategoryPlan(stock: IPStock) {
+  if (stock.serverType === 'Proxy') return true;
+  const productType = String(stock.defaultConfigurations?.netbay?.productType || stock.defaultConfigurations?.netbay?.appType || '').toLowerCase();
+  return productType === 'proxy';
+}
+
 /** Linux tab — serverType, tags, or name (many IP rows are tagged VPS but named Linux 4GB). */
 function isLinuxCategoryPlan(stock: IPStock) {
+  if (isProxyCategoryPlan(stock)) return false;
   if (isOceanLinuxCategoryPlan(stock)) return true;
   if (stock.serverType === 'Linux' || stock.serverType === 'Windows & Linux') return true;
   const tags = stockTagsNormalized(stock);
@@ -294,6 +303,7 @@ function isLinuxCategoryPlan(stock: IPStock) {
 }
 
 function isVpsCategoryPlan(stock: IPStock) {
+  if (isProxyCategoryPlan(stock)) return false;
   if (isOceanLinuxCategoryPlan(stock)) return true;
   if (stock.serverType === 'VPS' || stock.serverType === 'Windows & Linux') return true;
   const tags = stockTagsNormalized(stock);
@@ -303,10 +313,15 @@ function isVpsCategoryPlan(stock: IPStock) {
   return false;
 }
 
+function getStockGroupTags(stock: IPStock) {
+  return parseNetbayGroupTags(stock.defaultConfigurations?.netbay || {});
+}
+
 function matchesCategoryTab(stock: IPStock, tab: string) {
   if (!tab || tab === 'all') return true;
   if (tab === 'Linux') return isLinuxCategoryPlan(stock);
   if (tab === 'VPS') return isVpsCategoryPlan(stock);
+  if (tab === 'SlotIP') return isProxyCategoryPlan(stock);
   return stock.serverType === tab;
 }
 
@@ -396,6 +411,7 @@ function IPStockContent() {
     price: number;
     ipStockId: string;
     slotIpPackageId?: string;
+    netbayGroupTag?: string;
   } | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [paymentInitiating, setPaymentInitiating] = useState(false);
@@ -431,10 +447,9 @@ function IPStockContent() {
 
   const handleTabChange = (tabId: string) => {
     setActiveTab(tabId);
-    if (tabId === 'all') {
-      router.push('/dashboard/ipStock', { scroll: false });
-    } else {
-      router.push(`/dashboard/ipStock?category=${tabId}`, { scroll: false });
+    const url = tabId === 'all' ? '/dashboard/ipStock' : `/dashboard/ipStock?category=${tabId}`;
+    if (typeof window !== 'undefined') {
+      window.history.replaceState(null, '', url);
     }
   };
 
@@ -456,11 +471,8 @@ function IPStockContent() {
     const syncLiveStockInBackground = async () => {
       setIsRefreshingStock(true);
       try {
-        const refreshUrl = forceAdvps
-          ? "/api/advps/refresh-stock?force=1"
-          : "/api/advps/refresh-stock";
         await Promise.allSettled([
-          dashboardFetch(refreshUrl, { cache: "no-store" }),
+          dashboardFetch("/api/advps/refresh-stock", { cache: "no-store" }),
           dashboardFetch("/api/reseller-panel/refresh-stock", { cache: "no-store" }),
           dashboardFetch("/api/kurohost/refresh-stock", { cache: "no-store" }),
           dashboardFetch("/api/smartvps/sync", { cache: "no-store" }),
@@ -507,22 +519,17 @@ function IPStockContent() {
 
     if (waitForLiveSync) {
       await syncLiveStockInBackground();
-    } else {
+    } else if (forceAdvps) {
       void syncLiveStockInBackground();
     }
   }, []);
 
-  // Refresh ADVPS + SmartVPS stock when user opens IP Stock
   useEffect(() => {
     loadPlans();
   }, [loadPlans]);
 
-  const filteredIpStocks = useMemo(() => {
+  const listedVisibleStocks = useMemo(() => {
     let filtered = ipStocks.filter((stock) => !stock.hiddenFromStore);
-
-    if (activeTab && activeTab !== 'all' && activeTab !== 'SlotIP') {
-      filtered = filtered.filter((stock) => matchesCategoryTab(stock, activeTab));
-    }
 
     if (searchTerm.trim()) {
       filtered = filtered.filter((stock) => stockMatchesSearch(stock, searchTerm));
@@ -576,7 +583,20 @@ function IPStockContent() {
     });
 
     return filtered;
-  }, [ipStocks, activeTab, searchTerm, priceFilter, sortBy]);
+  }, [ipStocks, searchTerm, priceFilter, sortBy]);
+
+  const proxyIpStocks = useMemo(
+    () => listedVisibleStocks.filter((stock) => isProxyCategoryPlan(stock)),
+    [listedVisibleStocks]
+  );
+
+  const filteredIpStocks = useMemo(() => {
+    let filtered = listedVisibleStocks.filter((stock) => !isProxyCategoryPlan(stock));
+    if (activeTab && activeTab !== 'all' && activeTab !== 'SlotIP') {
+      filtered = filtered.filter((stock) => matchesCategoryTab(stock, activeTab));
+    }
+    return filtered;
+  }, [listedVisibleStocks, activeTab]);
 
   const tagGroupedStocks = useMemo(
     () => groupStocksByTags(filteredIpStocks),
@@ -591,9 +611,10 @@ function IPStockContent() {
   const counts = useMemo(() => {
     const linux = visibleStocks.filter((stock) => matchesCategoryTab(stock, 'Linux')).length;
     const vps = visibleStocks.filter((stock) => matchesCategoryTab(stock, 'VPS')).length;
-    const slot = slotPackages.length;
+    const proxy = visibleStocks.filter((stock) => isProxyCategoryPlan(stock)).length;
+    const slot = slotPackages.length + proxy;
     return {
-      all: visibleStocks.length + slot,
+      all: visibleStocks.length + slotPackages.length,
       linux,
       vps,
       slot,
@@ -601,10 +622,10 @@ function IPStockContent() {
   }, [visibleStocks, slotPackages]);
 
   const listedPlanCount = useMemo(() => {
-    if (activeTab === 'SlotIP') return slotPackages.length;
-    if (activeTab === 'all') return filteredIpStocks.length + slotPackages.length;
+    if (activeTab === 'SlotIP') return slotPackages.length + proxyIpStocks.length;
+    if (activeTab === 'all') return filteredIpStocks.length + slotPackages.length + proxyIpStocks.length;
     return filteredIpStocks.length;
-  }, [activeTab, filteredIpStocks.length, slotPackages.length]);
+  }, [activeTab, filteredIpStocks.length, slotPackages.length, proxyIpStocks.length]);
 
   // Group stocks by tags — computed in tagGroupedStocks useMemo above.
 
@@ -637,6 +658,7 @@ function IPStockContent() {
     ipStockId?: string;
     slotIpPackageId?: string;
     memory?: string;
+    groupTag?: string;
   }) => {
     const res = await dashboardFetch('/api/ipstock/verify-purchase', {
       method: 'POST',
@@ -656,7 +678,8 @@ function IPStockContent() {
     price: number,
     ipStockId: string,
     slotIpPackageId?: string,
-    stockAvailable = true
+    stockAvailable = true,
+    groupTag?: string
   ) => {
     if (!stockAvailable) {
       openOutOfStockPopup({
@@ -669,13 +692,14 @@ function IPStockContent() {
       return;
     }
 
-    const verifyKey = slotIpPackageId || `${ipStockId}:${memory}`;
+    const verifyKey = slotIpPackageId || `${ipStockId}:${memory}:${groupTag || ''}`;
     setVerifyingPurchaseKey(verifyKey);
     try {
       const { ok, message } = await verifyLiveStock({
         ipStockId: slotIpPackageId ? undefined : ipStockId,
         slotIpPackageId,
         memory,
+        groupTag,
       });
 
       if (!ok) {
@@ -688,7 +712,7 @@ function IPStockContent() {
         return;
       }
 
-      setSelectedProduct({ name: productName, memory, price, ipStockId, slotIpPackageId });
+      setSelectedProduct({ name: productName, memory, price, ipStockId, slotIpPackageId, netbayGroupTag: groupTag });
       setPurchaseDisclaimerAccepted(false);
       setShowDialog(true);
       setPromoCode("");
@@ -865,6 +889,7 @@ function IPStockContent() {
         ipStockId: selectedProduct.slotIpPackageId ? undefined : selectedProduct.ipStockId,
         slotIpPackageId: selectedProduct.slotIpPackageId,
         memory: selectedProduct.memory,
+        groupTag: selectedProduct.netbayGroupTag,
       });
       if (!liveCheck.ok) {
         setShowDialog(false);
@@ -909,6 +934,9 @@ function IPStockContent() {
         paymentBody.slotIpPackageId = selectedProduct.slotIpPackageId;
       } else {
         paymentBody.ipStockId = selectedProduct.ipStockId;
+        if (selectedProduct.netbayGroupTag) {
+          paymentBody.netbayGroupTag = selectedProduct.netbayGroupTag;
+        }
       }
 
       const res = await dashboardFetch("/api/payment/create", {
@@ -1026,6 +1054,9 @@ function IPStockContent() {
               fallbackBody.slotIpPackageId = selectedProduct.slotIpPackageId;
             } else {
               fallbackBody.ipStockId = selectedProduct.ipStockId;
+              if (selectedProduct.netbayGroupTag) {
+                fallbackBody.netbayGroupTag = selectedProduct.netbayGroupTag;
+              }
             }
 
           const fallbackRes = await dashboardFetch("/api/payment/create", {
@@ -1218,7 +1249,7 @@ function IPStockContent() {
   };
 
   const categoryCards = [
-    { id: 'all', Icon: Grid3X3, label: 'All Plans', shortLabel: 'All', count: counts.all + counts.slot, activeClass: 'border-emerald-400/50 bg-emerald-500/15 shadow-[0_0_20px_rgba(52,211,153,0.12)]' },
+    { id: 'all', Icon: Grid3X3, label: 'All Plans', shortLabel: 'All', count: counts.all, activeClass: 'border-emerald-400/50 bg-emerald-500/15 shadow-[0_0_20px_rgba(52,211,153,0.12)]' },
     { id: 'Linux', Icon: Server, label: 'Linux Servers', shortLabel: 'Linux', count: counts.linux, activeClass: 'border-emerald-400/50 bg-emerald-500/15 shadow-[0_0_20px_rgba(52,211,153,0.12)]' },
     { id: 'VPS', Icon: Cloud, label: 'Windows VPS', shortLabel: 'Windows', count: counts.vps, activeClass: 'border-sky-400/50 bg-sky-500/15 shadow-[0_0_20px_rgba(56,189,248,0.12)]' },
     { id: 'SlotIP', Icon: Zap, label: 'Premium IP Proxies', shortLabel: 'Proxies', count: counts.slot, activeClass: 'border-orange-400/50 bg-orange-500/15 shadow-[0_0_20px_rgba(251,146,60,0.12)]' },
@@ -1395,13 +1426,16 @@ function IPStockContent() {
             {/* Plan listings */}
             <div>
               {/* Slot IP Section */}
-              {(activeTab === 'all' || activeTab === 'SlotIP') && slotPackages.length > 0 && (
+              {(activeTab === 'all' || activeTab === 'SlotIP') && (slotPackages.length > 0 || proxyIpStocks.length > 0) && (
                 <div className="space-y-2 mb-6">
-                  <div className="flex items-center gap-2 px-1">
-                    <div className="w-1 h-6 bg-orange-500 rounded-full"></div>
-                    <h2 className="text-base font-semibold text-white">Premium IP Proxies</h2>
-                    <Badge variant="outline" className="text-[10px] border-orange-400/40 bg-orange-500/15 text-orange-200 h-5 px-2">
-                      {slotPackages.length} {slotPackages.length === 1 ? 'package' : 'packages'}
+                  <div className="flex items-center gap-2 px-1 min-w-0">
+                    <div className="w-1 h-5 sm:h-6 bg-orange-500 rounded-full shrink-0"></div>
+                    <h2 className="text-sm sm:text-base font-semibold text-white truncate">Premium IP Proxies</h2>
+                    <Badge variant="outline" className="text-[10px] border-orange-400/40 bg-orange-500/15 text-orange-200 h-5 px-2 shrink-0">
+                      {slotPackages.length + proxyIpStocks.length}
+                      <span className="ml-1 hidden min-[380px]:inline">
+                        {(slotPackages.length + proxyIpStocks.length) === 1 ? 'plan' : 'plans'}
+                      </span>
                     </Badge>
                   </div>
                   <div className="space-y-2">
@@ -1413,35 +1447,37 @@ function IPStockContent() {
                       })
                       .map((pkg) => (
                       <div key={pkg._id} className="premium-dashboard-card rounded-lg hover:border-emerald-400/20 transition-colors overflow-hidden">
-                        <div className="flex items-center gap-3 p-3">
-                          <div className="w-8 h-8 rounded-lg bg-orange-500/20 flex items-center justify-center border border-orange-400/35 flex-shrink-0">
-                            <Zap className="h-4 w-4 text-orange-300" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <h3 className="font-semibold text-sm md:text-base text-white">{pkg.name}</h3>
-                              <Badge variant="outline" className="text-[10px] border-orange-400/35 bg-orange-500/15 text-orange-200 px-1.5 py-0 h-5">
-                                Premium IP
-                              </Badge>
-                              {pkg.promoCodes && pkg.promoCodes.length > 0 && (
-                                <Badge variant="outline" className="text-[10px] gap-1 bg-amber-500/15 text-amber-200 border-amber-400/35 px-1.5 py-0 h-5">
-                                  <Tag className="h-2.5 w-2.5" />
-                                  Promo
+                        <div className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center">
+                          <div className="flex items-start gap-3 min-w-0 flex-1">
+                            <div className="w-8 h-8 rounded-lg bg-orange-500/20 flex items-center justify-center border border-orange-400/35 shrink-0">
+                              <Zap className="h-4 w-4 text-orange-300" />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <h3 className="font-semibold text-sm md:text-base text-white break-words">{pkg.name}</h3>
+                                <Badge variant="outline" className="text-[10px] border-orange-400/35 bg-orange-500/15 text-orange-200 px-1.5 py-0 h-5">
+                                  Premium IP
                                 </Badge>
-                              )}
-                            </div>
-                            <div className="flex items-center gap-3 mt-0.5">
-                              {pkg.description && (
-                                <p className="text-xs text-white/45">{pkg.description}</p>
-                              )}
-                              <Badge variant="secondary" className="text-[10px] h-5 px-1.5 gap-1 bg-white/10 text-white/70 border-0">
-                                <Package className="h-3 w-3" />
-                                {pkg.availableCount} available
-                              </Badge>
+                                {pkg.promoCodes && pkg.promoCodes.length > 0 && (
+                                  <Badge variant="outline" className="text-[10px] gap-1 bg-amber-500/15 text-amber-200 border-amber-400/35 px-1.5 py-0 h-5">
+                                    <Tag className="h-2.5 w-2.5" />
+                                    Promo
+                                  </Badge>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                                {pkg.description && (
+                                  <p className="text-xs text-white/45 break-words">{pkg.description}</p>
+                                )}
+                                <Badge variant="secondary" className="text-[10px] h-5 px-1.5 gap-1 bg-white/10 text-white/70 border-0">
+                                  <Package className="h-3 w-3" />
+                                  {pkg.availableCount} available
+                                </Badge>
+                              </div>
                             </div>
                           </div>
-                          <div className="flex items-center gap-2 flex-shrink-0">
-                            <div className="text-right">
+                          <div className="flex items-center gap-2 pl-11 sm:pl-0 sm:shrink-0">
+                            <div className="text-left sm:text-right shrink-0 mr-auto sm:mr-0">
                               <p className="font-bold text-base md:text-lg text-white">₹{pkg.price}</p>
                               <p className="text-[10px] text-white/45">per IP</p>
                             </div>
@@ -1451,14 +1487,14 @@ function IPStockContent() {
                                 slotIpPackageId={pkg._id}
                                 size="sm"
                                 variant="outline"
-                                className="h-8 px-2.5"
+                                className="h-9 px-3 flex-1 sm:flex-none sm:h-8 sm:px-2.5"
                                 label="Cart"
                               />
                             )}
                             <Button
                               size="sm"
                               onClick={() => handleBuyNow(pkg.name, 'Premium IP Proxies', pkg.price, '', pkg._id)}
-                              className="h-8 px-3 gap-1.5 premium-btn-primary border-0"
+                              className="h-9 px-3 gap-1.5 premium-btn-primary border-0 flex-1 sm:flex-none sm:h-8"
                               disabled={pkg.availableCount === 0 || verifyingPurchaseKey === pkg._id}
                             >
                               {verifyingPurchaseKey === pkg._id ? (
@@ -1466,17 +1502,25 @@ function IPStockContent() {
                               ) : (
                                 <Zap className="h-3 w-3" />
                               )}
-                              {verifyingPurchaseKey === pkg._id ? 'Checking…' : 'Buy Now'}
+                              <span className="truncate">{verifyingPurchaseKey === pkg._id ? 'Checking…' : 'Buy Now'}</span>
                             </Button>
                           </div>
                         </div>
                       </div>
                     ))}
+                    {proxyIpStocks.map((stock) => (
+                      <CompactServerPlanRow
+                        key={stock._id}
+                        stock={stock}
+                        onBuyNow={handleBuyNow}
+                        verifyingPurchaseKey={verifyingPurchaseKey}
+                      />
+                    ))}
                   </div>
                 </div>
               )}
 
-              {activeTab === 'SlotIP' && slotPackages.length === 0 && (
+              {activeTab === 'SlotIP' && slotPackages.length === 0 && proxyIpStocks.length === 0 && (
                 <Card className="text-center py-12 premium-dashboard-card border-0">
                   <CardContent>
                     <div className="w-16 h-16 bg-orange-500/15 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-orange-400/25">
@@ -1490,7 +1534,7 @@ function IPStockContent() {
                 </Card>
               )}
 
-              {activeTab !== 'SlotIP' && filteredIpStocks.length === 0 ? (
+              {activeTab !== 'SlotIP' && filteredIpStocks.length === 0 && !(activeTab === 'all' && (slotPackages.length > 0 || proxyIpStocks.length > 0)) ? (
                 <Card className="text-center py-12 premium-dashboard-card border-0">
                   <CardContent>
                     <div className="w-16 h-16 bg-white/5 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-white/10">
@@ -1517,7 +1561,7 @@ function IPStockContent() {
                     )}
                   </CardContent>
                 </Card>
-              ) : (
+              ) : activeTab !== 'SlotIP' && filteredIpStocks.length > 0 ? (
                 (() => {
                   const { grouped, untagged } = tagGroupedStocks;
                   const tagKeys = Object.keys(grouped).sort();
@@ -1572,7 +1616,7 @@ function IPStockContent() {
                     </div>
                   );
                 })()
-              )}
+              ) : null}
             </div>
           </div>
         )}
@@ -1604,7 +1648,10 @@ function IPStockContent() {
               <div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2.5 space-y-1.5">
                 <p className="text-xs sm:text-sm font-medium leading-snug line-clamp-2">{selectedProduct.name}</p>
                 <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                  <span>{selectedProduct.memory}</span>
+                  <span>
+                    {selectedProduct.memory}
+                    {selectedProduct.netbayGroupTag ? ` · ${selectedProduct.netbayGroupTag}` : ''}
+                  </span>
                   <span className={cn(promoApplied && 'line-through')}>₹{selectedProduct.price}</span>
                 </div>
                 {promoApplied && (
@@ -1786,10 +1833,20 @@ const CompactServerPlanRow = memo(function CompactServerPlanRow({
   verifyingPurchaseKey,
 }: {
   stock: IPStock;
-  onBuyNow: (name: string, memory: string, price: number, id: string, slotIpPackageId?: string, stockAvailable?: boolean) => void | Promise<void>;
+  onBuyNow: (
+    name: string,
+    memory: string,
+    price: number,
+    id: string,
+    slotIpPackageId?: string,
+    stockAvailable?: boolean,
+    groupTag?: string
+  ) => void | Promise<void>;
   verifyingPurchaseKey?: string | null;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
+  const groupTags = getStockGroupTags(stock);
+  const [selectedSeries, setSelectedSeries] = useState(groupTags[0] || '');
   const inStock = isStockPurchasable(stock);
   const unitsLeft = getStockUnitsRemaining(stock);
   const manualUnits = usesCompanyManualUnits(stock);
@@ -1810,6 +1867,7 @@ const CompactServerPlanRow = memo(function CompactServerPlanRow({
   const startingPrice = pricedMemoryOptions.length
     ? Math.min(...pricedMemoryOptions.map(([, details]) => details.price || 0))
     : 0;
+  const seriesReady = groupTags.length === 0 || !!selectedSeries;
 
   return (
     <div className={cn(
@@ -1821,7 +1879,7 @@ const CompactServerPlanRow = memo(function CompactServerPlanRow({
       {/* Main Row - Always Visible */}
       <div 
         className={cn(
-          "flex items-center gap-3 p-3 cursor-pointer",
+          "flex items-start sm:items-center gap-2.5 sm:gap-3 p-3 cursor-pointer",
           !inStock && "cursor-default"
         )}
         onClick={() => setIsExpanded(!isExpanded)}
@@ -1835,6 +1893,8 @@ const CompactServerPlanRow = memo(function CompactServerPlanRow({
         )}>
           {!inStock ? (
             <XCircle className="h-4 w-4 text-red-400" />
+          ) : stock.serverType === 'Proxy' ? (
+            <Zap className="h-4 w-4 text-orange-300" />
           ) : stock.serverType === 'VPS' ? (
             <Cloud className="h-4 w-4 text-sky-300" />
           ) : (
@@ -1846,7 +1906,7 @@ const CompactServerPlanRow = memo(function CompactServerPlanRow({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <h3 className={cn(
-              "font-semibold text-sm md:text-base",
+              "font-semibold text-sm md:text-base break-words",
               inStock ? "text-white" : "text-white/45 line-through decoration-white/25"
             )}>
               {stock.name}
@@ -1925,6 +1985,39 @@ const CompactServerPlanRow = memo(function CompactServerPlanRow({
           <div className="p-3 space-y-2">
             {pricedMemoryOptions.length > 0 ? (
               <>
+                {groupTags.length > 0 && (
+                  <div className="mb-3">
+                    <p className="text-xs font-medium text-white/45 uppercase tracking-wide mb-2">
+                      Select IP series
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {groupTags.map((tag) => {
+                        const active = selectedSeries === tag;
+                        return (
+                          <button
+                            key={tag}
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedSeries(tag);
+                            }}
+                            className={cn(
+                              "min-h-9 max-w-full px-3 py-1.5 rounded-md text-xs font-mono border transition-colors break-all",
+                              active
+                                ? "bg-orange-500/25 text-orange-100 border-orange-400/50"
+                                : "bg-white/[0.04] text-white/70 border-white/10 hover:border-orange-400/35"
+                            )}
+                          >
+                            {tag}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {!selectedSeries && groupTags.length > 1 && (
+                      <p className="text-[11px] text-amber-200/80 mt-1.5">Choose a series to buy.</p>
+                    )}
+                  </div>
+                )}
                 <p className="text-xs font-medium text-white/45 uppercase tracking-wide mb-3">
                   Select Configuration
                 </p>
@@ -1936,21 +2029,29 @@ const CompactServerPlanRow = memo(function CompactServerPlanRow({
                     <div
                       key={memory}
                       className={cn(
-                        "flex items-center justify-between gap-3 p-2.5 rounded-md border transition-colors",
+                        "flex flex-col gap-2 p-2.5 rounded-md border transition-colors sm:flex-row sm:items-center sm:justify-between sm:gap-3",
                         memoryInStock
                           ? "bg-white/[0.04] border-white/10 hover:border-emerald-400/35"
                           : "bg-white/[0.02] border-red-400/10 opacity-80"
                       )}
                     >
-                      <span className={cn(
-                        "text-sm font-medium flex-1",
-                        memoryInStock ? "text-white/90" : "text-white/45"
-                      )}>
-                        {memory}
-                      </span>
+                      <div className="flex items-center justify-between gap-2 min-w-0">
+                        <span className={cn(
+                          "text-sm font-medium truncate",
+                          memoryInStock ? "text-white/90" : "text-white/45"
+                        )}>
+                          {memory}
+                        </span>
+                        <span className={cn(
+                          "font-bold text-base shrink-0 sm:hidden",
+                          memoryInStock ? "text-emerald-300" : "text-white/35"
+                        )}>
+                          {hasPrice ? `₹${details.price}` : 'Price N/A'}
+                        </span>
+                      </div>
                       <div className="flex items-center gap-2">
                         <span className={cn(
-                          "font-bold text-base",
+                          "hidden sm:inline font-bold text-base shrink-0",
                           memoryInStock ? "text-emerald-300" : "text-white/35"
                         )}>
                           {hasPrice ? `₹${details.price}` : 'Price N/A'}
@@ -1959,40 +2060,44 @@ const CompactServerPlanRow = memo(function CompactServerPlanRow({
                           kind="ipstock"
                           ipStockId={stock._id}
                           memory={memory}
+                          netbayGroupTag={selectedSeries || undefined}
                           size="sm"
                           variant="outline"
-                          className="h-8 px-2.5"
+                          className="h-9 px-3 flex-1 sm:flex-none sm:h-8 sm:px-2.5"
                           label="Cart"
-                          disabled={!memoryInStock}
+                          disabled={!memoryInStock || !seriesReady}
                         />
                         <Button
                           size="sm"
                           onClick={(e) => {
                             e.stopPropagation();
-                            onBuyNow(stock.name, memory, details.price!, stock._id, undefined, memoryInStock);
+                            if (!seriesReady) return;
+                            onBuyNow(stock.name, memory, details.price!, stock._id, undefined, memoryInStock, selectedSeries || undefined);
                           }}
-                          disabled={!memoryInStock || !hasPrice || verifyingPurchaseKey === `${stock._id}:${memory}`}
+                          disabled={!memoryInStock || !hasPrice || !seriesReady || verifyingPurchaseKey === `${stock._id}:${memory}:${selectedSeries || ''}`}
                           className={cn(
-                            "h-8 px-3 gap-1.5 border-0",
+                            "h-9 px-3 gap-1.5 border-0 flex-1 sm:flex-none sm:h-8",
                             memoryInStock && hasPrice
                               ? "premium-btn-primary"
                               : "bg-red-500/15 text-red-300 hover:bg-red-500/20 cursor-not-allowed"
                           )}
                         >
-                          {verifyingPurchaseKey === `${stock._id}:${memory}` ? (
+                          {verifyingPurchaseKey === `${stock._id}:${memory}:${selectedSeries || ''}` ? (
                             <Loader2 className="h-3 w-3 animate-spin" />
                           ) : memoryInStock && hasPrice ? (
                             <Zap className="h-3 w-3" />
                           ) : (
                             <XCircle className="h-3 w-3" />
                           )}
-                          {verifyingPurchaseKey === `${stock._id}:${memory}`
-                            ? 'Checking…'
-                            : memoryInStock && hasPrice
-                              ? 'Buy Now'
-                              : hasPrice
-                                ? 'Sold out'
-                                : 'No price'}
+                          <span className="truncate">
+                            {verifyingPurchaseKey === `${stock._id}:${memory}:${selectedSeries || ''}`
+                              ? 'Checking…'
+                              : memoryInStock && hasPrice
+                                ? 'Buy Now'
+                                : hasPrice
+                                  ? 'Sold out'
+                                  : 'No price'}
+                          </span>
                         </Button>
                       </div>
                     </div>

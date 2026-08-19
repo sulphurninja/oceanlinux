@@ -77,6 +77,8 @@ const orderSchema = new mongoose.Schema({
     netbayPlanId: { type: String },    // plan used at purchase time (cached for renewals)
     netbayTaskId: { type: String },    // most recent async task (purchase / rebuild)
     netbayGroupTag: { type: String },  // location filter used at purchase
+    netbayProxyId: { type: String },   // POST /proxies/purchase
+    netbayAppType: { type: String },   // 'proxy' for HTTP proxy applications
 
     // KuroHost Cloud Platform (https://kurohost.com/cloud/docs)
     kurohostInstanceId: { type: String },
@@ -195,6 +197,7 @@ orderSchema.index({ hostycareServiceId: 1 });
 orderSchema.index({ smartvpsServiceId: 1 });
 orderSchema.index({ advpsServiceId: 1 });
 orderSchema.index({ netbayServiceId: 1 });
+orderSchema.index({ netbayProxyId: 1 });
 orderSchema.index({ kurohostInstanceId: 1 });
 orderSchema.index({ lastSyncTime: -1 });
 orderSchema.index({ expiryDate: 1 });

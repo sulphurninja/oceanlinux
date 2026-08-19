@@ -5,6 +5,8 @@ import Cart from '@/models/cartModel';
 import { priceCart } from '@/lib/cartPricing';
 const { defaultOsForProduct } = require('@/lib/orderOs');
 const { normalizeOsForServerType } = require('@/lib/companyInventory');
+const { resolveNetbayPurchaseGroupTag } = require('@/lib/netbayGroupTags');
+const { toPlainConfigurations } = require('@/lib/advpsLiveStock');
 
 function authError(err) {
   return NextResponse.json(
@@ -47,6 +49,7 @@ async function buildCartResponse(cart) {
       os: item.os,
       quantity: item.quantity,
       promoCode: item.promoCode,
+      netbayGroupTag: item.netbayGroupTag || '',
       addedAt: item.addedAt,
       pricing: line.priced.valid
         ? {
@@ -141,6 +144,7 @@ export async function POST(request) {
     os: explicitOs || 'Ubuntu 22',
     quantity,
     promoCode,
+    netbayGroupTag: kind === 'ipstock' ? String(body.netbayGroupTag || '').trim() : '',
   };
 
   // Verify availability + memory option / package validity before persisting.
@@ -148,6 +152,15 @@ export async function POST(request) {
   const priced = await priceCartLine(candidate);
   if (!priced.valid) {
     return NextResponse.json({ success: false, message: priced.reason }, { status: 400 });
+  }
+
+  if (kind === 'ipstock' && priced.stock) {
+    const netbayCfg = toPlainConfigurations(priced.stock.defaultConfigurations)?.netbay || {};
+    const seriesPick = resolveNetbayPurchaseGroupTag(netbayCfg, candidate.netbayGroupTag);
+    if (!seriesPick.ok) {
+      return NextResponse.json({ success: false, message: seriesPick.error }, { status: 400 });
+    }
+    candidate.netbayGroupTag = seriesPick.groupTag || '';
   }
 
   // Pick the right OS for this stock instead of always defaulting to Ubuntu.
@@ -164,7 +177,9 @@ export async function POST(request) {
   const existing = cart.items.find((it) => {
     if (it.kind !== kind) return false;
     if (kind === 'ipstock') {
-      return String(it.ipStockId) === String(candidate.ipStockId) && it.memory === candidate.memory;
+      return String(it.ipStockId) === String(candidate.ipStockId)
+        && it.memory === candidate.memory
+        && String(it.netbayGroupTag || '') === String(candidate.netbayGroupTag || '');
     }
     return String(it.slotIpPackageId) === String(candidate.slotIpPackageId);
   });

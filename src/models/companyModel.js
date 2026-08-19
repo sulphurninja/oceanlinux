@@ -69,6 +69,10 @@ const companyNetbayApiSchema = new mongoose.Schema({
   apiSecret: { type: String, default: '' },  // X-API-Secret — private secret
   /** When true, IP stock availability follows GET /services/stock. When false, use stockCount per plan. */
   useLiveStockApi: { type: Boolean, default: false },
+  /** Fallback coupon when no per-RAM code matches. */
+  couponCode: { type: String, default: '' },
+  /** Per-RAM NetBay coupons, e.g. { "4GB": "NB4", "8GB": "NB8", "16GB": "NB16" }. */
+  couponByMemory: { type: Map, of: String, default: undefined },
 }, { _id: false });
 
 /**
@@ -122,6 +126,8 @@ companySchema.index({ slug: 1 });
 if (
   mongoose.models.Company &&
   (!mongoose.models.Company.schema.paths['netbayApi.useLiveStockApi'] ||
+    !mongoose.models.Company.schema.paths['netbayApi.couponCode'] ||
+    !mongoose.models.Company.schema.paths['netbayApi.couponByMemory'] ||
     !mongoose.models.Company.schema.paths['kurohostApi.apiKey'] ||
     !mongoose.models.Company.schema.paths['joyApi.apiToken'] ||
     !mongoose.models.Company.schema.paths['resellerApi.useLiveStockApi'])
