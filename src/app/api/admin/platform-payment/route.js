@@ -8,6 +8,8 @@ import {
   getPublicPlatformPaymentConfig,
 } from '@/lib/platformPaymentSettings';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(request) {
   const denied = await enforceAdmin(request);
   if (denied) return denied;

@@ -457,6 +457,7 @@ function IPStockContent() {
   // Payment method selection
   const paymentConfig = usePaymentConfig();
   const [paymentMethod, setPaymentMethod] = useState<PaymentGateway>('upi');
+  const [gatewayUserPicked, setGatewayUserPicked] = useState(false);
   const [walletBalance, setWalletBalance] = useState(0);
   const [useWallet, setUseWallet] = useState(true);
   const [upiQrSession, setUpiQrSession] = useState<UpiQrSession | null>(null);
@@ -464,6 +465,7 @@ function IPStockContent() {
   useEffect(() => {
     if (paymentConfig.loaded) {
       setPaymentMethod(paymentConfig.primaryGateway);
+      setGatewayUserPicked(false);
     }
   }, [paymentConfig.loaded, paymentConfig.primaryGateway]);
 
@@ -772,6 +774,10 @@ function IPStockContent() {
 
       setSelectedProduct({ name: productName, memory, price, ipStockId, slotIpPackageId, netbayGroupTag });
       setPurchaseDisclaimerAccepted(false);
+      if (paymentConfig.loaded) {
+        setPaymentMethod(paymentConfig.primaryGateway);
+        setGatewayUserPicked(false);
+      }
       setShowDialog(true);
       setPromoCode("");
       setPromoDiscount(0);
@@ -996,7 +1002,12 @@ function IPStockContent() {
         }
       }
 
-      const methodsToTry = getGatewayTryOrder(paymentMethod, paymentConfig.primaryGateway);
+      const methodsToTry = getGatewayTryOrder(
+        paymentMethod,
+        paymentConfig.primaryGateway,
+        paymentConfig.methodsToTry,
+        gatewayUserPicked
+      );
       let res: Response | null = null;
       let data: any = null;
 
@@ -1708,7 +1719,10 @@ function IPStockContent() {
                     <button
                       key={method}
                       type="button"
-                      onClick={() => setPaymentMethod(method)}
+                      onClick={() => {
+                        setPaymentMethod(method);
+                        setGatewayUserPicked(method !== paymentConfig.primaryGateway);
+                      }}
                       className={cn(
                         'premium-payment-pill capitalize text-[11px] px-2.5 py-1',
                         paymentMethod === method ? 'premium-payment-pill--active' : 'premium-payment-pill--inactive'

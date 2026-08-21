@@ -379,6 +379,7 @@ const OrderDetails = () => {
   // Payment method for renewals
   const paymentConfig = usePaymentConfig();
   const [renewalPaymentMethod, setRenewalPaymentMethod] = useState<PaymentGateway>('upi');
+  const [renewalGatewayUserPicked, setRenewalGatewayUserPicked] = useState(false);
   const [walletBalance, setWalletBalance] = useState(0);
   const [useWalletRenewal, setUseWalletRenewal] = useState(true);
   const [upiQrSession, setUpiQrSession] = useState<UpiQrSession | null>(null);
@@ -386,6 +387,7 @@ const OrderDetails = () => {
   useEffect(() => {
     if (paymentConfig.loaded) {
       setRenewalPaymentMethod(paymentConfig.primaryGateway);
+      setRenewalGatewayUserPicked(false);
     }
   }, [paymentConfig.loaded, paymentConfig.primaryGateway]);
 
@@ -1860,7 +1862,12 @@ const OrderDetails = () => {
         await handleUpiRenewal(data);
       };
 
-      const methodsToTry = getGatewayTryOrder(renewalPaymentMethod, paymentConfig.primaryGateway);
+      const methodsToTry = getGatewayTryOrder(
+        renewalPaymentMethod,
+        paymentConfig.primaryGateway,
+        paymentConfig.methodsToTry,
+        renewalGatewayUserPicked
+      );
 
       let lastError: any = null;
       for (let i = 0; i < methodsToTry.length; i++) {
@@ -4036,7 +4043,10 @@ const OrderDetails = () => {
                               {sortGatewaysByPrimary(paymentConfig.primaryGateway).map((method) => (
                               <button
                                 key={method}
-                                onClick={() => setRenewalPaymentMethod(method)}
+                                onClick={() => {
+                                  setRenewalPaymentMethod(method);
+                                  setRenewalGatewayUserPicked(method !== paymentConfig.primaryGateway);
+                                }}
                                 disabled={actionBusy === 'renew'}
                                 className={cn(
                                   "flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-all",

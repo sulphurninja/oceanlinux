@@ -82,6 +82,7 @@ export default function CartPage() {
   const [useWallet, setUseWallet] = useState<boolean>(true);
   const paymentConfig = usePaymentConfig();
   const [gateway, setGateway] = useState<PaymentGateway>('upi');
+  const [gatewayUserPicked, setGatewayUserPicked] = useState(false);
   const [busyItem, setBusyItem] = useState<string | null>(null);
   const [checkingOut, setCheckingOut] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -91,6 +92,7 @@ export default function CartPage() {
   useEffect(() => {
     if (paymentConfig.loaded) {
       setGateway(paymentConfig.primaryGateway);
+      setGatewayUserPicked(false);
     }
   }, [paymentConfig.loaded, paymentConfig.primaryGateway]);
 
@@ -259,7 +261,12 @@ export default function CartPage() {
       return initData;
     };
 
-    const methodsToTry = getGatewayTryOrder(gateway, paymentConfig.primaryGateway);
+    const methodsToTry = getGatewayTryOrder(
+      gateway,
+      paymentConfig.primaryGateway,
+      paymentConfig.methodsToTry,
+      gatewayUserPicked
+    );
 
     try {
       let lastError: Error | null = null;
@@ -574,7 +581,10 @@ export default function CartPage() {
                         <button
                           key={g}
                           type="button"
-                          onClick={() => setGateway(g)}
+                          onClick={() => {
+                            setGateway(g);
+                            setGatewayUserPicked(g !== paymentConfig.primaryGateway);
+                          }}
                           className={cn(
                             'premium-payment-pill uppercase',
                             gateway === g ? 'premium-payment-pill--active' : 'premium-payment-pill--inactive'

@@ -25,7 +25,10 @@ export function usePaymentConfig(): PaymentConfig {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch('/api/payment/config', { credentials: 'include' });
+        const res = await fetch('/api/payment/config', {
+          credentials: 'include',
+          cache: 'no-store',
+        });
         const data = await res.json();
         if (cancelled || !res.ok || !data.success) return;
         setConfig({
@@ -41,7 +44,7 @@ export function usePaymentConfig(): PaymentConfig {
           loaded: true,
         });
       } catch {
-        if (!cancelled) setConfig((c) => ({ ...c, loaded: true }));
+        /* keep loaded:false so checkout does not assume UPI-first on fetch failure */
       }
     })();
     return () => {
@@ -54,11 +57,19 @@ export function usePaymentConfig(): PaymentConfig {
 
 export function getGatewayTryOrder(
   selected: PaymentGateway,
-  primary: PaymentGateway
+  primary: PaymentGateway,
+  methodsToTry?: PaymentGateway[],
+  userExplicitlySelected = false
 ): PaymentGateway[] {
-  if (selected === 'razorpay' && primary !== 'razorpay') return ['razorpay'];
-  if (selected === 'upi' && primary !== 'upi') return ['upi'];
-  return primary === 'razorpay' ? ['razorpay', 'upi'] : ['upi', 'razorpay'];
+  const order =
+    methodsToTry && methodsToTry.length > 0
+      ? methodsToTry
+      : sortGatewaysByPrimary(primary);
+
+  if (userExplicitlySelected && selected !== primary) {
+    return [selected];
+  }
+  return order;
 }
 
 export function sortGatewaysByPrimary(primary: PaymentGateway): PaymentGateway[] {

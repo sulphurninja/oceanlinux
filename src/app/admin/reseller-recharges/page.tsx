@@ -66,6 +66,7 @@ export default function AdminResellerRechargesPage() {
   const [maxAmount, setMaxAmount] = useState(100000);
   const [provider, setProvider] = useState('kwikupi');
   const [customerPrimaryGateway, setCustomerPrimaryGateway] = useState<'upi' | 'razorpay'>('upi');
+  const [savedPrimaryGateway, setSavedPrimaryGateway] = useState<'upi' | 'razorpay' | null>(null);
   const [savingPrimaryGateway, setSavingPrimaryGateway] = useState(false);
 
   const [paytmForm, setPaytmForm] = useState({
@@ -116,7 +117,9 @@ export default function AdminResellerRechargesPage() {
       setWebhookUrl(data.webhookUrl || '');
       setKwikUpiWebhookUrl(data.kwikUpiWebhookUrl || '');
       if (platformData?.success && platformData.primaryGateway) {
-        setCustomerPrimaryGateway(platformData.primaryGateway === 'razorpay' ? 'razorpay' : 'upi');
+        const pg = platformData.primaryGateway === 'razorpay' ? 'razorpay' : 'upi';
+        setCustomerPrimaryGateway(pg);
+        setSavedPrimaryGateway(pg);
       }
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Failed to load');
@@ -211,6 +214,9 @@ export default function AdminResellerRechargesPage() {
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.message || 'Save failed');
+      const pg = data.primaryGateway === 'razorpay' ? 'razorpay' : 'upi';
+      setSavedPrimaryGateway(pg);
+      setCustomerPrimaryGateway(pg);
       toast.success(data.message || 'Customer payment priority updated');
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Save failed');
@@ -254,6 +260,11 @@ export default function AdminResellerRechargesPage() {
           </CardTitle>
           <CardDescription>
             Sab customers (wallet, buy, cart, renewal) ko pehle yahi gateway milega. Fail hone par dusra auto try hoga.
+            {savedPrimaryGateway && (
+              <span className="block mt-2 font-medium text-foreground">
+                Abhi live: {savedPrimaryGateway === 'razorpay' ? 'Razorpay first' : 'UPI first'}
+              </span>
+            )}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">

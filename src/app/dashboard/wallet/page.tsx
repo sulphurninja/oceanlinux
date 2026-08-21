@@ -95,12 +95,14 @@ export default function WalletPage() {
   const [rechargeAmount, setRechargeAmount] = useState('500');
   const paymentConfig = usePaymentConfig();
   const [gateway, setGateway] = useState<PaymentGateway>('upi');
+  const [gatewayUserPicked, setGatewayUserPicked] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [upiQrSession, setUpiQrSession] = useState<UpiQrSession | null>(null);
 
   useEffect(() => {
     if (paymentConfig.loaded) {
       setGateway(paymentConfig.primaryGateway);
+      setGatewayUserPicked(false);
     }
   }, [paymentConfig.loaded, paymentConfig.primaryGateway]);
 
@@ -193,7 +195,12 @@ export default function WalletPage() {
       return data;
     };
 
-    const methodsToTry = getGatewayTryOrder(gateway, paymentConfig.primaryGateway);
+    const methodsToTry = getGatewayTryOrder(
+      gateway,
+      paymentConfig.primaryGateway,
+      paymentConfig.methodsToTry,
+      gatewayUserPicked
+    );
 
     try {
       let lastError: Error | null = null;
@@ -327,7 +334,17 @@ export default function WalletPage() {
             <RefreshCw className={cn('h-4 w-4 mr-2', refreshing && 'animate-spin')} />
             Refresh
           </Button>
-          <Button size="sm" onClick={() => setRechargeOpen(true)} className="premium-btn-primary border-0">
+          <Button
+            size="sm"
+            onClick={() => {
+              if (paymentConfig.loaded) {
+                setGateway(paymentConfig.primaryGateway);
+                setGatewayUserPicked(false);
+              }
+              setRechargeOpen(true);
+            }}
+            className="premium-btn-primary border-0"
+          >
             <Plus className="h-4 w-4 mr-2" /> Add Money
           </Button>
         </div>
@@ -519,7 +536,10 @@ export default function WalletPage() {
                   <button
                     key={g}
                     type="button"
-                    onClick={() => setGateway(g)}
+                    onClick={() => {
+                      setGateway(g);
+                      setGatewayUserPicked(g !== paymentConfig.primaryGateway);
+                    }}
                     className={cn(
                       'premium-payment-pill p-2 uppercase',
                       gateway === g ? 'premium-payment-pill--active' : 'premium-payment-pill--inactive'
