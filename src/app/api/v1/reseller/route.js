@@ -41,7 +41,7 @@ export async function GET() {
       manage: {
         method: 'POST',
         path: '/orders/manage',
-        description: 'start | stop | restart | reinstall | changeos',
+        description: 'start | stop | restart | reinstall | changeos | resetmac',
         body: { orderId: 'required', action: UNIVERSAL_ACTIONS.join('|'), osType: 'optional' },
       },
       renew: {
@@ -60,7 +60,7 @@ export async function GET() {
       '2. POST /orders → buy server',
       '3. GET /orders/{id} → IP + password (poll until ready)',
       '4. GET /orders/{id}/status → online/offline',
-      '5. POST /orders/manage → start/stop/restart/reinstall',
+      '5. POST /orders/manage → start/stop/restart/reinstall/resetmac',
       '6. POST /orders/{id}/sync → refresh IP/password after reinstall',
       '7. POST /orders/{id}/renew → extend service',
     ],

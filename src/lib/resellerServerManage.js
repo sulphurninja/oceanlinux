@@ -5,8 +5,8 @@
  * When you add a new provider/company, register a handler here — reseller API
  * contract stays unchanged.
  *
- * Universal actions: start | stop | restart | status | sync | reinstall | changeos
- * Aliases accepted: format → reinstall, reboot → restart
+ * Universal actions: start | stop | restart | status | sync | reinstall | changeos | resetmac
+ * Aliases accepted: format → reinstall, reboot → restart, reset-mac → resetmac
  */
 
 import Order from '@/models/orderModel';
@@ -51,7 +51,7 @@ const VirtualizorAPI = require('@/services/virtualizorApi');
 const { getCompanyVirtualizorAccounts, toVirtualizorApiAccounts } = require('@/lib/companyVirtualizor');
 const { generateSecurePassword } = require('@/lib/securePassword');
 
-export const UNIVERSAL_ACTIONS = ['start', 'stop', 'restart', 'status', 'sync', 'templates', 'reinstall', 'changeos'];
+export const UNIVERSAL_ACTIONS = ['start', 'stop', 'restart', 'status', 'sync', 'templates', 'reinstall', 'changeos', 'resetmac'];
 
 const POWER_ACTIONS = new Set(['start', 'stop', 'restart', 'status', 'sync']);
 const OS_ACTIONS = new Set(['reinstall', 'changeos']);
@@ -123,7 +123,7 @@ const PROVIDER_CAPABILITIES = {
     reinstallRequiresOs: true,
     changeosRequiresOs: true,
     osOptions: ['ubuntu', 'centos', 'windows'],
-    notes: 'reinstall and changeos both rebuild the VM with a new OS template. Send osType from the templates action.',
+    notes: 'reinstall and changeos both rebuild the VM with a new OS template. Send osType from the templates action. resetmac is limited to once per 24h without a MAC reset subscription (VPS only).',
   },
   smartvps: {
     supported: UNIVERSAL_ACTIONS,
@@ -175,11 +175,11 @@ const PROVIDER_CAPABILITIES = {
     notes: 'Joy Services — power actions + status only. OS reinstall/change is not exposed by the Joy connect API.',
   },
   'reseller-api': {
-    supported: ['start', 'stop', 'restart', 'status', 'sync', 'templates', 'reinstall'],
+    supported: ['start', 'stop', 'restart', 'status', 'sync', 'templates', 'reinstall', 'resetmac'],
     reinstallRequiresOs: true,
     changeosRequiresOs: false,
     osOptions: ['ubuntu', 'centos', 'windows'],
-    notes: 'PrimeVPS / Hostheaven panel — osType must be an ISO id or name from the templates action.',
+    notes: 'PrimeVPS / Hostheaven panel — osType must be an ISO id or name from the templates action. resetmac stops the VM, assigns a new MAC, then restarts it.',
   },
   oceanlinux: {
     supported: [],
@@ -194,6 +194,7 @@ export function normalizeResellerAction(action) {
   const a = String(action || '').toLowerCase();
   if (a === 'format' || a === 'rebuild') return 'reinstall';
   if (a === 'reboot') return 'restart';
+  if (a === 'reset-mac') return 'resetmac';
   return a;
 }
 
@@ -449,6 +450,39 @@ async function runAdvps(order, orderId, action, osType) {
         message: `Reinstall started (${os}). Poll GET /orders/{orderId} or action=sync for new password.`,
         data: { os, taskId: taskId || null },
       };
+    }
+    case 'resetmac': {
+      try {
+        const macRes = await api.resetMac(serviceId);
+        const d = macRes?.data || macRes;
+        const newMacAddress = d?.newMac || d?.macAddress || d?.mac || null;
+        await Order.findByIdAndUpdate(orderId, {
+          lastAction: 'resetmac',
+          lastActionTime: new Date(),
+        });
+        return {
+          success: true,
+          message: 'MAC address reset successfully',
+          data: { newMacAddress, serviceId, raw: d },
+        };
+      } catch (macErr) {
+        const status = macErr?.status;
+        if (status === 429) {
+          return {
+            success: false,
+            message: 'MAC reset is only allowed once every 24 hours without an active MAC reset subscription.',
+            code: 'MAC_RESET_RATE_LIMIT',
+          };
+        }
+        if (status === 404) {
+          return {
+            success: false,
+            message: 'Service not found or MAC reset is not supported for this assignment (VPS only).',
+            code: 'MAC_RESET_NOT_APPLICABLE',
+          };
+        }
+        throw macErr;
+      }
     }
     default:
       return actionNotSupported(action, PROVIDER_CAPABILITIES.advps);
@@ -819,6 +853,24 @@ async function runResellerApi(order, orderId, action, osType, ipStock) {
         data: { vmId, isoId },
       };
     }
+    case 'resetmac': {
+      const { vmId } = await findVm();
+      const apiRes = await api.regenerateMac(vmId);
+      const newMacAddress = apiRes?.newMac || apiRes?.mac || apiRes?.data?.mac || null;
+      await Order.findByIdAndUpdate(orderId, {
+        lastAction: 'resetmac',
+        lastActionTime: new Date(),
+      });
+      return {
+        success: true,
+        message: apiRes?.message || 'MAC address regenerated successfully',
+        data: {
+          newMacAddress,
+          vmId,
+          apiResponse: apiRes,
+        },
+      };
+    }
     default:
       return actionNotSupported(action, PROVIDER_CAPABILITIES['reseller-api']);
   }
@@ -1047,7 +1099,7 @@ export async function executeResellerServerAction({ order, orderId, action, osTy
   if (!UNIVERSAL_ACTIONS.includes(normalized)) {
     return {
       success: false,
-      message: `Invalid action. Use: ${UNIVERSAL_ACTIONS.join(', ')} (aliases: format, reboot)`,
+      message: `Invalid action. Use: ${UNIVERSAL_ACTIONS.join(', ')} (aliases: format, reboot, reset-mac)`,
       code: 'INVALID_ACTION',
     };
   }

@@ -108,7 +108,7 @@ export async function GET(request) {
     message: 'Universal Reseller Server Management API',
     description: 'Same actions for every product — OceanLinux routes to the correct provider internally.',
     universalActions: UNIVERSAL_ACTIONS,
-    aliases: { format: 'reinstall', rebuild: 'reinstall', reboot: 'restart' },
+    aliases: { format: 'reinstall', rebuild: 'reinstall', reboot: 'restart', 'reset-mac': 'resetmac' },
     requestBody: {
       orderId: 'required — your order ID from POST /orders',
       action: `one of: ${UNIVERSAL_ACTIONS.join(', ')}`,
@@ -125,6 +125,7 @@ export async function GET(request) {
       templates: { orderId: 'ORDER_ID', action: 'templates' },
       reinstall: { orderId: 'ORDER_ID', action: 'reinstall', osType: 'Ubuntu 22.04' },
       changeos: { orderId: 'ORDER_ID', action: 'changeos', osType: 'ubuntu' },
+      resetmac: { orderId: 'ORDER_ID', action: 'resetmac' },
     },
   });
 }
