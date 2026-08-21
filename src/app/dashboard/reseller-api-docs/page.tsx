@@ -303,10 +303,10 @@ export default function ResellerApiDocsPage() {
 
                                 <StepCard step={6} title="Manage the service">
                                     <p>
-                                        <code>POST /orders/manage</code> handles power control and reinstalls:{' '}
+                                        <code>POST /orders/manage</code> handles power control, reinstalls, and MAC reset:{' '}
                                         <code>start</code>, <code>stop</code>, <code>restart</code>,{' '}
-                                        <code>status</code>, <code>format</code>, <code>changeos</code> and{' '}
-                                        <code>sync</code>.
+                                        <code>status</code>, <code>format</code>, <code>changeos</code>,{' '}
+                                        <code>resetmac</code> and <code>sync</code>.
                                     </p>
                                     <CodeBlock
                                         code={`curl -X POST "${baseUrl}/orders/manage" \\
@@ -336,7 +336,7 @@ export default function ResellerApiDocsPage() {
                                     <li><code>GET /orders/{`{orderId}`}</code> — Order detail and capabilities</li>
                                     <li><code>GET /orders/{`{orderId}`}/status</code> — Live power state</li>
                                     <li><code>POST /orders/{`{orderId}`}/sync</code> — Re-sync IP and credentials</li>
-                                    <li><code>POST /orders/manage</code> — Power actions and reinstalls</li>
+                                    <li><code>POST /orders/manage</code> — Power actions, reinstalls, MAC reset</li>
                                     <li><code>GET /orders/{`{orderId}`}/renew</code> — Renewal quote</li>
                                     <li><code>POST /orders/{`{orderId}`}/renew</code> — Renew the service</li>
                                 </ul>
@@ -559,7 +559,7 @@ x-api-secret: YOUR_API_SECRET`}
   },
   "management": {
     "available": true,
-    "supportedActions": ["start", "stop", "restart", "status", "sync", "templates", "reinstall"],
+    "supportedActions": ["start", "stop", "restart", "status", "sync", "templates", "reinstall", "resetmac"],
     "reinstallRequiresOs": true,
     "osOptions": ["Windows Server 2022", "Windows Server 2025", "Ubuntu 22.04"],
     "osTemplates": [
@@ -572,14 +572,15 @@ x-api-secret: YOUR_API_SECRET`}
                             />
                             <p className="mt-3 text-sm premium-dashboard-subtitle">
                                 osTemplates Ocean panel ke reinstall dropdown jaisi live list hai (2022, 2025, Ubuntu,
-                                etc.). Reinstall ke liye osType me id ya name bhejo.
+                                etc.). Reinstall ke liye osType me id ya name bhejo.{' '}
+                                <code>resetmac</code> sirf ADVPS aur Reseller-panel VPS par dikhega — har product par nahi.
                             </p>
                         </EndpointCard>
 
                         <EndpointCard
                             method="POST"
                             path="/orders/manage"
-                            description="Server actions: start, stop, restart, status, templates, reinstall, changeos, sync"
+                            description="Server actions: start, stop, restart, status, templates, reinstall, changeos, resetmac, sync"
                         >
                             <CodeBlock
                                 label="Request body"
@@ -608,12 +609,20 @@ x-api-secret: YOUR_API_SECRET`}
                                     </li>
                                     <li><code>format</code> — Alias of reinstall</li>
                                     <li><code>changeos</code> — OS change (SmartVPS)</li>
+                                    <li>
+                                        <code>resetmac</code> — New MAC address (ADVPS + Reseller-panel VPS only; alias{' '}
+                                        <code>reset-mac</code>)
+                                    </li>
                                     <li><code>sync</code> — Provider se status / password sync</li>
                                 </ul>
                             </div>
                             <CodeBlock
                                 label="Templates request"
                                 code={`{ "orderId": "65b...", "action": "templates" }`}
+                            />
+                            <CodeBlock
+                                label="MAC reset request"
+                                code={`{ "orderId": "65b...", "action": "resetmac" }`}
                             />
                             <CodeBlock
                                 label="Status response"
