@@ -11,14 +11,14 @@ import { readFileSync } from 'fs';
 import { resolve } from 'path';
 
 function loadEnv() {
-  try {
-    const raw = readFileSync(resolve(process.cwd(), '.env.local'), 'utf8');
-    for (const line of raw.split('\n')) {
-      const m = line.match(/^MONGOOSE_URL=(.+)$/);
+  for (const file of ['.env.local', '.env']) {
+    try {
+      const raw = readFileSync(resolve(process.cwd(), file), 'utf8');
+      const m = raw.match(/MONGOOSE_URL=(.+)/);
       if (m) return m[1].trim().replace(/^['"]|['"]$/g, '');
+    } catch {
+      // try next file
     }
-  } catch {
-    // ignore
   }
   return process.env.MONGOOSE_URL?.trim().replace(/^['"]|['"]$/g, '') || '';
 }
@@ -37,7 +37,17 @@ function parseProxyLine(line) {
 }
 
 /** ip:port:user:newPass — matched 1:1 by ip + port + username */
-const NEW_LINES = `
+function loadReplacementLines() {
+  const fileArgIdx = process.argv.indexOf('--file');
+  if (fileArgIdx !== -1 && process.argv[fileArgIdx + 1]) {
+    const filePath = resolve(process.cwd(), process.argv[fileArgIdx + 1]);
+    return readFileSync(filePath, 'utf8')
+      .split('\n')
+      .map((l) => parseProxyLine(l))
+      .filter(Boolean);
+  }
+
+  return `
 103.169.81.13:8000:boss252proxy265:eb9gdajv
 103.169.81.14:8000:boss252proxy266:uRV3LBs7
 103.169.81.15:8000:boss252proxy267:Lh1bDCqB
@@ -49,9 +59,12 @@ const NEW_LINES = `
 103.169.81.21:8000:boss252proxy273:Bbw1RlI0
 103.169.81.22:8000:boss252proxy274:jOHbUotx
 `
-  .split('\n')
-  .map((l) => parseProxyLine(l))
-  .filter(Boolean);
+    .split('\n')
+    .map((l) => parseProxyLine(l))
+    .filter(Boolean);
+}
+
+const NEW_LINES = loadReplacementLines();
 
 const apply = process.argv.includes('--apply');
 const uri = loadEnv();

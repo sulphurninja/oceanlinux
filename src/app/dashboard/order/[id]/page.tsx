@@ -3194,13 +3194,13 @@ const OrderDetails = () => {
                         Manage System
                       </CardTitle>
                       <CardDescription className="text-xs lg:text-sm">
-                        Sync proxy credentials and expiry from NetBay
+                        Sync proxy credentials and expiry date
                       </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-3">
                       {!order.netbayServiceId ? (
                         <div className="p-3 rounded-lg border bg-muted/40 text-xs text-muted-foreground">
-                          Proxy is still provisioning. Sync will be available once NetBay assigns your proxy ID.
+                          Proxy is still provisioning. Sync will be available once your connection is ready.
                         </div>
                       ) : (
                         <Button
@@ -3510,7 +3510,7 @@ const OrderDetails = () => {
                       </CardTitle>
                       <CardDescription className="text-xs lg:text-sm">
                         {netbayProxyOrder
-                          ? 'Sync connection details from NetBay — host, port, username and password'
+                          ? 'Sync connection details — host, port, username and password'
                           : 'Manage your server\'s power state and configuration'}
                       </CardDescription>
                     </CardHeader>
@@ -3518,7 +3518,7 @@ const OrderDetails = () => {
                       {netbayProxyOrder ? (
                         <div className="space-y-3">
                           <div className="p-3 rounded-lg border bg-muted/40 text-xs text-muted-foreground">
-                            HTTP proxy has no start/stop controls. Use Sync after NetBay updates credentials or expiry.
+                            HTTP proxy has no start/stop controls. Use Sync to refresh credentials or expiry after updates.
                           </div>
                           <Button
                             variant="default"
