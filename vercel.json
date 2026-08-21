@@ -1,0 +1,73 @@
+{
+  "crons": [
+    {
+      "path": "/api/orders/cleanup-old",
+      "schedule": "0 2 * * *"
+    },
+    {
+      "path": "/api/admin/auto-provision-cron",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/smartvps/sync",
+      "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/smartvps/status-sync?limit=40",
+      "schedule": "0 */4 * * *"
+    },
+    {
+      "path": "/api/netbay/sync-orders",
+      "schedule": "0 */6 * * *"
+    },
+    {
+      "path": "/api/netbay/refresh-stock?force=1",
+      "schedule": "*/8 * * * *"
+    },
+    {
+      "path": "/api/reseller-panel/refresh-stock?force=1",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/kurohost/refresh-stock?force=1",
+      "schedule": "*/8 * * * *"
+    },
+    {
+      "path": "/api/orders/expiry-reminders",
+      "schedule": "0 4 * * *"
+    },
+    {
+      "path": "/api/orders/expiry-reminders",
+      "schedule": "30 12 * * *"
+    },
+    {
+      "path": "/api/orders/suspension-notices",
+      "schedule": "0 5 * * *"
+    },
+    {
+      "path": "/api/orders/suspension-notices",
+      "schedule": "30 13 * * *"
+    },
+    {
+      "path": "/api/cart/checkout/sweep?minutes=30",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/orders/cleanup-expired",
+      "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/admin/paid-but-pending-cron?hours=72&limit=40",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/payment/recover-pending?minutes=120&limit=30",
+      "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/admin/advps-pending-cron",
+      "schedule": "*/15 * * * *"
+    }
+  ]
+}
+

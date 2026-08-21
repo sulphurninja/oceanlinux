@@ -1,0 +1,390 @@
+import { NextResponse } from 'next/server';
+import connectDB from '@/lib/db';
+import Order from '@/models/orderModel';
+import NotificationService from '@/services/notificationService';
+import { assignPanelCredentials } from '@/lib/panelCredentials';
+import { fulfillOrderInventory } from '@/lib/fulfillOrderInventory';
+const { resolveOrderExpiryOnPayment } = require('@/lib/advpsOrderExpiry');
+import {
+  findDispatchTarget,
+  confirmRechargeFromWebhook,
+  confirmCheckoutFromWebhook,
+  confirmResellerRechargeFromWebhook,
+} from '@/lib/paymentDispatch';
+const { customerApiCatchPayload } = require('@/lib/customerFacingErrors');
+const AutoProvisioningService = require('@/services/autoProvisioningService');
+const WhatsAppService = require('@/services/whatsappService');
+
+/**
+ * UPI Gateway Webhook Handler
+ * Documentation: https://documenter.getpostman.com/view/1665248/2s9Y5U15tk
+ * 
+ * Webhook receives form-urlencoded data with following fields:
+ * - amount, client_txn_id, createdAt, customer_email, customer_mobile
+ * - customer_name, customer_vpa, id, p_info, redirect_url, remark
+ * - status (success/failure), txnAt, udf1, udf2, udf3, upi_txn_id
+ */
+
+// Verify payment with UPI Gateway API
+async function verifyUPIPayment(clientTxnId) {
+  const UPI_GATEWAY_KEY = process.env.UPI_GATEWAY_API_KEY;
+  if (!UPI_GATEWAY_KEY) {
+    console.error('[UPI Webhook] UPI_GATEWAY_API_KEY not configured');
+    return { verified: false, error: 'API key not configured' };
+  }
+
+  try {
+    const response = await fetch('https://merchant.upigateway.com/api/check_order_status', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        key: UPI_GATEWAY_KEY,
+        client_txn_id: clientTxnId
+      })
+    });
+
+    const data = await response.json();
+    console.log('[UPI Webhook] Verification response:', data);
+
+    if (data.status === true && data.data?.status === 'success') {
+      return { 
+        verified: true, 
+        amount: parseFloat(data.data.amount),
+        upi_txn_id: data.data.upi_txn_id
+      };
+    }
+
+    return { verified: false, status: data.data?.status, error: data.msg };
+  } catch (error) {
+    console.error('[UPI Webhook] Verification error:', error);
+    return { verified: false, error: error.message };
+  }
+}
+
+export async function POST(request) {
+  await connectDB();
+
+  console.log("========== UPI GATEWAY WEBHOOK ==========");
+
+  try {
+    // Parse form-urlencoded data
+    const formData = await request.formData();
+    
+    const webhookData = {
+      amount: formData.get('amount'),
+      client_txn_id: formData.get('client_txn_id'),
+      createdAt: formData.get('createdAt'),
+      customer_email: formData.get('customer_email'),
+      customer_mobile: formData.get('customer_mobile'),
+      customer_name: formData.get('customer_name'),
+      customer_vpa: formData.get('customer_vpa'),
+      id: formData.get('id'), // UPI Gateway order ID
+      p_info: formData.get('p_info'),
+      redirect_url: formData.get('redirect_url'),
+      remark: formData.get('remark'),
+      status: formData.get('status'), // success or failure
+      txnAt: formData.get('txnAt'),
+      udf1: formData.get('udf1'),
+      udf2: formData.get('udf2'),
+      udf3: formData.get('udf3'),
+      upi_txn_id: formData.get('upi_txn_id') // UTR number
+    };
+
+    console.log('[UPI Webhook] Received data:', webhookData);
+
+    const { client_txn_id, status, upi_txn_id, id, amount: webhookAmount } = webhookData;
+
+    if (!client_txn_id) {
+      console.error('[UPI Webhook] Missing client_txn_id');
+      return NextResponse.json(
+        { success: false, message: 'Missing client_txn_id' },
+        { status: 400 }
+      );
+    }
+
+    // Dispatch by parent collection BEFORE the existing order lookup.
+    // For UPI we still verify against the gateway first to be sure the
+    // payment is real, then route to the matching parent confirm path.
+    const dispatch = await findDispatchTarget(client_txn_id);
+    if (dispatch && status === 'success') {
+      const verification = await verifyUPIPayment(client_txn_id);
+      if (!verification.verified) {
+        console.error('[UPI Webhook] Verification failed for', dispatch.kind, client_txn_id, verification);
+        return NextResponse.json(
+          { success: false, message: 'Payment verification failed', error: verification.error },
+          { status: 400 }
+        );
+      }
+
+      const expectedAmount = dispatch.kind === 'checkout'
+        ? dispatch.doc.gatewayAmount
+        : dispatch.doc.amount;
+      const paidAmount = verification.amount || parseFloat(webhookAmount);
+      if (Math.abs(paidAmount - expectedAmount) > 1) {
+        console.error('[UPI Webhook] Amount mismatch', { expectedAmount, paidAmount, kind: dispatch.kind });
+        return NextResponse.json(
+          { success: false, message: 'Payment amount mismatch' },
+          { status: 400 }
+        );
+      }
+
+      const sharedDetails = {
+        upi_txn_id: verification.upi_txn_id || upi_txn_id,
+        customer_vpa: webhookData.customer_vpa,
+        txnAt: webhookData.txnAt,
+        verifiedAmount: paidAmount,
+        webhookReceivedAt: new Date(),
+      };
+
+      if (dispatch.kind === 'checkout') {
+        console.log(`[UPI Webhook] 🛒 Cart checkout session matched: ${dispatch.doc._id}`);
+        const result = await confirmCheckoutFromWebhook(dispatch.doc, {
+          paymentMethod: 'upi',
+          transactionId: verification.upi_txn_id || upi_txn_id || id,
+          paymentDetails: sharedDetails,
+        });
+        return NextResponse.json({
+          success: !!result.success,
+          message: 'Cart checkout (UPI) processed',
+          ...result,
+        });
+      }
+
+      if (dispatch.kind === 'recharge') {
+        console.log(`[UPI Webhook] 💰 Wallet recharge matched: ${dispatch.doc._id}`);
+        const result = await confirmRechargeFromWebhook(dispatch.doc, {
+          paymentMethod: 'upi',
+          transactionId: verification.upi_txn_id || upi_txn_id || id,
+          paymentDetails: sharedDetails,
+        });
+        return NextResponse.json({
+          success: !!result.success,
+          message: 'Wallet recharge (UPI) processed',
+          ...result,
+        });
+      }
+
+      if (dispatch.kind === 'reseller_recharge') {
+        console.log(`[UPI Webhook] 🤝 Reseller wallet recharge matched: ${dispatch.doc._id}`);
+        const result = await confirmResellerRechargeFromWebhook(dispatch.doc, {
+          paymentMethod: 'upi',
+          transactionId: verification.upi_txn_id || upi_txn_id || id,
+          paymentDetails: sharedDetails,
+        });
+        return NextResponse.json({
+          success: !!result.success,
+          message: 'Reseller wallet recharge (UPI) processed',
+          ...result,
+        });
+      }
+    }
+    if (dispatch && status !== 'success') {
+      // Mark recharge / checkout failed too.
+      if (dispatch.kind === 'recharge' || dispatch.kind === 'reseller_recharge') {
+        dispatch.doc.status = 'failed';
+        dispatch.doc.failureReason = webhookData.remark || 'UPI payment failed';
+        await dispatch.doc.save();
+      } else if (dispatch.kind === 'checkout') {
+        const { refundAndFailCheckoutSession } = await import('@/lib/paymentDispatch');
+        await refundAndFailCheckoutSession(dispatch.doc, webhookData.remark || 'UPI payment failed');
+      }
+      return NextResponse.json({ success: true, message: 'Failure recorded' });
+    }
+
+    // Find the order in our database
+    const order = await Order.findOne({ clientTxnId: client_txn_id });
+    
+    if (!order) {
+      console.error(`[UPI Webhook] Order not found: ${client_txn_id}`);
+      return NextResponse.json(
+        { success: false, message: 'Order not found' },
+        { status: 404 }
+      );
+    }
+
+    console.log(`[UPI Webhook] Found order: ${order._id}, Status from webhook: ${status}`);
+
+    // The gateway may deliver the same webhook more than once. Without this the
+    // retry would re-run the deferred wallet charge, re-assign panel credentials
+    // and re-notify the customer.
+    if (order.status === 'confirmed' || order.status === 'active') {
+      console.log(`[UPI Webhook] Order ${order._id} already ${order.status} — ignoring duplicate webhook`);
+      return NextResponse.json({
+        success: true,
+        message: 'Order already confirmed',
+        alreadyProcessed: true,
+      });
+    }
+
+    // Only process successful payments
+    if (status === 'success') {
+      // SECURITY: Verify the payment with UPI Gateway API before confirming
+      console.log('[UPI Webhook] Verifying payment with UPI Gateway API...');
+      const verification = await verifyUPIPayment(client_txn_id);
+      
+      if (!verification.verified) {
+        console.error(`[UPI Webhook] Payment verification FAILED for ${client_txn_id}:`, verification);
+        return NextResponse.json(
+          { success: false, message: 'Payment verification failed', error: verification.error },
+          { status: 400 }
+        );
+      }
+
+      // SECURITY: Verify the amount matches what we expected
+      const expectedAmount =
+        Number(order.paymentDetails?.gatewayAmount) ||
+        Math.max(0, Number(order.price) - (Number(order.walletDeduction?.amount) || 0));
+      const paidAmount = verification.amount || parseFloat(webhookAmount);
+      
+      if (Math.abs(paidAmount - expectedAmount) > 1) { // Allow ₹1 tolerance for rounding
+        console.error(`[UPI Webhook] Amount mismatch! Expected: ${expectedAmount}, Paid: ${paidAmount}`);
+        return NextResponse.json(
+          { success: false, message: 'Payment amount mismatch' },
+          { status: 400 }
+        );
+      }
+
+      console.log(`[UPI Webhook] Payment verified! Amount: ${paidAmount}, Expected: ${expectedAmount}`);
+
+      const expiryDate = await resolveOrderExpiryOnPayment(order);
+
+      // Deduct-on-success: charge the deferred wallet portion now UPI paid.
+      const { chargeDeferredWalletForOrder } = await import('@/lib/confirmPendingOrderPayment');
+      const walletCharge = await chargeDeferredWalletForOrder(order);
+      if (!walletCharge.ok) {
+        console.error('[UPI Webhook] Gateway paid but wallet debit failed — order NOT confirmed');
+        return NextResponse.json(
+          { success: false, message: 'Wallet portion could not be debited; order not confirmed' },
+          { status: 400 }
+        );
+      }
+
+      // Update order status
+      order.status = 'confirmed';
+      order.transactionId = verification.upi_txn_id || upi_txn_id || id;
+      order.gatewayOrderId = id; // Store UPI Gateway order ID
+      if (expiryDate) order.expiryDate = expiryDate;
+      order.paymentDetails = {
+        upi_txn_id: verification.upi_txn_id || upi_txn_id,
+        customer_vpa: webhookData.customer_vpa,
+        txnAt: webhookData.txnAt,
+        remark: webhookData.remark,
+        verified: true,
+        verifiedAmount: paidAmount
+      };
+      await assignPanelCredentials(order);
+      await order.save();
+      await fulfillOrderInventory(order);
+
+      console.log(`[UPI Webhook] Order ${order._id} confirmed with UPI txn ${upi_txn_id}`);
+      console.log(`[UPI Webhook] Order expiry set to: ${expiryDate ? expiryDate.toISOString() : 'deferred (ADVPS upstream)'}`);
+
+      // Send notifications
+      try {
+        await NotificationService.notifyOrderConfirmed(order.user, order);
+      } catch (notifError) {
+        console.error('[UPI Webhook] Failed to create payment confirmation notification:', notifError);
+      }
+
+      // Trigger auto-provisioning (with duplicate prevention)
+      try {
+        // CRITICAL: Re-fetch order to check current provisioning state
+        // This prevents race conditions where confirm API already started provisioning
+        const freshOrder = await Order.findById(order._id);
+        const alreadyProvisioning = freshOrder?.provisioningStatus === 'provisioning' ||
+                                     freshOrder?.provisioningStatus === 'active' ||
+                                     freshOrder?.inventoryItemId ||
+                                     freshOrder?.ipAddress;
+        
+        if (alreadyProvisioning) {
+          console.log(`[UPI Webhook] ⚠️ Order ${order._id} already provisioning/provisioned, skipping`);
+          console.log(`[UPI Webhook]   → Status: ${freshOrder?.provisioningStatus}`);
+          console.log(`[UPI Webhook]   → IP: ${freshOrder?.ipAddress || 'none'}`);
+        } else {
+          console.log(`[UPI Webhook] 🚀 Starting auto-provisioning for order ${order._id}`);
+          
+          const provisioningService = new AutoProvisioningService();
+
+          // Create notification for provisioning start
+          await NotificationService.notifyOrderProvisioning(order.user, order);
+
+          // Start provisioning in background
+          // The provisionServer method now has atomic DB locking to prevent duplicates
+          provisioningService.provisionServer(order._id.toString())
+            .then(async result => {
+              console.log(`[UPI Webhook] Auto-provisioning completed for order ${order._id}:`, result);
+
+              // Only send notifications if actually provisioned (not skipped due to duplicate)
+              if (result.success && !result.alreadyProvisioned && !result.alreadyProvisioning) {
+                await NotificationService.notifyOrderCompleted(order.user, order, {
+                  ipAddress: result.ipAddress || 'Available in dashboard',
+                  username: result.username || 'root',
+                  password: result.password || 'Check dashboard'
+                });
+                WhatsAppService.notifyOrderViaWhatsApp(order.user, order).catch(() => {});
+              } else if (!result.success && !result.alreadyProvisioning && !result.advpsPending && !result.resellerApiPending) {
+                await NotificationService.notifyOrderFailed(order.user, order, result.error);
+              } else if (result.advpsPending || result.resellerApiPending) {
+                console.log(`[UPI Webhook] Upstream order pending assignment — skipping failure notification`);
+              }
+            })
+            .catch(async error => {
+              console.error(`[UPI Webhook] Auto-provisioning failed for order ${order._id}:`, error);
+              if (!String(error.message).startsWith('ADVPS_PENDING')) {
+                await NotificationService.notifyOrderFailed(order.user, order, error.message);
+              }
+            });
+
+          console.log("[UPI Webhook] Auto-provisioning initiated");
+        }
+      } catch (error) {
+        console.error("[UPI Webhook] Error starting auto-provisioning:", error);
+        // Don't fail the response - provisioning can be retried
+      }
+
+      return NextResponse.json({
+        success: true,
+        message: 'Payment confirmed and order processed'
+      });
+
+    } else if (status === 'failure') {
+      const { probeGatewayPayment, confirmPendingOrderPayment } = await import('@/lib/confirmPendingOrderPayment');
+      const probe = await probeGatewayPayment(order);
+      if (probe.success) {
+        await confirmPendingOrderPayment(order, probe);
+        console.log(`[UPI Webhook] Order ${order._id} was actually paid — confirmed instead of failing`);
+      } else {
+        order.paymentDetails = {
+          ...(order.paymentDetails || {}),
+          remark: webhookData.remark,
+          txnAt: webhookData.txnAt,
+        };
+        const { cancelPendingBuyNowOrder } = await import('@/lib/cancelPendingOrder');
+        await cancelPendingBuyNowOrder(order, 'failed');
+        console.log(`[UPI Webhook] Order ${order._id} payment release recorded`);
+      }
+
+      return NextResponse.json({
+        success: true,
+        message: 'Payment failure recorded'
+      });
+
+    } else {
+      console.log(`[UPI Webhook] Unknown status: ${status}`);
+      return NextResponse.json({
+        success: true,
+        message: 'Webhook received'
+      });
+    }
+
+  } catch (error) {
+    console.error('[UPI Webhook] Error:', error);
+    return NextResponse.json(
+      { success: false, message: 'Server error', ...customerApiCatchPayload(error.message) },
+      { status: 500 }
+    );
+  }
+}
+

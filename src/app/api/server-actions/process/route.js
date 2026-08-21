@@ -1,0 +1,94 @@
+import { NextResponse } from 'next/server';
+import connectDB from '@/lib/db';
+import { getDataFromToken } from '@/helper/getDataFromToken';
+import ServerActionRequest from '@/models/serverActionRequestModel';
+import Order from '@/models/orderModel';
+import { enforceAdmin } from '@/lib/apiSecurity';
+
+export async function POST(request) {
+    const denied = await enforceAdmin(request);
+    if (denied) return denied;
+
+    await connectDB();
+
+    try {
+        const userId = await getDataFromToken(request);
+
+        const { requestId, action, adminNotes, newPassword } = await request.json();
+
+        if (!requestId || !action) {
+            return NextResponse.json(
+                { success: false, message: 'Missing required fields: requestId, action' },
+                { status: 400 }
+            );
+        }
+
+        if (!['approve', 'reject'].includes(action)) {
+            return NextResponse.json(
+                { success: false, message: 'Invalid action. Must be "approve" or "reject"' },
+                { status: 400 }
+            );
+        }
+
+        // Find the request
+        const actionRequest = await ServerActionRequest.findById(requestId);
+        if (!actionRequest) {
+            return NextResponse.json(
+                { success: false, message: 'Request not found' },
+                { status: 404 }
+            );
+        }
+
+        // Check if already processed
+        if (actionRequest.status !== 'pending') {
+            return NextResponse.json(
+                { success: false, message: `Request already ${actionRequest.status}` },
+                { status: 400 }
+            );
+        }
+
+        // Update request status
+        const newStatus = action === 'approve' ? 'approved' : 'rejected';
+        actionRequest.status = newStatus;
+        actionRequest.processedAt = new Date();
+        actionRequest.processedBy = userId;
+        if (adminNotes) {
+            actionRequest.adminNotes = adminNotes;
+        }
+        await actionRequest.save();
+
+        console.log(`[SERVER-ACTION-PROCESS] Request ${requestId} ${newStatus} by admin ${userId}`);
+
+        if (action === 'approve') {
+            const updateFields = {
+                lastAction: actionRequest.action,
+                lastActionTime: new Date()
+            };
+            if (actionRequest.action === 'format' && newPassword) {
+                updateFields.password = newPassword;
+            }
+            await Order.findByIdAndUpdate(actionRequest.orderId, updateFields);
+            console.log(`[SERVER-ACTION-PROCESS] Updated order ${actionRequest.orderId} with action: ${actionRequest.action}`);
+        }
+
+        // TODO: Send notification to customer
+        // You can add email notification here using your email service
+
+        return NextResponse.json({
+            success: true,
+            message: `Request ${newStatus} successfully`,
+            request: {
+                _id: actionRequest._id,
+                status: actionRequest.status,
+                processedAt: actionRequest.processedAt
+            }
+        });
+
+    } catch (error) {
+        console.error('[SERVER-ACTION-PROCESS] Error processing request:', error);
+        return NextResponse.json(
+            { success: false, message: 'Failed to process request', error: error.message },
+            { status: 500 }
+        );
+    }
+}

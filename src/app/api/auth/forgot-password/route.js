@@ -1,0 +1,100 @@
+import connectDB from '@/lib/db';
+import User from '@/models/userModel';
+import PasswordReset from '@/models/passwordResetModel';
+import EmailService from '@/lib/sendgrid';
+import crypto from 'crypto';
+import { enforceRateLimit } from '@/lib/rateLimit';
+
+export async function POST(request) {
+  const rateLimited = enforceRateLimit(request, {
+    max: 5,
+    windowMs: 15 * 60_000,
+    scope: 'ip',
+    message: 'Too many reset requests. Please wait a few minutes and try again.',
+  });
+  if (rateLimited) return rateLimited;
+
+  try {
+    await connectDB();
+
+    const { email } = await request.json();
+
+    if (!email) {
+      return new Response(JSON.stringify({ message: 'Email is required' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
+    // Find user by email
+    const user = await User.findOne({ email: email.toLowerCase() });
+
+    if (!user) {
+      // Don't reveal whether the email exists or not for security
+      return new Response(JSON.stringify({
+        message: 'If an account with that email exists, we have sent a password reset link.'
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
+    // Generate reset token
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    const hashedToken = crypto.createHash('sha256').update(resetToken).digest('hex');
+
+    // Delete any existing reset tokens for this user
+    await PasswordReset.deleteMany({ userId: user._id });
+
+    // Create new reset token
+    await PasswordReset.create({
+      userId: user._id,
+      email: user.email,
+      resetToken: hashedToken,
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000) // 1 hour from now
+    });
+
+    // Send reset email
+    console.log('[Forgot Password] Attempting to send reset email to:', user.email);
+    const emailService = new EmailService();
+    const emailResult = await emailService.sendForgotPasswordEmail(
+      user.email,
+      user.name,
+      resetToken // Send the unhashed token in the email
+    );
+
+    if (!emailResult.success) {
+      console.error('[Forgot Password] Failed to send reset email:', emailResult.error);
+      
+      // Clean up the token since email failed
+      await PasswordReset.deleteMany({ userId: user._id });
+      
+      return new Response(JSON.stringify({
+        message: emailResult.error || 'Failed to send reset email. Please try again later.',
+        hint: 'If this issue persists, please contact support.'
+      }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+    
+    console.log('[Forgot Password] Reset email sent successfully to:', user.email);
+
+    return new Response(JSON.stringify({
+      message: 'If an account with that email exists, we have sent a password reset link.',
+      success: true
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+  } catch (error) {
+    console.error('Forgot password error:', error);
+    return new Response(JSON.stringify({
+      message: 'Internal server error. Please try again later.'
+    }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+}

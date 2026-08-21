@@ -1,0 +1,121 @@
+import { NextResponse } from 'next/server';
+import connectDB from '@/lib/db';
+import Order from '@/models/orderModel';
+import IPStock from '@/models/ipStockModel';
+import { getDataFromToken } from '@/helper/getDataFromToken';
+import { assertIpStockPurchasable } from '@/lib/ipStockAvailability';
+import { refreshAndVerifyPurchase } from '@/lib/syncIpStockBeforePurchase';
+import { customerStockUnavailableMessage } from '@/lib/customerStockMessages';
+const { defaultOsForProduct } = require('@/lib/orderOs');
+
+export async function POST(request) {
+  await connectDB();
+
+  try {
+    // 1. Check which user is making this purchase
+    const userId = await getDataFromToken(request);
+    if (!userId) {
+      return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
+    }
+
+    // 2. Read request data
+    const reqBody = await request.json();
+    const { productName, memory, transactionId, ipStockId, promoCode, netbayGroupTag } = reqBody;
+
+    // 3. Basic validation
+    if (!productName || !memory || !transactionId || !ipStockId) {
+      return NextResponse.json(
+        { message: 'Missing required fields (productName, memory, transactionId, ipStockId)' },
+        { status: 400 }
+      );
+    }
+
+    // 4. SERVER-SIDE PRICE VALIDATION - Fetch actual price from database
+    const liveStock = await refreshAndVerifyPurchase({ ipStockId, memory });
+    if (!liveStock.ok) {
+      return NextResponse.json(
+        { message: customerStockUnavailableMessage(liveStock.message) },
+        { status: 409 }
+      );
+    }
+
+    const stockCheck = await assertIpStockPurchasable(ipStockId, 1);
+    if (!stockCheck.ok) {
+      return NextResponse.json({ message: stockCheck.message }, { status: 400 });
+    }
+    const ipStock = stockCheck.stock;
+
+    // Get the actual price from the database for this memory option
+    const memoryOption = ipStock.memoryOptions.get(memory);
+    if (!memoryOption || !memoryOption.price) {
+      console.error(`[CreateOrder] Memory option ${memory} not found for IPStock ${ipStockId}`);
+      return NextResponse.json(
+        { message: `Memory option ${memory} is not available for this product` },
+        { status: 400 }
+      );
+    }
+
+    // Server-validated price (from database, NOT from frontend)
+    let originalPrice = memoryOption.price;
+    const { getResellerForUserId, resellerPriceForStockMemory } = await import('@/lib/resellerStorePricing');
+    const reseller = await getResellerForUserId(userId);
+    if (reseller) {
+      originalPrice = resellerPriceForStockMemory(reseller, ipStock, memory, originalPrice);
+    }
+    let price = originalPrice;
+    let promoDiscount = 0;
+
+    // Validate promo code if provided
+    if (promoCode) {
+      const validPromo = ipStock.promoCodes.find(
+        p => p.code.toUpperCase() === promoCode.toUpperCase() && p.isActive
+      );
+
+      if (validPromo) {
+        if (validPromo.discountType === 'percentage') {
+          promoDiscount = Math.round((originalPrice * validPromo.discount) / 100);
+        } else {
+          promoDiscount = validPromo.discount;
+        }
+        price = Math.max(1, originalPrice - promoDiscount);
+        console.log(`[CreateOrder] Applied promo code ${promoCode}: ${originalPrice} - ${promoDiscount} = ${price}`);
+      }
+    }
+
+    console.log(`[CreateOrder] Server-validated price: originalPrice=${originalPrice}, discount=${promoDiscount}, finalPrice=${price}`);
+
+    // 5. Create a new order with server-validated price
+    const { resolveNetbayGroupTag, isNetbayProxyStock } = require('@/lib/netbayGroupTags');
+    const newOrder = await Order.create({
+      user: userId,
+      productName,
+      memory,
+      price: Math.round(price),
+      originalPrice: originalPrice,
+      promoCode: promoDiscount > 0 ? promoCode : null,
+      promoDiscount: promoDiscount,
+      os: defaultOsForProduct(productName),
+      ipStockId: ipStockId,
+      netbayGroupTag: resolveNetbayGroupTag(ipStock, netbayGroupTag) || undefined,
+      netbayProductKind: isNetbayProxyStock(ipStock) ? 'proxy' : undefined,
+      transactionId,      // Store user-entered transaction reference
+      status: 'pending',   // Pending until admin verifies
+    });
+
+    // 6. Return success
+    return NextResponse.json(
+      {
+        message: 'Order created successfully',
+        order: newOrder
+      },
+      { status: 201 }
+    );
+
+  } catch (error) {
+    console.error('Error creating order:', error);
+    return NextResponse.json(
+      { message: 'Server error', error: error.message },
+      { status: 500 }
+    );
+  }
+}

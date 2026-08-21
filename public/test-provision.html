@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test SmartVPS Provisioning</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            border-bottom: 3px solid #4CAF50;
+            padding-bottom: 10px;
+        }
+        label {
+            display: block;
+            margin-top: 15px;
+            font-weight: bold;
+            color: #555;
+        }
+        input {
+            width: 100%;
+            padding: 10px;
+            margin-top: 5px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            font-size: 16px;
+        }
+        button {
+            margin-top: 20px;
+            padding: 12px 30px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        #result {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f9f9f9;
+            border-left: 4px solid #4CAF50;
+            border-radius: 5px;
+            white-space: pre-wrap;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            display: none;
+        }
+        .error {
+            border-left-color: #f44336 !important;
+            background: #ffebee !important;
+        }
+        .success {
+            border-left-color: #4CAF50 !important;
+            background: #e8f5e9 !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧪 Test SmartVPS Provisioning (No Purchase)</h1>
+        <p>This will simulate the entire provisioning flow without actually purchasing anything.</p>
+        
+        <label for="productName">Product Name:</label>
+        <input type="text" id="productName" value="🌊 103.82.72" placeholder="🌊 103.82.72">
+        
+        <label for="memory">Memory:</label>
+        <input type="text" id="memory" value="16GB Vps" placeholder="16GB Vps">
+        
+        <button onclick="testProvision()">🚀 Test Provisioning</button>
+        
+        <div id="result"></div>
+    </div>
+
+    <script>
+        async function testProvision() {
+            const resultDiv = document.getElementById('result');
+            resultDiv.style.display = 'block';
+            resultDiv.className = '';
+            resultDiv.textContent = '⏳ Testing...';
+            
+            try {
+                const response = await fetch('/api/test/simulate-provision', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        productName: document.getElementById('productName').value,
+                        memory: document.getElementById('memory').value
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    resultDiv.className = 'success';
+                    resultDiv.textContent = '✅ SUCCESS!\n\n' + JSON.stringify(data, null, 2);
+                } else {
+                    resultDiv.className = 'error';
+                    resultDiv.textContent = '❌ FAILED!\n\n' + JSON.stringify(data, null, 2);
+                }
+            } catch (error) {
+                resultDiv.className = 'error';
+                resultDiv.textContent = '❌ ERROR!\n\n' + error.message;
+            }
+        }
+    </script>
+</body>
+</html>

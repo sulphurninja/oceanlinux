@@ -1,0 +1,91 @@
+/**
+ * Helpers for resolving a company's external reseller-panel API config
+ * (Hostheaven / SomaniOne style — see /docs and `services/resellerApi.js`).
+ *
+ * Hardcoded defaults: when a company has `resellerApi.enabled = true` but
+ * leaves any of (baseUrl, email, password) blank, we fall back to the
+ * Hostheaven account below. This keeps the admin flow trivial — flip the
+ * Enabled switch and save, no credentials needed.
+ *
+ * Companies can still override individual fields (e.g. point a different
+ * panel) by filling them in explicitly; non-empty values always win over
+ * the defaults.
+ */
+
+const RESELLER_API_DEFAULTS = Object.freeze({
+  baseUrl: 'https://vps.hostheaven.in',
+  resellerDomain: 'vps.hostheaven.in',
+  email: 'raftare3t5@gmail.com',
+  password: 'Umesh@2113',
+});
+
+function getCompanyResellerApiConfig(company) {
+  if (!company) return null;
+  const cfg = company.resellerApi;
+  if (!cfg) return null;
+  if (!cfg.enabled) return null;
+
+  const baseUrl = (cfg.baseUrl || '').trim() || RESELLER_API_DEFAULTS.baseUrl;
+  const email = (cfg.email || '').trim() || RESELLER_API_DEFAULTS.email;
+  const password = cfg.password || RESELLER_API_DEFAULTS.password;
+  // resellerDomain auto-derives from the baseUrl host inside ResellerApi if
+  // left blank, but we still seed the default when the saved baseUrl matches
+  // the default (most common case).
+  let resellerDomain = (cfg.resellerDomain || '').trim();
+  if (!resellerDomain && baseUrl === RESELLER_API_DEFAULTS.baseUrl) {
+    resellerDomain = RESELLER_API_DEFAULTS.resellerDomain;
+  }
+
+  if (!baseUrl || !email || !password) return null;
+
+  return {
+    enabled: true,
+    label: cfg.label || '',
+    baseUrl,
+    resellerDomain,
+    email,
+    password,
+    couponCode: String(cfg.couponCode || '').trim().toUpperCase(),
+    couponByMemory: normalizeCouponByMemory(cfg.couponByMemory),
+  };
+}
+
+function normalizeCouponByMemory(raw) {
+  if (!raw || typeof raw !== 'object') return {};
+  const plain = raw instanceof Map ? Object.fromEntries(raw) : raw;
+  const out = {};
+  for (const [key, value] of Object.entries(plain)) {
+    if (typeof value === 'string' && value.trim()) {
+      out[String(key).trim()] = value.trim().toUpperCase();
+    }
+  }
+  return out;
+}
+
+function hasCompanyResellerApi(company) {
+  return !!getCompanyResellerApiConfig(company);
+}
+
+/** Company portal slugs that must not see bulk promo management (e.g. SiteWorx). */
+const PORTAL_BULK_PROMO_BLOCKED_SLUGS = new Set(['siteworx']);
+
+function companyHasPortalBulkPromos(company) {
+  if (!company) return false;
+  const slug = String(company.slug || '').trim().toLowerCase();
+  if (slug && PORTAL_BULK_PROMO_BLOCKED_SLUGS.has(slug)) return false;
+  return hasCompanyResellerApi(company);
+}
+
+/** True when PrimeVPS / Hostheaven plans sync availability from panel wallet + pricing. */
+function companyUsesResellerLiveStock(company) {
+  if (!company?.resellerApi?.enabled) return false;
+  return company.resellerApi.useLiveStockApi === true;
+}
+
+module.exports = {
+  RESELLER_API_DEFAULTS,
+  getCompanyResellerApiConfig,
+  hasCompanyResellerApi,
+  companyHasPortalBulkPromos,
+  companyUsesResellerLiveStock,
+};
