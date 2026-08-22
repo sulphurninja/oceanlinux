@@ -109,6 +109,21 @@ function resellerZoneLabel(stock: IPStock) {
     return '—';
 }
 
+function isOceanSmartVpsStock(stock: IPStock | null) {
+    return !!stock?.name?.trimStart().startsWith('🌊');
+}
+
+function getSmartVpsArchivedMemory(stock: IPStock | null): Record<string, MemoryOptionDetails> {
+    const raw = stock?.defaultConfigurations?.smartvps?.archivedMemoryOptions;
+    if (!raw || typeof raw !== 'object') return {};
+    return raw as Record<string, MemoryOptionDetails>;
+}
+
+function getSmartVpsAllowedRams(stock: IPStock | null): number[] {
+    const allowed = stock?.defaultConfigurations?.smartvps?.allowedRams;
+    return Array.isArray(allowed) ? allowed.filter((n) => Number.isFinite(Number(n))) : [];
+}
+
 /**
  * Read the Netbay block out of an IPStock's defaultConfigurations.
  * Tolerates both Map (server-shape) and plain-object (client-shape) storage.
@@ -571,6 +586,26 @@ const ManageIpStock = () => {
                 memoryOptions: updatedMemoryOptions
             });
         }
+    };
+
+    const handleArchivedSmartVpsPriceChange = (size: string, value: string) => {
+        if (!currentStock) return;
+        const smartvps = { ...(currentStock.defaultConfigurations?.smartvps || {}) };
+        const archived = { ...getSmartVpsArchivedMemory(currentStock) };
+        archived[size] = {
+            ...(archived[size] || {}),
+            price: parseFloat(value) || 0,
+        };
+        setCurrentStock({
+            ...currentStock,
+            defaultConfigurations: {
+                ...currentStock.defaultConfigurations,
+                smartvps: {
+                    ...smartvps,
+                    archivedMemoryOptions: archived,
+                },
+            },
+        });
     };
 
     // -------------- Netbay configuration helpers --------------
@@ -1357,6 +1392,15 @@ const ManageIpStock = () => {
                                 {/* Memory Options and Hostycare Mapping */}
                                 <div>
                                     <Label className="text-base font-semibold">Memory Configuration & Hostycare Mapping:</Label>
+                                    {isOceanSmartVpsStock(currentStock) && (
+                                        <p className="text-xs text-muted-foreground mt-1 mb-2">
+                                            SmartVPS live RAM:{' '}
+                                            {getSmartVpsAllowedRams(currentStock).length
+                                                ? getSmartVpsAllowedRams(currentStock).map((gb) => `${gb}GB`).join(', ')
+                                                : 'sync pending — open store once or run SmartVPS sync'}
+                                            . Band tiers store par hidden; archived section mein price save hoti hai.
+                                        </p>
+                                    )}
                                     <div className="bg--50 p-4 rounded-lg border dark:border-none space-y-4">
                                         {Object.keys(currentStock.memoryOptions).map((size) => (
                                             <div key={size} className="border dark:border-none-b pb-3 last:border dark:border-none-b-0 last:pb-0">
@@ -1390,6 +1434,34 @@ const ManageIpStock = () => {
                                                 </div>
                                             </div>
                                         ))}
+
+                                        {isOceanSmartVpsStock(currentStock) &&
+                                            Object.entries(getSmartVpsArchivedMemory(currentStock)).map(([size, details]) => (
+                                                <div
+                                                    key={`archived-${size}`}
+                                                    className="border border-amber-200/80 dark:border-amber-900/50 rounded-md p-3 bg-amber-50/50 dark:bg-amber-950/20"
+                                                >
+                                                    <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+                                                        <h4 className="font-medium">{size} Configuration</h4>
+                                                        <Badge variant="outline" className="text-amber-800 border-amber-300 bg-amber-100/80 dark:bg-amber-950/40 dark:text-amber-200">
+                                                            SmartVPS OFF — hidden from store
+                                                        </Badge>
+                                                    </div>
+                                                    <p className="text-xs text-muted-foreground mb-2">
+                                                        Jab SmartVPS par {size} wapas on hoga, ye price auto-restore ho jayegi.
+                                                    </p>
+                                                    <div className="grid grid-cols-2 gap-3">
+                                                        <div>
+                                                            <Label className="text-sm">{size} Price (₹):</Label>
+                                                            <Input
+                                                                type="number"
+                                                                value={details.price ?? 0}
+                                                                onChange={(e) => handleArchivedSmartVpsPriceChange(size, e.target.value)}
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ))}
 
                                         {/* Add new memory option */}
                                         <div className="border-t pt-3">
