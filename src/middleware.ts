@@ -59,7 +59,6 @@ export async function middleware(request: NextRequest) {
   }
 
   // Already unlocked — skip login page
-  const { pathname } = request.nextUrl;
   if (pathname === '/admin/login') {
     const ok = await isAdminGateSessionValidForMiddleware(request);
     if (ok) {
