@@ -43,6 +43,16 @@ async function enforceAdminGateMiddleware(request: NextRequest) {
 }
 
 export async function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+
+  // Company orders portal entry — must send a real Location header (cached RSC redirect broke /orders).
+  if (pathname === '/orders' || pathname === '/orders/') {
+    const slug = process.env.COMPANY_ORDERS_PORTAL_SLUG || 'siteworx';
+    const dest = new URL(`/company/${slug}`, request.url);
+    dest.searchParams.set('tab', 'orders');
+    return NextResponse.redirect(dest, 307);
+  }
+
   const gateResponse = await enforceAdminGateMiddleware(request);
   if (gateResponse) {
     return gateResponse;
@@ -73,6 +83,7 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
+    '/orders',
     '/admin/:path*',
     '/api/admin/:path*',
     '/api/orders/provision',
