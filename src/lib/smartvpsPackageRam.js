@@ -65,7 +65,16 @@ function buildSmartVpsMemorySync(pkg, existingMemoryOptions = {}, archivedMemory
     const key = memoryKeyForGb(tier.gb);
     if (!allowedRams.includes(tier.gb)) {
       const live = findMemoryOptionForGb(existing, tier.gb);
-      if (live) nextArchived[key] = live;
+      if (live) {
+        nextArchived[key] = live;
+      } else if (!nextArchived[key]) {
+        // Tier was purged before archive existed — seed default so admin can edit / auto-restore later.
+        nextArchived[key] = {
+          price: DEFAULT_PRICING_GB[tier.gb] ?? 999,
+          hostycareProductId: null,
+          hostycareProductName: null,
+        };
+      }
       continue;
     }
 

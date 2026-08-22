@@ -124,6 +124,46 @@ function getSmartVpsAllowedRams(stock: IPStock | null): number[] {
     return Array.isArray(allowed) ? allowed.filter((n) => Number.isFinite(Number(n))) : [];
 }
 
+const SMARTVPS_RAM_TIERS_GB = [4, 8, 16, 32] as const;
+const SMARTVPS_DEFAULT_PRICING_GB: Record<number, number> = { 4: 699, 8: 999, 16: 1499, 32: 1999 };
+
+/** RAM tiers SmartVPS has disabled — shown in admin archived section even if DB archive is empty. */
+function getSmartVpsDisabledRamEntries(stock: IPStock | null): Array<[string, MemoryOptionDetails]> {
+    if (!isOceanSmartVpsStock(stock)) return [];
+    const allowed = getSmartVpsAllowedRams(stock);
+    const activeKeys = new Set(Object.keys(stock?.memoryOptions || {}));
+    const archived = getSmartVpsArchivedMemory(stock);
+    const entries: Array<[string, MemoryOptionDetails]> = [];
+
+    for (const gb of SMARTVPS_RAM_TIERS_GB) {
+        if (allowed.includes(gb)) continue;
+        const key = `${gb}GB`;
+        if (activeKeys.has(key)) continue;
+        entries.push([
+            key,
+            archived[key] || {
+                price: SMARTVPS_DEFAULT_PRICING_GB[gb] ?? 999,
+                hostycareProductId: null,
+                hostycareProductName: null,
+            },
+        ]);
+    }
+    return entries;
+}
+
+function parseMemoryGbKey(size: string): number | null {
+    const match = String(size || '').match(/(\d+)\s*gb/i);
+    return match ? Number(match[1]) : null;
+}
+
+function isSmartVpsDisabledRamTier(stock: IPStock | null, size: string): boolean {
+    if (!isOceanSmartVpsStock(stock)) return false;
+    const gb = parseMemoryGbKey(size);
+    if (gb == null) return false;
+    const allowed = getSmartVpsAllowedRams(stock);
+    return allowed.length > 0 && !allowed.includes(gb);
+}
+
 /**
  * Read the Netbay block out of an IPStock's defaultConfigurations.
  * Tolerates both Map (server-shape) and plain-object (client-shape) storage.
@@ -386,13 +426,28 @@ const ManageIpStock = () => {
             toast.error(`${size} already exists`);
             return;
         }
-        setCurrentStock({
-            ...currentStock,
-            memoryOptions: {
-                ...currentStock.memoryOptions,
-                [size]: { price: parseFloat(newMemoryPrice) || 0 },
-            },
-        });
+        const price = parseFloat(newMemoryPrice) || 0;
+        if (isSmartVpsDisabledRamTier(currentStock, size)) {
+            const smartvps = { ...(currentStock.defaultConfigurations?.smartvps || {}) };
+            const archived = { ...getSmartVpsArchivedMemory(currentStock) };
+            archived[size] = { ...(archived[size] || {}), price };
+            setCurrentStock({
+                ...currentStock,
+                defaultConfigurations: {
+                    ...currentStock.defaultConfigurations,
+                    smartvps: { ...smartvps, archivedMemoryOptions: archived },
+                },
+            });
+            toast.info(`${size} SmartVPS par band hai — archived price save hogi (store par hidden)`);
+        } else {
+            setCurrentStock({
+                ...currentStock,
+                memoryOptions: {
+                    ...currentStock.memoryOptions,
+                    [size]: { price },
+                },
+            });
+        }
         setNewMemorySize('');
         setNewMemoryPrice('');
     };
@@ -522,6 +577,19 @@ const ManageIpStock = () => {
             return;
         }
         try {
+            let defaultConfigurations = currentStock.defaultConfigurations;
+            if (isOceanSmartVpsStock(currentStock)) {
+                const smartvps = { ...(defaultConfigurations?.smartvps || {}) };
+                const archived = { ...getSmartVpsArchivedMemory(currentStock) };
+                for (const [key, details] of getSmartVpsDisabledRamEntries(currentStock)) {
+                    if (!archived[key]?.price) archived[key] = details;
+                }
+                defaultConfigurations = {
+                    ...defaultConfigurations,
+                    smartvps: { ...smartvps, archivedMemoryOptions: archived },
+                };
+            }
+
             const payload = {
                 _id: currentStock._id,
                 name: currentStock.name,
@@ -532,7 +600,7 @@ const ManageIpStock = () => {
                 tags: currentStock.tags,
                 memoryOptions: currentStock.memoryOptions,
                 promoCodes: currentStock.promoCodes,
-                defaultConfigurations: currentStock.defaultConfigurations,
+                defaultConfigurations,
                 company: currentStock.company ?? null,
                 stockCount: liveResellerStock ? 1 : currentStock.stockCount,
                 hiddenFromStore: currentStock.hiddenFromStore === true,
@@ -1436,7 +1504,7 @@ const ManageIpStock = () => {
                                         ))}
 
                                         {isOceanSmartVpsStock(currentStock) &&
-                                            Object.entries(getSmartVpsArchivedMemory(currentStock)).map(([size, details]) => (
+                                            getSmartVpsDisabledRamEntries(currentStock).map(([size, details]) => (
                                                 <div
                                                     key={`archived-${size}`}
                                                     className="border border-amber-200/80 dark:border-amber-900/50 rounded-md p-3 bg-amber-50/50 dark:bg-amber-950/20"
@@ -1474,7 +1542,10 @@ const ManageIpStock = () => {
                                                             <SelectValue placeholder="Select RAM" />
                                                         </SelectTrigger>
                                                         <SelectContent>
-                                                            {['1GB', '2GB', '4GB', '6GB', '8GB', '12GB', '16GB', '32GB'].filter(s => !currentStock.memoryOptions[s]).map(s => (
+                                                            {['1GB', '2GB', '4GB', '6GB', '8GB', '12GB', '16GB', '32GB'].filter(s =>
+                                                                !currentStock.memoryOptions[s] &&
+                                                                !(isOceanSmartVpsStock(currentStock) && getSmartVpsDisabledRamEntries(currentStock).some(([k]) => k === s))
+                                                            ).map(s => (
                                                                 <SelectItem key={s} value={s}>{s}</SelectItem>
                                                             ))}
                                                         </SelectContent>
