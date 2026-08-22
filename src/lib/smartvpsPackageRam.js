@@ -39,23 +39,38 @@ function findMemoryOptionForGb(existing, gb) {
   return null;
 }
 
+function toPlainObject(value) {
+  if (!value || typeof value !== 'object') return {};
+  if (value instanceof Map) return Object.fromEntries(value);
+  if (typeof value.toObject === 'function') return value.toObject({ minimize: true });
+  return { ...value };
+}
+
 /**
  * Keep only RAM tiers SmartVPS allows (On4GB / On8GB / …).
  * Preserves admin-set prices for tiers that stay enabled.
- * Normalizes keys like "8GB Vps" → "8GB".
+ * Disabled tiers are archived so they auto-restore when SmartVPS re-enables them.
  */
-function buildSmartVpsMemorySync(pkg, existingMemoryOptions = {}) {
+function buildSmartVpsMemorySync(pkg, existingMemoryOptions = {}, archivedMemoryOptions = {}) {
   const existing = toPlainMemoryOptions(existingMemoryOptions);
+  const archived = toPlainObject(archivedMemoryOptions);
   const allowedRams = getAllowedRamsForPackage(pkg);
   const memoryOptions = {};
   const byMemory = {};
+  const nextArchived = { ...archived };
   const pid = String(pkg?.id ?? '');
   const pool = String(pkg?.name ?? '');
 
   for (const tier of RAM_TIERS) {
-    if (!allowedRams.includes(tier.gb)) continue;
     const key = memoryKeyForGb(tier.gb);
-    const prev = findMemoryOptionForGb(existing, tier.gb);
+    if (!allowedRams.includes(tier.gb)) {
+      const live = findMemoryOptionForGb(existing, tier.gb);
+      if (live) nextArchived[key] = live;
+      continue;
+    }
+
+    const prev =
+      findMemoryOptionForGb(existing, tier.gb) || findMemoryOptionForGb(nextArchived, tier.gb);
     memoryOptions[key] = {
       price:
         prev?.price != null && Number(prev.price) > 0
@@ -69,13 +84,16 @@ function buildSmartVpsMemorySync(pkg, existingMemoryOptions = {}) {
       pool,
       defaultOS: DEFAULT_OS,
     };
+    delete nextArchived[key];
   }
 
-  return { memoryOptions, byMemory, allowedRams };
+  return { memoryOptions, byMemory, allowedRams, archivedMemoryOptions: nextArchived };
 }
 
 function buildSmartVpsBlockFromPackage(pkg, existingSmartvps = {}, existingMemoryOptions = {}) {
-  const { memoryOptions, byMemory, allowedRams } = buildSmartVpsMemorySync(pkg, existingMemoryOptions);
+  const archivedMemoryOptions = existingSmartvps?.archivedMemoryOptions || {};
+  const { memoryOptions, byMemory, allowedRams, archivedMemoryOptions: nextArchived } =
+    buildSmartVpsMemorySync(pkg, existingMemoryOptions, archivedMemoryOptions);
   const qty = Number(pkg?.ipv4 || 0);
 
   return {
@@ -88,6 +106,7 @@ function buildSmartVpsBlockFromPackage(pkg, existingSmartvps = {}, existingMemor
       availableQty: qty,
       allowedRams,
       byMemory,
+      archivedMemoryOptions: nextArchived,
     },
   };
 }
