@@ -90,6 +90,11 @@ function messageForCode(code, raw) {
       return 'Server details could not be found. Please contact support.';
     case 'SMARTVPS_BUSY':
       return 'Your server is still processing a previous action. Please wait a few minutes and try again.';
+    case 'SMARTVPS_OS_REJECTED':
+      return (
+        stripProviderBranding(raw) ||
+        'This OS version is not available for your server right now. Try another option from the list or contact support.'
+      );
     default:
       return null;
   }

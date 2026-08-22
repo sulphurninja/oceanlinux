@@ -41,6 +41,13 @@ const {
   verifyResellerMemoryInStock,
 } = require('@/lib/resellerLiveStock');
 
+const {
+  buildSmartVpsBlockFromPackage,
+  isSmartVpsMemoryListed,
+  normalizeMemoryTierKey,
+  validateSmartVpsPackageRam,
+} = require('@/lib/smartvpsPackageRam');
+
 function normalizeSmartVpsResponse(payload) {
   if (payload == null) return payload;
   try {
@@ -112,15 +119,26 @@ async function syncSmartVpsIpStockRow(stock) {
   const qty = pkg ? Number(pkg.ipv4 || 0) : 0;
   const isAvailable = !!(pkg && qty > 0 && String(pkg.status).toLowerCase() === 'active');
 
-  const smartvpsBlock = {
-    ...(smartvps || {}),
-    provider: 'smartvps',
-    packagePid: pkg ? String(pkg.id) : smartvps?.packagePid,
-    packageName,
-    availableQty: qty,
-  };
+  const existingMemory = stock.memoryOptions instanceof Map
+    ? Object.fromEntries(stock.memoryOptions)
+    : (typeof stock.memoryOptions?.toObject === 'function'
+      ? stock.memoryOptions.toObject({ minimize: true })
+      : { ...(stock.memoryOptions || {}) });
+
+  const { memoryOptions, smartvpsBlock } = pkg
+    ? buildSmartVpsBlockFromPackage(pkg, smartvps || {}, existingMemory)
+    : {
+        memoryOptions: existingMemory,
+        smartvpsBlock: {
+          ...(smartvps || {}),
+          provider: 'smartvps',
+          packageName,
+          availableQty: qty,
+        },
+      };
 
   const updatePayload = {
+    memoryOptions,
     defaultConfigurations: { ...defaults, smartvps: smartvpsBlock },
   };
   if (!stock.availabilityManual) {
@@ -304,6 +322,49 @@ export async function refreshAndVerifyIpStockPurchase(ipStockId, memory) {
         stock: stock.toObject?.() || stock,
         synced: true,
       };
+    }
+  }
+
+  if (isSmartVpsPlan(stock) && memory) {
+    if (!isSmartVpsMemoryListed(stock, memory)) {
+      const allowed = stock.defaultConfigurations?.smartvps?.allowedRams;
+      const allowedLabel = Array.isArray(allowed) && allowed.length
+        ? allowed.map((gb) => `${gb}GB`).join(', ')
+        : 'another size';
+      return {
+        ok: false,
+        message: customerStockUnavailableMessage(
+          `${memory} is not available for this plan. Please choose ${allowedLabel}.`
+        ),
+        stock: stock.toObject?.() || stock,
+        synced: true,
+      };
+    }
+
+    const pkgName = stock.defaultConfigurations?.smartvps?.packageName;
+    if (pkgName) {
+      try {
+        const api = new SmartVpsAPI();
+        const raw = await api.ipstock();
+        const obj = normalizeSmartVpsResponse(raw);
+        const packages = Array.isArray(obj?.packages) ? obj.packages : [];
+        const pkg = packages.find((p) => String(p.name) === String(pkgName));
+        const ramGb = normalizeMemoryTierKey(memory).replace(/GB$/i, '');
+        const ramCheck = pkg ? validateSmartVpsPackageRam(pkg, ramGb) : { ok: true };
+        if (!ramCheck.ok) {
+          const allowedLabel = (ramCheck.allowedRams || []).map((gb) => `${gb}GB`).join(', ') || 'another size';
+          return {
+            ok: false,
+            message: customerStockUnavailableMessage(
+              `${memory} is not available for this plan. Please choose ${allowedLabel}.`
+            ),
+            stock: stock.toObject?.() || stock,
+            synced: true,
+          };
+        }
+      } catch (ramErr) {
+        console.warn('[SYNC-PURCHASE] SmartVPS RAM live check failed:', ramErr.message);
+      }
     }
   }
 

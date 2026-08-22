@@ -94,11 +94,11 @@ export function clearDashboardCache(key) {
 
 export const DASHBOARD_CACHE_KEYS = {
   currentUser: 'users:me',
-  ipStock: 'ipstock:store',
+  ipStock: 'ipstock:store:v2',
   slotIps: 'slotips:customer',
   ordersMe: 'orders:me',
   wallet: 'wallet',
   dashboardStats: (timeframe) => `dashboard:stats:${timeframe}`,
   resellerInfo: 'reseller:info',
-  stockSyncedAt: 'ipstock:lastSync',
+  stockSyncedAt: 'ipstock:lastSync:v2',
 };

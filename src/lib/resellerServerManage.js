@@ -50,6 +50,13 @@ const { toUserFacingNetbayError } = require('@/lib/netbayApiErrors');
 const VirtualizorAPI = require('@/services/virtualizorApi');
 const { getCompanyVirtualizorAccounts, toVirtualizorApiAccounts } = require('@/lib/companyVirtualizor');
 const { generateSecurePassword } = require('@/lib/securePassword');
+const {
+  SMARTVPS_OS_LABELS,
+  fetchSmartVpsOsTemplates,
+} = require('@/lib/smartvpsOsTemplates');
+const { executeSmartVpsOsInstall } = require('@/lib/smartvpsOsInstall');
+const { assertSmartVpsActionOk } = require('@/lib/smartvpsPowerActions');
+const { resolveSmartVpsOrderIp } = require('@/lib/smartvpsOrderSync');
 
 export const UNIVERSAL_ACTIONS = ['start', 'stop', 'restart', 'status', 'sync', 'templates', 'reinstall', 'changeos', 'resetmac'];
 
@@ -63,16 +70,7 @@ const OS_ACTIONS = new Set(['reinstall', 'changeos']);
  */
 const ID_BASED_OS_PROVIDERS = new Set(['kurohost', 'reseller-api', 'virtualizor']);
 
-const SMARTVPS_OS_TEMPLATES = {
-  ubuntu: 'Ubuntu 22',
-  centos: 'CentOS 7',
-  '2012': 'Windows Server 2012',
-  '2016': 'Windows Server 2016',
-  '2019': 'Windows Server 2019',
-  '2022': 'Windows Server 2022',
-  '11': 'Windows 11',
-  '2025': 'Windows 2025',
-};
+const SMARTVPS_OS_TEMPLATES = SMARTVPS_OS_LABELS;
 
 const ADVPS_OS_TEMPLATES = {
   'ubuntu-22.04': 'Ubuntu 22.04',
@@ -490,7 +488,7 @@ async function runAdvps(order, orderId, action, osType) {
 }
 
 async function runSmartvps(order, orderId, action, osType) {
-  const ip = getOrderIp(order);
+  const ip = resolveSmartVpsOrderIp(order) || getOrderIp(order);
   if (!ip) return { success: false, message: 'No IP address on order yet' };
   const api = new SmartVpsAPI();
 
@@ -519,12 +517,26 @@ async function runSmartvps(order, orderId, action, osType) {
       return { success: true, message: 'Status retrieved', data: { powerState, raw: res } };
     }
     case 'reinstall':
-      await api.format(ip);
-      return { success: true, message: 'Reinstall/format command sent. Server is resetting.', data: {} };
+      if (osType) {
+        await executeSmartVpsOsInstall(api, ip, osType, {
+          assertActionOk: assertSmartVpsActionOk,
+        });
+      } else {
+        await api.format(ip);
+      }
+      return {
+        success: true,
+        message: osType
+          ? `Reinstall to ${osType} started (changeos). Server is resetting.`
+          : 'Reinstall/format command sent. Server is resetting.',
+        data: { osType: osType || undefined },
+      };
     case 'changeos': {
       if (!osType) return missingOsType(action, PROVIDER_CAPABILITIES.smartvps);
-      await api.changeOS(ip, osType);
-      return { success: true, message: `OS change to ${osType} initiated`, data: { osType } };
+      await executeSmartVpsOsInstall(api, ip, osType, {
+        assertActionOk: assertSmartVpsActionOk,
+      });
+      return { success: true, message: `OS change to ${osType} initiated (changeos)`, data: { osType } };
     }
     default:
       return actionNotSupported(action, PROVIDER_CAPABILITIES.smartvps);
@@ -1042,8 +1054,18 @@ export async function listResellerOsTemplates(order, ipStock = null) {
     case 'advps':
       return toTemplateList(ADVPS_OS_TEMPLATES);
 
-    case 'smartvps':
-      return toTemplateList(SMARTVPS_OS_TEMPLATES);
+    case 'smartvps': {
+      const ip = resolveSmartVpsOrderIp(order) || getOrderIp(order);
+      if (!ip) return toTemplateList(SMARTVPS_OS_TEMPLATES);
+      try {
+        const api = new SmartVpsAPI();
+        const map = await fetchSmartVpsOsTemplates(api, ip, { currentOs: order.os });
+        return toTemplateList(map);
+      } catch (err) {
+        console.warn('[RESELLER] SmartVPS live template fetch failed:', err.message);
+        return toTemplateList(SMARTVPS_OS_TEMPLATES);
+      }
+    }
 
     case 'netbay': {
       const cfg = ipStock?.company?.netbayApi;

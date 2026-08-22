@@ -12,6 +12,10 @@ import connectDB from '@/lib/db';
 import IPStock from '@/models/ipStockModel';
 import { storeAutoUnhideUpdate } from '@/lib/ipStockAvailability';
 import { enforceCronOrLoggedInUser } from '@/lib/apiSecurity';
+const {
+  buildSmartVpsBlockFromPackage,
+  buildSmartVpsMemorySync,
+} = require('@/lib/smartvpsPackageRam');
 
 const SmartVpsAPI = require('@/services/smartvpsApi');
 
@@ -50,7 +54,16 @@ async function runSync(req: Request) {
   const api = new SmartVpsAPI();
   const raw = await api.ipstock();
   const obj = normalizeSmartVpsResponse(raw);
-  const packages: Array<{ id: number | string; name: string; ipv4: number; status: string }> =
+  const packages: Array<{
+    id: number | string;
+    name: string;
+    ipv4: number;
+    status: string;
+    On4GB?: boolean;
+    On8GB?: boolean;
+    On16GB?: boolean;
+    On32GB?: boolean;
+  }> =
     Array.isArray(obj?.packages) ? obj.packages : [];
 
   // De-dup by name only (name is the key, not PID)
@@ -73,9 +86,8 @@ async function runSync(req: Request) {
   let created = 0, updated = 0, disabled = 0;
   const results: any[] = [];
 
-  // Default configs for new entries
-  const defaultOS = { '4GB': 'ubuntu-22.04', '8GB': 'ubuntu-22.04', '16GB': 'ubuntu-22.04' };
-  const defaultPricing = { '4GB': 699, '8GB': 999, '16GB': 1499 };
+  // Default configs for brand-new entries (tiers filtered by On*GB flags below)
+  const defaultPricing = { '4GB': 699, '8GB': 999, '16GB': 1499, '32GB': 1999 };
 
   // Process each package from SmartVPS API
   for (const pkg of deduped) {
@@ -96,28 +108,24 @@ async function runSync(req: Request) {
       name: { $regex: new RegExp(`^🌊 ${escapedName}(\\s|$)`, 'i') }
     });
 
-    const smartvpsBlock = {
-      provider: 'smartvps',
-      packagePid: pid,
-      packageName: name,
-      availableQty: qty,
-      byMemory: {
-        '4GB': { pid, pool: name, defaultOS: defaultOS['4GB'] },
-        '8GB': { pid, pool: name, defaultOS: defaultOS['8GB'] },
-        '16GB': { pid, pool: name, defaultOS: defaultOS['16GB'] },
-      }
-    };
+    const existingDefaults = existing ? toPlainMap(existing.defaultConfigurations) : {};
+    const existingSmartvps = existingDefaults?.smartvps || {};
+    const existingMemory = existing ? toPlainMap(existing.memoryOptions) : {};
+
+    const { memoryOptions, smartvpsBlock } = buildSmartVpsBlockFromPackage(
+      pkg,
+      existingSmartvps,
+      existingMemory
+    );
 
     if (existing) {
-      // UPDATE existing - only update availability and smartvps config
-      // DO NOT touch name, tags, or anything else
-      const existingDefaults = toPlainMap(existing.defaultConfigurations);
-      
+      // UPDATE existing — sync availability, SmartVPS config, and RAM tiers from On*GB flags
       const updateFields: Record<string, unknown> = {
+        memoryOptions,
         defaultConfigurations: {
           ...existingDefaults,
-          smartvps: smartvpsBlock
-        }
+          smartvps: smartvpsBlock,
+        },
       };
       if (!existing.availabilityManual) {
         updateFields.available = isAvailable;
@@ -127,22 +135,26 @@ async function runSync(req: Request) {
       await IPStock.findByIdAndUpdate(existing._id, updateFields);
       
       updated++;
-      console.log(`[SVPS-SYNC] Updated: ${existing.name} - available: ${isAvailable}, qty: ${qty}`);
+      console.log(
+        `[SVPS-SYNC] Updated: ${existing.name} - available: ${isAvailable}, qty: ${qty}, RAM: ${smartvpsBlock.allowedRams?.join(',') || 'none'}GB`
+      );
       results.push({
         action: 'updated',
         id: existing._id.toString(),
         name: existing.name,
         packageName: name,
         qty,
-        available: isAvailable
+        available: isAvailable,
+        allowedRams: smartvpsBlock.allowedRams,
       });
     } else {
-      // CREATE new IPStock for this SmartVPS package
-      const memoryOptions = {
+      // CREATE new IPStock — only tiers SmartVPS allows (On4GB / On8GB / …)
+      const { memoryOptions: newMemoryOptions } = buildSmartVpsMemorySync(pkg, {
         '4GB': { price: defaultPricing['4GB'], hostycareProductId: null, hostycareProductName: null },
         '8GB': { price: defaultPricing['8GB'], hostycareProductId: null, hostycareProductName: null },
         '16GB': { price: defaultPricing['16GB'], hostycareProductId: null, hostycareProductName: null },
-      };
+        '32GB': { price: defaultPricing['32GB'], hostycareProductId: null, hostycareProductName: null },
+      });
 
       const defaultPromoCodes = [
         { code: 'OCEAN50', discount: 50, discountType: 'fixed', isActive: true, createdAt: new Date() },
@@ -157,20 +169,21 @@ async function runSync(req: Request) {
         available: isAvailable,
         serverType: 'VPS',
         tags: ['ocean linux'],
-        memoryOptions,
+        memoryOptions: newMemoryOptions,
         promoCodes: defaultPromoCodes,
-        defaultConfigurations: { smartvps: smartvpsBlock }
+        defaultConfigurations: { smartvps: smartvpsBlock },
       });
 
       created++;
-      console.log(`[SVPS-SYNC] Created: ${namePrefix}`);
+      console.log(`[SVPS-SYNC] Created: ${namePrefix} RAM: ${smartvpsBlock.allowedRams?.join(',') || 'none'}GB`);
       results.push({
         action: 'created',
         id: newDoc._id.toString(),
         name: namePrefix,
         packageName: name,
         qty,
-        available: isAvailable
+        available: isAvailable,
+        allowedRams: smartvpsBlock.allowedRams,
       });
     }
   }

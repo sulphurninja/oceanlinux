@@ -105,10 +105,20 @@ function buildSmartVpsStatusOrderUpdates(order, statusRaw, { updateCreds = true 
   };
 }
 
+function resolveSmartVpsOrderIp(order) {
+  const fromIp = extractIpFromAddress(order?.ipAddress);
+  const fromServiceId = extractIpFromAddress(order?.smartvpsServiceId);
+  if (fromIp) return fromIp;
+  if (fromServiceId) return fromServiceId;
+  const fallback = String(order?.ipAddress || order?.smartvpsServiceId || '').split(':')[0].trim();
+  return fallback || null;
+}
+
 module.exports = {
   normalizeSmartVpsResponse,
   parseSmartVpsStatusObject,
   parseSmartVpsExpiryDate,
   extractIpFromAddress,
+  resolveSmartVpsOrderIp,
   buildSmartVpsStatusOrderUpdates,
 };

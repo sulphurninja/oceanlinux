@@ -300,6 +300,44 @@ function isOceanLinuxCategoryPlan(stock: IPStock) {
   );
 }
 
+function isOceanSmartVpsPlan(stock: IPStock) {
+  return isOceanLinuxCategoryPlan(stock) || String(stock.name || '').trimStart().startsWith('🌊');
+}
+
+function isOceanSmartVpsProductName(name: string) {
+  return String(name || '').trimStart().startsWith('🌊');
+}
+
+/** SmartVPS display only: 4GB = Linux slot, 8GB+ = VPS (Linux + Windows). */
+function formatOceanMemoryDisplay(memory: string) {
+  return normalizeMemoryKey(memory);
+}
+
+function oceanSmartVpsPlanType(memory: string): 'Linux' | 'VPS' | null {
+  const gb = Number(String(memory).match(/(\d+)/)?.[1]);
+  if (!Number.isFinite(gb)) return null;
+  if (gb === 4) return 'Linux';
+  if (gb >= 8) return 'VPS';
+  return null;
+}
+
+function OceanPlanTypeBadge({ memory }: { memory: string }) {
+  const type = oceanSmartVpsPlanType(memory);
+  if (!type) return null;
+  return (
+    <span
+      className={cn(
+        'text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded border shrink-0',
+        type === 'Linux'
+          ? 'text-emerald-300 border-emerald-400/40 bg-emerald-500/15'
+          : 'text-sky-300 border-sky-400/40 bg-sky-500/15',
+      )}
+    >
+      {type}
+    </span>
+  );
+}
+
 function formatTagGroupTitle(tag: string) {
   const t = normalizePlanTag(tag);
   if (t === 'ocean linux' || t === 'oceanlinux') return 'Ocean Linux';
@@ -1647,7 +1685,14 @@ function IPStockContent() {
               <div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2.5 space-y-1.5">
                 <p className="text-xs sm:text-sm font-medium leading-snug line-clamp-2">{selectedProduct.name}</p>
                 <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                  <span>{selectedProduct.memory}</span>
+                  <span className="inline-flex items-center gap-1.5">
+                    {isOceanSmartVpsProductName(selectedProduct.name)
+                      ? formatOceanMemoryDisplay(selectedProduct.memory)
+                      : selectedProduct.memory}
+                    {isOceanSmartVpsProductName(selectedProduct.name) && (
+                      <OceanPlanTypeBadge memory={selectedProduct.memory} />
+                    )}
+                  </span>
                   <span className={cn(promoApplied && 'line-through')}>₹{selectedProduct.price}</span>
                 </div>
                 {promoApplied && (
@@ -1865,11 +1910,18 @@ const CompactServerPlanRow = memo(function CompactServerPlanRow({
   const showUnits = manualUnits && Number.isFinite(unitsLeft) && unitsLeft < Number.POSITIVE_INFINITY;
   const isNetbay = isNetbayLiveStock(stock);
   const isReseller = isResellerLiveStock(stock);
+  const isOceanSmartVps = isOceanSmartVpsPlan(stock);
 
   const memoryOptions = sortMemoryOptionEntries(
-    Object.entries(stock.memoryOptions || {}).filter(
-      ([memory]) => memory && !String(memory).startsWith('$')
-    )
+    Object.entries(stock.memoryOptions || {}).filter(([memory]) => {
+      if (!memory || String(memory).startsWith('$')) return false;
+      const allowed = stock.defaultConfigurations?.smartvps?.allowedRams;
+      if (Array.isArray(allowed) && allowed.length > 0) {
+        const gb = String(memory).match(/(\d+)/)?.[1];
+        return gb ? allowed.includes(Number(gb)) : true;
+      }
+      return true;
+    })
   );
 
   const pricedMemoryOptions = memoryOptions.filter(
@@ -2061,12 +2113,24 @@ const CompactServerPlanRow = memo(function CompactServerPlanRow({
                       )}
                     >
                       <div className="flex items-center justify-between gap-2 min-w-0 sm:flex-1">
-                        <span className={cn(
-                          "text-sm font-medium font-mono tracking-wide truncate",
-                          memoryInStock ? "text-white/90" : "text-white/45"
-                        )}>
-                          {label}
-                        </span>
+                        {isOceanSmartVps ? (
+                          <span className="inline-flex items-center gap-2 min-w-0">
+                            <span className={cn(
+                              "text-sm font-medium font-mono tracking-wide truncate",
+                              memoryInStock ? "text-white/90" : "text-white/45"
+                            )}>
+                              {formatOceanMemoryDisplay(memory)}
+                            </span>
+                            <OceanPlanTypeBadge memory={memory} />
+                          </span>
+                        ) : (
+                          <span className={cn(
+                            "text-sm font-medium font-mono tracking-wide truncate",
+                            memoryInStock ? "text-white/90" : "text-white/45"
+                          )}>
+                            {label}
+                          </span>
+                        )}
                         <span className={cn(
                           "font-bold text-base shrink-0 sm:hidden",
                           memoryInStock ? "text-emerald-300" : "text-white/35"

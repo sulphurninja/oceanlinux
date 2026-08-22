@@ -23,6 +23,10 @@ function buildAuthHeader() {
   return `Basic ${b64}`;
 }
 
+function normalizeIp(ip) {
+  return String(ip || '').split(':')[0].trim();
+}
+
 async function httpFetch(path, { method = 'POST', jsonBody, query, timeoutMs = 60_000 } = {}) {
   const ac = new AbortController();
   const t = setTimeout(() => ac.abort(), timeoutMs);
@@ -104,22 +108,28 @@ class SmartVpsAPI {
   ipstock() { return httpFetch('api/oceansmart/ipstock', { method: 'POST' }); }
 
   // Power
-  start(ip) { return httpFetch('api/oceansmart/start', { jsonBody: { ip } }); }
-  stop(ip) { return httpFetch('api/oceansmart/stop', { jsonBody: { ip } }); }
+  start(ip) { return httpFetch('api/oceansmart/start', { jsonBody: { ip: normalizeIp(ip) } }); }
+  stop(ip) { return httpFetch('api/oceansmart/stop', { jsonBody: { ip: normalizeIp(ip) } }); }
   format(ip, os) {
-    const jsonBody = os ? { ip, os: String(os) } : { ip };
+    const cleanIp = normalizeIp(ip);
+    const jsonBody = os ? { ip: cleanIp, os: String(os) } : { ip: cleanIp };
     return httpFetch('api/oceansmart/format', { jsonBody });
   }
-  status(ip) { return httpFetch('api/oceansmart/status', { jsonBody: { ip } }); }
+  status(ip) { return httpFetch('api/oceansmart/status', { jsonBody: { ip: normalizeIp(ip) } }); }
 
-  // OS change — SmartVPS doc: Windows uses changeos { ip, os: "2022"|"2019"|... }; Linux may need format+os
-  changeOS(ip, os) { return httpFetch('api/oceansmart/changeos', { jsonBody: { ip, os: String(os) } }); }
+  /** Live OS templates available for reinstall/format on this IP. */
+  getOsTemplate(ip) { return httpFetch('api/oceansmart/getostemplate', { jsonBody: { ip: normalizeIp(ip) } }); }
+
+  // OS change — must run before plain format to switch template (getostemplate ids)
+  changeOS(ip, os) {
+    return httpFetch('api/oceansmart/changeos', { jsonBody: { ip: normalizeIp(ip), os: String(os) } });
+  }
 
   // Buy (call ipstock first and pick a usable IP; ram string/number)
   // buyVps needs a longer timeout as it provisions a server
   buyVps(ip, ram) { 
     return httpFetch('api/oceansmart/buyvps', { 
-      jsonBody: { ip, ram: String(ram) },
+      jsonBody: { ip: normalizeIp(ip), ram: String(ram) },
       timeoutMs: 180_000 // 3 minutes for server provisioning
     }); 
   }
@@ -139,7 +149,7 @@ class SmartVpsAPI {
     // 🔧 EXPLICIT POST METHOD TO OVERRIDE DEFAULT
     return httpFetch('api/oceansmart/renewvps', {
       method: 'POST',  // Explicitly specify POST
-      jsonBody: { ip }
+      jsonBody: { ip: normalizeIp(ip) }
     })
       .then(result => {
         const endTime = Date.now();

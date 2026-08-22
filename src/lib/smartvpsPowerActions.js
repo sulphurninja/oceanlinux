@@ -10,7 +10,7 @@ function isSmartVpsErrorResponse(response) {
   if (response == null) return true;
   if (typeof response === 'string') {
     const lower = response.toLowerCase().trim();
-    if (['success', 'pending', 'completed', 'ok'].includes(lower)) return false;
+    if (['success', 'pending', 'completed', 'ok', 'processing'].includes(lower)) return false;
     return lower === 'error' || lower === 'false' || lower.includes('fail');
   }
   if (typeof response === 'object') {

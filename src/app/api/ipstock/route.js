@@ -75,20 +75,56 @@ function slimDefaultConfigurationsForStore(defaultConfigurations) {
     return slim;
 }
 
+function filterSmartVpsMemoryOptionsForStore(stock) {
+  if (!stock || typeof stock !== 'object') return stock;
+  const name = String(stock.name || '').trimStart();
+  if (!name.startsWith('🌊')) return stock;
+
+  const dc = toPlainMap(stock.defaultConfigurations);
+  const smartvps = dc?.smartvps || {};
+  const allowedRams = Array.isArray(smartvps.allowedRams) ? smartvps.allowedRams : null;
+  const byMemoryKeys = smartvps.byMemory && typeof smartvps.byMemory === 'object'
+    ? Object.keys(toPlainMap(smartvps.byMemory))
+    : null;
+
+  const opts = toPlainMap(stock.memoryOptions);
+  const allowedKeys = allowedRams?.length
+    ? allowedRams.map((gb) => `${gb}GB`)
+    : byMemoryKeys?.length
+      ? byMemoryKeys
+      : null;
+
+  if (!allowedKeys?.length) return stock;
+
+  const filtered = {};
+  for (const key of allowedKeys) {
+    if (opts[key]) filtered[key] = opts[key];
+  }
+  return { ...stock, memoryOptions: filtered };
+}
+
 function enrichIpStocksForStore(ipStocks) {
     return ipStocks.map((stock) => {
         const hasInventory = usesPreconfiguredInventory(stock);
         const inventoryForStore = hasInventory && inventoryDrivesStoreAvailability(stock);
         const { inventoryItems, defaultConfigurations, promoCodes, ...safeStock } = stock;
+        const smartvpsAllowedRams = Array.isArray(defaultConfigurations?.smartvps?.allowedRams)
+            ? defaultConfigurations.smartvps.allowedRams
+            : [];
         // The store only renders a "Promo" badge — codes are validated server-side
         // via /api/validate-promo, so shipping the full list would just bloat the
         // payload (it was over half of it).
         const activePromoCount = Array.isArray(promoCodes)
             ? promoCodes.filter((p) => p && p.isActive !== false).length
             : 0;
+        const slimDc = slimDefaultConfigurationsForStore(defaultConfigurations);
+        if (smartvpsAllowedRams.length) {
+            slimDc.smartvps = { allowedRams: smartvpsAllowedRams };
+        }
+        const filteredStock = filterSmartVpsMemoryOptionsForStore(safeStock);
         return {
-            ...safeStock,
-            defaultConfigurations: slimDefaultConfigurationsForStore(defaultConfigurations),
+            ...filteredStock,
+            defaultConfigurations: slimDc,
             promoCodeCount: activePromoCount,
             usesPreconfiguredInventory: inventoryForStore,
             inventoryAvailable: inventoryForStore ? countUnallocatedInventory(stock) : undefined,

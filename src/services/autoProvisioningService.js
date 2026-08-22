@@ -15,6 +15,10 @@ const { getCompanyKurohostApiConfig } = require('@/lib/companyKurohostApi');
 const { generateSecurePassword } = require('@/lib/securePassword');
 const { extractSmartVpsIpPrefix } = require('@/lib/smartvpsIpPrefix');
 const {
+  validateSmartVpsPackageRam,
+  parseSmartVpsBuyResponse,
+} = require('@/lib/smartvpsPackageRam');
+const {
   readKurohostStockConfig,
   resolveKurohostFlavorId,
   resolveKurohostOsTemplateId,
@@ -625,7 +629,7 @@ class AutoProvisioningService {
  * 
  * We search for a matching package and return its NAME (e.g., "103.82.72"),
  * then buyVps("103.82.72", "16") will assign a random IP from that package's pool.
- */async pickSmartVpsIpForPackage(pkgName) {
+ */async pickSmartVpsIpForPackage(pkgName, ramGb = null) {
     try {
       L.line('[SMARTVPS] Calling ipstock() …');
       const res = await this.smartvpsApi.ipstock();
@@ -714,6 +718,15 @@ class AutoProvisioningService {
       if (selectedPackage) {
         L.kv('[SMARTVPS] Selected package name', selectedPackage.name);
         L.kv('[SMARTVPS] Available IPs in package', selectedPackage.ipv4);
+
+        if (ramGb != null && ramGb !== '') {
+          const ramCheck = validateSmartVpsPackageRam(selectedPackage, ramGb);
+          L.kv('[SMARTVPS] RAM validation', ramCheck);
+          if (!ramCheck.ok) {
+            throw new Error(ramCheck.error);
+          }
+        }
+
         L.line(`[SMARTVPS] ✅ Will request package "${selectedPackage.name}" and SmartVPS will assign an IP from its pool`);
 
         // Return the PACKAGE NAME (not a full IP) - SmartVPS will assign an IP from this package
@@ -2656,7 +2669,7 @@ class AutoProvisioningService {
     let specificIpToBuy;
     try {
       L.line(`[SMARTVPS] Searching ipstock for available IPs matching: ${requestedIpPrefix}.*`);
-      specificIpToBuy = await this.pickSmartVpsIpForPackage(requestedIpPrefix);
+      specificIpToBuy = await this.pickSmartVpsIpForPackage(requestedIpPrefix, ram);
       L.kv('[SMARTVPS] Specific IP selected from ipstock', specificIpToBuy);
 
       if (!specificIpToBuy) {
@@ -2769,11 +2782,31 @@ class AutoProvisioningService {
           const buyText = typeof buyRes === 'string' ? buyRes : JSON.stringify(buyRes);
           L.kv(`[SMARTVPS] buyVps attempt ${attempt} response`, buyText.slice(0, 500));
 
-          // Extract the assigned IP from the buy response
-          boughtIp = this.extractIp(buyText);
+          const buyParsed = parseSmartVpsBuyResponse(buyRes);
+          L.kv(`[SMARTVPS] buyVps attempt ${attempt} parsed`, buyParsed);
+
+          if (!buyParsed.ok) {
+            const err = new Error(
+              buyParsed.message
+                ? `SmartVPS buyVps rejected: ${buyParsed.message}`
+                : 'SmartVPS buyVps did not return an assigned IP'
+            );
+            err.isNonRetryable = /does not support|On\d+GB=false|not a supported SmartVPS tier/i.test(
+              buyParsed.message || ''
+            );
+            throw err;
+          }
+
+          boughtIp = buyParsed.ip || this.extractIp(buyText);
           L.kv('[SMARTVPS] assigned/bought IP', boughtIp);
           if (!boughtIp) {
-            throw new Error('SmartVPS buyVps did not return an assigned IP');
+            const err = new Error(
+              buyParsed.status === 'processing' || buyParsed.status === 'success'
+                ? 'SmartVPS buyVps accepted the order but did not return an assigned IP yet'
+                : 'SmartVPS buyVps did not return an assigned IP'
+            );
+            err.isNonRetryable = false;
+            throw err;
           }
 
           // CRITICAL SAFETY CHECK: Verify the assigned IP belongs to the requested package
@@ -2847,9 +2880,9 @@ class AutoProvisioningService {
           lastError = error;
           L.line(`[SMARTVPS] ❌ buyVps attempt ${attempt} failed: ${error.message}`);
 
-          // CRITICAL: If safety check failed, do NOT retry - abort immediately
-          if (error.isSafetyCheckFailure || safetyCheckFailed) {
-            L.line(`[SMARTVPS] ❌ Safety check failure - aborting all retries`);
+          // CRITICAL: If safety check failed or error is not retryable, abort immediately
+          if (error.isSafetyCheckFailure || safetyCheckFailed || error.isNonRetryable) {
+            L.line(`[SMARTVPS] ❌ Non-retryable failure - aborting all retries`);
             break; // Exit loop immediately, do not retry
           }
 
