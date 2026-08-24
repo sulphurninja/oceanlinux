@@ -28,5 +28,18 @@ module.exports = {
         PORT: 5655,
       },
     },
+    {
+      name: 'oceanlinux-cleanup',
+      cwd: __dirname,
+      script: 'scripts/scheduled-cleanup-worker.js',
+      instances: 1,
+      exec_mode: 'fork',
+      autorestart: true,
+      max_memory_restart: '128M',
+      env: {
+        NODE_ENV: 'production',
+        PORT: 3000,
+      },
+    },
   ],
 };
