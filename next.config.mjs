@@ -21,6 +21,7 @@ const nextConfig = {
   },
   // Ensure node-ssh only runs on server
   experimental: {
+    instrumentationHook: true,
     serverComponentsExternalPackages: ['node-ssh', 'ssh2', 'cpu-features'],
   },
   async headers() {

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 import { enforceCronSecret } from '@/lib/apiSecurity';
+const { deleteExpiredOrders } = require('@/lib/cleanupExpiredOrders');
 const { deleteStaleNullExpiryOrders } = require('@/lib/cleanupNullExpiryOrders');
 const { purgeExpiredSlotIpHistory } = require('@/lib/slotIpExpiryCleanup');
 
@@ -39,33 +40,19 @@ export async function POST(request) {
 
     // 1. DELETE EXPIRED ORDERS (3+ days past expiry)
     console.log('\n[CLEANUP-ALL] 🗑️  Phase 1: Deleting expired orders...');
-    const threeDaysAgo = new Date();
-    threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
 
-    const expiredOrders = await Order.find({
-      expiryDate: { 
-        $exists: true, 
-        $ne: null,
-        $lt: threeDaysAgo 
-      }
-    }).select('_id productName expiryDate status provisioningStatus');
-
-    if (expiredOrders.length > 0) {
-      console.log(`[CLEANUP-ALL]   Found ${expiredOrders.length} expired orders`);
-      const deleteExpired = await Order.deleteMany({
-        _id: { $in: expiredOrders.map(o => o._id) }
-      });
-      results.expired.count = deleteExpired.deletedCount;
-      results.expired.orders = expiredOrders.map(o => ({
-        id: o._id.toString(),
-        productName: o.productName,
-        expiryDate: o.expiryDate,
-        daysExpired: Math.floor((new Date() - new Date(o.expiryDate)) / (1000 * 60 * 60 * 24))
-      }));
-      console.log(`[CLEANUP-ALL]   ✅ Deleted ${deleteExpired.deletedCount} expired orders`);
+    const expiredResult = await deleteExpiredOrders();
+    if (expiredResult.matchedCount > 0) {
+      console.log(`[CLEANUP-ALL]   Found ${expiredResult.matchedCount} expired orders`);
+      results.expired.count = expiredResult.deletedCount;
+      results.expired.orders = expiredResult.orders;
+      console.log(`[CLEANUP-ALL]   ✅ Deleted ${expiredResult.deletedCount} expired orders`);
     } else {
       console.log(`[CLEANUP-ALL]   ✨ No expired orders found`);
     }
+
+    const threeDaysAgo = new Date();
+    threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
 
     // 2. SKIP FAILED ORDERS (NEVER DELETE - kept for audit/debugging)
     console.log('\n[CLEANUP-ALL] 🔒 Phase 2: Checking failed orders...');
