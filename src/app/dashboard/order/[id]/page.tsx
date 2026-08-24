@@ -30,6 +30,7 @@ import {
   Database,
   Shield,
   XCircle,
+  Ban,
   Settings2,
   Info,
   Wallet,
@@ -228,6 +229,9 @@ interface Order {
     paymentConfirmedAt?: Date;
     renewalRequestId?: string;
   };
+  adminSuspended?: boolean;
+  adminSuspendMessage?: string;
+  adminSuspendedAt?: Date;
 }
 
 function humanizeOsTemplateName(name: unknown, id: string): string {
@@ -435,6 +439,16 @@ const OrderDetails = () => {
       if (wallet) setWalletBalance(wallet.balance);
     });
   }, []);
+
+  useEffect(() => {
+    const suspended = !isAdminView && Boolean(order?.adminSuspended);
+    if (!suspended) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [isAdminView, order?.adminSuspended]);
 
   // Fetch server power state when order is loaded (for managed orders).
   // OceanLinux orders only get status polling when the linked company has
@@ -2331,7 +2345,8 @@ const OrderDetails = () => {
   }
 
   const provider = getProviderFromOrder(order, ipStock);
-  const canManageServer = isServerManagementAvailable(order, ipStock);
+  const isCustomerSuspended = !isAdminView && Boolean(order.adminSuspended);
+  const canManageServer = !isCustomerSuspended && isServerManagementAvailable(order, ipStock);
   const slotIpOrder = isSlotIpOrder(order);
   const netbayProxyOrder = isNetbayProxyOrder(order, ipStock);
   const proxyStyleOrder = slotIpOrder || netbayProxyOrder;
@@ -2350,14 +2365,80 @@ const OrderDetails = () => {
   const currentListPrice = getCurrentListPriceFromStock(ipStock, order.memory);
   const renewalPrice = renewalPaymentTotals.total;
   const renewalPriceNote = getOrderRenewalPriceNote(order, currentListPrice);
+  const suspendMessage =
+    order.adminSuspendMessage?.trim() || 'This service has been suspended. Please contact support.';
 
   return (
-    <div className='premium-dashboard-page premium-order-detail-page min-h-0'>
+    <div className='premium-dashboard-page premium-order-detail-page min-h-0 relative'>
       {isAdminView && (
         <div className="bg-amber-500/10 border-b border-amber-500/30 px-4 py-2 text-center text-sm text-amber-900 dark:text-amber-200">
           Admin mode — managing customer order{order.customerEmail ? ` (${order.customerEmail})` : ''}. Start / stop / format work without seller login.
         </div>
       )}
+
+      {isCustomerSuspended && (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/75 p-3 sm:p-4 backdrop-blur-md"
+          style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="order-suspend-title"
+          aria-describedby="order-suspend-message"
+        >
+          <div className="flex max-h-[min(92dvh,640px)] w-full max-w-lg flex-col overflow-hidden rounded-2xl border-2 border-orange-500/50 bg-background shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+            <div className="shrink-0 bg-gradient-to-r from-orange-600 to-red-600 px-4 py-4 text-white sm:px-6 sm:py-5">
+              <div className="flex items-start gap-3 sm:items-center">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/20 sm:h-12 sm:w-12">
+                  <Ban className="h-5 w-5 sm:h-6 sm:w-6" />
+                </div>
+                <div className="min-w-0">
+                  <h2 id="order-suspend-title" className="text-lg font-bold tracking-tight sm:text-xl">
+                    Service Suspended
+                  </h2>
+                  <p className="mt-0.5 text-xs text-white/90 sm:text-sm">
+                    Server management is disabled for this order.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4 sm:space-y-4 sm:px-6 sm:py-5">
+              {order.ipAddress ? (
+                <div className="rounded-lg border bg-muted/50 px-3 py-2 text-sm">
+                  <span className="text-muted-foreground">IP: </span>
+                  <span className="break-all font-mono font-semibold">{order.ipAddress}</span>
+                </div>
+              ) : null}
+
+              <div className="rounded-xl border border-orange-500/25 bg-orange-500/5 p-3 sm:p-4">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-orange-700 dark:text-orange-300">
+                  Message from admin
+                </p>
+                <p
+                  id="order-suspend-message"
+                  className="whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground sm:text-base"
+                >
+                  {suspendMessage}
+                </p>
+              </div>
+
+              <p className="text-center text-[11px] text-muted-foreground sm:text-xs">
+                You cannot start, stop, renew, or change this server until the suspension is lifted.
+              </p>
+
+              <Button onClick={goBack} className="h-11 w-full gap-2 text-sm sm:text-base" size="lg">
+                <ArrowLeft className="h-4 w-4" />
+                Back to Servers
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div
+        className={cn(isCustomerSuspended && 'pointer-events-none select-none blur-[2px] opacity-40')}
+        aria-hidden={isCustomerSuspended || undefined}
+      >
       {/* Order sub-header — matches dashboard topbar in light & dark */}
       <div className='premium-order-detail-header sticky top-0 z-30 lg:top-0'>
           <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 p-3 sm:p-4 lg:px-6 lg:py-4 max-w-7xl mx-auto'>
@@ -4502,6 +4583,8 @@ const OrderDetails = () => {
           setActionBusy(null);
         }}
       />
+
+      </div>
 
       <ConfirmDialog />
     </div>

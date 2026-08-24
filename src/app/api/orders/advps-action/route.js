@@ -166,6 +166,12 @@ export async function POST(request) {
     if (access.error) return access.error;
     const order = access.order;
 
+    const { assertOrderNotAdminSuspended } = require('@/lib/orderAdminSuspend');
+    const suspended = assertOrderNotAdminSuspended(order, { isAdmin: access.isAdmin });
+    if (suspended) {
+      return customerJson(suspended, 403, action);
+    }
+
     const api = new AdvpsAPI();
     const resolved = await resolveServiceIdForOrder(api, order, orderId);
     if (resolved.error) {

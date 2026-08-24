@@ -19,6 +19,7 @@ const {
 } = require('@/lib/smartvpsPowerActions');
 const { parseSmartVpsExpiryDate, resolveSmartVpsOrderIp } = require('@/lib/smartvpsOrderSync');
 const { sanitizeCustomerApiPayload, customerServiceErrorMessage } = require('@/lib/customerFacingErrors');
+const { assertOrderNotAdminSuspended } = require('@/lib/orderAdminSuspend');
 
 function customerJson(body, status = 200, action = null) {
   return NextResponse.json(sanitizeCustomerApiPayload(body, { action }), { status });
@@ -400,6 +401,11 @@ export async function POST(request) {
     if (!order) {
       console.log('[SMARTVPS-ACTION][POST] Order not found');
       return customerJson({ success: false, message: 'Order not found' }, 404, action);
+    }
+
+    const suspended = assertOrderNotAdminSuspended(order, { isAdmin: resolved.isAdmin });
+    if (suspended) {
+      return customerJson(suspended, 403, action);
     }
 
     const serviceIdentifier = resolveSmartVpsOrderIp(order);

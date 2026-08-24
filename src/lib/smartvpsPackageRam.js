@@ -39,6 +39,48 @@ function findMemoryOptionForGb(existing, gb) {
   return null;
 }
 
+/** Collect highest admin-set price per GB tier from live + archived options. */
+function collectAdminPricesByGb(...sources) {
+  const byGb = new Map();
+  for (const source of sources) {
+    const plain = toPlainMemoryOptions(source);
+    for (const [key, value] of Object.entries(plain)) {
+      const match = String(key).match(/(\d+)\s*gb/i);
+      if (!match) continue;
+      const gb = Number(match[1]);
+      const price = Number(value?.price);
+      if (!Number.isFinite(gb) || !(price > 0)) continue;
+      byGb.set(gb, Math.max(byGb.get(gb) || 0, price));
+    }
+  }
+  return byGb;
+}
+
+/**
+ * After SmartVPS RAM sync, never lower prices admin already set.
+ * Sync may only add missing tiers (defaults) — existing admin rates stay fixed.
+ */
+function preserveAdminMemoryPrices(existingMemoryOptions, syncedMemoryOptions, archivedMemoryOptions = {}) {
+  const adminByGb = collectAdminPricesByGb(existingMemoryOptions, archivedMemoryOptions);
+  if (!adminByGb.size) return syncedMemoryOptions;
+
+  const out = { ...toPlainMemoryOptions(syncedMemoryOptions) };
+  for (const [gb, adminPrice] of adminByGb) {
+    const key = memoryKeyForGb(gb);
+    if (!out[key]) continue;
+    const syncedPrice = Number(out[key]?.price) || 0;
+    if (syncedPrice !== adminPrice) {
+      out[key] = {
+        ...out[key],
+        price: adminPrice,
+        hostycareProductId: out[key]?.hostycareProductId ?? null,
+        hostycareProductName: out[key]?.hostycareProductName ?? null,
+      };
+    }
+  }
+  return out;
+}
+
 function toPlainObject(value) {
   if (!value || typeof value !== 'object') return {};
   if (value instanceof Map) return Object.fromEntries(value);
@@ -68,23 +110,22 @@ function buildSmartVpsMemorySync(pkg, existingMemoryOptions = {}, archivedMemory
       if (live) {
         nextArchived[key] = live;
       } else if (!nextArchived[key]) {
-        // Tier was purged before archive existed — seed default so admin can edit / auto-restore later.
-        nextArchived[key] = {
-          price: DEFAULT_PRICING_GB[tier.gb] ?? 999,
-          hostycareProductId: null,
-          hostycareProductName: null,
-        };
+        // No live tier — do not seed default prices into archive (prevents wrong renewals on re-enable).
       }
       continue;
     }
 
     const prev =
       findMemoryOptionForGb(existing, tier.gb) || findMemoryOptionForGb(nextArchived, tier.gb);
-    memoryOptions[key] = {
-      price:
-        prev?.price != null && Number(prev.price) > 0
+    const adminPrice = collectAdminPricesByGb(existing, archived).get(tier.gb);
+    const resolvedPrice =
+      adminPrice != null && adminPrice > 0
+        ? adminPrice
+        : prev?.price != null && Number(prev.price) > 0
           ? Number(prev.price)
-          : (DEFAULT_PRICING_GB[tier.gb] ?? 999),
+          : (DEFAULT_PRICING_GB[tier.gb] ?? 999);
+    memoryOptions[key] = {
+      price: resolvedPrice,
       hostycareProductId: prev?.hostycareProductId ?? null,
       hostycareProductName: prev?.hostycareProductName ?? null,
     };
@@ -103,10 +144,15 @@ function buildSmartVpsBlockFromPackage(pkg, existingSmartvps = {}, existingMemor
   const archivedMemoryOptions = existingSmartvps?.archivedMemoryOptions || {};
   const { memoryOptions, byMemory, allowedRams, archivedMemoryOptions: nextArchived } =
     buildSmartVpsMemorySync(pkg, existingMemoryOptions, archivedMemoryOptions);
+  const finalizedMemoryOptions = finalizeSmartVpsMemorySync(
+    existingMemoryOptions,
+    memoryOptions,
+    nextArchived
+  );
   const qty = Number(pkg?.ipv4 || 0);
 
   return {
-    memoryOptions,
+    memoryOptions: finalizedMemoryOptions,
     smartvpsBlock: {
       ...existingSmartvps,
       provider: 'smartvps',
@@ -116,8 +162,13 @@ function buildSmartVpsBlockFromPackage(pkg, existingSmartvps = {}, existingMemor
       allowedRams,
       byMemory,
       archivedMemoryOptions: nextArchived,
+      preserveAdminPricing: true,
     },
   };
+}
+
+function finalizeSmartVpsMemorySync(existingMemoryOptions, syncedMemoryOptions, archivedMemoryOptions = {}) {
+  return preserveAdminMemoryPrices(existingMemoryOptions, syncedMemoryOptions, archivedMemoryOptions);
 }
 
 function normalizeMemoryTierKey(memory) {
@@ -222,6 +273,9 @@ module.exports = {
   getAllowedRamsForPackage,
   buildSmartVpsMemorySync,
   buildSmartVpsBlockFromPackage,
+  preserveAdminMemoryPrices,
+  finalizeSmartVpsMemorySync,
+  collectAdminPricesByGb,
   normalizeMemoryTierKey,
   isSmartVpsMemoryListed,
   validateSmartVpsPackageRam,

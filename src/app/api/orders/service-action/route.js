@@ -45,6 +45,7 @@ const {
 const { mapKurohostOsLabel, runKurohostPostReinstallFlow } = require('@/lib/kurohostPostReinstallFlow');
 const { toUserFacingNetbayError } = require('@/lib/netbayApiErrors');
 const { sanitizeCustomerApiPayload, customerServiceErrorMessage } = require('@/lib/customerFacingErrors');
+const { assertOrderNotAdminSuspended } = require('@/lib/orderAdminSuspend');
 
 function actionJson(body, status = 200, action = null) {
   return NextResponse.json(sanitizeCustomerApiPayload(body, { action }), { status });
@@ -80,6 +81,11 @@ async function resolveOrderForAction(request, orderId) {
 
   if (!order) {
     return { error: NextResponse.json({ success: false, error: 'Order not found' }, { status: 404 }) };
+  }
+
+  const suspended = assertOrderNotAdminSuspended(order, { isAdmin: isAdminUser(user) });
+  if (suspended) {
+    return { error: NextResponse.json(suspended, { status: 403 }) };
   }
 
   return { order, userId };

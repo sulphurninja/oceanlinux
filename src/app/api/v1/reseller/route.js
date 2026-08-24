@@ -1,12 +1,13 @@
 import { NextResponse } from 'next/server';
 import { UNIVERSAL_ACTIONS } from '@/lib/resellerServerManage';
+import { RESELLER_PANEL_ENDPOINTS } from '@/lib/resellerPanelApi';
 
 /** GET /api/v1/reseller — universal API index */
 export async function GET() {
   return NextResponse.json({
     success: true,
     name: 'OceanLinux Universal Reseller API',
-    version: '1.0',
+    version: '1.1',
     baseUrl: '/api/v1/reseller',
     auth: {
       headers: {
@@ -14,6 +15,7 @@ export async function GET() {
         'x-api-secret': 'Your reseller API secret (sec_...)',
       },
     },
+    panelEndpoints: RESELLER_PANEL_ENDPOINTS,
     endpoints: {
       account: { method: 'GET', path: '/account', description: 'Account + wallet summary' },
       wallet: { method: 'GET', path: '/wallet', description: 'Balance + transactions' },
@@ -56,13 +58,15 @@ export async function GET() {
       },
     },
     simpleFlow: [
-      '1. GET /products → show stock',
-      '2. POST /orders → buy server',
-      '3. GET /orders/{id} → IP + password (poll until ready)',
-      '4. GET /orders/{id}/status → online/offline',
-      '5. POST /orders/manage → start/stop/restart/reinstall/resetmac',
-      '6. POST /orders/{id}/sync → refresh IP/password after reinstall',
-      '7. POST /orders/{id}/renew → extend service',
+      '1. GET /plans (or /products) → show stock',
+      '2. POST /vms (or /orders) → deploy server',
+      '3. GET /vms/{id} → IP + password (poll until ready)',
+      '4. POST /orders/manage → start/stop/restart/reinstall',
+      '5. POST /vms/{id}/renew → extend service',
+      '6. GET /transactions → wallet ledger',
     ],
+    legacyEndpoints: {
+      note: 'Legacy /orders and /products paths remain supported alongside /vms and /plans.',
+    },
   });
 }

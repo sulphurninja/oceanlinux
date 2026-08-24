@@ -76,6 +76,12 @@ export async function POST(request) {
       );
     }
 
+    const { assertOrderNotAdminSuspended } = require('@/lib/orderAdminSuspend');
+    const suspended = assertOrderNotAdminSuspended(order);
+    if (suspended) {
+      return NextResponse.json(suspended, { status: 403 });
+    }
+
     const accessDenied = await enforceOrderAccess(request, order);
     if (accessDenied) return accessDenied;
 

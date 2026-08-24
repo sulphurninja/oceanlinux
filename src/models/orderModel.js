@@ -110,6 +110,11 @@ const orderSchema = new mongoose.Schema({
     lastAction: { type: String }, // 'start', 'stop', 'reboot', 'changepassword', 'reinstall', 'format', 'renew'
     lastActionTime: { type: Date },
     lastSyncTime: { type: Date },
+
+    /** Admin manual suspend — blocks customer manage actions; shows adminSuspendMessage. */
+    adminSuspended: { type: Boolean, default: false },
+    adminSuspendMessage: { type: String, default: '' },
+    adminSuspendedAt: { type: Date, default: null },
     serverDetails: {
         lastUpdated: { type: Date },
         rawDetails: { type: mongoose.Schema.Types.Mixed },

@@ -213,7 +213,7 @@ export function sanitizeResellerOrder(order) {
 export async function createResellerOrder(reseller, body) {
   await connectDB();
 
-  const productId = body.productId || body.serverId;
+  const productId = body.productId || body.planId || body.plan_id || body.serverId;
   const slotIpPackageId =
     body.slotIpPackageId ||
     (body.productType === 'slotip' && productId ? productId : null);

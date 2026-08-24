@@ -62,23 +62,25 @@ function EndpointCard({
     description,
     children,
 }: {
-    method: 'GET' | 'POST';
+    method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
     path: string;
     description: string;
     children?: React.ReactNode;
 }) {
+    const methodClass =
+        method === 'GET'
+            ? 'bg-sky-500/15 text-sky-700 dark:text-sky-300'
+            : method === 'POST'
+              ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+              : method === 'PATCH'
+                ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300'
+                : 'bg-rose-500/15 text-rose-700 dark:text-rose-300';
+
     return (
         <Card className={softCard}>
             <CardHeader className="pb-3">
                 <div className="flex items-center gap-2 flex-wrap">
-                    <Badge
-                        className={cn(
-                            'font-mono text-[10px] tracking-wide border-0',
-                            method === 'GET'
-                                ? 'bg-sky-500/15 text-sky-700 dark:text-sky-300'
-                                : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300',
-                        )}
-                    >
+                    <Badge className={cn('font-mono text-[10px] tracking-wide border-0', methodClass)}>
                         {method}
                     </Badge>
                     <CardTitle className="text-base sm:text-lg font-mono premium-dashboard-title break-all">
@@ -186,7 +188,7 @@ export default function ResellerApiDocsPage() {
                 </Card>
 
                 <Tabs defaultValue="quickstart" className="space-y-4 premium-dashboard-tabs">
-                    <TabsList className="premium-profile-tabs-list grid w-full grid-cols-3 lg:grid-cols-6 gap-1 h-auto">
+                    <TabsList className="premium-profile-tabs-list grid w-full grid-cols-3 lg:grid-cols-7 gap-1 h-auto">
                         <TabsTrigger value="quickstart" className="flex items-center gap-1.5 text-xs sm:text-sm">
                             <Rocket className="h-3.5 w-3.5" />
                             Quick start
@@ -198,6 +200,10 @@ export default function ResellerApiDocsPage() {
                         <TabsTrigger value="endpoints" className="flex items-center gap-1.5 text-xs sm:text-sm">
                             <Code2 className="h-3.5 w-3.5" />
                             Endpoints
+                        </TabsTrigger>
+                        <TabsTrigger value="panel" className="flex items-center gap-1.5 text-xs sm:text-sm">
+                            <Network className="h-3.5 w-3.5" />
+                            Panel API
                         </TabsTrigger>
                         <TabsTrigger value="proxies" className="flex items-center gap-1.5 text-xs sm:text-sm">
                             <Network className="h-3.5 w-3.5" />
@@ -328,17 +334,18 @@ export default function ResellerApiDocsPage() {
                             <CardContent>
                                 <ul className="space-y-1.5 text-sm premium-dashboard-subtitle">
                                     <li><code>GET /</code> — API index listing every available endpoint</li>
-                                    <li><code>GET /account</code> — Account profile and wallet summary</li>
                                     <li><code>GET /wallet</code> — Balance, credit line and transactions</li>
-                                    <li><code>GET /products</code> — Catalogue priced at your reseller rate</li>
-                                    <li><code>POST /orders</code> — Purchase a server or proxy</li>
-                                    <li><code>GET /orders</code> — Your order history</li>
-                                    <li><code>GET /orders/{`{orderId}`}</code> — Order detail and capabilities</li>
-                                    <li><code>GET /orders/{`{orderId}`}/status</code> — Live power state</li>
-                                    <li><code>POST /orders/{`{orderId}`}/sync</code> — Re-sync IP and credentials</li>
+                                    <li><code>GET /transactions</code> — Wallet ledger only</li>
+                                    <li><code>GET /plans</code> — Catalogue (alias of /products)</li>
+                                    <li><code>GET /vms</code> — Your VMs (alias of /orders)</li>
+                                    <li><code>POST /vms</code> — Deploy VM (alias of POST /orders)</li>
+                                    <li><code>PATCH /vms/{`{id}`}</code> — Auto-renew toggle</li>
+                                    <li><code>POST /vms/{`{id}`}/renew</code> — Renew service</li>
+                                    <li><code>GET /customers</code> — White-label customers</li>
+                                    <li><code>GET /account</code> — Account profile and wallet summary</li>
+                                    <li><code>GET /products</code> — Legacy catalogue path</li>
+                                    <li><code>POST /orders</code> — Legacy purchase path</li>
                                     <li><code>POST /orders/manage</code> — Power actions, reinstalls, MAC reset</li>
-                                    <li><code>GET /orders/{`{orderId}`}/renew</code> — Renewal quote</li>
-                                    <li><code>POST /orders/{`{orderId}`}/renew</code> — Renew the service</li>
                                 </ul>
                             </CardContent>
                         </Card>
@@ -637,6 +644,154 @@ x-api-secret: YOUR_API_SECRET`}
 }`}
                             />
                         </EndpointCard>
+                    </TabsContent>
+
+                    <TabsContent value="panel" className="space-y-4">
+                        <Card className={softCard}>
+                            <CardHeader>
+                                <CardTitle className="text-base sm:text-lg premium-dashboard-title">
+                                    Reseller Panel API
+                                </CardTitle>
+                                <CardDescription className="premium-dashboard-subtitle">
+                                    XiteNodes-style paths for wallet billing, VM lifecycle, white-label customers and
+                                    add-ons. Legacy <code>/orders</code> and <code>/products</code> paths still work.
+                                </CardDescription>
+                            </CardHeader>
+                            <CardContent>
+                                <CodeBlock
+                                    label="Index"
+                                    code={`curl "${baseUrl}" \\
+  -H "x-api-key: YOUR_API_KEY" \\
+  -H "x-api-secret: YOUR_API_SECRET"`}
+                                />
+                            </CardContent>
+                        </Card>
+
+                        <EndpointCard method="GET" path="/" description="Reseller account summary + API index">
+                            <p className="text-sm premium-dashboard-subtitle">
+                                Returns <code>panelEndpoints</code> — full list of panel routes below.
+                            </p>
+                        </EndpointCard>
+
+                        <EndpointCard method="GET" path="/wallet" description="Reseller wallet balance, minimum + credit limit">
+                            <p className="text-sm premium-dashboard-subtitle">
+                                Same as legacy wallet endpoint. Includes recent transactions inline.
+                            </p>
+                        </EndpointCard>
+
+                        <EndpointCard method="GET" path="/transactions" description="Reseller wallet ledger">
+                            <CodeBlock
+                                code={`{
+  "success": true,
+  "currency": "INR",
+  "balance": 50000,
+  "count": 12,
+  "transactions": [
+    { "type": "deduction", "amount": 1200, "description": "Reseller API order ..." }
+  ]
+}`}
+                            />
+                        </EndpointCard>
+
+                        <EndpointCard method="GET" path="/plans" description="Active reseller plans with your prices">
+                            <p className="text-sm premium-dashboard-subtitle">
+                                Alias of <code>GET /products</code>. Query <code>?id=PLAN_ID</code> for one plan.
+                            </p>
+                            <CodeBlock
+                                code={`curl "${baseUrl}/plans" \\
+  -H "x-api-key: YOUR_API_KEY" \\
+  -H "x-api-secret: YOUR_API_SECRET"`}
+                            />
+                        </EndpointCard>
+
+                        <EndpointCard method="GET" path="/vms" description="List reseller VMs">
+                            <p className="text-sm premium-dashboard-subtitle">
+                                Alias of <code>GET /orders</code>. Returns <code>vms[]</code> instead of <code>orders[]</code>.
+                            </p>
+                        </EndpointCard>
+
+                        <EndpointCard
+                            method="POST"
+                            path="/vms"
+                            description="Deploy a VM — charged from reseller wallet, auto-provisioned"
+                        >
+                            <CodeBlock
+                                label="Request body"
+                                code={`{
+  "planId": "65a...",
+  "memoryOption": "4GB",
+  "userEmail": "customer@yourdomain.com",
+  "os": "Ubuntu 22"
+}`}
+                            />
+                            <p className="text-sm premium-dashboard-subtitle mt-2">
+                                Accepts <code>planId</code> or legacy <code>productId</code>.
+                            </p>
+                        </EndpointCard>
+
+                        <EndpointCard method="PATCH" path="/vms/{id}" description="Toggle auto-renew or update customer email">
+                            <CodeBlock
+                                code={`{ "autoRenew": true, "customerEmail": "client@example.com" }`}
+                            />
+                        </EndpointCard>
+
+                        <EndpointCard method="POST" path="/vms/{id}/renew" description="Renew VM for a term from wallet">
+                            <p className="text-sm premium-dashboard-subtitle">
+                                <code>GET</code> on same path returns renewal quote. <code>POST</code> executes renewal.
+                            </p>
+                        </EndpointCard>
+
+                        <EndpointCard
+                            method="GET"
+                            path="/vms/{id}/plan"
+                            description="Same-series upgrade/downgrade options + prorated quote"
+                        />
+
+                        <EndpointCard
+                            method="POST"
+                            path="/vms/{id}/plan"
+                            description="Upgrade/downgrade VM plan (same series)"
+                        >
+                            <p className="text-sm premium-dashboard-subtitle">
+                                Plan changes that need provider-side RAM migration — contact support or use reinstall via{' '}
+                                <code>POST /orders/manage</code>.
+                            </p>
+                        </EndpointCard>
+
+                        <EndpointCard
+                            method="POST"
+                            path="/vms/{id}/assign"
+                            description="Assign or unassign VM to a white-label customer"
+                        >
+                            <CodeBlock
+                                code={`{ "customerId": "65f...", "customerEmail": "client@example.com" }
+{ "unassign": true }`}
+                            />
+                        </EndpointCard>
+
+                        <EndpointCard method="GET" path="/customers" description="List white-label customers" />
+                        <EndpointCard
+                            method="POST"
+                            path="/customers"
+                            description="Create white-label customer (password optional — invite flow)"
+                        >
+                            <CodeBlock code={`{ "email": "client@example.com", "displayName": "Acme Hosting" }`} />
+                        </EndpointCard>
+                        <EndpointCard method="GET" path="/customers/{id}" description="Get one customer" />
+                        <EndpointCard method="PATCH" path="/customers/{id}" description="Update customer display name">
+                            <CodeBlock code={`{ "displayName": "New Name" }`} />
+                        </EndpointCard>
+                        <EndpointCard
+                            method="DELETE"
+                            path="/customers/{id}"
+                            description="Remove customer — VMs unassigned, not deleted"
+                        />
+
+                        <EndpointCard method="GET" path="/import" description="List importable non-reseller VMs + cost" />
+                        <EndpointCard method="POST" path="/import" description="Import VM into reseller program" />
+
+                        <EndpointCard method="GET" path="/addons" description="IP-rotation quota + buyable packs" />
+                        <EndpointCard method="POST" path="/addons" description="Buy rotation pack from wallet" />
                     </TabsContent>
 
                     <TabsContent value="proxies" className="space-y-4">

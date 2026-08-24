@@ -64,6 +64,14 @@ const resellerSchema = new mongoose.Schema({
         }
     },
 
+    /** White-label customers for panel API (/customers) */
+    panelCustomers: [{
+        displayName: { type: String, default: '' },
+        email: { type: String, required: true },
+        createdAt: { type: Date, default: Date.now },
+        updatedAt: { type: Date, default: Date.now },
+    }],
+
     // Stats
     stats: {
         totalOrders: { type: Number, default: 0 },

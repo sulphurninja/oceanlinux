@@ -31,6 +31,10 @@ const LIST_SELECT = [
   'advpsServiceId',
   'advpsOrderId',
   'netbayServiceId',
+  'netbayGroupTag',
+  'netbayProductKind',
+  'slotIpPackageId',
+  'slotIpId',
   'provider',
   'autoProvisioned',
   'ipAddress',
@@ -50,6 +54,9 @@ const LIST_SELECT = [
   'invoiceNumber',
   'customerName',
   'customerEmail',
+  'adminSuspended',
+  'adminSuspendMessage',
+  'adminSuspendedAt',
 ].join(' ');
 
 const EXPORT_SELECT = [

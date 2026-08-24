@@ -77,6 +77,12 @@ export async function POST(request) {
       return NextResponse.json({ message: SLOT_IP_NO_RENEWAL_MESSAGE }, { status: 400 });
     }
 
+    const { assertOrderNotAdminSuspended } = require('@/lib/orderAdminSuspend');
+    const suspended = assertOrderNotAdminSuspended(order);
+    if (suspended) {
+      return NextResponse.json(suspended, { status: 403 });
+    }
+
     // 5. Check if order is eligible for renewal
     if (!order.expiryDate) {
       return NextResponse.json({ message: 'Order has no expiry date' }, { status: 400 });

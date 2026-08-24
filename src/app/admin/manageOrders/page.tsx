@@ -20,7 +20,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { 
     Eye, Settings, Play, RotateCcw, Loader2, AlertCircle, CheckCircle, 
     Wrench, Search, Filter, Calendar, X, ChevronLeft, ChevronRight, 
-    ChevronsLeft, ChevronsRight, Edit2, Save, XCircle, Download, RefreshCw, KeyRound, ArrowRightLeft, Wallet, CreditCard, Clock, TrendingUp
+    ChevronsLeft, ChevronsRight, Edit2, Save, XCircle, Download, RefreshCw, KeyRound, ArrowRightLeft, Wallet, CreditCard, Clock, TrendingUp, Ban, ShieldOff
 } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -72,6 +72,10 @@ interface Order {
     advpsServiceId?: string;
     advpsOrderId?: string;
     provider?: string;
+    netbayGroupTag?: string;
+    netbayProductKind?: string;
+    slotIpPackageId?: string;
+    slotIpId?: string;
     autoProvisioned?: boolean;
     ipAddress?: string;
     username?: string;
@@ -98,6 +102,9 @@ interface Order {
     expiryDate?: string;
     lastAction?: string;
     lastActionTime?: string;
+    adminSuspended?: boolean;
+    adminSuspendMessage?: string;
+    adminSuspendedAt?: string;
 }
 
 function formatPaymentGatewayName(method: string): string {
@@ -286,6 +293,9 @@ const ManageOrders = () => {
     const [transferOrder, setTransferOrder] = useState<Order | null>(null);
     const [transferEmail, setTransferEmail] = useState('');
     const [transferring, setTransferring] = useState(false);
+    const [suspendOrder, setSuspendOrder] = useState<Order | null>(null);
+    const [suspendMessage, setSuspendMessage] = useState('');
+    const [suspending, setSuspending] = useState(false);
     const [debouncedSearch, setDebouncedSearch] = useState('');
     const [walletLoaded, setWalletLoaded] = useState(false);
     const filterKeyRef = useRef('');
@@ -680,6 +690,29 @@ const ManageOrders = () => {
     const formatInr = (amount?: number) =>
         amount != null ? `₹${amount.toLocaleString('en-IN')}` : '';
 
+    const renderOrderSelectionTag = (order: Order, compact = false) => {
+        if (order.netbayGroupTag) {
+            return (
+                <div className={compact ? 'mt-1' : ''}>
+                    <Badge variant="outline" className="font-mono text-[11px] border-sky-500/30 bg-sky-500/10 text-sky-800 dark:text-sky-200">
+                        {order.netbayGroupTag}
+                    </Badge>
+                    {order.netbayProductKind === 'proxy' && !compact ? (
+                        <p className="mt-1 text-[10px] text-muted-foreground">Netbay proxy range</p>
+                    ) : null}
+                </div>
+            );
+        }
+        if (order.slotIpPackageId) {
+            return (
+                <Badge variant="outline" className="font-mono text-[11px]">
+                    Slot IP
+                </Badge>
+            );
+        }
+        return <span className="text-xs text-muted-foreground">—</span>;
+    };
+
     const renderOrderExpiryCell = (order: Order) => {
         if (!order.expiryDate) {
             return <span className="text-xs text-muted-foreground">—</span>;
@@ -806,6 +839,40 @@ const ManageOrders = () => {
         return <span className="text-xs text-muted-foreground">—</span>;
     };
 
+    const handleSuspendOrder = useCallback(async (order: Order, message: string, suspended: boolean) => {
+        setSuspending(true);
+        try {
+            const response = await fetch('/api/admin/orders/suspend', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ orderId: order._id, suspended, message }),
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.message || 'Failed to update suspend status');
+            }
+            setOrders((prev) =>
+                prev.map((o) =>
+                    o._id === order._id
+                        ? {
+                              ...o,
+                              adminSuspended: data.order?.adminSuspended ?? suspended,
+                              adminSuspendMessage: data.order?.adminSuspendMessage ?? (suspended ? message : ''),
+                              adminSuspendedAt: data.order?.adminSuspendedAt,
+                          }
+                        : o
+                )
+            );
+            toast.success(suspended ? 'Order suspended for customer' : 'Order unsuspended');
+            setSuspendOrder(null);
+            setSuspendMessage('');
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : 'Suspend update failed');
+        } finally {
+            setSuspending(false);
+        }
+    }, []);
+
     const renderOrderActions = (order: Order) => (
         <div className="flex flex-wrap items-center gap-2">
             <Button
@@ -816,6 +883,19 @@ const ManageOrders = () => {
             >
                 <Edit2 className="w-3.5 h-3.5" />
                 Edit
+            </Button>
+            <Button
+                size="sm"
+                variant={order.adminSuspended ? 'secondary' : 'outline'}
+                onClick={() => {
+                    setSuspendOrder(order);
+                    setSuspendMessage(order.adminSuspendMessage || '');
+                }}
+                className={`gap-1 h-8 ${order.adminSuspended ? 'border-orange-500/40 text-orange-700 dark:text-orange-300' : ''}`}
+                title={order.adminSuspended ? 'Edit suspend message or unsuspend' : 'Suspend customer access to this order'}
+            >
+                {order.adminSuspended ? <ShieldOff className="w-3.5 h-3.5" /> : <Ban className="w-3.5 h-3.5" />}
+                {order.adminSuspended ? 'Suspended' : 'Suspend'}
             </Button>
             <Button
                 size="sm"
@@ -1452,6 +1532,10 @@ const ManageOrders = () => {
                                                     <div className="mt-1">{getProvisioningStatusBadge(order)}</div>
                                                 </div>
                                                 <div className="rounded-lg bg-muted/40 px-2.5 py-2">
+                                                    <p className="text-[10px] text-muted-foreground">Tag / Range</p>
+                                                    <div className="mt-1">{renderOrderSelectionTag(order, true)}</div>
+                                                </div>
+                                                <div className="rounded-lg bg-muted/40 px-2.5 py-2 sm:col-span-2">
                                                     <p className="text-[10px] text-muted-foreground">IP Address</p>
                                                     <code className="mt-1 block break-all text-[11px] font-medium">
                                                         {order.ipAddress || 'Pending'}
@@ -1513,6 +1597,7 @@ const ManageOrders = () => {
                                         <TableHead className="font-semibold">Status</TableHead>
                                         <TableHead className="font-semibold">Provisioning</TableHead>
                                         <TableHead className="font-semibold">Provider</TableHead>
+                                        <TableHead className="font-semibold">Tag / Range</TableHead>
                                         <TableHead className="font-semibold">IP Address</TableHead>
                                         <TableHead className="font-semibold">Created</TableHead>
                                         <TableHead className="font-semibold">Expiry</TableHead>
@@ -1522,7 +1607,7 @@ const ManageOrders = () => {
                                 <TableBody>
                                     {loading ? (
                                         <TableRow>
-                                            <TableCell colSpan={12} className="h-32 text-center">
+                                            <TableCell colSpan={13} className="h-32 text-center">
                                                 <div className="flex items-center justify-center gap-2">
                                                     <Loader2 className="h-6 w-6 animate-spin" />
                                                     <span>Loading orders...</span>
@@ -1531,7 +1616,7 @@ const ManageOrders = () => {
                                         </TableRow>
                                     ) : orders.length === 0 ? (
                                         <TableRow>
-                                            <TableCell colSpan={12} className="h-32 text-center text-muted-foreground">
+                                            <TableCell colSpan={13} className="h-32 text-center text-muted-foreground">
                                                 {hasActiveFilters ? 'No orders match your search criteria.' : 'No orders found.'}
                                             </TableCell>
                                         </TableRow>
@@ -1561,10 +1646,18 @@ const ManageOrders = () => {
                                                         {order.provider || 'hostycare'}
                                                     </Badge>
                                                 </TableCell>
+                                                <TableCell>{renderOrderSelectionTag(order)}</TableCell>
                                                 <TableCell>
-                                                    <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-                                                        {order.ipAddress || 'Pending'}
-                                                    </code>
+                                                    <div className="flex flex-col gap-1">
+                                                        <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
+                                                            {order.ipAddress || 'Pending'}
+                                                        </code>
+                                                        {order.adminSuspended ? (
+                                                            <Badge variant="outline" className="w-fit border-orange-500/40 text-orange-700 dark:text-orange-300 text-[10px]">
+                                                                Suspended
+                                                            </Badge>
+                                                        ) : null}
+                                                    </div>
                                                 </TableCell>
                                                 <TableCell>
                                                     <div className="text-xs whitespace-nowrap">
@@ -2037,6 +2130,38 @@ const ManageOrders = () => {
                                 </div>
                             </div>
 
+                            {/* Netbay / Slot selection (read-only) */}
+                            {(editingOrder.netbayGroupTag || editingOrder.slotIpPackageId) && (
+                                <div className="space-y-3">
+                                    <h3 className="text-lg font-semibold border-b pb-2">Customer Selection</h3>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        {editingOrder.netbayGroupTag ? (
+                                            <div className="space-y-2">
+                                                <Label>Netbay IP range (tag)</Label>
+                                                <Input
+                                                    value={editingOrder.netbayGroupTag}
+                                                    readOnly
+                                                    className="bg-muted font-mono"
+                                                />
+                                                <p className="text-xs text-muted-foreground">
+                                                    Range customer chose at checkout — tell company if this tag has stock issues.
+                                                </p>
+                                            </div>
+                                        ) : null}
+                                        {editingOrder.slotIpPackageId ? (
+                                            <div className="space-y-2">
+                                                <Label>Slot IP package</Label>
+                                                <Input
+                                                    value={editingOrder.slotIpPackageId}
+                                                    readOnly
+                                                    className="bg-muted font-mono text-xs"
+                                                />
+                                            </div>
+                                        ) : null}
+                                    </div>
+                                </div>
+                            )}
+
                             {/* Error Display */}
                             {editingOrder.provisioningError && (
                                 <div className="border border-destructive/50 rounded-lg p-4 bg-destructive/5">
@@ -2317,6 +2442,101 @@ const ManageOrders = () => {
             </Dialog>
 
             {/* Transfer VPS Dialog */}
+            {suspendOrder && (
+                <Dialog
+                    open={!!suspendOrder}
+                    onOpenChange={(open) => {
+                        if (!open) {
+                            setSuspendOrder(null);
+                            setSuspendMessage('');
+                        }
+                    }}
+                >
+                    <DialogContent className="max-w-lg">
+                        <DialogHeader>
+                            <DialogTitle>
+                                {suspendOrder.adminSuspended ? 'Manage Order Suspension' : 'Suspend Order for Customer'}
+                            </DialogTitle>
+                            <DialogDescription>
+                                Customer will not be able to manage this server (start/stop, reinstall, renew, etc.). Your message will be shown on their order page.
+                            </DialogDescription>
+                        </DialogHeader>
+
+                        <div className="space-y-4">
+                            <div className="rounded-lg border bg-muted/40 p-3 text-sm space-y-1">
+                                <p className="font-medium">{suspendOrder.productName}</p>
+                                <p className="text-muted-foreground">
+                                    IP: <span className="font-mono">{suspendOrder.ipAddress || 'Pending'}</span>
+                                </p>
+                                <p className="text-muted-foreground">
+                                    Customer: {suspendOrder.user?.name || 'N/A'} ({suspendOrder.user?.email || 'N/A'})
+                                </p>
+                            </div>
+
+                            <div className="space-y-2">
+                                <Label htmlFor="suspend-message">Message for customer</Label>
+                                <Textarea
+                                    id="suspend-message"
+                                    value={suspendMessage}
+                                    onChange={(e) => setSuspendMessage(e.target.value)}
+                                    placeholder="e.g. Payment pending — please contact support on WhatsApp."
+                                    rows={4}
+                                    maxLength={2000}
+                                />
+                                <p className="text-xs text-muted-foreground">
+                                    This message is shown to the user when they open this order.
+                                </p>
+                            </div>
+                        </div>
+
+                        <DialogFooter className="gap-2 flex-wrap">
+                            <Button
+                                variant="outline"
+                                onClick={() => {
+                                    setSuspendOrder(null);
+                                    setSuspendMessage('');
+                                }}
+                                disabled={suspending}
+                            >
+                                Cancel
+                            </Button>
+                            {suspendOrder.adminSuspended ? (
+                                <>
+                                    <Button
+                                        variant="secondary"
+                                        onClick={() => handleSuspendOrder(suspendOrder, suspendMessage, true)}
+                                        disabled={suspending || !suspendMessage.trim()}
+                                        className="gap-2"
+                                    >
+                                        {suspending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                                        Update Message
+                                    </Button>
+                                    <Button
+                                        variant="default"
+                                        onClick={() => handleSuspendOrder(suspendOrder, '', false)}
+                                        disabled={suspending}
+                                        className="gap-2"
+                                    >
+                                        {suspending ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldOff className="w-4 h-4" />}
+                                        Unsuspend
+                                    </Button>
+                                </>
+                            ) : (
+                                <Button
+                                    variant="destructive"
+                                    onClick={() => handleSuspendOrder(suspendOrder, suspendMessage, true)}
+                                    disabled={suspending || !suspendMessage.trim()}
+                                    className="gap-2"
+                                >
+                                    {suspending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Ban className="w-4 h-4" />}
+                                    Suspend Order
+                                </Button>
+                            )}
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+            )}
+
             {transferOrder && (
                 <Dialog
                     open={!!transferOrder}
