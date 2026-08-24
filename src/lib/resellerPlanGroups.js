@@ -94,6 +94,36 @@ export function pricedMemoryEntries(stock) {
   );
 }
 
+export function toCustomPriceRecord(customPrices) {
+  if (!customPrices) return {};
+  if (customPrices instanceof Map) return Object.fromEntries(customPrices);
+  return customPrices;
+}
+
+/** Direct key first, then legacy keys with the same RAM bucket (e.g. "4GB Linux" → "4GB"). */
+export function getCustomPriceForStockMemory(stockId, memoryKey, customPrices = {}) {
+  const prices = toCustomPriceRecord(customPrices);
+  const id = String(stockId || '');
+  const mem = String(memoryKey || '').trim();
+  if (!id || !mem) return null;
+
+  const direct = Number(prices[`${id}_${mem}`]);
+  if (direct > 0) return direct;
+
+  const bucket = ramBucket(mem);
+  if (!bucket || bucket === 'slot') return null;
+
+  const prefix = `${id}_`;
+  for (const [key, raw] of Object.entries(prices)) {
+    if (!key.startsWith(prefix)) continue;
+    if (ramBucket(key.slice(prefix.length)) !== bucket) continue;
+    const value = Number(raw);
+    if (value > 0) return value;
+  }
+
+  return null;
+}
+
 /** status: set | partial | missing | none */
 export function stockCustomStatus(stock, customPrices = {}) {
   const entries = pricedMemoryEntries(stock);
@@ -103,7 +133,7 @@ export function stockCustomStatus(stock, customPrices = {}) {
   const setRates = [];
   const missingKeys = [];
   for (const [mem] of entries) {
-    const value = Number(customPrices[`${stock._id}_${mem}`]);
+    const value = getCustomPriceForStockMemory(stock._id, mem, customPrices);
     if (value > 0) setRates.push(`${mem} ₹${value}`);
     else missingKeys.push(mem);
   }

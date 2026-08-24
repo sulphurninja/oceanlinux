@@ -22,6 +22,7 @@ import Link from 'next/link';
 import { toast } from 'sonner';
 import { useParams } from 'next/navigation';
 import {
+    getCustomPriceForStockMemory,
     memoryKeysForGroup,
     ramBucket,
     resellerPlanGroup,
@@ -408,17 +409,36 @@ export default function ResellerDetailsPage() {
 
     const visibleGroupProducts = useMemo(() => {
         if (bulkStatusFilter === 'all') return groupProducts;
+        if (bulkStatusFilter === 'missing') {
+            return groupProducts.filter((stock) => {
+                const status = stockCustomStatus(stock, customPrices).status;
+                return status === 'missing' || status === 'partial';
+            });
+        }
         return groupProducts.filter((stock) => stockCustomStatus(stock, customPrices).status === bulkStatusFilter);
     }, [groupProducts, customPrices, bulkStatusFilter]);
 
-    const tableStocks = useMemo(() => {
-        let list = tableGroupFilter === 'all'
+    const tablePricingRows = useMemo(() => {
+        let stocks = tableGroupFilter === 'all'
             ? stocksWithGroup
             : stocksWithGroup.filter((s) => s.planGroup === tableGroupFilter);
-        if (rateStatusFilter !== 'all') {
-            list = list.filter((s) => stockCustomStatus(s, customPrices).status === rateStatusFilter);
+
+        if (rateStatusFilter === 'partial') {
+            stocks = stocks.filter((s) => stockCustomStatus(s, customPrices).status === 'partial');
         }
-        return list;
+
+        const rows: Array<{ stock: (typeof stocksWithGroup)[number]; key: string; details: Record<string, unknown> }> = [];
+        for (const stock of stocks) {
+            for (const [key, details] of Object.entries(stock.memoryOptions || {})) {
+                if ((Number((details as { price?: number })?.price) || 0) <= 0) continue;
+                const resolvedCustom = getCustomPriceForStockMemory(stock._id, key, customPrices);
+                const hasCustom = Number(resolvedCustom) > 0;
+                if (rateStatusFilter === 'missing' && hasCustom) continue;
+                if (rateStatusFilter === 'set' && !hasCustom) continue;
+                rows.push({ stock, key, details: details as Record<string, unknown> });
+            }
+        }
+        return rows;
     }, [stocksWithGroup, tableGroupFilter, rateStatusFilter, customPrices]);
 
     useEffect(() => {
@@ -1185,18 +1205,22 @@ export default function ResellerDetailsPage() {
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {tableStocks.map(stock => (
-                                            Object.entries(stock.memoryOptions || {}).map(([key, details]: [string, any]) => {
+                                        {tablePricingRows.map(({ stock, key, details }) => {
                                                 const priceKey = `${stock._id}_${key}`;
-                                                const hasCustom = Number(customPrices[priceKey]) > 0;
+                                                const resolvedCustom = getCustomPriceForStockMemory(
+                                                    stock._id,
+                                                    key,
+                                                    customPrices
+                                                );
+                                                const hasCustom = Number(resolvedCustom) > 0;
                                                 const hasDraft = priceKey in priceDrafts;
-                                                const skipZero = (Number(details?.price) || 0) <= 0;
+                                                const basePrice = Number((details as { price?: number })?.price) || 0;
 
                                                 // Calculate markup price for display reference
-                                                let markupPrice = details.price;
+                                                let markupPrice = basePrice;
                                                 if (pricing.enabled) {
                                                     if (pricing.type === 'percentage') {
-                                                        markupPrice += (details.price * (pricing.value / 100));
+                                                        markupPrice += (basePrice * (pricing.value / 100));
                                                     } else {
                                                         markupPrice += pricing.value;
                                                     }
@@ -1206,17 +1230,13 @@ export default function ResellerDetailsPage() {
                                                     <tr
                                                         key={priceKey}
                                                         className={`border-t hover:bg-muted/50 ${
-                                                            skipZero
-                                                                ? ''
-                                                                : hasCustom
-                                                                    ? 'bg-emerald-50/70'
-                                                                    : 'bg-rose-50/40'
+                                                            hasCustom
+                                                                ? 'bg-emerald-50/70'
+                                                                : 'bg-rose-50/40'
                                                         }`}
                                                     >
                                                         <td className="p-3">
-                                                            {skipZero ? (
-                                                                <span className="text-xs text-muted-foreground">—</span>
-                                                            ) : hasCustom ? (
+                                                            {hasCustom ? (
                                                                 <Badge className="bg-emerald-600 hover:bg-emerald-600">Set</Badge>
                                                             ) : (
                                                                 <Badge variant="destructive">Not set</Badge>
@@ -1224,7 +1244,7 @@ export default function ResellerDetailsPage() {
                                                         </td>
                                                         <td className="p-3 font-medium">{stock.name}</td>
                                                         <td className="p-3">{key}</td>
-                                                        <td className="p-3">₹{details.price}</td>
+                                                        <td className="p-3">₹{basePrice}</td>
                                                         <td className="p-3 text-muted-foreground">
                                                             ₹{Math.ceil(markupPrice)}
                                                         </td>
@@ -1243,8 +1263,8 @@ export default function ResellerDetailsPage() {
                                                                 value={
                                                                     priceKey in priceDrafts
                                                                         ? priceDrafts[priceKey]
-                                                                        : customPrices[priceKey]
-                                                                            ? String(customPrices[priceKey])
+                                                                        : resolvedCustom
+                                                                            ? String(resolvedCustom)
                                                                             : ''
                                                                 }
                                                                 onChange={(e) => {
@@ -1257,9 +1277,8 @@ export default function ResellerDetailsPage() {
                                                         </td>
                                                     </tr>
                                                 );
-                                            })
-                                        ))}
-                                        {tableStocks.length === 0 && (
+                                        })}
+                                        {tablePricingRows.length === 0 && (
                                             <tr>
                                                 <td colSpan={6} className="p-6 text-center text-muted-foreground">
                                                     No products found to configure.

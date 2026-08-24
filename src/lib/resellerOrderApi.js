@@ -9,6 +9,7 @@ import { calculateExpiryDate } from '@/lib/expiryHelper';
 import NotificationService from '@/services/notificationService';
 import ResellerWalletService from '@/services/resellerWalletService';
 import { normalizeOs } from '@/lib/v1ServerApi';
+import { getCustomPriceForStockMemory } from '@/lib/resellerPlanGroups';
 
 const SlotIPPackage = require('@/models/slotIpPackageModel');
 
@@ -31,11 +32,8 @@ export function calculateResellerPlanPrice(reseller, productId, memoryOption, ba
   const customPrices = reseller.pricing?.customPrices;
   if (customPrices) {
     for (const mem of keys) {
-      const priceKey = `${productId}_${mem}`;
-      let custom = null;
-      if (customPrices instanceof Map) custom = customPrices.get(priceKey);
-      else if (typeof customPrices === 'object') custom = customPrices[priceKey];
-      if (custom && Number(custom) > 0) return Math.ceil(Number(custom));
+      const custom = getCustomPriceForStockMemory(productId, mem, customPrices);
+      if (custom > 0) return Math.ceil(custom);
     }
   }
 
