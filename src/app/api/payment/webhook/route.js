@@ -725,7 +725,7 @@ export async function handleRenewalWebhook(renewalTxnId, payment, webhookStartTi
       paymentId: payment.payment.cf_payment_id,
       amount: renewalPrice,
       paidAt: new Date(),
-      previousExpiry: currentExpiry,
+      previousExpiry: order.expiryDate,
       newExpiry: newExpiryDate,
       renewalTxnId: renewalTxnId,
       provider: provider,
