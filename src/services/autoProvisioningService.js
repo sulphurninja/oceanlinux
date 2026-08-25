@@ -2474,6 +2474,7 @@ class AutoProvisioningService {
     let username = isWindowsProduct ? 'Administrator' : 'root';
     let password = order.password || '';
     let expiryDate = order.expiryDate || null;
+    let wrongIpHold = '';
 
     if (!ipAddress || !password) {
       const vmIdKnown = resellerVmId || null;
@@ -2582,12 +2583,15 @@ class AutoProvisioningService {
       locationCtx.expectedIpPrefix &&
       !ipMatchesOrderedRange(ipAddress, locationCtx.expectedIpPrefix)
     ) {
-      L.line(
-        `[RESELLER-API] WRONG IP ${ipAddress} for order expecting ${locationCtx.expectedIpPrefix}.* — not activating`
-      );
+      // Keep the VM linked and hold the order in processing: the admin fixes
+      // the IP on the reseller panel, and the stuck-order sync auto-completes
+      // the order once the panel IP matches the ordered range. Clearing
+      // resellerVmId here would orphan the already-paid VM and let a retry
+      // purchase (and bill) a second one.
+      wrongIpHold = `WRONG_IP: VM ${resellerVmId || 'unknown'} provisioned with ${ipAddress}, but this product needs ${locationCtx.expectedIpPrefix}.x. Fix the VM IP on the reseller panel — the order auto-completes once it matches.`;
+      L.line(`[RESELLER-API] ${wrongIpHold} — holding order in processing, VM link kept`);
       ipAddress = '';
       password = '';
-      resellerVmId = '';
     }
 
     if (!expiryDate) {
@@ -2608,7 +2612,7 @@ class AutoProvisioningService {
       provisioningStatus: fullyProvisioned ? 'active' : 'provisioning',
       provisioningError: fullyProvisioned
         ? ''
-        : `PENDING: awaiting ${!ipAddress ? 'IP' : 'password'} from panel`,
+        : (wrongIpHold || `PENDING: awaiting ${!ipAddress ? 'IP' : 'password'} from panel`),
       provider: 'reseller-api',
       ...panelCredsUpdate,
       resellerVmId: resellerVmId || undefined,

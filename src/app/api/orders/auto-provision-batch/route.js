@@ -27,13 +27,16 @@ export async function POST(request) {
       }
     };
 
-    // Reset any orders stuck in provisioning for more than 10 minutes
+    // Reset any orders stuck in provisioning for more than 10 minutes.
+    // WRONG_IP holds are excluded — those wait for a manual IP fix on the
+    // reseller panel and are watched by the stuck-order sync instead.
     const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
     await Order.updateMany(
       {
         status: 'confirmed',
         provisioningStatus: 'provisioning',
-        updatedAt: { $lt: tenMinutesAgo }
+        updatedAt: { $lt: tenMinutesAgo },
+        provisioningError: { $not: /^WRONG_IP/ }
       },
       {
         provisioningStatus: 'failed',
