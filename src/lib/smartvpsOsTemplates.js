@@ -8,8 +8,21 @@ const SMARTVPS_OS_LABELS = {
   '2022': 'Windows Server 2022',
   '11': 'Windows 11',
   '2025': 'Windows 2025',
-  '2022g': 'Windows Server 2022 G',
+  '2022g': 'Windows Server 2022 Gold',
 };
+
+/** Display-name overrides applied even when the live API provides its own name. */
+const SMARTVPS_OS_NAME_OVERRIDES = {
+  '2022g': 'Windows Server 2022 Gold',
+};
+
+function applySmartVpsOsNameOverrides(map) {
+  for (const key of Object.keys(map)) {
+    const override = SMARTVPS_OS_NAME_OVERRIDES[String(key).toLowerCase()];
+    if (override) map[key] = override;
+  }
+  return map;
+}
 
 function humanizeSmartVpsOsLabel(id) {
   const raw = String(id || '').trim();
@@ -61,7 +74,7 @@ function parseSmartVpsOsTemplateList(raw) {
         if (id) map[id] = name || humanizeSmartVpsOsLabel(id);
       }
     }
-    return map;
+    return applySmartVpsOsNameOverrides(map);
   }
 
   if (data && typeof data === 'object' && !Array.isArray(data)) {
@@ -73,7 +86,7 @@ function parseSmartVpsOsTemplateList(raw) {
         map[key] = String(value.name || value.label || key);
       }
     }
-    if (Object.keys(map).length) return map;
+    if (Object.keys(map).length) return applySmartVpsOsNameOverrides(map);
   }
 
   throw new Error('Unexpected SmartVPS getostemplate response');
