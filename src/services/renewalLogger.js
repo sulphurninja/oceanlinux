@@ -133,6 +133,23 @@ class RenewalLogger {
         });
 
         try {
+            // Import dynamically to avoid circular dependencies
+            const RenewalLogModel = (await import('@/models/renewalLogModel')).default;
+
+            // Dedupe: the same payment is often processed by both the gateway
+            // webhook and the browser confirm-api. Only the first success log
+            // is kept so the admin page never shows a renewal twice.
+            if (success) {
+                const existingSuccess = await RenewalLogModel.findOne({
+                    renewalTxnId: this.renewalTxnId,
+                    success: true
+                }).select('_id processedVia').lean();
+                if (existingSuccess) {
+                    console.log(`[RENEWAL-LOG] Success log already exists for ${this.renewalTxnId} via ${existingSuccess.processedVia} — skipping duplicate (${this.processedVia})`);
+                    return existingSuccess;
+                }
+            }
+
             const logDoc = {
                 orderId: this.orderId,
                 renewalTxnId: this.renewalTxnId,
@@ -150,8 +167,6 @@ class RenewalLogger {
                 errorStack
             };
 
-            // Import dynamically to avoid circular dependencies
-            const RenewalLogModel = (await import('@/models/renewalLogModel')).default;
             const savedLog = await RenewalLogModel.create(logDoc);
 
             console.log(`[RENEWAL-LOG] Log saved to database: ${savedLog._id}`);
