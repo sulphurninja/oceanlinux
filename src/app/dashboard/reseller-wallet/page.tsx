@@ -763,13 +763,14 @@ export default function ResellerWalletPage() {
                             <div className="flex items-start gap-2.5 rounded-xl border border-emerald-500/25 bg-emerald-500/8 px-3 py-2.5 text-xs text-emerald-800 dark:text-emerald-100">
                                 <Zap className="h-4 w-4 shrink-0 mt-0.5 text-emerald-600 dark:text-emerald-300" />
                                 <p>
-                                    Your custom reseller rates apply automatically — both in the API and in the
-                                    store when you are signed in.
+                                    Your custom reseller rates apply automatically on every API order — no promo
+                                    codes needed.
                                 </p>
                             </div>
                         </CardContent>
                     </Card>
                 </div>
+
 
                 <Tabs defaultValue="transactions" className="space-y-4 premium-dashboard-tabs">
                     <TabsList className="grid w-full grid-cols-3 premium-profile-tabs-list">

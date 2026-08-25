@@ -24,6 +24,7 @@ import {
   Zap,
   ShoppingCart,
   Ticket,
+  Tag,
 } from 'lucide-react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { cn } from "@/lib/utils";
@@ -159,27 +160,39 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
       label: 'Dashboard',
       icon: LayoutDashboardIcon,
     },
-    {
-      href: '/dashboard/ipStock',
-      label: 'All Plans',
-      icon: Store,
-      badge: 'Buy Now'
-    },
-    {
-      href: '/dashboard/ipStock?category=Linux',
-      label: 'Linux Servers',
-      icon: Server,
-    },
-    {
-      href: '/dashboard/ipStock?category=VPS',
-      label: 'Windows VPS',
-      icon: Cloud,
-    },
-    {
-      href: '/dashboard/ipStock?category=SlotIP',
-      label: 'Premium IP Proxies',
-      icon: Zap,
-    },
+    // Plan/store items — hidden for resellers (panel buying is disabled;
+    // resellers order via the Reseller API instead).
+    ...((!user || user?.userType !== 'reseller') ? [
+      {
+        href: '/dashboard/ipStock',
+        label: 'All Plans',
+        icon: Store,
+        badge: 'Buy Now'
+      },
+      {
+        href: '/dashboard/ipStock?category=Linux',
+        label: 'Linux Servers',
+        icon: Server,
+      },
+      {
+        href: '/dashboard/ipStock?category=VPS',
+        label: 'Windows VPS',
+        icon: Cloud,
+      },
+      {
+        href: '/dashboard/ipStock?category=SlotIP',
+        label: 'Premium IP Proxies',
+        icon: Zap,
+      },
+    ] : []),
+    // Reseller rate card lives on its own page — linked above Manage Orders.
+    ...(user?.userType === 'reseller' ? [
+      {
+        href: '/dashboard/api-rates',
+        label: 'API Rates',
+        icon: Tag,
+      },
+    ] : []),
     {
       href: '/dashboard/viewLinux',
       label: 'Manage Orders',

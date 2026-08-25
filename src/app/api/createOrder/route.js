@@ -18,6 +18,16 @@ export async function POST(request) {
       return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
     }
 
+    // Reseller panel buying is disabled — orders must go through the Reseller API.
+    const User = (await import('@/models/userModel')).default;
+    const buyer = await User.findById(userId).select('userType').lean();
+    if (buyer?.userType === 'reseller') {
+      return NextResponse.json(
+        { message: 'Panel purchasing is disabled for reseller accounts. Please place orders via the Reseller API (see Reseller API Docs).' },
+        { status: 403 }
+      );
+    }
+
     // 2. Read request data
     const reqBody = await request.json();
     const { productName, memory, transactionId, ipStockId, promoCode, netbayGroupTag } = reqBody;

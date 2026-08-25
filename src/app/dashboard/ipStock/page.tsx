@@ -500,6 +500,20 @@ function IPStockContent() {
   const [useWallet, setUseWallet] = useState(true);
   const [upiQrSession, setUpiQrSession] = useState<UpiQrSession | null>(null);
 
+  // Panel buying is disabled for resellers — they order via the Reseller API.
+  const [isReseller, setIsReseller] = useState(false);
+  useEffect(() => {
+    const cached = readDashboardCache(DASHBOARD_CACHE_KEYS.currentUser) as { userType?: string } | null;
+    if (cached?.userType === 'reseller') {
+      setIsReseller(true);
+      return;
+    }
+    dashboardFetch('/api/users/me', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((u) => { if (u?.userType === 'reseller') setIsReseller(true); })
+      .catch(() => { /* ignore */ });
+  }, []);
+
   useEffect(() => {
     if (paymentConfig.loaded) {
       setPaymentMethod(paymentConfig.primaryGateway);
@@ -1293,6 +1307,33 @@ function IPStockContent() {
     VPS: 'bg-sky-400 text-sky-950',
     SlotIP: 'bg-orange-400 text-orange-950',
   };
+
+  if (isReseller) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4">
+        <Card className="max-w-md w-full border-white/10 bg-white/[0.03]">
+          <CardHeader className="text-center space-y-3">
+            <div className="mx-auto h-14 w-14 rounded-full bg-emerald-500/10 border border-emerald-400/20 flex items-center justify-center">
+              <WalletIcon className="h-7 w-7 text-emerald-300" />
+            </div>
+            <CardTitle className="text-xl text-white">Panel purchasing is disabled</CardTitle>
+            <CardDescription className="text-white/55 leading-relaxed">
+              Purchases are disabled for reseller accounts in the panel. Please place orders
+              via the Reseller API — your API rates apply automatically.
+            </CardDescription>
+          </CardHeader>
+          <CardFooter className="flex flex-col gap-2">
+            <Button className="w-full" onClick={() => router.push('/dashboard/reseller-api-docs')}>
+              Reseller API Docs
+            </Button>
+            <Button variant="outline" className="w-full" onClick={() => router.push('/dashboard/reseller-wallet')}>
+              Reseller Console
+            </Button>
+          </CardFooter>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen">

@@ -58,6 +58,15 @@ export async function POST(request) {
       return NextResponse.json({ message: 'User not found' }, { status: 404 });
     }
 
+    // Reseller panel buying is disabled — promo stacking on reseller rates.
+    // Resellers must place orders via the Reseller API (/api/v1/reseller/orders).
+    if (user.userType === 'reseller') {
+      return NextResponse.json(
+        { message: 'Panel purchasing is disabled for reseller accounts. Please place orders via the Reseller API (see Reseller API Docs).' },
+        { status: 403 }
+      );
+    }
+
     const rateLimited = enforcePaymentRateLimit(request);
     if (rateLimited) return rateLimited;
 

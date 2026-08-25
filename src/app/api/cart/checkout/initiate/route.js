@@ -53,6 +53,14 @@ export async function POST(request) {
   const user = await User.findById(userId);
   if (!user) return NextResponse.json({ success: false, message: 'User not found' }, { status: 404 });
 
+  // Reseller panel buying is disabled — orders must go through the Reseller API.
+  if (user.userType === 'reseller') {
+    return NextResponse.json(
+      { success: false, message: 'Panel purchasing is disabled for reseller accounts. Please place orders via the Reseller API (see Reseller API Docs).' },
+      { status: 403 }
+    );
+  }
+
   const rateLimited = enforcePaymentRateLimit(request);
   if (rateLimited) return rateLimited;
 
