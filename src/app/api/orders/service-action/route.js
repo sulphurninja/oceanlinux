@@ -309,21 +309,30 @@ function watchResellerPasswordAfterReinstall(resellerApi, orderId, vmId, previou
     for (let i = 0; i < delays.length; i++) {
       await new Promise((r) => setTimeout(r, delays[i]));
       try {
+        const order = await Order.findById(orderId);
+        if (!order) return;
+
         const newPass = await resellerApi.getVmPassword(vmId);
         if (newPass && newPass !== previousPassword) {
-          await Order.findByIdAndUpdate(orderId, {
+          const synced = await syncResellerVmCredentials(resellerApi, order, vmId);
+          const updates = {
+            ...synced.updates,
             password: newPass,
             lastSyncTime: new Date(),
+            resellerVmId: String(vmId),
+          };
+          await Order.findByIdAndUpdate(orderId, {
+            ...updates,
             $push: {
               logs: {
                 action: 'reinstall',
                 timestamp: new Date(),
-                details: 'New password captured from reseller panel after reinstall',
+                details: `Post-reinstall sync from panel (${synced.changes.join(', ') || 'password'})`,
                 success: true,
               },
             },
           });
-          console.log(`[SERVICE-ACTION] 🔑 Post-reinstall password captured for order ${orderId} (attempt ${i + 1})`);
+          console.log(`[SERVICE-ACTION] 🔑 Post-reinstall credentials captured for order ${orderId} (attempt ${i + 1}, changes: ${synced.changes.join(', ') || 'password'})`);
           return;
         }
       } catch (err) {

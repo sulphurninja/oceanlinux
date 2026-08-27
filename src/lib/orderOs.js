@@ -28,6 +28,14 @@ function defaultUsernameForProduct(productName) {
   return isWindowsProductName(productName) ? 'Administrator' : 'root';
 }
 
+/** Login username for a given OS — Linux family uses root, Windows uses Administrator. */
+function usernameForOs(os) {
+  const t = String(os || '').toLowerCase();
+  if (/ubuntu|centos|debian|almalinux|rocky|linux/.test(t)) return 'root';
+  if (/windows|\bwin[-_ ]?\d/.test(t)) return 'Administrator';
+  return '';
+}
+
 /**
  * Prefer product name over order.os — schema defaults os to Ubuntu 22 before provision.
  */
@@ -48,27 +56,31 @@ function isWindowsOrder(order, ipStock) {
 
 function normalizePanelOsForOrder(panelOs, productName, currentOs) {
   const panel = String(panelOs || '').trim();
+  // Panel is the source of truth — after a reinstall the VM really runs what
+  // the panel reports, even if the product name says otherwise (e.g. a
+  // Windows product reinstalled to Ubuntu).
+  if (panel) return panel;
   if (isWindowsProductName(productName)) {
-    if (panel && !/ubuntu|centos|debian|linux/i.test(panel)) {
-      return panel;
-    }
     if (currentOs && !/ubuntu|centos/i.test(String(currentOs))) {
       return currentOs;
     }
     return defaultOsForProduct(productName);
   }
-  if (panel) return panel;
   return currentOs || defaultOsForProduct(productName);
 }
 
-function normalizePanelUsernameForOrder(panelUsername, productName, currentUsername) {
+function normalizePanelUsernameForOrder(panelUsername, productName, currentUsername, panelOs) {
   const user = String(panelUsername || '').trim();
+  // Trust the panel's username (root after a Linux reinstall, Administrator
+  // for Windows) instead of forcing a product-name default.
+  if (user) return user;
+  // Panel didn't expose a username — derive it from the panel-reported OS.
+  const fromOs = usernameForOs(panelOs);
+  if (fromOs) return fromOs;
   if (isWindowsProductName(productName)) {
-    if (user && user.toLowerCase() !== 'root') return user;
     if (currentUsername && currentUsername.toLowerCase() !== 'root') return currentUsername;
     return 'Administrator';
   }
-  if (user) return user;
   return currentUsername || 'root';
 }
 
@@ -77,6 +89,7 @@ module.exports = {
   isLinuxProductName,
   defaultOsForProduct,
   defaultUsernameForProduct,
+  usernameForOs,
   isWindowsOrder,
   normalizePanelOsForOrder,
   normalizePanelUsernameForOrder,

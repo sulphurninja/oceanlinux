@@ -136,5 +136,6 @@ export async function POST(request) {
     amount: recharge.amount,
     newBalance: result.newBalance,
     walletTxnId: result.walletTxnId,
+    reroutedToResellerWallet: !!result.reroutedToResellerWallet,
   });
 }

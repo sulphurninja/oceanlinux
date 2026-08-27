@@ -2575,8 +2575,8 @@ class AutoProvisioningService {
     }
 
     const { normalizePanelUsernameForOrder, normalizePanelOsForOrder } = require('@/lib/orderOs');
-    username = normalizePanelUsernameForOrder(username, order.productName, username);
     orderOs = normalizePanelOsForOrder(orderOs, order.productName, orderOs);
+    username = normalizePanelUsernameForOrder(username, order.productName, username, orderOs);
 
     if (
       ipAddress &&

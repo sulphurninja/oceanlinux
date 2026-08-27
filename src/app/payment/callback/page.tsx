@@ -181,7 +181,7 @@ function PaymentCallbackContent() {
                 : `Wallet recharged successfully! New balance: ₹${cd.newBalance}`);
               toast.success('Wallet recharged');
               fetchWalletSummary().catch(() => { });
-              setTimeout(() => router.push('/dashboard/wallet'), 2500);
+              setTimeout(() => router.push(cd.reroutedToResellerWallet ? '/dashboard/reseller-wallet' : '/dashboard/wallet'), 2500);
               return;
             }
 
@@ -199,7 +199,7 @@ function PaymentCallbackContent() {
               setMessage(`Wallet recharged successfully! New balance: ₹${pollData.newBalance}`);
               toast.success('Wallet recharged');
               fetchWalletSummary().catch(() => { });
-              setTimeout(() => router.push('/dashboard/wallet'), 2500);
+              setTimeout(() => router.push(cd.reroutedToResellerWallet ? '/dashboard/reseller-wallet' : '/dashboard/wallet'), 2500);
               return;
             }
 

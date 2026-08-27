@@ -414,6 +414,48 @@ export async function confirmRechargeFromWebhook(recharge, { paymentMethod, tran
 
   const creditAmount = Math.min(Number(recharge.amount), Number(verifiedAmount));
 
+  const User = (await import('@/models/userModel')).default;
+  const owner = await User.findById(recharge.user).select('userType resellerId').lean();
+
+  // Reseller used the customer wallet recharge flow — credit their reseller
+  // wallet instead of the normal user wallet so the payment is never lost.
+  if (owner?.userType === 'reseller' && owner.resellerId) {
+    const ResellerWalletService = (await import('@/services/resellerWalletService')).default;
+    try {
+      const result = await ResellerWalletService.recharge(
+        owner.resellerId,
+        creditAmount,
+        `Wallet top-up (rerouted from customer recharge #${recharge._id})`,
+        {
+          rechargeId: String(recharge._id),
+          clientTxnId: recharge.clientTxnId,
+          paymentMethod: recharge.paymentMethod,
+          transactionId: recharge.transactionId,
+          reroutedFromCustomerWallet: true,
+        }
+      );
+      recharge.status = 'confirmed';
+      recharge.creditedAt = new Date();
+      recharge.paymentDetails = {
+        ...(recharge.paymentDetails || {}),
+        reroutedToResellerWallet: true,
+        resellerId: String(owner.resellerId),
+      };
+      await recharge.save();
+      return {
+        success: true,
+        rechargeId: recharge._id,
+        newBalance: result.newBalance,
+        reroutedToResellerWallet: true,
+      };
+    } catch (err) {
+      console.error('[paymentDispatch] reroute to reseller wallet failed:', err);
+      recharge.status = 'pending';
+      await recharge.save();
+      return { success: false, error: err.message };
+    }
+  }
+
   // Final race guard: if we were reset from processing→pending after a credit
   // already landed, do not credit again.
   const alreadyCredited = await userWalletService.findTxnByReference(recharge.user, recharge._id);

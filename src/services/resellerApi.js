@@ -472,7 +472,20 @@ class ResellerApi {
       details.imageName ||
       details?.vm?.os ||
       '';
-    return typeof candidate === 'string' ? candidate.trim() : '';
+    if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
+
+    // Hostheaven exposes no dedicated OS field — infer from the VM name
+    // (e.g. "oceanlinux-ubuntu-7gb-60gb" after a reinstall).
+    const vmName = String(details.vmName || details.name || '').toLowerCase();
+    if (/ubuntu/.test(vmName)) return 'Ubuntu';
+    if (/centos/.test(vmName)) return 'CentOS';
+    if (/debian/.test(vmName)) return 'Debian';
+    if (/almalinux/.test(vmName)) return 'AlmaLinux';
+    if (/rocky/.test(vmName)) return 'Rocky Linux';
+    const winYear = vmName.match(/win(?:dows)?[-_ ]?(20\d{2})/);
+    if (winYear) return `Windows ${winYear[1]}`;
+    if (/windows|win[-_ ]?\d/.test(vmName)) return 'Windows';
+    return '';
   }
 
   /** Login username when the panel exposes it; otherwise callers default by OS. */

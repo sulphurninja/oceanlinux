@@ -345,8 +345,8 @@ async function hydrateProvisionedRow(api, row, order = null) {
   const rawUsername = ResellerApi.extractVmUsername(details);
   const rawOs = ResellerApi.extractVmOs(details);
   const productName = order?.productName || '';
-  const username = normalizePanelUsernameForOrder(rawUsername, productName, order?.username);
   const os = normalizePanelOsForOrder(rawOs, productName, order?.os);
+  const username = normalizePanelUsernameForOrder(rawUsername, productName, order?.username, rawOs || os);
   const expiryDate = ResellerApi.extractVmExpiryDate(row, details);
 
   if (!ip && !password) return null;
@@ -512,8 +512,8 @@ async function syncResellerVmCredentials(api, order, vmId) {
   const password = ResellerApi.extractVmPassword(details);
   const rawUsername = ResellerApi.extractVmUsername(details);
   const rawOs = ResellerApi.extractVmOs(details);
-  const username = normalizePanelUsernameForOrder(rawUsername, order.productName, order.username);
   const os = normalizePanelOsForOrder(rawOs, order.productName, order.os);
+  const username = normalizePanelUsernameForOrder(rawUsername, order.productName, order.username, rawOs || os);
   const panelIp =
     ResellerApi.extractOverviewRowIp(overviewRow) ||
     details?.ipAddress ||
@@ -1008,12 +1008,13 @@ async function completeResellerPendingOrder(order, ipStock, { api: existingApi =
     };
   }
 
+  const os = normalizePanelOsForOrder(provisioned.os, order.productName, order.os);
   const username = normalizePanelUsernameForOrder(
     provisioned.username,
     order.productName,
-    order.username
+    order.username,
+    provisioned.os || os
   );
-  const os = normalizePanelOsForOrder(provisioned.os, order.productName, order.os);
   const orderIpLocked = cleanOrderIp(order.ipAddress);
   const ipAddress =
     orderIpLocked && order.password
@@ -1111,8 +1112,9 @@ async function syncStuckResellerPendingOrders({ limit = 5 } = {}) {
 const RESELLER_FETCH_SYNC_COOLDOWN_MS = 8000;
 
 /**
- * When customer opens manage order, pull IP/credentials from panel if still missing.
- * Never re-provision when IP+password exist (admin may have moved VM to another IP block).
+ * When customer opens manage order, pull IP/credentials from panel.
+ * Always syncs os/username/password when a panel ref exists — a reinstall
+ * can change the OS even though IP+password were already stored.
  */
 async function maybeSyncResellerOrderOnFetch(order) {
   if (!order) return order;
@@ -1128,16 +1130,10 @@ async function maybeSyncResellerOrderOnFetch(order) {
   const ipStock = order.ipStockId ? await IPStock.findById(order.ipStockId) : null;
   if (!ipStock) return order;
 
-  const locationCtx = buildResellerLocationContext(ipStock, order);
-  const ipLooksWrong =
-    ip &&
-    locationCtx.expectedIpPrefix &&
-    !ipMatchesOrderedRange(ip, locationCtx.expectedIpPrefix);
+  const lastSync = order.lastSyncTime ? new Date(order.lastSyncTime).getTime() : 0;
+  if (Date.now() - lastSync < RESELLER_FETCH_SYNC_COOLDOWN_MS) return order;
 
   if (ip && pwd) {
-    if (!ipLooksWrong) return order;
-
-    // IP outside product prefix (admin reassigned) — sync by order IP only, never reprovision old range
     try {
       const Company = (await import('@/models/companyModel')).default;
       const Order = (await import('@/models/orderModel')).default;
@@ -1153,7 +1149,7 @@ async function maybeSyncResellerOrderOnFetch(order) {
       }
       return await Order.findById(order._id).lean();
     } catch (err) {
-      console.warn('[RESELLER-SYNC] Reassigned-IP credential sync failed:', err.message);
+      console.warn('[RESELLER-SYNC] Credential sync on fetch failed:', err.message);
       return order;
     }
   }

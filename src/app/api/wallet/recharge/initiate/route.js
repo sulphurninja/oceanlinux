@@ -37,6 +37,17 @@ export async function POST(request) {
     return NextResponse.json({ success: false, message: 'User not found' }, { status: 404 });
   }
 
+  if (user.userType === 'reseller') {
+    return NextResponse.json(
+      {
+        success: false,
+        message: 'Reseller accounts must recharge via Reseller Console → Wallet. Customer wallet top-ups are not available for reseller accounts.',
+        redirectTo: '/dashboard/reseller-wallet',
+      },
+      { status: 403 }
+    );
+  }
+
   const rateLimited = enforcePaymentRateLimit(request);
   if (rateLimited) return rateLimited;
 

@@ -110,6 +110,20 @@ export default function WalletPage() {
     style: 'currency', currency: 'INR', maximumFractionDigits: 2,
   }).format, []);
 
+  useEffect(() => {
+    const cached = readDashboardCache(DASHBOARD_CACHE_KEYS.currentUser) as { userType?: string } | null;
+    if (cached?.userType === 'reseller') {
+      router.replace('/dashboard/reseller-wallet');
+      return;
+    }
+    dashboardFetch('/api/users/me', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((u) => {
+        if (u?.userType === 'reseller') router.replace('/dashboard/reseller-wallet');
+      })
+      .catch(() => { /* ignore */ });
+  }, [router]);
+
   const fetchWallet = async (silent = false) => {
     try {
       const res = await dashboardFetch('/api/wallet', { credentials: 'include' });
