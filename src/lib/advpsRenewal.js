@@ -75,6 +75,32 @@ async function executeAdvpsUpstreamRenewal(api, order, { Order } = {}) {
     };
   } catch (err) {
     const testMode = isAdvpsTestApiKey() || isAdvpsTestModeResponse(err.advpsBody);
+    const msg = String(err.message || '');
+
+    // ADVPS only allows renewal close to expiry. A "not within renewal window"
+    // rejection means the panel expiry is already well ahead — the service is
+    // already renewed on the provider side (e.g. manual panel renewal). Treat
+    // it as soft-success so callers sync expiry from the panel and the renewal
+    // is not logged as a provider failure.
+    if (/not within renewal window/i.test(msg)) {
+      console.log(
+        '[ADVPS-RENEW] Not within renewal window — panel expiry already ahead; treating as already renewed'
+      );
+      return {
+        success: true,
+        alreadyOutsideWindow: true,
+        result: {
+          ...(err.advpsBody && typeof err.advpsBody === 'object' ? err.advpsBody : {}),
+          status: 'ok',
+          message:
+            'Already renewed on ADVPS panel (outside renewal window) — expiry synced from panel',
+          upstreamMessage: msg,
+        },
+        serviceId,
+        advpsOrderId,
+      };
+    }
+
     return {
       success: false,
       error: err.message,
