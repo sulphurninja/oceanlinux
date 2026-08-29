@@ -52,7 +52,7 @@ import { fetchWalletSummary } from '@/lib/walletClient';
 import { toast } from 'sonner';
 import { dashboardFetch } from '@/lib/dashboardFetch';
 import { cn } from '@/lib/utils';
-import { OsIcon } from '@/components/os/OsIcon';
+import { OsIcon, isWindowsOsName, isUbuntuOsName, isCentosOsName } from '@/components/os/OsIcon';
 import { premiumBtnOutline, premiumBadge } from '@/lib/premium-badges';
 import { ADVPS_REBUILD_LIMIT, getAdvpsRebuildUsage } from '@/lib/advpsRebuildLimit';
 import { isWithinRenewalWindow } from '@/lib/expiryHelper';
@@ -255,6 +255,10 @@ function humanizeOsTemplateName(name: unknown, id: string): string {
     window2022: 'Windows Server 2022',
     window2025: 'Windows Server 2025',
     'win-25': 'Windows Server 2025',
+    'primevm-win22': 'Windows Server 2022',
+    primevm_win22: 'Windows Server 2022',
+    'primevm-ubuntu22': 'Ubuntu 22.04',
+    primevm_ubuntu22: 'Ubuntu 22.04',
     ubuntu22: 'Ubuntu 22.04',
     ubuntu24: 'Ubuntu 24.04',
     'ubuntu-22': 'Ubuntu 22.04',
@@ -262,8 +266,18 @@ function humanizeOsTemplateName(name: unknown, id: string): string {
   };
   if (known[raw]) return known[raw];
 
+  const primeWin = raw.match(/^primevm[_-]?win(\d{2})$/);
+  if (primeWin) return `Windows Server 20${primeWin[1]}`;
+
+  const primeUbuntu = raw.match(/^primevm[_-]?ubuntu(\d{2})$/);
+  if (primeUbuntu) return `Ubuntu ${primeUbuntu[1]}.04`;
+
   const winYear = raw.match(/^win-?(\d{2})$/);
   if (winYear) return `Windows Server 20${winYear[1]}`;
+
+  if (isWindowsOsName(raw)) return 'Windows Server';
+  if (isUbuntuOsName(raw)) return 'Ubuntu';
+  if (isCentosOsName(raw)) return 'CentOS';
 
   if (typeof name === 'string' && name.trim()) return name.trim();
   if (name && typeof name === 'object') {
@@ -297,6 +311,65 @@ function getOsTemplateRebuildName(entry: unknown, id: string): string {
   }
   if (typeof entry === 'string') return entry;
   return id;
+}
+
+function osTemplateDetectionHint(name: unknown, id: string, label: string): string {
+  const rawName = typeof name === 'string' ? name : '';
+  return `${label} ${id} ${rawName}`.trim();
+}
+
+function partitionOsTemplates(templates: Record<string, unknown>) {
+  const windows: Array<{ id: string; label: string; hint: string }> = [];
+  const linux: Array<{ id: string; label: string; hint: string }> = [];
+  const other: Array<{ id: string; label: string; hint: string }> = [];
+
+  for (const [id, name] of Object.entries(templates)) {
+    const label = getOsTemplateLabel(name, id);
+    const hint = osTemplateDetectionHint(name, id, label);
+    const row = { id, label, hint };
+    if (isWindowsOsName(hint)) windows.push(row);
+    else if (isUbuntuOsName(hint) || isCentosOsName(hint) || /\blinux\b/i.test(hint)) linux.push(row);
+    else other.push(row);
+  }
+
+  return { windows, linux, other };
+}
+
+function OsTemplatePickerGrid({
+  items,
+  selectedOs,
+  onSelect,
+}: {
+  items: Array<{ id: string; label: string; hint: string }>;
+  selectedOs: string;
+  onSelect: (id: string) => void;
+}) {
+  if (!items.length) return null;
+
+  return (
+    <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 sm:gap-3">
+      {items.map(({ id, label, hint }) => {
+        const isSelected = selectedOs === id;
+        return (
+          <button
+            key={id}
+            type="button"
+            onClick={() => onSelect(id)}
+            className={cn(
+              'flex min-h-[4.5rem] w-full items-center gap-3 rounded-xl border p-3.5 text-left transition-colors sm:min-h-[5rem] sm:p-4',
+              isSelected
+                ? 'border-emerald-400/40 bg-emerald-500/15 ring-1 ring-emerald-400/30'
+                : 'border-white/12 bg-white/[0.03] hover:bg-white/[0.06] hover:border-emerald-400/20 active:scale-[0.99]'
+            )}
+          >
+            <OsIcon os={hint} className="h-10 w-10 shrink-0 sm:h-11 sm:w-11" />
+            <span className="min-w-0 flex-1 text-sm font-medium leading-snug sm:text-[0.9375rem]">{label}</span>
+            {isSelected && <Check className="h-4 w-4 shrink-0 text-primary" />}
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 
 function orderOsMatchesTemplate(orderOs: string | undefined, templateId: string): boolean {
@@ -3466,7 +3539,7 @@ const OrderDetails = () => {
                 }}
               >
                 <DialogContent
-                  className="premium-dashboard-dialog premium-dialog-mobile-sheet sm:max-w-[480px] w-[calc(100vw-1.25rem)] overflow-hidden"
+                  className="premium-dashboard-dialog premium-dialog-mobile-sheet sm:max-w-[520px] w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] overflow-hidden"
                   onOpenAutoFocus={(e) => e.preventDefault()}
                 >
                   <DialogHeader className="premium-dashboard-dialog-header">
@@ -3493,32 +3566,56 @@ const OrderDetails = () => {
                       </div>
                     ) : (
                       <>
-                        <div className="space-y-2">
+                        <div className="space-y-4">
                           <Label className="text-sm font-medium">
                             Select Operating System
                           </Label>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-72 overflow-y-auto pr-1">
-                            {Object.entries(osTemplates).map(([id, name]) => {
-                              const label = getOsTemplateLabel(name, id);
-                              const isSelected = selectedOs === id;
+                          <div className="max-h-[min(60vh,22rem)] space-y-4 overflow-y-auto pr-1 sm:max-h-72">
+                            {(() => {
+                              const { windows, linux, other } = partitionOsTemplates(osTemplates);
                               return (
-                                <button
-                                  key={id}
-                                  type="button"
-                                  onClick={() => setSelectedOs(id)}
-                                  className={cn(
-                                    'flex items-center gap-3 rounded-lg border p-3 text-left transition-colors',
-                                    isSelected
-                                      ? 'border-emerald-400/40 bg-emerald-500/15 ring-1 ring-emerald-400/30'
-                                      : 'border-white/12 bg-white/[0.03] hover:bg-white/[0.06] hover:border-emerald-400/20'
+                                <>
+                                  {windows.length > 0 && (
+                                    <div className="space-y-2">
+                                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                                        Windows
+                                      </p>
+                                      <OsTemplatePickerGrid
+                                        items={windows}
+                                        selectedOs={selectedOs}
+                                        onSelect={setSelectedOs}
+                                      />
+                                    </div>
                                   )}
-                                >
-                                  <OsIcon os={label} className="h-8 w-8 shrink-0" />
-                                  <span className="min-w-0 flex-1 text-sm font-medium leading-tight">{label}</span>
-                                  {isSelected && <Check className="h-4 w-4 shrink-0 text-primary" />}
-                                </button>
+                                  {linux.length > 0 && (
+                                    <div className="space-y-2">
+                                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                                        Linux
+                                      </p>
+                                      <OsTemplatePickerGrid
+                                        items={linux}
+                                        selectedOs={selectedOs}
+                                        onSelect={setSelectedOs}
+                                      />
+                                    </div>
+                                  )}
+                                  {other.length > 0 && (
+                                    <div className="space-y-2">
+                                      {(windows.length > 0 || linux.length > 0) && (
+                                        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                                          Other
+                                        </p>
+                                      )}
+                                      <OsTemplatePickerGrid
+                                        items={other}
+                                        selectedOs={selectedOs}
+                                        onSelect={setSelectedOs}
+                                      />
+                                    </div>
+                                  )}
+                                </>
                               );
-                            })}
+                            })()}
                           </div>
                         </div>
 

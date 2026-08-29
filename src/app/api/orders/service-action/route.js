@@ -377,7 +377,7 @@ function classifyResellerIso(iso) {
     .filter(Boolean)
     .join(' ')
     .toLowerCase();
-  if (/\b(windows|win\s*server|win\s*xp|win\s*7|win\s*8|win\s*10|win\s*11|server\s*200[38]|server\s*201[269]|server\s*202[0-9])\b/.test(haystack)) {
+  if (/\b(windows|win\s*server|win\s*xp|win\s*7|win\s*8|win\s*10|win\s*11|server\s*200[38]|server\s*201[269]|server\s*202[0-9]|primevm[_-]?win)\b/.test(haystack)) {
     return { family: 'windows', username: 'Administrator', osLabel: iso.isoName || iso.name || null };
   }
   if (/\b(ubuntu|debian|centos|rocky|almalinux|alma|fedora|rhel|redhat|linux|arch|opensuse|suse)\b/.test(haystack)) {

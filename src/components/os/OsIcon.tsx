@@ -4,19 +4,23 @@ import { Computer } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export function isWindowsOsName(name: string): boolean {
-  const t = (name || '').toLowerCase();
+  const t = (name || '').toLowerCase().replace(/[_\s]+/g, '-');
   return (
     t.includes('windows') ||
-    t.includes('win server') ||
+    t.includes('win-server') ||
     t.includes('window20') ||
+    t.includes('primevm-win') ||
+    t.includes('primevm_win') ||
     /\bwin-?\d{2}\b/.test(t) ||
     /\bwin-\d/.test(t) ||
+    /[_-]win\d{2}\b/.test(t) ||
     t.includes('rdp')
   );
 }
 
 export function isUbuntuOsName(name: string): boolean {
-  return (name || '').toLowerCase().includes('ubuntu');
+  const t = (name || '').toLowerCase();
+  return t.includes('ubuntu') || t.includes('primevm-ubuntu') || t.includes('primevm_ubuntu');
 }
 
 export function isCentosOsName(name: string): boolean {
@@ -108,12 +112,22 @@ function humanizeOsLabelFromString(name: string): string {
     window2022: 'Windows Server 2022',
     window2025: 'Windows Server 2025',
     'win-25': 'Windows Server 2025',
+    'primevm-win22': 'Windows Server 2022',
+    primevm_win22: 'Windows Server 2022',
+    'primevm-ubuntu22': 'Ubuntu 22.04',
+    primevm_ubuntu22: 'Ubuntu 22.04',
     ubuntu22: 'Ubuntu 22.04',
     ubuntu24: 'Ubuntu 24.04',
     'ubuntu-22': 'Ubuntu 22.04',
     'ubuntu-24': 'Ubuntu 24.04',
   };
   if (known[raw]) return known[raw];
+
+  const primeWin = raw.match(/^primevm[_-]?win(\d{2})$/);
+  if (primeWin) return `Windows Server 20${primeWin[1]}`;
+
+  const primeUbuntu = raw.match(/^primevm[_-]?ubuntu(\d{2})$/);
+  if (primeUbuntu) return `Ubuntu ${primeUbuntu[1]}.04`;
 
   const winYear = raw.match(/^win-?(\d{2})$/);
   if (winYear) return `Windows Server 20${winYear[1]}`;
