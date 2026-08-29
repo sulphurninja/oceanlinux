@@ -18,6 +18,14 @@ const {
   assertSmartVpsActionOk,
 } = require('@/lib/smartvpsPowerActions');
 const { parseSmartVpsExpiryDate, resolveSmartVpsOrderIp } = require('@/lib/smartvpsOrderSync');
+const {
+  buildOrderSyncContext,
+  shouldSyncPanelDataToOrder,
+  markOrderExpiredIfPastDue,
+  cleanOrderIp,
+  ipAddressRegex,
+} = require('@/lib/orderIpOwnership');
+const IPStock = require('@/models/ipStockModel');
 const { sanitizeCustomerApiPayload, customerServiceErrorMessage } = require('@/lib/customerFacingErrors');
 const { assertOrderNotAdminSuspended } = require('@/lib/orderAdminSuspend');
 
@@ -1142,6 +1150,41 @@ async function syncServerState(orderId, details, info) {
       password: currentOrder.password ? '[PASSWORD SET]' : 'no password',
       os: currentOrder.os
     });
+
+    const orderIp = cleanOrderIp(currentOrder.ipAddress);
+    if (orderIp) {
+      const ipRegex = ipAddressRegex(orderIp);
+      const siblings = ipRegex
+        ? await Order.find({
+            ipAddress: ipRegex,
+            status: { $nin: ['cancelled', 'failed'] },
+          }).lean()
+        : [];
+      let stockDocs = [];
+      if (currentOrder.ipStockId) {
+        const stock = await IPStock.findById(currentOrder.ipStockId)
+          .select('inventoryItems tags provider name defaultConfigurations')
+          .lean();
+        if (stock) stockDocs = [stock];
+      }
+      const syncCtx = buildOrderSyncContext(siblings, stockDocs);
+
+      if (!shouldSyncPanelDataToOrder(currentOrder, syncCtx)) {
+        const markedExpired = await markOrderExpiredIfPastDue(currentOrder);
+        console.log('[SMARTVPS-SYNC] Skipping panel sync for order', orderId, {
+          markedExpired,
+          reason: markedExpired ? 'order_expired' : 'not_current_ip_owner',
+        });
+        await Order.findByIdAndUpdate(orderId, { lastSyncTime: new Date() });
+        return {
+          skipped: true,
+          lastSyncTime: new Date(),
+          markedExpired,
+          expiryUpdated: false,
+          credentialsUpdated: false,
+        };
+      }
+    }
 
     const updateData = {
       lastSyncTime: new Date()

@@ -495,38 +495,44 @@ export async function handleRenewalWebhook(renewalTxnId, payment, webhookStartTi
       const existingReq = await RenewalRequest.findOne({ renewalTxnId }).lean();
       if (!existingReq) {
         const customer = await User.findById(order.user).select('name email').lean();
-        await RenewalRequest.create({
-          orderId: order._id,
-          userId: order.user,
-          companyId: companyCheck.companyId,
-          renewalTxnId,
-          amount: renewalPrice,
-          paymentMethod: 'cashfree',
-          paymentId: payment.payment.cf_payment_id,
-          gatewayOrderId: renewalTxnId,
-          paymentDetails: {
-            cf_payment_id: payment.payment.cf_payment_id,
-            cf_order_id: renewalTxnId,
-            payment_status: payment.payment.payment_status,
-            payment_amount: payment.payment.payment_amount,
-            confirmedAt: new Date(),
-            via: 'webhook',
-          },
-          status: 'pending',
-          orderSnapshot: {
-            productName: order.productName,
-            ipAddress: order.ipAddress || '',
-            customerEmail: customer?.email || '',
-            customerName: customer?.name || '',
-            memory: order.memory || '',
-            stockName: companyCheck.stockName || '',
-          },
-          renewalSnapshot: {
-            previousExpiry: order.expiryDate,
-            proposedNewExpiry: newExpiryDate,
-          },
-        });
-        console.log(`[WEBHOOK-RENEWAL] ✅ RenewalRequest created for company approval`);
+        try {
+          await RenewalRequest.create({
+            orderId: order._id,
+            userId: order.user,
+            companyId: companyCheck.companyId,
+            renewalTxnId,
+            amount: renewalPrice,
+            paymentMethod: 'cashfree',
+            paymentId: payment.payment.cf_payment_id,
+            gatewayOrderId: renewalTxnId,
+            paymentDetails: {
+              cf_payment_id: payment.payment.cf_payment_id,
+              cf_order_id: renewalTxnId,
+              payment_status: payment.payment.payment_status,
+              payment_amount: payment.payment.payment_amount,
+              confirmedAt: new Date(),
+              via: 'webhook',
+            },
+            status: 'pending',
+            orderSnapshot: {
+              productName: order.productName,
+              ipAddress: order.ipAddress || '',
+              customerEmail: customer?.email || '',
+              customerName: customer?.name || '',
+              memory: order.memory || '',
+              stockName: companyCheck.stockName || '',
+            },
+            renewalSnapshot: {
+              previousExpiry: order.expiryDate,
+              proposedNewExpiry: newExpiryDate,
+            },
+          });
+          console.log(`[WEBHOOK-RENEWAL] ✅ RenewalRequest created for company approval`);
+        } catch (createErr) {
+          // Webhook and confirm-api can race on the same renewalTxnId.
+          if (createErr?.code !== 11000) throw createErr;
+          console.log(`[WEBHOOK-RENEWAL] ⚠️ RenewalRequest already exists (duplicate webhook race)`);
+        }
       } else {
         console.log(`[WEBHOOK-RENEWAL] ⚠️ RenewalRequest already exists (${existingReq.status})`);
       }

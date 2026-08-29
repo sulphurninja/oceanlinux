@@ -3,7 +3,7 @@
  * On company renewal approval we start a stopped/suspended VM and sync credentials.
  */
 
-const { resolveKurohostApiForOrder, syncKurohostOrderFromApi } = require('@/lib/kurohostOrderSync');
+const { resolveKurohostApiForOrder, syncKurohostOrderFromApi, commitKurohostOrderSync } = require('@/lib/kurohostOrderSync');
 
 function isKurohostOrder(order) {
   return order?.provider === 'kurohost' || !!order?.kurohostInstanceId;
@@ -76,7 +76,7 @@ async function executeKurohostRenewalOnApprove(order, { Order } = {}) {
   try {
     sync = await syncKurohostOrderFromApi(order);
     if (sync.ok && Order && Object.keys(sync.dbUpdates).length) {
-      await Order.findByIdAndUpdate(order._id, sync.dbUpdates);
+      await commitKurohostOrderSync(order, sync);
     }
     if (sync.ok) actions.push('sync');
   } catch (syncErr) {

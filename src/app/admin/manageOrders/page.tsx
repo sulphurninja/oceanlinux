@@ -29,6 +29,7 @@ import { Calendar as CalendarComponent } from '@/components/ui/calendar';
 import { format } from 'date-fns';
 import { Textarea } from '@/components/ui/textarea';
 import { PaymentDashboard } from '@/components/admin/PaymentDashboard';
+import { getAdminProviderDisplayNameFromOrder } from '@/lib/customerProviderDisplay';
 
 const ADMIN_ORDER_STATUSES = ['pending', 'confirmed', 'active'] as const;
 
@@ -1309,6 +1310,7 @@ const ManageOrders = () => {
                                                     <SelectItem value="hostycare">Hostycare</SelectItem>
                                                     <SelectItem value="smartvps">SmartVPS</SelectItem>
                                                     <SelectItem value="advps">ADVPS</SelectItem>
+                                                    <SelectItem value="reseller-api">Hostheaven</SelectItem>
                                                 </SelectContent>
                                             </Select>
                                         </div>
@@ -1514,8 +1516,8 @@ const ManageOrders = () => {
                                             <div className="flex flex-wrap items-center gap-2">
                                                 <Badge variant="outline" className="text-xs">{order.memory}</Badge>
                                                 <span className="text-sm font-bold tabular-nums">₹{order.price.toLocaleString('en-IN')}</span>
-                                                <Badge variant="secondary" className="text-xs capitalize">
-                                                    {order.provider || 'hostycare'}
+                                                <Badge variant="secondary" className="text-xs">
+                                                    {getAdminProviderDisplayNameFromOrder(order)}
                                                 </Badge>
                                             </div>
 

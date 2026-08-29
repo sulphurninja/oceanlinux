@@ -108,8 +108,16 @@ function applyJoyMachineToOrderUpdates(machine, machineInfo, order) {
   return { dbUpdates, changes, expiryDate };
 }
 
+async function commitJoyOrderSync(order, machine, machineInfo) {
+  const { commitPanelSyncToOrder } = require('@/lib/orderIpOwnership');
+  const applied = applyJoyMachineToOrderUpdates(machine, machineInfo, order);
+  await commitPanelSyncToOrder(order, applied.dbUpdates);
+  return applied;
+}
+
 module.exports = {
   parseJoyExpiryDate,
   pickJoyExpiryDate,
   applyJoyMachineToOrderUpdates,
+  commitJoyOrderSync,
 };

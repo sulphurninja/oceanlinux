@@ -10,7 +10,7 @@ const {
   getAdvpsRebuildLimitMessage,
   consumeAdvpsRebuildCredit,
 } = require('@/lib/advpsRebuildLimit');
-const { syncAdvpsOrderCredentials, configureAdvpsServiceIp } = require('@/lib/advpsOrderSync');
+const { syncAdvpsOrderCredentials, configureAdvpsServiceIp, commitAdvpsOrderSync } = require('@/lib/advpsOrderSync');
 import { internalKeyMatches } from '@/lib/internalApiKey';
 
 function validateInternalKey(request) {
@@ -109,7 +109,7 @@ export async function POST(request) {
           const d = unwrapAdvpsEnvelope(statusRes) || {};
           const powerState = normalizeAdvpsPowerState(d);
           const sync = await syncAdvpsOrderCredentials(api, order, { statusPayload: statusRes, Order });
-          await Order.findByIdAndUpdate(orderId, sync.dbUpdates);
+          await commitAdvpsOrderSync(order, sync);
           const orderSnapshot = await Order.findById(orderId)
             .select('ipAddress username password os provisioningStatus provisioningError lastSyncTime advpsRebuildCount advpsRebuildCountMonth status advpsOrderId advpsServiceId')
             .lean();

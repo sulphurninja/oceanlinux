@@ -20,7 +20,10 @@ const {
 } = require('@/lib/smartvpsOrderSync');
 const {
   buildInventoryOwnerMaps,
+  buildOrderSyncContext,
   shouldSyncPanelDataToOrder,
+  markOrderExpiredIfPastDue,
+  cleanOrderIp,
 } = require('@/lib/orderIpOwnership');
 
 // --- tiny logger
@@ -56,14 +59,21 @@ function isSmartVpsStock(ipStock) {
 }
 
 // --- update one order from SmartVPS status()
-async function refreshOneOrder(order, smartvpsApi, { updateCreds = true, ownerCtx = null } = {}) {
+async function refreshOneOrder(order, smartvpsApi, { updateCreds = true, syncCtx = null } = {}) {
   const ip = order?.ipAddress && extractIpFromAddress(order.ipAddress);
   if (!ip) {
     return { orderId: order._id.toString(), skipped: true, reason: 'No valid IP on order' };
   }
 
-  if (ownerCtx && !shouldSyncPanelDataToOrder(order, ownerCtx)) {
-    return { orderId: order._id.toString(), skipped: true, reason: 'not_current_ip_owner' };
+  const ctx = syncCtx || { ownerByIp: new Map(), ownerByItemId: new Map(), ordersByIp: new Map() };
+  if (!shouldSyncPanelDataToOrder(order, ctx)) {
+    const markedExpired = await markOrderExpiredIfPastDue(order);
+    return {
+      orderId: order._id.toString(),
+      skipped: true,
+      reason: markedExpired ? 'order_expired_detached' : 'not_current_ip_owner',
+      markedExpired,
+    };
   }
 
   L.kv('Checking status for IP', ip);
@@ -74,7 +84,7 @@ async function refreshOneOrder(order, smartvpsApi, { updateCreds = true, ownerCt
   const { update, obj, hasCreds, panelExpiry, expirySynced } = buildSmartVpsStatusOrderUpdates(
     order,
     raw,
-    { updateCreds }
+    { updateCreds, syncPanelData: true }
   );
 
   L.kv('status(parsed)', obj);
@@ -190,8 +200,6 @@ export async function POST(req) {
     const ipStockIds = [...new Set(candidates.map(o => o.ipStockId).filter(Boolean))];
     const ipStocks = await IPStock.find({ _id: { $in: ipStockIds } });
     const ipStockMap = new Map(ipStocks.map(s => [String(s._id), s]));
-    const { ownerByIp, ownerByItemId } = buildInventoryOwnerMaps(ipStocks);
-    const ownerCtx = { ownerByIp, ownerByItemId };
     L.kv('ipStocksLoaded', ipStocks.length);
 
     const smartvpsOrders = candidates.filter(o => {
@@ -211,12 +219,31 @@ export async function POST(req) {
       });
     }
 
+    const { ownerByIp, ownerByItemId } = buildInventoryOwnerMaps(ipStocks);
+
+    const ipsInBatch = [
+      ...new Set(smartvpsOrders.map((o) => cleanOrderIp(o.ipAddress)).filter(Boolean)),
+    ];
+    let relatedOrders = smartvpsOrders;
+    if (ipsInBatch.length) {
+      relatedOrders = await Order.find({
+        status: { $nin: ['cancelled', 'failed'] },
+        $or: ipsInBatch.map((ip) => ({
+          ipAddress: new RegExp(`^${ip.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`),
+        })),
+      }).lean();
+    }
+    const syncCtx = buildOrderSyncContext(relatedOrders, ipStocks);
+
     // Process each with small delay
     const results = [];
     for (let i = 0; i < smartvpsOrders.length; i++) {
       const order = smartvpsOrders[i];
       try {
-        const res = await refreshOneOrder(order, smartvpsApi, { updateCreds: true, ownerCtx });
+        const res = await refreshOneOrder(order, smartvpsApi, {
+          updateCreds: true,
+          syncCtx: { ...syncCtx, ownerByIp, ownerByItemId },
+        });
         results.push({ ok: true, ...res });
       } catch (err) {
         results.push({ ok: false, orderId: order._id.toString(), error: err.message });

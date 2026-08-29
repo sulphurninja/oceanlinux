@@ -1,4 +1,5 @@
 const AdvpsAPI = require('@/services/advpsApi');
+const { commitPanelSyncToOrder } = require('@/lib/orderIpOwnership');
 const {
   unwrapAdvpsEnvelope,
   extractAdvpsStatusCredentials,
@@ -556,6 +557,10 @@ async function configureAdvpsServiceIp(api, serviceId, { logPrefix = '[ADVPS]' }
   }
 }
 
+async function commitAdvpsOrderSync(order, syncResult) {
+  return commitPanelSyncToOrder(order, syncResult?.dbUpdates || {});
+}
+
 module.exports = {
   normalizePurchaseOrderDetails,
   pickAdvpsService,
@@ -568,4 +573,5 @@ module.exports = {
   resolveAdvpsServiceIdForPower,
   formatAdvpsActionError,
   configureAdvpsServiceIp,
+  commitAdvpsOrderSync,
 };

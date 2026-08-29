@@ -136,20 +136,6 @@ class RenewalLogger {
             // Import dynamically to avoid circular dependencies
             const RenewalLogModel = (await import('@/models/renewalLogModel')).default;
 
-            // Dedupe: the same payment is often processed by both the gateway
-            // webhook and the browser confirm-api. Only the first success log
-            // is kept so the admin page never shows a renewal twice.
-            if (success) {
-                const existingSuccess = await RenewalLogModel.findOne({
-                    renewalTxnId: this.renewalTxnId,
-                    success: true
-                }).select('_id processedVia').lean();
-                if (existingSuccess) {
-                    console.log(`[RENEWAL-LOG] Success log already exists for ${this.renewalTxnId} via ${existingSuccess.processedVia} — skipping duplicate (${this.processedVia})`);
-                    return existingSuccess;
-                }
-            }
-
             const logDoc = {
                 orderId: this.orderId,
                 renewalTxnId: this.renewalTxnId,
@@ -166,6 +152,42 @@ class RenewalLogger {
                 errorMessage,
                 errorStack
             };
+
+            // One admin row per renewalTxnId. Webhook + browser confirm-api
+            // (and occasional webhook retries) all fire for the same payment.
+            const existing = await RenewalLogModel.findOne({
+                renewalTxnId: this.renewalTxnId,
+            }).lean();
+
+            if (existing) {
+                if (existing.success) {
+                    console.log(`[RENEWAL-LOG] Log already exists for ${this.renewalTxnId} via ${existing.processedVia} — skipping duplicate (${this.processedVia})`);
+                    return existing;
+                }
+                if (success) {
+                    const upgraded = await RenewalLogModel.findByIdAndUpdate(
+                        existing._id,
+                        {
+                            ...logDoc,
+                            logs: [
+                                ...(existing.logs || []),
+                                {
+                                    timestamp: new Date(),
+                                    level: 'info',
+                                    message: `Recovered: earlier ${existing.processedVia} attempt failed; ${this.processedVia} succeeded`,
+                                    data: null,
+                                },
+                                ...this.logs,
+                            ],
+                        },
+                        { new: true }
+                    );
+                    console.log(`[RENEWAL-LOG] Upgraded failed log ${existing._id} to success for ${this.renewalTxnId}`);
+                    return upgraded;
+                }
+                console.log(`[RENEWAL-LOG] Failed log already exists for ${this.renewalTxnId} — skipping duplicate (${this.processedVia})`);
+                return existing;
+            }
 
             const savedLog = await RenewalLogModel.create(logDoc);
 

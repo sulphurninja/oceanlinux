@@ -32,7 +32,7 @@ const { getCompanyJoyApiConfig, resolveJoyApiForOrder } = require('@/lib/company
 const JoyApi = require('@/services/joyApi');
 const { applyJoyMachineToOrderUpdates } = require('@/lib/joyOrderSync');
 const { runNetbayPostRebuildFlow } = require('@/lib/netbayPostRebuildFlow');
-const { applyNetbayServiceToOrderUpdates, resolveNetbayPowerState, syncNetbayOrderFromApi } = require('@/lib/netbayOrderSync');
+const { applyNetbayServiceToOrderUpdates, resolveNetbayPowerState, syncNetbayOrderFromApi, commitNetbayOrderSync } = require('@/lib/netbayOrderSync');
 const {
   syncResellerVmCredentials,
   resolveResellerVmForOrder,
@@ -41,7 +41,9 @@ const {
   applyKurohostInstanceToOrderUpdates,
   resolveKurohostPowerState,
   syncKurohostOrderFromApi,
+  commitKurohostOrderSync,
 } = require('@/lib/kurohostOrderSync');
+const { commitPanelSyncToOrder } = require('@/lib/orderIpOwnership');
 const { mapKurohostOsLabel, runKurohostPostReinstallFlow } = require('@/lib/kurohostPostReinstallFlow');
 const { toUserFacingNetbayError } = require('@/lib/netbayApiErrors');
 const { sanitizeCustomerApiPayload, customerServiceErrorMessage } = require('@/lib/customerFacingErrors');
@@ -292,7 +294,7 @@ async function syncResellerOrderPassword(resellerApi, order, orderId, vmId) {
 async function applyResellerPanelSync(resellerApi, order, orderId, vmId) {
   const synced = await syncResellerVmCredentials(resellerApi, order, vmId);
   const updates = { ...synced.updates, resellerVmId: String(vmId) };
-  await Order.findByIdAndUpdate(orderId, updates);
+  await commitPanelSyncToOrder(order, updates);
   return synced;
 }
 
@@ -321,8 +323,8 @@ function watchResellerPasswordAfterReinstall(resellerApi, orderId, vmId, previou
             lastSyncTime: new Date(),
             resellerVmId: String(vmId),
           };
+          await commitPanelSyncToOrder(order, updates);
           await Order.findByIdAndUpdate(orderId, {
-            ...updates,
             $push: {
               logs: {
                 action: 'reinstall',
@@ -792,7 +794,7 @@ export async function POST(request) {
             }
             const inst = sync.instance;
             const { powerState, rawStatus } = resolveKurohostPowerState(inst);
-            await Order.findByIdAndUpdate(orderId, sync.dbUpdates);
+            await commitKurohostOrderSync(order, sync);
             const syncChanges = sync.changes || [];
             const credentialsUpdated = syncChanges.some(c => ['password', 'username', 'ipAddress'].includes(c));
             return NextResponse.json({
@@ -1002,9 +1004,9 @@ export async function POST(request) {
                 }, 502, action);
               }
               if (sync.changes.length > 0) {
-                await Order.findByIdAndUpdate(orderId, { $set: sync.dbUpdates });
+                await commitNetbayOrderSync(order, sync);
               } else {
-                await Order.findByIdAndUpdate(orderId, { $set: { lastSyncTime: sync.dbUpdates.lastSyncTime } });
+                await commitNetbayOrderSync(order, { dbUpdates: { lastSyncTime: sync.dbUpdates.lastSyncTime } });
               }
               const credentialsUpdated = sync.changes.some((c) =>
                 ['password', 'username', 'ipAddress'].includes(c)
@@ -1055,7 +1057,7 @@ export async function POST(request) {
                 rawStatus = resolved.rawStatus;
               }
             }
-            await Order.findByIdAndUpdate(orderId, dbUpdates);
+            await commitPanelSyncToOrder(order, dbUpdates);
             const passwordChanged = syncChanges.includes('password');
             const usernameChanged = syncChanges.includes('username');
             const ipChanged = syncChanges.includes('ipAddress');
@@ -1240,7 +1242,7 @@ export async function POST(request) {
               }
               const applied = applyJoyMachineToOrderUpdates(machine, info, order);
               const dbUpdates = applied.dbUpdates;
-              await Order.findByIdAndUpdate(orderId, dbUpdates);
+              await commitPanelSyncToOrder(order, dbUpdates);
               const expiryUpdated = applied.changes.includes('expiryDate');
               return NextResponse.json({
                 success: true,
@@ -2395,7 +2397,7 @@ export async function GET(request) {
           const inst = KurohostApi.unwrapInstance(detailRes);
           const { powerState, rawStatus } = resolveKurohostPowerState(inst);
           const applied = applyKurohostInstanceToOrderUpdates(inst, order);
-          await Order.findByIdAndUpdate(orderId, applied.dbUpdates);
+          await commitPanelSyncToOrder(order, applied.dbUpdates);
           const credentialsUpdated = applied.changes.some(c => ['password', 'username', 'ipAddress'].includes(c));
 
           return NextResponse.json({
@@ -2478,7 +2480,7 @@ export async function GET(request) {
           // Sync IP / credentials / expiry from Netbay (expiryDate is source of truth)
           const applied = applyNetbayServiceToOrderUpdates(svc, order);
           const dbUpdates = applied.dbUpdates;
-          await Order.findByIdAndUpdate(orderId, dbUpdates);
+          await commitPanelSyncToOrder(order, dbUpdates);
 
           const passwordChanged = applied.changes.includes('password');
           const usernameChanged = applied.changes.includes('username');
@@ -2547,7 +2549,7 @@ export async function GET(request) {
           }
           const applied = applyJoyMachineToOrderUpdates(machine, info, order);
           const dbUpdates = applied.dbUpdates;
-          await Order.findByIdAndUpdate(orderId, dbUpdates);
+          await commitPanelSyncToOrder(order, dbUpdates);
           const expiryUpdated = applied.changes.includes('expiryDate');
           return NextResponse.json({
             success: true,

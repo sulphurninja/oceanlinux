@@ -22,6 +22,7 @@ const {
   resolveAdvpsServiceIdForPower,
   formatAdvpsActionError,
   configureAdvpsServiceIp,
+  commitAdvpsOrderSync,
 } = require('@/lib/advpsOrderSync');
 const { extractPasswordFromGenerateError } = require('@/lib/advpsPasswordFetch');
 const { sanitizeCustomerApiPayload, customerServiceErrorMessage } = require('@/lib/customerFacingErrors');
@@ -122,9 +123,9 @@ export async function GET(request) {
     if (sync.freshIp) details.ip = sync.freshIp;
 
     if (Object.keys(sync.dbUpdates).length > 1 || sync.credentialsUpdated) {
-      await Order.findByIdAndUpdate(orderId, sync.dbUpdates);
+      await commitAdvpsOrderSync(order, sync);
     } else {
-      await Order.findByIdAndUpdate(orderId, { lastSyncTime: sync.dbUpdates.lastSyncTime });
+      await commitAdvpsOrderSync(order, { dbUpdates: { lastSyncTime: sync.dbUpdates.lastSyncTime } });
     }
 
     return customerJson({
@@ -257,9 +258,9 @@ export async function POST(request) {
           // Auto-sync IP/password/username on every status poll (same path as manual Sync)
           const sync = await syncAdvpsOrderCredentials(api, order, { statusPayload: statusRes, Order });
           if (sync.credentialsUpdated) {
-            await Order.findByIdAndUpdate(orderId, sync.dbUpdates);
+            await commitAdvpsOrderSync(order, sync);
           } else {
-            await Order.findByIdAndUpdate(orderId, { lastSyncTime: sync.dbUpdates.lastSyncTime });
+            await commitAdvpsOrderSync(order, { dbUpdates: { lastSyncTime: sync.dbUpdates.lastSyncTime } });
           }
 
           return customerJson({
@@ -439,7 +440,7 @@ export async function POST(request) {
             Order,
             tryGeneratePasswordFallback: action === 'pullpassword' || action === 'sync',
           });
-          await Order.findByIdAndUpdate(orderId, sync.dbUpdates);
+          await commitAdvpsOrderSync(order, sync);
           result = {
             synced: true,
             message: sync.credentialsUpdated

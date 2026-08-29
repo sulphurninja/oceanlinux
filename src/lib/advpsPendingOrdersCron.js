@@ -89,12 +89,12 @@ export async function checkAdvpsPendingOrders() {
       }
 
       console.log(`${tag} COMPLETED! IP=${ipAddress}, serviceId=${advpsServiceId}, password=${password.substring(0, 4)}****`);
-      await Order.findByIdAndUpdate(order._id, {
+      const { finalizeIpAssignmentForOrder } = require('@/lib/orderIpOwnership');
+      await finalizeIpAssignmentForOrder(order, ipAddress, {
         status: 'active',
         provisioningStatus: 'active',
         provisioningError: '',
         advpsServiceId,
-        ipAddress,
         username,
         password,
         expiryDate,

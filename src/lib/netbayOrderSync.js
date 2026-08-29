@@ -4,6 +4,7 @@ const Order = require('@/models/orderModel');
 const NetbayApi = require('@/services/netbayApi');
 const { getCompanyNetbayApiConfig } = require('@/lib/companyNetbayApi');
 const { formatIpAddress, extractBaseIp } = require('@/lib/ipAddressHelper.js');
+const { commitPanelSyncToOrder } = require('@/lib/orderIpOwnership');
 
 function pickNetbayExpiryDate(payload) {
   if (!payload || typeof payload !== 'object') return null;
@@ -219,11 +220,11 @@ async function syncAllNetbayOrdersFromApi() {
 
       const hasFieldUpdates = sync.changes.length > 0;
       if (hasFieldUpdates) {
-        await Order.findByIdAndUpdate(order._id, { $set: sync.dbUpdates });
-        updated += 1;
-        if (sync.changes.includes('expiryDate')) expirySynced += 1;
+        const committed = await commitPanelSyncToOrder(order, sync.dbUpdates);
+        if (committed.applied) updated += 1;
+        if (committed.applied && sync.changes.includes('expiryDate')) expirySynced += 1;
       } else {
-        await Order.findByIdAndUpdate(order._id, { $set: { lastSyncTime: sync.dbUpdates.lastSyncTime } });
+        await commitPanelSyncToOrder(order, { lastSyncTime: sync.dbUpdates.lastSyncTime });
       }
     } catch (err) {
       errors.push({ orderId: String(order._id), error: err.message });
@@ -238,6 +239,10 @@ async function syncAllNetbayOrdersFromApi() {
   };
 }
 
+async function commitNetbayOrderSync(order, syncResult) {
+  return commitPanelSyncToOrder(order, syncResult?.dbUpdates || {});
+}
+
 module.exports = {
   pickNetbayExpiryDate,
   resolveNetbayApiForOrder,
@@ -245,4 +250,5 @@ module.exports = {
   applyNetbayServiceToOrderUpdates,
   syncNetbayOrderFromApi,
   syncAllNetbayOrdersFromApi,
+  commitNetbayOrderSync,
 };

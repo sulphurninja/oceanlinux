@@ -22,6 +22,10 @@ const {
   normalizePanelOsForOrder,
   normalizePanelUsernameForOrder,
 } = require('@/lib/orderOs');
+const {
+  commitPanelSyncToOrder,
+  finalizeIpAssignmentForOrder,
+} = require('@/lib/orderIpOwnership');
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
@@ -1037,7 +1041,7 @@ async function completeResellerPendingOrder(order, ipStock, { api: existingApi =
     panelCredsUpdate = { panelUsername, panelPassword };
   }
 
-  await Order.findByIdAndUpdate(order._id, {
+  const provisionUpdate = {
     status: fullyProvisioned ? 'active' : 'confirmed',
     provisioningStatus: fullyProvisioned ? 'active' : 'provisioning',
     provisioningError: fullyProvisioned ? '' : 'PENDING: awaiting IP/password from panel',
@@ -1045,14 +1049,19 @@ async function completeResellerPendingOrder(order, ipStock, { api: existingApi =
     ...panelCredsUpdate,
     resellerVmId: provisioned.vmId || order.resellerVmId || undefined,
     resellerZoneId: locationCtx.expectedZoneId != null ? String(locationCtx.expectedZoneId) : undefined,
-    ipAddress,
     username,
     password,
     os,
     expiryDate,
     autoProvisioned: true,
     lastProvisionAttempt: new Date(),
-  });
+  };
+
+  if (fullyProvisioned && ipAddress) {
+    await finalizeIpAssignmentForOrder(order, ipAddress, provisionUpdate);
+  } else {
+    await Order.findByIdAndUpdate(order._id, { ...provisionUpdate, ipAddress });
+  }
 
   return {
     success: fullyProvisioned,
@@ -1145,7 +1154,7 @@ async function maybeSyncResellerOrderOnFetch(order) {
       const resolved = await resolveResellerVmForOrder(api, order);
       const synced = await syncResellerVmCredentials(api, order, resolved.vmId);
       if (synced.changes.length) {
-        await Order.findByIdAndUpdate(order._id, synced.updates);
+        await commitPanelSyncToOrder(order, synced.updates);
       }
       return await Order.findById(order._id).lean();
     } catch (err) {

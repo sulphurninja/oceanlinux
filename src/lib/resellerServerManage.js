@@ -45,7 +45,9 @@ const {
   syncAdvpsOrderCredentials,
   resolveAdvpsServiceIdForPower,
   configureAdvpsServiceIp,
+  commitAdvpsOrderSync,
 } = require('@/lib/advpsOrderSync');
+const { commitPanelSyncToOrder } = require('@/lib/orderIpOwnership');
 const { toUserFacingNetbayError } = require('@/lib/netbayApiErrors');
 const VirtualizorAPI = require('@/services/virtualizorApi');
 const { getCompanyVirtualizorAccounts, toVirtualizorApiAccounts } = require('@/lib/companyVirtualizor');
@@ -389,7 +391,7 @@ async function runAdvps(order, orderId, action, osType) {
       const d = unwrapAdvpsEnvelope(statusRes) || {};
       const powerState = normalizeAdvpsPowerState(d);
       const sync = await syncAdvpsOrderCredentials(api, order, { statusPayload: statusRes, Order });
-      await Order.findByIdAndUpdate(orderId, sync.credentialsUpdated ? sync.dbUpdates : { lastSyncTime: sync.dbUpdates.lastSyncTime });
+      await commitAdvpsOrderSync(order, sync.credentialsUpdated ? sync : { dbUpdates: { lastSyncTime: sync.dbUpdates.lastSyncTime } });
       return {
         success: true,
         message: 'Status retrieved',
@@ -404,7 +406,7 @@ async function runAdvps(order, orderId, action, osType) {
     case 'sync': {
       const statusRes = await api.status(serviceId);
       const sync = await syncAdvpsOrderCredentials(api, order, { statusPayload: statusRes, Order, tryGeneratePasswordFallback: true });
-      await Order.findByIdAndUpdate(orderId, sync.dbUpdates);
+      await commitAdvpsOrderSync(order, sync);
       return { success: true, message: sync.credentialsUpdated ? `Synced — ${sync.changes.join(', ')}` : 'Status synced', data: { credentialsUpdated: sync.credentialsUpdated } };
     }
     case 'reinstall':
@@ -768,7 +770,7 @@ async function runJoy(order, orderId, action, _osType, ipStock) {
         else if (['paused', 'suspended', 'hibernated'].includes(raw)) powerState = 'suspended';
       } catch (_) { /* best effort */ }
       const applied = applyJoyMachineToOrderUpdates(machine, info, order);
-      await Order.findByIdAndUpdate(orderId, applied.dbUpdates);
+      await commitPanelSyncToOrder(order, applied.dbUpdates);
       return {
         success: true,
         message: applied.changes.includes('expiryDate')

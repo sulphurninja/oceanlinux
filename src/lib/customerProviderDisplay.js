@@ -15,9 +15,28 @@ export function getCustomerProviderDisplayName(provider) {
       return 'OceanLinux';
     case 'advps':
       return 'ADVPS';
+    case 'reseller-api':
+      return 'Hostheaven';
+    case 'kurohost':
+      return 'KuroHost';
+    case 'joy':
+      return 'Joy';
     default:
       return provider.charAt(0).toUpperCase() + provider.slice(1);
   }
+}
+
+/** Admin / manage-orders label — same mapping, keeps DB `provider` key unchanged. */
+export function getAdminProviderDisplayName(provider, order) {
+  if (order?.resellerVmId || order?.resellerOrderId) {
+    if (!provider || provider === 'reseller-api') return 'Hostheaven';
+  }
+  return getCustomerProviderDisplayName(provider);
+}
+
+export function getAdminProviderDisplayNameFromOrder(order) {
+  if (!order) return 'OceanLinux';
+  return getAdminProviderDisplayName(order.provider, order);
 }
 
 /** Infer provider key from an order row (dashboard lists). */
@@ -31,6 +50,8 @@ export function getCustomerProviderDisplayNameFromOrder(order) {
   if (order.provider) {
     return getCustomerProviderDisplayName(order.provider);
   }
+
+  if (order.resellerVmId || order.resellerOrderId) return 'Hostheaven';
 
   if (order.netbayServiceId) return 'OceanLinux';
   if (order.advpsServiceId) return 'ADVPS';

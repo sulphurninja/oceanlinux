@@ -326,35 +326,56 @@ export async function POST(request) {
       const customer = await User.findById(order.user).select('name email').lean();
       const stockName = companyCheck.stockName || '';
 
-      const renewalReq = await RenewalRequest.create({
-        orderId: order._id,
-        userId: order.user,
-        companyId: companyCheck.companyId,
-        renewalTxnId,
-        amount: renewalPrice,
-        paymentMethod: actualPaymentMethod,
-        paymentId: cf_payment_id,
-        gatewayOrderId: actualPaymentMethod === 'razorpay' ? razorpayPaymentId : renewalTxnId,
-        paymentDetails: {
-          method: actualPaymentMethod,
-          payment_id: cf_payment_id,
-          order_id: actualPaymentMethod === 'razorpay' ? razorpayPaymentId : renewalTxnId,
-          confirmedAt: new Date(),
-        },
-        status: 'pending',
-        orderSnapshot: {
-          productName: order.productName,
-          ipAddress: order.ipAddress || '',
-          customerEmail: customer?.email || '',
-          customerName: customer?.name || '',
-          memory: order.memory || '',
-          stockName,
-        },
-        renewalSnapshot: {
-          previousExpiry: currentExpiry,
-          proposedNewExpiry: newExpiryDate,
-        },
-      });
+      let renewalReq;
+      try {
+        renewalReq = await RenewalRequest.create({
+          orderId: order._id,
+          userId: order.user,
+          companyId: companyCheck.companyId,
+          renewalTxnId,
+          amount: renewalPrice,
+          paymentMethod: actualPaymentMethod,
+          paymentId: cf_payment_id,
+          gatewayOrderId: actualPaymentMethod === 'razorpay' ? razorpayPaymentId : renewalTxnId,
+          paymentDetails: {
+            method: actualPaymentMethod,
+            payment_id: cf_payment_id,
+            order_id: actualPaymentMethod === 'razorpay' ? razorpayPaymentId : renewalTxnId,
+            confirmedAt: new Date(),
+          },
+          status: 'pending',
+          orderSnapshot: {
+            productName: order.productName,
+            ipAddress: order.ipAddress || '',
+            customerEmail: customer?.email || '',
+            customerName: customer?.name || '',
+            memory: order.memory || '',
+            stockName,
+          },
+          renewalSnapshot: {
+            previousExpiry: currentExpiry,
+            proposedNewExpiry: newExpiryDate,
+          },
+        });
+      } catch (createErr) {
+        if (createErr?.code === 11000) {
+          renewalReq = await RenewalRequest.findOne({ renewalTxnId }).lean();
+          if (renewalReq) {
+            console.log(`[RENEWAL-CONFIRM] ✅ RenewalRequest already exists (race with webhook)`);
+            await logger.finalize(true, currentExpiry);
+            return NextResponse.json({
+              success: true,
+              message: renewalReq.status === 'pending'
+                ? 'Payment received. Your renewal is waiting for approval from the provider.'
+                : `Renewal already ${renewalReq.status}.`,
+              companyApproval: { status: renewalReq.status, requestId: renewalReq._id },
+              orderId: order._id,
+              newExpiryDate: currentExpiry,
+            });
+          }
+        }
+        throw createErr;
+      }
 
       // Tag the order itself so the customer's order-detail UI can show
       // "awaiting approval" without making a second roundtrip. We also

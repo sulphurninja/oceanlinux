@@ -89,9 +89,15 @@ async function syncKurohostOrderFromApi(order) {
   return { ok: true, dbUpdates, changes, instance };
 }
 
+async function commitKurohostOrderSync(order, syncResult) {
+  const { commitPanelSyncToOrder } = require('@/lib/orderIpOwnership');
+  return commitPanelSyncToOrder(order, syncResult?.dbUpdates || {});
+}
+
 module.exports = {
   resolveKurohostApiForOrder,
   applyKurohostInstanceToOrderUpdates,
   resolveKurohostPowerState,
   syncKurohostOrderFromApi,
+  commitKurohostOrderSync,
 };

@@ -63,7 +63,7 @@ function extractIpFromAddress(ipAddress) {
  * Build Mongo update fields from a SmartVPS status() response.
  * Always prefers panel ExpiryDate when present.
  */
-function buildSmartVpsStatusOrderUpdates(order, statusRaw, { updateCreds = true } = {}) {
+function buildSmartVpsStatusOrderUpdates(order, statusRaw, { updateCreds = true, syncPanelData = true } = {}) {
   const obj = parseSmartVpsStatusObject(statusRaw);
 
   const username = obj.Usernane || obj.Username || order?.username || null;
@@ -76,31 +76,39 @@ function buildSmartVpsStatusOrderUpdates(order, statusRaw, { updateCreds = true 
 
   const hasCreds = Boolean(username && password);
   const update = {
-    ...(updateCreds && hasCreds ? { username, password } : {}),
-    ...(os ? { os } : {}),
-    ...(panelExpiry ? { expiryDate: panelExpiry } : {}),
-    ...(machineStatus ? { machineStatus } : {}),
-    ...(powerStatus ? { powerStatus } : {}),
-    ...(actionStatus ? { actionStatus } : {}),
     autoProvisioned: true,
     provisioningError: '',
     lastSyncTime: new Date(),
+    ...(machineStatus ? { machineStatus } : {}),
+    ...(powerStatus ? { powerStatus } : {}),
+    ...(actionStatus ? { actionStatus } : {}),
   };
 
-  if (hasCreds) {
-    update.provisioningStatus = 'active';
-    update.status = 'active';
+  if (syncPanelData) {
+    Object.assign(update, {
+      ...(updateCreds && hasCreds ? { username, password } : {}),
+      ...(os ? { os } : {}),
+      ...(panelExpiry ? { expiryDate: panelExpiry } : {}),
+    });
+
+    if (hasCreds) {
+      update.provisioningStatus = 'active';
+      update.status = 'active';
+    } else if (order) {
+      update.provisioningStatus = order.provisioningStatus || 'provisioning';
+      update.status = order.status || 'active';
+    }
   } else if (order) {
-    update.provisioningStatus = order.provisioningStatus || 'provisioning';
-    update.status = order.status || 'active';
+    update.provisioningStatus = order.provisioningStatus;
+    update.status = order.status;
   }
 
   return {
     update,
     obj,
     hasCreds,
-    panelExpiry,
-    expirySynced: !!panelExpiry,
+    panelExpiry: syncPanelData ? panelExpiry : null,
+    expirySynced: syncPanelData && !!panelExpiry,
     ip: obj.IP || extractIpFromAddress(order?.ipAddress),
   };
 }

@@ -44,6 +44,9 @@ const {
 const ResellerApi = require('@/services/resellerApi');
 const { pickNetbayExpiryDate } = require('@/lib/netbayOrderSync');
 const { orderHasConfirmedPayment } = require('@/lib/orderPaymentStatus');
+const {
+  finalizeIpAssignmentForOrder,
+} = require('@/lib/orderIpOwnership');
 
 const L = {
   head: (label) => {
@@ -1434,7 +1437,11 @@ class AutoProvisioningService {
       updateData.lastProvisionAttempt = new Date();
     }
 
-    await Order.findByIdAndUpdate(order._id, updateData);
+    if (fullyProvisioned && ipAddress) {
+      await finalizeIpAssignmentForOrder(order, ipAddress, updateData);
+    } else {
+      await Order.findByIdAndUpdate(order._id, updateData);
+    }
 
     const totalTime = Date.now() - startTime;
     console.log("\n" + "✅".repeat(80));
@@ -1761,7 +1768,11 @@ class AutoProvisioningService {
       updateData.provisioningLockId = undefined;
       updateData.lastProvisionAttempt = new Date();
     }
-    await Order.findByIdAndUpdate(order._id, updateData);
+    if (fullyProvisioned && displayIpAddress) {
+      await finalizeIpAssignmentForOrder(order, displayIpAddress, updateData);
+    } else {
+      await Order.findByIdAndUpdate(order._id, updateData);
+    }
 
     return {
       success: fullyProvisioned,
@@ -2025,7 +2036,11 @@ class AutoProvisioningService {
       updateData.provisioningLockId = undefined;
       updateData.lastProvisionAttempt = new Date();
     }
-    await Order.findByIdAndUpdate(order._id, updateData);
+    if (fullyProvisioned && displayIpAddress) {
+      await finalizeIpAssignmentForOrder(order, displayIpAddress, updateData);
+    } else {
+      await Order.findByIdAndUpdate(order._id, updateData);
+    }
 
     const totalTime = Date.now() - startTime;
     console.log("\n" + "✅".repeat(80));
@@ -2190,7 +2205,11 @@ class AutoProvisioningService {
 
     if (ipAddress) updateData.ipAddress = ipAddress;
 
-    await Order.findByIdAndUpdate(order._id, updateData);
+    if (fullyProvisioned && ipAddress) {
+      await finalizeIpAssignmentForOrder(order, ipAddress, updateData);
+    } else {
+      await Order.findByIdAndUpdate(order._id, updateData);
+    }
 
     const totalTime = Date.now() - startTime;
     console.log(`[KUROHOST] ✅ PROVISIONING ${fullyProvisioned ? 'COMPLETED' : 'PENDING — cron will check'}`);
@@ -2607,7 +2626,7 @@ class AutoProvisioningService {
     }
 
     const fullyProvisioned = !!(ipAddress && (password || resellerVmId));
-    await Order.findByIdAndUpdate(order._id, {
+    const provisionUpdate = {
       status: fullyProvisioned ? 'active' : 'confirmed',
       provisioningStatus: fullyProvisioned ? 'active' : 'provisioning',
       provisioningError: fullyProvisioned
@@ -2625,7 +2644,13 @@ class AutoProvisioningService {
       os: orderOs,
       expiryDate,
       autoProvisioned: true,
-    });
+    };
+
+    if (fullyProvisioned && ipAddress) {
+      await finalizeIpAssignmentForOrder(order, ipAddress, provisionUpdate);
+    } else {
+      await Order.findByIdAndUpdate(order._id, provisionUpdate);
+    }
 
     const totalTime = Date.now() - startTime;
     L.line(`[RESELLER-API] ${fullyProvisioned ? 'COMPLETED' : 'PENDING'} in ${totalTime}ms`);
@@ -2984,13 +3009,12 @@ class AutoProvisioningService {
         hostycareServiceId: undefined,
         username,
         password,
-        ipAddress,
         autoProvisioned: true,
         provisioningError: '',
         os,
         expiryDate
       };
-      await Order.findByIdAndUpdate(order._id, updateData);
+      await finalizeIpAssignmentForOrder(order, ipAddress, updateData);
 
       const totalTime = Date.now() - startTime;
       console.log("\n" + "✅".repeat(80));
@@ -3184,11 +3208,20 @@ class AutoProvisioningService {
         password: credentials.password,
         autoProvisioned: true,
         provisioningError: '',
-        ipAddress: formattedIpAddress,
         expiryDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
       };
 
-      await Order.findByIdAndUpdate(order._id, updateData);
+      if (ipAddress && ipAddress !== 'Pending - Server being provisioned') {
+        await finalizeIpAssignmentForOrder(order, formattedIpAddress, {
+          ...updateData,
+          ipAddress: formattedIpAddress,
+        });
+      } else {
+        await Order.findByIdAndUpdate(order._id, {
+          ...updateData,
+          ipAddress: formattedIpAddress,
+        });
+      }
 
       const totalTime = Date.now() - startTime;
       console.log("\n" + "✅".repeat(80));
@@ -3244,7 +3277,15 @@ class AutoProvisioningService {
         null;
 
       if (ip && ip !== 'Pending - Server being provisioned') {
-        await Order.findByIdAndUpdate(orderId, { ipAddress: ip });
+        const order = await Order.findById(orderId).lean();
+        if (order) {
+          await finalizeIpAssignmentForOrder(order, ip, {
+            ipAddress: ip,
+            lastSyncTime: new Date(),
+          });
+        } else {
+          await Order.findByIdAndUpdate(orderId, { ipAddress: ip });
+        }
         L.line(`[BACKGROUND-IP] ✅ Updated IP for order ${orderId}: ${ip}`);
       } else {
         L.line(`[BACKGROUND-IP] ⌛ IP still not ready for service ${serviceId}`);

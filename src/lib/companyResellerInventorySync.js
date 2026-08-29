@@ -9,6 +9,10 @@ const {
   buildInventoryOwnerMaps,
   groupOrdersByIp,
   shouldSyncPanelDataToOrder,
+  markOrderExpiredIfPastDue,
+  buildOrderSyncContext,
+  ipAddressRegex,
+  commitPanelSyncToOrder,
 } = require('@/lib/orderIpOwnership');
 
 const EXPIRY_FETCH_COOLDOWN_MS = 5 * 60 * 1000;
@@ -258,6 +262,7 @@ async function syncCompanyOrderExpiriesFromPanelIndex(ipIndex, stockDocs, api = 
     if (!ip) continue;
 
     if (!shouldSyncPanelDataToOrder(order, syncCtx)) {
+      await markOrderExpiredIfPastDue(order);
       skipped.push({
         orderId: String(order._id),
         ipAddress: ip,
@@ -356,8 +361,18 @@ async function syncSingleOrderExpiryFromPanel(order, { force = false, companyDoc
     companyDoc || (await Company.findById(ipStock.company).select('resellerApi name').lean());
   if (!getCompanyResellerApiConfig(company)) return { order, synced: false };
 
-  const { ownerByIp, ownerByItemId } = buildInventoryOwnerMaps([ipStock]);
-  if (!shouldSyncPanelDataToOrder(order, { ownerByIp, ownerByItemId })) {
+  const ip = cleanIpAddress(order.ipAddress);
+  let siblings = [order];
+  const regex = ip ? ipAddressRegex(ip) : null;
+  if (regex) {
+    siblings = await Order.find({
+      ipAddress: regex,
+      status: { $nin: ['cancelled', 'failed'] },
+    }).lean();
+  }
+  const syncCtx = buildOrderSyncContext(siblings, [ipStock]);
+  if (!shouldSyncPanelDataToOrder(order, syncCtx)) {
+    await markOrderExpiredIfPastDue(order);
     return { order, synced: false, reason: 'not_current_ip_owner' };
   }
 
@@ -388,9 +403,12 @@ async function syncSingleOrderExpiryFromPanel(order, { force = false, companyDoc
     updates.expiryDate = panel.expiryDate;
   }
 
-  const updated = await Order.findByIdAndUpdate(order._id, updates, { new: true }).lean();
+  const committed = await commitPanelSyncToOrder(order, updates);
+  const updated = committed.applied
+    ? await Order.findById(order._id).lean()
+    : await Order.findById(order._id).lean();
 
-  if (shouldUpdate && order.inventoryItemId) {
+  if (committed.applied && shouldUpdate && order.inventoryItemId) {
     await IPStock.updateOne(
       { 'inventoryItems._id': order.inventoryItemId },
       { $set: { 'inventoryItems.$.expiryDate': panel.expiryDate } }
@@ -399,7 +417,7 @@ async function syncSingleOrderExpiryFromPanel(order, { force = false, companyDoc
 
   return {
     order: updated,
-    synced: shouldUpdate,
+    synced: committed.applied && shouldUpdate,
     extended: extendsCustomer,
     expiryDate: panel.expiryDate,
   };
@@ -463,11 +481,14 @@ async function syncUserHostheavenOrderExpiries(orders) {
       const entry = ipIndex.get(ip);
       if (!entry?.expiryDate) continue;
 
-      if (!shouldSyncPanelDataToOrder(order, syncCtx)) continue;
+      if (!shouldSyncPanelDataToOrder(order, syncCtx)) {
+        await markOrderExpiredIfPastDue(order);
+        continue;
+      }
 
       if (!panelExpiryExtendsCustomer(order.expiryDate, entry.expiryDate)) continue;
 
-      await Order.findByIdAndUpdate(order._id, {
+      await commitPanelSyncToOrder(order, {
         expiryDate: entry.expiryDate,
         lastSyncTime: new Date(),
         ...(entry.vmId && !order.resellerVmId

@@ -75,6 +75,7 @@ function resolveCanonicalOwnerOrderId(ip, ordersForIp = [], ownerByIp = new Map(
 
 /**
  * Should this order receive panel expiry / credential sync for its IP?
+ * Expired orders never sync — prevents reviving old owners after IP resale.
  */
 function shouldSyncPanelDataToOrder(order, ctx = {}) {
   if (!order?._id || !order?.ipAddress) return false;
@@ -82,6 +83,10 @@ function shouldSyncPanelDataToOrder(order, ctx = {}) {
   const orderId = String(order._id);
   const ip = cleanOrderIp(order.ipAddress);
   if (!ip) return false;
+
+  if (isOrderExpiredWithoutRenewal(order)) {
+    return false;
+  }
 
   const ownerByIp = ctx.ownerByIp || new Map();
   const ownerByItemId = ctx.ownerByItemId || new Map();
@@ -94,10 +99,6 @@ function shouldSyncPanelDataToOrder(order, ctx = {}) {
     if (itemOwner && itemOwner !== orderId) return false;
   }
 
-  if (isOrderExpiredWithoutRenewal(order) && inventoryOwner !== orderId) {
-    return false;
-  }
-
   const ordersForIp =
     ctx.ordersByIp?.get(ip) ||
     (ctx.allOrders ? groupOrdersByIp(ctx.allOrders).get(ip) : null);
@@ -107,6 +108,64 @@ function shouldSyncPanelDataToOrder(order, ctx = {}) {
     if (canonical && canonical !== orderId) return false;
   }
 
+  return true;
+}
+
+function buildOrderSyncContext(orders = [], stockDocs = []) {
+  const { ownerByIp, ownerByItemId } = buildInventoryOwnerMaps(stockDocs);
+  return {
+    ownerByIp,
+    ownerByItemId,
+    ordersByIp: groupOrdersByIp(orders),
+    allOrders: orders,
+  };
+}
+
+function ipAddressRegex(ip) {
+  const clean = cleanOrderIp(ip);
+  if (!clean) return null;
+  const escaped = clean.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`^${escaped}`);
+}
+
+/** Another non-expired order already holds this IP — block duplicate provision. */
+async function findActiveIpConflict(ip, currentOrderId, nowMs = Date.now()) {
+  const Order = require('@/models/orderModel').default;
+  const regex = ipAddressRegex(ip);
+  if (!regex) return null;
+
+  const others = await Order.find({
+    _id: { $ne: currentOrderId },
+    status: { $nin: ['cancelled', 'failed', 'expired', 'superseded'] },
+    ipAddress: regex,
+  }).select('_id createdAt expiryDate renewalPayments status ipAddress clientTxnId');
+
+  for (const other of others) {
+    if (!isOrderExpiredWithoutRenewal(other, nowMs)) {
+      return other;
+    }
+  }
+  return null;
+}
+
+/** Clear credentials on expired orders that still show as active in the dashboard. */
+async function markOrderExpiredIfPastDue(order) {
+  if (!order?._id || !isOrderExpiredWithoutRenewal(order)) return false;
+  if (['expired', 'cancelled', 'failed', 'superseded'].includes(String(order.status || ''))) {
+    return false;
+  }
+
+  const Order = require('@/models/orderModel').default;
+  await Order.findByIdAndUpdate(order._id, {
+    $set: {
+      status: 'expired',
+      provisioningStatus: 'terminated',
+      ipAddress: '',
+      username: '',
+      password: '',
+      lastSyncTime: new Date(),
+    },
+  });
   return true;
 }
 
@@ -122,22 +181,25 @@ async function detachSupersededIpOrders({
   const Order = require('@/models/orderModel').default;
   const ip = cleanOrderIp(ipAddress);
   const currentId = String(currentOrderId);
-  if (!ipStockId || !currentId) return { detached: 0 };
+  if (!currentId || (!ip && !inventoryItemId)) return { detached: 0 };
 
-  const candidates = await Order.find({
+  const currentOrder = await Order.findById(currentOrderId).select('createdAt').lean();
+  const currentCreated = expiryMs(currentOrder?.createdAt) || 0;
+
+  const ipRegex = ip ? ipAddressRegex(ip) : null;
+  const orClauses = [];
+  if (inventoryItemId) orClauses.push({ inventoryItemId: String(inventoryItemId) });
+  if (ipRegex) orClauses.push({ ipAddress: ipRegex });
+  if (!orClauses.length) return { detached: 0 };
+
+  const query = {
     _id: { $ne: currentOrderId },
-    ipStockId: String(ipStockId),
     status: { $nin: ['cancelled', 'failed', 'expired', 'superseded'] },
-    $or: [
-      ...(inventoryItemId ? [{ inventoryItemId: String(inventoryItemId) }] : []),
-      ...(ip
-        ? [
-            { ipAddress: ip },
-            { ipAddress: new RegExp(`^${ip.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`) },
-          ]
-        : []),
-    ],
-  }).select('_id ipAddress inventoryItemId');
+    $or: orClauses,
+  };
+  if (ipStockId) query.ipStockId = String(ipStockId);
+
+  const candidates = await Order.find(query).select('_id ipAddress inventoryItemId createdAt expiryDate renewalPayments status');
 
   let detached = 0;
   for (const stale of candidates) {
@@ -146,6 +208,11 @@ async function detachSupersededIpOrders({
       inventoryItemId && String(stale.inventoryItemId || '') === String(inventoryItemId);
     const sameIp = ip && staleIp === ip;
     if (!sameItem && !sameIp) continue;
+
+    const staleCreated = expiryMs(stale.createdAt) || 0;
+    const staleExpired = isOrderExpiredWithoutRenewal(stale);
+    // Newer non-expired holder keeps the IP; older or expired orders are detached.
+    if (!staleExpired && staleCreated >= currentCreated) continue;
 
     await Order.findByIdAndUpdate(stale._id, {
       $set: {
@@ -165,13 +232,140 @@ async function detachSupersededIpOrders({
   return { detached };
 }
 
+/** Load sibling orders + inventory maps for panel sync ownership checks. */
+async function loadSyncContextForOrder(order) {
+  const Order = require('@/models/orderModel').default;
+  const IPStock = require('@/models/ipStockModel');
+
+  const ip = cleanOrderIp(order?.ipAddress);
+  let siblings = [];
+  if (ip) {
+    const regex = ipAddressRegex(ip);
+    if (regex) {
+      siblings = await Order.find({
+        ipAddress: regex,
+        status: { $nin: ['cancelled', 'failed'] },
+      }).lean();
+    }
+  }
+  if (!siblings.length && order?._id) siblings = [order];
+
+  let stockDocs = [];
+  if (order?.ipStockId) {
+    const stock = await IPStock.findById(order.ipStockId)
+      .select('inventoryItems tags provider name defaultConfigurations company')
+      .lean();
+    if (stock) stockDocs = [stock];
+  }
+
+  return buildOrderSyncContext(siblings, stockDocs);
+}
+
+/** Returns filtered updates when panel sync is allowed; otherwise only lastSyncTime. */
+async function guardPanelSyncUpdate(order, updates = {}) {
+  if (!order?._id) {
+    return { allowed: false, updates: {}, markedExpired: false, reason: 'no_order' };
+  }
+
+  const ctx = await loadSyncContextForOrder(order);
+  if (!shouldSyncPanelDataToOrder(order, ctx)) {
+    const markedExpired = await markOrderExpiredIfPastDue(order);
+    return {
+      allowed: false,
+      updates: { lastSyncTime: new Date() },
+      markedExpired,
+      reason: markedExpired ? 'order_expired' : 'not_current_ip_owner',
+    };
+  }
+
+  return {
+    allowed: true,
+    updates: { ...updates, lastSyncTime: updates.lastSyncTime || new Date() },
+    markedExpired: false,
+    reason: null,
+  };
+}
+
+/**
+ * Apply panel expiry/credentials to an order (all providers).
+ * Expired or superseded owners are not revived.
+ */
+async function commitPanelSyncToOrder(orderOrId, updates = {}) {
+  const Order = require('@/models/orderModel').default;
+  const order =
+    orderOrId && orderOrId._id && orderOrId.ipAddress !== undefined
+      ? orderOrId
+      : await Order.findById(orderOrId).lean();
+  if (!order) {
+    return { applied: false, reason: 'order_not_found', updates: {} };
+  }
+
+  const guard = await guardPanelSyncUpdate(order, updates);
+  const payload = guard.updates && Object.keys(guard.updates).length
+    ? guard.updates
+    : { lastSyncTime: new Date() };
+
+  await Order.findByIdAndUpdate(order._id, { $set: payload });
+  return {
+    applied: guard.allowed,
+    reason: guard.reason,
+    markedExpired: guard.markedExpired,
+    updates: payload,
+  };
+}
+
+/**
+ * Save a newly provisioned IP on an order; detach older/expired holders of the same IP.
+ */
+async function finalizeIpAssignmentForOrder(order, ipAddress, updateData = {}) {
+  const Order = require('@/models/orderModel').default;
+  const cleanIp = cleanOrderIp(ipAddress || updateData.ipAddress);
+  if (!cleanIp) {
+    await Order.findByIdAndUpdate(order._id, updateData);
+    return { ipAddress: '', detached: 0 };
+  }
+
+  const conflict = await findActiveIpConflict(cleanIp, order._id);
+  if (conflict) {
+    const msg =
+      `IP ${cleanIp} is already assigned to active order ${conflict._id} ` +
+      `(${conflict.clientTxnId || 'existing customer'}). Will not duplicate this VPS.`;
+    await Order.findByIdAndUpdate(order._id, {
+      provisioningStatus: 'failed',
+      provisioningError: msg,
+      status: 'failed',
+      autoProvisioned: true,
+      failedAt: new Date(),
+    });
+    throw new Error(msg);
+  }
+
+  await Order.findByIdAndUpdate(order._id, { ...updateData, ipAddress: cleanIp });
+
+  const detach = await detachSupersededIpOrders({
+    ipStockId: order.ipStockId,
+    ipAddress: cleanIp,
+    currentOrderId: order._id,
+  });
+
+  return { ipAddress: cleanIp, detached: detach.detached || 0 };
+}
+
 module.exports = {
   cleanOrderIp,
   expiryMs,
   isOrderExpiredWithoutRenewal,
   buildInventoryOwnerMaps,
   groupOrdersByIp,
+  buildOrderSyncContext,
   resolveCanonicalOwnerOrderId,
   shouldSyncPanelDataToOrder,
+  findActiveIpConflict,
+  markOrderExpiredIfPastDue,
   detachSupersededIpOrders,
+  ipAddressRegex,
+  loadSyncContextForOrder,
+  guardPanelSyncUpdate,
+  commitPanelSyncToOrder,
+  finalizeIpAssignmentForOrder,
 };
