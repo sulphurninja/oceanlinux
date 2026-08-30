@@ -125,7 +125,8 @@ function ipAddressRegex(ip) {
   const clean = cleanOrderIp(ip);
   if (!clean) return null;
   const escaped = clean.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`^${escaped}`);
+  // Require end-of-IP (or port suffix) so 160.191.10.12 does not match 160.191.10.125.
+  return new RegExp(`^${escaped}(?:$|:)`);
 }
 
 /** Another non-expired order already holds this IP — block duplicate provision. */
