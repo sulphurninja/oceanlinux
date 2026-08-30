@@ -1,8 +1,7 @@
 import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
-import { getDataFromToken } from '@/helper/getDataFromToken';
 import Order from '@/models/orderModel';
-import User from '@/models/userModel';
+import { resolveOrderForUserOrAdmin } from '@/lib/resolveOrderAccess';
 import userWalletService from '@/services/userWalletService';
 import { createGatewayOrder } from '@/lib/paymentGateways';
 import { getPrimaryPaymentMethod } from '@/lib/platformPaymentSettings';
@@ -44,18 +43,6 @@ export async function POST(request) {
   let pendingSaved = false;
 
   try {
-    // 1. Check which user is making this renewal request
-    userId = await getDataFromToken(request);
-    if (!userId) {
-      return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
-    }
-
-    // 2. Get user details
-    const user = await User.findById(userId);
-    if (!user) {
-      return NextResponse.json({ message: 'User not found' }, { status: 404 });
-    }
-
     // 3. Read request data
     const reqBody = await request.json();
     const primaryGateway = await getPrimaryPaymentMethod();
@@ -64,14 +51,20 @@ export async function POST(request) {
       ? reqBody.paymentMethod
       : primaryGateway;
     orderId = reqOrderId;
-    
+
+    if (!orderId) {
+      return NextResponse.json({ message: 'Order ID is required' }, { status: 400 });
+    }
+
     console.log(`[RENEWAL-INIT] Payment method requested: ${paymentMethod}`);
 
-    // 4. Find the order to renew
-    const order = await Order.findOne({ _id: orderId, user: userId });
-    if (!order) {
-      return NextResponse.json({ message: 'Order not found' }, { status: 404 });
-    }
+    // 4. Find the order (owner or admin)
+    const resolved = await resolveOrderForUserOrAdmin(request, orderId);
+    if (resolved.error) return resolved.error;
+
+    userId = resolved.userId;
+    const user = resolved.user;
+    const order = resolved.order;
 
     if (isSlotIpOrder(order)) {
       return NextResponse.json({ message: SLOT_IP_NO_RENEWAL_MESSAGE }, { status: 400 });

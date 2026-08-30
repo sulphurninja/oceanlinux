@@ -2025,9 +2025,15 @@ const OrderDetails = () => {
           return;
         } catch (err: any) {
           lastError = err;
-          if (i < methodsToTry.length - 1) {
+          const msg = String(err?.message || '');
+          const isGatewayIssue =
+            /gateway|upi|razorpay|payment could not|not configured/i.test(msg);
+          if (i < methodsToTry.length - 1 && isGatewayIssue) {
             toast.info(fallbackToastMessage(gw, methodsToTry[i + 1]));
             continue;
+          }
+          if (i < methodsToTry.length - 1 && !isGatewayIssue) {
+            break;
           }
         }
       }

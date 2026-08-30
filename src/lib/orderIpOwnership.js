@@ -155,17 +155,24 @@ async function markOrderExpiredIfPastDue(order) {
     return false;
   }
 
+  const { isWithinRenewalWindow } = require('@/lib/expiryHelper');
+  const inRenewalWindow = isWithinRenewalWindow(order.expiryDate);
+
   const Order = require('@/models/orderModel').default;
-  await Order.findByIdAndUpdate(order._id, {
-    $set: {
-      status: 'expired',
-      provisioningStatus: 'terminated',
-      ipAddress: '',
-      username: '',
-      password: '',
-      lastSyncTime: new Date(),
-    },
-  });
+  const update = {
+    status: 'expired',
+    provisioningStatus: inRenewalWindow ? 'expired' : 'terminated',
+    lastSyncTime: new Date(),
+  };
+
+  // Keep IP/credentials during the 7-day renewal grace window.
+  if (!inRenewalWindow) {
+    update.ipAddress = '';
+    update.username = '';
+    update.password = '';
+  }
+
+  await Order.findByIdAndUpdate(order._id, { $set: update });
   return true;
 }
 

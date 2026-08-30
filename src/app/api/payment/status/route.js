@@ -46,7 +46,9 @@ export async function POST(request) {
     const { clientTxnId, renewalTxnId } = reqBody;
 
     const txnId = renewalTxnId || clientTxnId;
-    const isRenewal = !!renewalTxnId;
+    const isRenewal =
+      !!renewalTxnId ||
+      (typeof clientTxnId === 'string' && clientTxnId.startsWith('RENEWAL_'));
 
     if (!txnId) {
       console.log("ERROR: Missing transaction ID");

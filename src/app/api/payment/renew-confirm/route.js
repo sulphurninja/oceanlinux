@@ -172,51 +172,67 @@ export async function POST(request) {
     if (!paymentVerified && gatewayPaymentMethod === 'razorpay') {
       console.log('[RENEWAL-CONFIRM] Verifying Razorpay renewal payment');
 
-      if (!razorpayPaymentId || !razorpaySignature) {
-        return NextResponse.json(
-          { success: false, message: 'Missing Razorpay payment details' },
-          { status: 400 }
-        );
-      }
-
-      // Always bind to the Razorpay order we created server-side for this
-      // renewal. Preferring a client-supplied order id would let a valid
-      // signature from any cheaper payment settle this renewal for free.
       const orderIdForSignature = order.pendingRenewal?.gatewayOrderId;
 
-      if (!orderIdForSignature) {
-        console.error('[RENEWAL-CONFIRM] ❌ Missing stored Razorpay order ID for signature verification');
-        logger.logError('Missing stored Razorpay order ID');
-        await logger.finalize(false, null, 'Missing stored Razorpay order ID');
-        return NextResponse.json(
-          { success: false, message: 'Missing Razorpay order ID' },
-          { status: 400 }
-        );
+      if (razorpayPaymentId && razorpaySignature && orderIdForSignature) {
+        console.log('[RENEWAL-CONFIRM] Using Razorpay order ID for signature:', orderIdForSignature);
+
+        const renewalSignatureOk = verifyRazorpaySignature({
+          razorpay_order_id: razorpayOrderId || orderIdForSignature,
+          razorpay_payment_id: razorpayPaymentId,
+          razorpay_signature: razorpaySignature,
+          expectedOrderId: orderIdForSignature,
+        });
+
+        if (renewalSignatureOk) {
+          console.log('[RENEWAL-CONFIRM] ✅ Razorpay signature verified');
+          logger.logSuccess('Razorpay payment verified');
+          payment_id = razorpayPaymentId;
+          paymentVerified = true;
+          logger.setPaymentInfo('razorpay', razorpayPaymentId, renewalPrice, orderIdForSignature);
+        } else {
+          console.error('[RENEWAL-CONFIRM] ❌ Razorpay signature verification failed');
+          logger.logError('Razorpay signature verification failed');
+          await logger.finalize(false, null, 'Razorpay signature verification failed');
+          return NextResponse.json(
+            { success: false, message: 'Payment verification failed' },
+            { status: 400 }
+          );
+        }
+      } else if (orderIdForSignature) {
+        // Callback / status-poll path — no signature in browser; verify server-side.
+        try {
+          const { getRazorpayClient } = await import('@/lib/razorpayClient');
+          const razorpay = getRazorpayClient();
+          if (!razorpay) throw new Error('Razorpay credentials not configured');
+
+          const razorpayOrder = await razorpay.orders.fetch(orderIdForSignature);
+          if (razorpayOrder.status === 'paid') {
+            const payments = await razorpay.orders.fetchPayments(orderIdForSignature);
+            const successPayment = payments.items?.find((p) => p.status === 'captured');
+            if (successPayment) {
+              console.log('[RENEWAL-CONFIRM] ✅ Razorpay payment verified via server fetch');
+              payment_id = successPayment.id;
+              paymentVerified = true;
+              logger.setPaymentInfo('razorpay', successPayment.id, renewalPrice, orderIdForSignature);
+            }
+          }
+        } catch (fetchErr) {
+          console.error('[RENEWAL-CONFIRM] Razorpay server verification failed:', fetchErr.message);
+        }
       }
 
-      console.log('[RENEWAL-CONFIRM] Using Razorpay order ID for signature:', orderIdForSignature);
-
-      const renewalSignatureOk = verifyRazorpaySignature({
-        razorpay_order_id: razorpayOrderId || orderIdForSignature,
-        razorpay_payment_id: razorpayPaymentId,
-        razorpay_signature: razorpaySignature,
-        expectedOrderId: orderIdForSignature,
-      });
-
-      if (renewalSignatureOk) {
-        console.log('[RENEWAL-CONFIRM] ✅ Razorpay signature verified');
-        logger.logSuccess('Razorpay payment verified');
-        payment_id = razorpayPaymentId;
-        paymentVerified = true;
-        logger.setPaymentInfo('razorpay', razorpayPaymentId, renewalPrice, orderIdForSignature);
-      } else {
-        console.error('[RENEWAL-CONFIRM] ❌ Razorpay signature verification failed');
-        console.error('[RENEWAL-CONFIRM] Expected signature format: order_id|payment_id');
-        console.error('[RENEWAL-CONFIRM] order_id used:', orderIdForSignature);
-        logger.logError('Razorpay signature verification failed');
-        await logger.finalize(false, null, 'Razorpay signature verification failed');
+      if (!paymentVerified) {
+        if (!orderIdForSignature) {
+          console.error('[RENEWAL-CONFIRM] ❌ Missing stored Razorpay order ID');
+          await logger.finalize(false, null, 'Missing stored Razorpay order ID');
+          return NextResponse.json(
+            { success: false, message: 'Missing Razorpay order ID' },
+            { status: 400 }
+          );
+        }
         return NextResponse.json(
-          { success: false, message: 'Payment verification failed' },
+          { success: false, message: 'Missing Razorpay payment details' },
           { status: 400 }
         );
       }
@@ -713,6 +729,8 @@ export async function POST(request) {
 
     const updatedOrder = await Order.findOneAndUpdate(renewalClaim, {
       expiryDate: newExpiryDate,
+      status: 'active',
+      provisioningStatus: 'active',
       lastAction: 'renew',
       lastActionTime: new Date(),
       provider: provider, // Store provider for accurate future renewals
