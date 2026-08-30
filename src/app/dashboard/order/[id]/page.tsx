@@ -55,7 +55,7 @@ import { cn } from '@/lib/utils';
 import { OsIcon, isWindowsOsName, isUbuntuOsName, isCentosOsName } from '@/components/os/OsIcon';
 import { premiumBtnOutline, premiumBadge } from '@/lib/premium-badges';
 import { ADVPS_REBUILD_LIMIT, getAdvpsRebuildUsage } from '@/lib/advpsRebuildLimit';
-import { isWithinRenewalWindow } from '@/lib/expiryHelper';
+import { isWithinRenewalWindow, getDaysUntilExpiryIST } from '@/lib/expiryHelper';
 import { getOrderRenewalPrice, getOrderRenewalPriceNote, getCurrentListPriceFromStock } from '@/lib/orderRenewalPricing';
 import { getCustomerProviderDisplayName } from '@/lib/customerProviderDisplay';
 import { customerServiceErrorMessage, customerProvisioningErrorMessage, customerSuccessMessage } from '@/lib/customerFacingErrors';
@@ -1863,7 +1863,12 @@ const OrderDetails = () => {
   // Add this function after the other utility functions
   const isExpired = (order: Order | null) => {
     if (!order || !order.expiryDate) return false;
-    return getDaysUntilExpiry(order.expiryDate) < 0;
+    return getDaysUntilExpiryIST(order.expiryDate) < 0;
+  };
+
+  const getRenewalDaysLeft = (order: Order | null) => {
+    if (!order?.expiryDate) return 0;
+    return getDaysUntilExpiryIST(order.expiryDate);
   };
 
   // Check if order is unpaid (pending status means payment didn't go through)
@@ -4140,17 +4145,17 @@ const OrderDetails = () => {
                                   ? "text-muted-foreground"
                                   : "text-"
                             )}>
-                              {Math.abs(getDaysUntilExpiry(order.expiryDate))}
+                              {Math.abs(getRenewalDaysLeft(order))}
                             </p>
                             <p className={cn(
                               "text-xs font-medium mt-1",
                               isExpired(order)
                                 ? "text-destructive/80"
-                                : getDaysUntilExpiry(order.expiryDate) <= 7
+                                : getRenewalDaysLeft(order) <= 7
                                   ? "text-muted-foreground/80"
                                   : "text-muted-foreground /80"
                             )}>
-                              {isExpired(order) ? 'days ago' : 'days left'}
+                              {isExpired(order) ? 'days ago' : getRenewalDaysLeft(order) === 0 ? 'last day to renew' : 'days left'}
                             </p>
                           </div>
                         </div>
@@ -4164,36 +4169,6 @@ const OrderDetails = () => {
                           </div>
                         )}
 
-                        {/* Service Price */}
-                        <div className="flex items-center justify-between p-2.5 bg-background/50 rounded-md border border-border mb-3">
-                          <span className="text-xs text-muted-foreground">Renewal Rate</span>
-                          <span className="font-semibold text-sm">₹{renewalPrice}/month</span>
-                        </div>
-
-                        {renewalPriceNote && (
-                          <p className="text-[11px] text-muted-foreground mb-3 px-0.5">
-                            {renewalPriceNote}
-                          </p>
-                        )}
-
-                        {order.price < renewalPrice && (
-                          <div className="flex items-center justify-between p-2.5 bg-muted/40 rounded-md border border-border mb-3 text-xs">
-                            <span className="text-muted-foreground">First purchase paid</span>
-                            <span className="font-medium">₹{order.price}</span>
-                          </div>
-                        )}
-
-                        {provider === 'oceanlinux' && !!ipStock?.company && !hasCompanyAnyAutomation(ipStock) && !order.pendingRenewal?.awaitingCompanyApproval && (
-                          <div className="flex items-start gap-2 mb-3 p-3 rounded-md bg-primary/5 border border-primary/20">
-                            <Building2 className="h-4 w-4 text-primary mt-0.5 flex-shrink-0" />
-                            <p className="text-xs text-muted-foreground">
-                              This service is managed by your provider. After you pay, they approve the renewal from their company dashboard before your expiry is extended.
-                            </p>
-                          </div>
-                        )}
-
-                        {/* Awaiting company approval banner — payment received,
-                            extension blocked until the linked company approves. */}
                         {order.pendingRenewal?.awaitingCompanyApproval && (
                           <div className="flex items-start gap-2 mb-3 p-3 rounded-md bg-amber-500/10 border border-amber-500/30">
                             <Clock className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
@@ -4206,9 +4181,35 @@ const OrderDetails = () => {
                           </div>
                         )}
 
-                        {/* Renewal Payment Method Selection */}
                         {isRenewalEligible(order) && !order.pendingRenewal?.awaitingCompanyApproval && (
                           <>
+                            <div className="flex items-center justify-between p-2.5 bg-background/50 rounded-md border border-border mb-3">
+                              <span className="text-xs text-muted-foreground">Renewal Rate</span>
+                              <span className="font-semibold text-sm">₹{renewalPrice}/month</span>
+                            </div>
+
+                            {renewalPriceNote && (
+                              <p className="text-[11px] text-muted-foreground mb-3 px-0.5">
+                                {renewalPriceNote}
+                              </p>
+                            )}
+
+                            {order.price < renewalPrice && (
+                              <div className="flex items-center justify-between p-2.5 bg-muted/40 rounded-md border border-border mb-3 text-xs">
+                                <span className="text-muted-foreground">First purchase paid</span>
+                                <span className="font-medium">₹{order.price}</span>
+                              </div>
+                            )}
+
+                            {provider === 'oceanlinux' && !!ipStock?.company && !hasCompanyAnyAutomation(ipStock) && (
+                              <div className="flex items-start gap-2 mb-3 p-3 rounded-md bg-primary/5 border border-primary/20">
+                                <Building2 className="h-4 w-4 text-primary mt-0.5 flex-shrink-0" />
+                                <p className="text-xs text-muted-foreground">
+                                  This service is managed by your provider. After you pay, they approve the renewal from their company dashboard before your expiry is extended.
+                                </p>
+                              </div>
+                            )}
+
                             <div className="mb-3 p-3 rounded-md border border-primary/20 bg-primary/5">
                               <div className="flex items-center justify-between gap-3">
                                 <div className="flex items-center gap-2">
@@ -4278,7 +4279,7 @@ const OrderDetails = () => {
                               disabled={actionBusy === 'renew'}
                               className={cn(
                                 "w-full gap-2 h-10 text-sm shadow-sm",
-                                isExpired(order)
+                                getRenewalDaysLeft(order) === 0
                                   ? "bg-destructive hover:bg-destructive/90"
                                   : "dark:bg-green-700 bg-green-500 text-white  hover:bg-primary/90"
                               )}
@@ -4301,15 +4302,27 @@ const OrderDetails = () => {
                                 </>
                               )}
                             </Button>
+
+                            {getRenewalDaysLeft(order) === 0 && (
+                              <div className="flex items-start gap-2 mt-3 p-2 bg-destructive/10 border border-destructive/20 rounded-md">
+                                <AlertTriangle className="h-3.5 w-3.5 text-destructive mt-0.5 flex-shrink-0" />
+                                <p className="text-xs text-destructive/90">
+                                  Today is the last day to renew. After today this VPS will be marked expired and renewal will close.
+                                </p>
+                              </div>
+                            )}
                           </>
                         )}
 
-                        {isExpired(order) && isRenewalEligible(order) && (
-                          <div className="flex items-start gap-2 mt-3 p-2 bg-destructive/10 border border-destructive/20 rounded-md">
-                            <AlertTriangle className="h-3.5 w-3.5 text-destructive mt-0.5 flex-shrink-0" />
-                            <p className="text-xs text-destructive/90">
-                              Renewal opens within 2 days of expiry (available for up to 7 days after expiry)
-                            </p>
+                        {isExpired(order) && !isRenewalEligible(order) && (
+                          <div className="flex items-start gap-3 p-4 rounded-md bg-destructive/10 border border-destructive/30">
+                            <AlertTriangle className="h-5 w-5 text-destructive mt-0.5 flex-shrink-0" />
+                            <div className="space-y-1">
+                              <p className="text-sm font-semibold text-destructive">VPS expired</p>
+                              <p className="text-xs text-destructive/90">
+                                The renewal period has ended. This service is no longer available for renewal. Please contact support if you need help.
+                              </p>
+                            </div>
                           </div>
                         )}
                       </div>

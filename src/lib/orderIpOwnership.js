@@ -165,7 +165,7 @@ async function markOrderExpiredIfPastDue(order) {
     lastSyncTime: new Date(),
   };
 
-  // Keep IP/credentials during the 7-day renewal grace window.
+  // Keep IP/credentials while renewal is still open (2 days before → expiry day).
   if (!inRenewalWindow) {
     update.ipAddress = '';
     update.username = '';

@@ -98,8 +98,8 @@ export function parseHostheavenExpiryDate(raw) {
 /** Renew button opens when this many days or fewer remain (inclusive). */
 export const RENEWAL_DAYS_BEFORE_EXPIRY = 2;
 
-/** Grace period after expiry during which renewal is still allowed. */
-export const RENEWAL_DAYS_AFTER_EXPIRY = 7;
+/** Post-expiry renewal grace — 0 = renewal closes after expiry day (IST). */
+export const RENEWAL_DAYS_AFTER_EXPIRY = 0;
 
 export function getDaysUntilExpiry(expiryDate) {
   if (!expiryDate) return 0;
@@ -120,8 +120,8 @@ export function getDaysUntilExpiryIST(expiryDate) {
   return Math.round((expiryMs - todayMs) / (1000 * 60 * 60 * 24));
 }
 
-/** True when renewal is allowed (ADVPS + company manual use the same window). */
+/** True when renewal is allowed: 2 days before expiry through expiry day (IST), inclusive. */
 export function isWithinRenewalWindow(expiryDate) {
-  const daysLeft = getDaysUntilExpiry(expiryDate);
-  return daysLeft <= RENEWAL_DAYS_BEFORE_EXPIRY && daysLeft >= -RENEWAL_DAYS_AFTER_EXPIRY;
+  const daysLeft = getDaysUntilExpiryIST(expiryDate);
+  return daysLeft <= RENEWAL_DAYS_BEFORE_EXPIRY && daysLeft >= 0;
 }

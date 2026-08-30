@@ -4,6 +4,8 @@
  *  - /dashboard/orders     → ALL orders (pending payment / failed / delivered history)
  */
 
+import { getDaysUntilExpiryIST } from '@/lib/expiryHelper';
+
 export type OrderLike = {
   status?: string;
   provisioningStatus?: string;
@@ -101,7 +103,7 @@ export type ServerStatus = 'active' | 'expired' | 'pending' | 'failed';
 export function getServerDeliveryStatus(order: OrderLike): ServerStatus {
   const currentStatus = (order.provisioningStatus || order.status || '').toLowerCase();
 
-  if (order.expiryDate && getDaysUntilExpiry(order.expiryDate) < 0) {
+  if (order.expiryDate && getDaysUntilExpiryIST(order.expiryDate) < 0) {
     return 'expired';
   }
 

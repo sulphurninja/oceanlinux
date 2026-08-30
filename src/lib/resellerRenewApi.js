@@ -5,7 +5,7 @@
 import Order from '@/models/orderModel';
 import Reseller from '@/models/resellerModel';
 import ResellerWalletService from '@/services/resellerWalletService';
-import { resolveOrderRenewalExpiryDate, getDaysUntilExpiry, isWithinRenewalWindow, RENEWAL_DAYS_BEFORE_EXPIRY } from '@/lib/expiryHelper';
+import { resolveOrderRenewalExpiryDate, getDaysUntilExpiryIST, isWithinRenewalWindow, RENEWAL_DAYS_BEFORE_EXPIRY } from '@/lib/expiryHelper';
 import { resolveRenewalProvider, detectCompanyManagedRenewal, shouldUseCompanyValidityForRenewal } from '@/lib/companyRenewal';
 import { isSlotIpOrder, SLOT_IP_NO_RENEWAL_MESSAGE } from '@/lib/slotIpOrder';
 import { calculateResellerPlanPrice } from '@/lib/resellerOrderApi';
@@ -121,7 +121,7 @@ export async function renewResellerOrder(reseller, order, orderId) {
     return { ok: false, status: 400, body: { success: false, message: 'Order has no expiry date' } };
   }
 
-  const diffDays = getDaysUntilExpiry(order.expiryDate);
+  const diffDays = getDaysUntilExpiryIST(order.expiryDate);
   if (!isWithinRenewalWindow(order.expiryDate)) {
     return {
       ok: false,
@@ -131,7 +131,7 @@ export async function renewResellerOrder(reseller, order, orderId) {
         message:
           diffDays > RENEWAL_DAYS_BEFORE_EXPIRY
             ? `Renewal opens within ${RENEWAL_DAYS_BEFORE_EXPIRY} days of expiry.`
-            : 'Service expired too long ago — contact support.',
+            : 'This VPS has expired. Renewal is no longer available.',
       },
     };
   }

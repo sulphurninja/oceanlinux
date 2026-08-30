@@ -7,7 +7,7 @@ import { createGatewayOrder } from '@/lib/paymentGateways';
 import { getPrimaryPaymentMethod } from '@/lib/platformPaymentSettings';
 import { detectCompanyManagedRenewal, resolveRenewalProvider } from '@/lib/companyRenewal';
 import {
-  getDaysUntilExpiry,
+  getDaysUntilExpiryIST,
   isWithinRenewalWindow,
   RENEWAL_DAYS_BEFORE_EXPIRY,
 } from '@/lib/expiryHelper';
@@ -81,14 +81,13 @@ export async function POST(request) {
       return NextResponse.json({ message: 'Order has no expiry date' }, { status: 400 });
     }
 
-    const diffDays = getDaysUntilExpiry(order.expiryDate);
+    const diffDays = getDaysUntilExpiryIST(order.expiryDate);
 
-    // ADVPS + company manual: renew opens within 2 days of expiry (7-day grace after).
     if (!isWithinRenewalWindow(order.expiryDate)) {
       return NextResponse.json({
         message: diffDays > RENEWAL_DAYS_BEFORE_EXPIRY
           ? `Renewal opens within ${RENEWAL_DAYS_BEFORE_EXPIRY} days of expiry. Please come back in ${diffDays - RENEWAL_DAYS_BEFORE_EXPIRY} day(s).`
-          : `This service has been expired for too long and can no longer be renewed. Please contact support.`,
+          : 'This VPS has expired. Renewal is no longer available. Please contact support.',
       }, { status: 400 });
     }
 

@@ -2,10 +2,7 @@ import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 import { enforceCronSecret } from '@/lib/apiSecurity';
-import {
-  getDaysUntilExpiryIST,
-  RENEWAL_DAYS_AFTER_EXPIRY,
-} from '@/lib/expiryHelper';
+import { getDaysUntilExpiryIST } from '@/lib/expiryHelper';
 import NotificationService from '@/services/notificationService';
 
 const ACTIVE_STATUSES = ['confirmed', 'active', 'paid', 'completed'];
@@ -14,7 +11,6 @@ const SUSPENSION_NOTIFY_MAX_DAYS_PAST = 2;
 
 function isEligibleForSuspensionNotice(daysLeft) {
   if (daysLeft > 0) return false;
-  if (daysLeft < -RENEWAL_DAYS_AFTER_EXPIRY) return false;
   return daysLeft >= -SUSPENSION_NOTIFY_MAX_DAYS_PAST;
 }
 
