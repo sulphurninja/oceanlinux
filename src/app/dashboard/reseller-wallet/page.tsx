@@ -171,10 +171,16 @@ interface RechargeConfig {
     provider: string;
     paytmConnected: boolean;
     kwikUpiConnected: boolean;
+    vyaparConnected?: boolean;
     paytmDisplayName: string;
     kwikUpiDisplayName: string;
+    vyaparDisplayName?: string;
     minAmount: number;
     maxAmount: number;
+}
+
+function isRechargeProviderConnected(config: RechargeConfig | null) {
+    return !!(config?.vyaparConnected || config?.paytmConnected || config?.kwikUpiConnected);
 }
 
 interface ActiveRechargeRequest {
@@ -335,7 +341,7 @@ export default function ResellerWalletPage() {
     };
 
     const startRecharge = async () => {
-        const connected = rechargeConfig?.paytmConnected || rechargeConfig?.kwikUpiConnected;
+        const connected = isRechargeProviderConnected(rechargeConfig);
         if (!connected) {
             toast.error('Payment provider is not connected yet. Contact admin.');
             return;
@@ -1239,7 +1245,7 @@ export default function ResellerWalletPage() {
 
                                 <Button
                                     className="w-full"
-                                    disabled={rechargeSubmitting || !(rechargeConfig?.paytmConnected || rechargeConfig?.kwikUpiConnected)}
+                                    disabled={rechargeSubmitting || !isRechargeProviderConnected(rechargeConfig)}
                                     onClick={startRecharge}
                                 >
                                     {rechargeSubmitting ? (

@@ -15,6 +15,7 @@ import { createPaytmDynamicQr } from '@/lib/paytmMerchant';
 import { createKwikUpiPayment } from '@/lib/kwikUpi';
 import { buildKwikUpiInlineQr } from '@/lib/kwikUpiQr';
 import { createVyaparOrderWithUniqueAmount } from '@/lib/vyaparGateway';
+import QRCode from 'qrcode';
 import { enforcePaymentRateLimit } from '@/lib/rateLimit';
 
 const REQUEST_TTL_HOURS = 24;
@@ -107,6 +108,11 @@ export async function POST(request) {
         );
       }
 
+      let qrImageUrl = created.qrImageUrl || '';
+      if (!qrImageUrl && created.upiLink) {
+        qrImageUrl = await QRCode.toDataURL(created.upiLink, { width: 320, margin: 1 }).catch(() => '');
+      }
+
       const reqDoc = await ResellerRechargeRequest.create({
         reseller: auth.reseller._id,
         user: auth.user._id,
@@ -119,7 +125,7 @@ export async function POST(request) {
         payeeName: vyapar.displayName,
         paymentUrl: created.paymentUrl,
         upiPayload: created.upiLink,
-        qrImageUrl: created.qrImageUrl,
+        qrImageUrl,
         gatewayOrderId: created.orderId,
         paymentMethod: 'vyapar',
         expiresAt,
