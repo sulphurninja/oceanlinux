@@ -59,7 +59,10 @@ function groupOrdersByIp(orders = []) {
  */
 function resolveCanonicalOwnerOrderId(ip, ordersForIp = [], ownerByIp = new Map()) {
   const fromInventory = ownerByIp.get(ip);
-  if (fromInventory) return fromInventory;
+  if (fromInventory) {
+    const invOrder = ordersForIp.find((o) => String(o._id) === fromInventory);
+    if (invOrder && !isOrderExpiredWithoutRenewal(invOrder)) return fromInventory;
+  }
 
   const sorted = [...ordersForIp].sort((a, b) => {
     const aCreated = expiryMs(a?.createdAt) || 0;
@@ -91,17 +94,23 @@ function shouldSyncPanelDataToOrder(order, ctx = {}) {
   const ownerByIp = ctx.ownerByIp || new Map();
   const ownerByItemId = ctx.ownerByItemId || new Map();
 
-  const inventoryOwner = ownerByIp.get(ip);
-  if (inventoryOwner && inventoryOwner !== orderId) return false;
-
-  if (order.inventoryItemId) {
-    const itemOwner = ownerByItemId.get(String(order.inventoryItemId));
-    if (itemOwner && itemOwner !== orderId) return false;
-  }
-
   const ordersForIp =
     ctx.ordersByIp?.get(ip) ||
     (ctx.allOrders ? groupOrdersByIp(ctx.allOrders).get(ip) : null);
+
+  const inventoryOwner = ownerByIp.get(ip);
+  if (inventoryOwner && inventoryOwner !== orderId) {
+    const invOrder = ordersForIp?.find((o) => String(o._id) === inventoryOwner);
+    if (invOrder && !isOrderExpiredWithoutRenewal(invOrder)) return false;
+  }
+
+  if (order.inventoryItemId) {
+    const itemOwner = ownerByItemId.get(String(order.inventoryItemId));
+    if (itemOwner && itemOwner !== orderId) {
+      const itemOrder = ordersForIp?.find((o) => String(o._id) === itemOwner);
+      if (itemOrder && !isOrderExpiredWithoutRenewal(itemOrder)) return false;
+    }
+  }
 
   if (ordersForIp && ordersForIp.length > 1) {
     const canonical = resolveCanonicalOwnerOrderId(ip, ordersForIp, ownerByIp);
