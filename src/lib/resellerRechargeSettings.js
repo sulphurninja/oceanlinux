@@ -20,6 +20,13 @@ export const DEFAULT_RESELLER_RECHARGE_SETTINGS = {
     displayName: 'OceanLinux',
     connectedAt: null,
   },
+  vyapar: {
+    connected: false,
+    apiKey: '',
+    webhookSecret: '',
+    displayName: 'OceanLinux',
+    connectedAt: null,
+  },
   minAmount: 100,
   maxAmount: 100000,
 };
@@ -46,12 +53,24 @@ function normalizeSettings(raw) {
   }
   kwikupi.connected = !!(kwikupi.apiKey && kwikupi.apiSecret && kwikupi.connected !== false);
 
-  const provider = ['paytm', 'kwikupi'].includes(raw.provider) ? raw.provider : base.provider;
+  const vyapar = {
+    ...base.vyapar,
+    ...(raw.vyapar || {}),
+  };
+  if (!vyapar.webhookSecret && raw.vyapar?.webhookSecret) {
+    vyapar.webhookSecret = raw.vyapar.webhookSecret;
+  }
+  // The webhook secret is only needed to accept callbacks; polling still works
+  // without it, so it must not gate the connection.
+  vyapar.connected = !!(vyapar.apiKey && vyapar.connected !== false);
+
+  const provider = ['paytm', 'kwikupi', 'vyapar'].includes(raw.provider) ? raw.provider : base.provider;
 
   return {
     provider,
     paytm,
     kwikupi,
+    vyapar,
     minAmount: Math.max(1, Number(raw.minAmount) || base.minAmount),
     maxAmount: Math.max(100, Number(raw.maxAmount) || base.maxAmount),
   };
@@ -139,8 +158,10 @@ export function getPublicResellerRechargeSettings(settings) {
     provider,
     paytmConnected: !!(s.paytm.connected && s.paytm.mid),
     kwikUpiConnected: !!(s.kwikupi.connected && s.kwikupi.apiKey),
+    vyaparConnected: !!(s.vyapar.connected && s.vyapar.apiKey),
     paytmDisplayName: s.paytm.displayName || '',
     kwikUpiDisplayName: s.kwikupi.displayName || '',
+    vyaparDisplayName: s.vyapar.displayName || '',
     minAmount: s.minAmount,
     maxAmount: s.maxAmount,
   };
@@ -150,6 +171,7 @@ export function getAdminPaytmSettings(settings) {
   const s = normalizeSettings(settings);
   const key = String(s.paytm.merchantKey || '');
   const secret = String(s.kwikupi.apiSecret || '');
+  const vyaparSecret = String(s.vyapar.webhookSecret || '');
   return {
     provider: s.provider,
     paytm: {
@@ -169,6 +191,14 @@ export function getAdminPaytmSettings(settings) {
       hasApiSecret: !!secret,
       displayName: s.kwikupi.displayName || 'OceanLinux',
       connectedAt: s.kwikupi.connectedAt || null,
+    },
+    vyapar: {
+      connected: s.vyapar.connected,
+      apiKey: s.vyapar.apiKey || '',
+      webhookSecretMasked: vyaparSecret ? `****${vyaparSecret.slice(-4)}` : '',
+      hasWebhookSecret: !!vyaparSecret,
+      displayName: s.vyapar.displayName || 'OceanLinux',
+      connectedAt: s.vyapar.connectedAt || null,
     },
     minAmount: s.minAmount,
     maxAmount: s.maxAmount,
@@ -199,4 +229,52 @@ export function getKwikUpiCredentials(settings) {
     apiSecret: s.kwikupi.apiSecret,
     displayName: s.kwikupi.displayName || 'OceanLinux',
   };
+}
+
+export function getVyaparCredentials(settings) {
+  const s = normalizeSettings(settings);
+  if (!s.vyapar.connected || !s.vyapar.apiKey) {
+    return null;
+  }
+  return {
+    apiKey: s.vyapar.apiKey,
+    webhookSecret: s.vyapar.webhookSecret || '',
+    displayName: s.vyapar.displayName || 'OceanLinux',
+  };
+}
+
+export async function updateVyaparCredentials(partial, updatedBy = null) {
+  const current = await getResellerRechargeSettings();
+  const nextVyapar = {
+    ...current.vyapar,
+    ...partial,
+  };
+
+  // Blank means "leave the stored secret alone" so the masked admin field can be
+  // submitted unchanged.
+  if (partial.webhookSecret === '' || partial.webhookSecret === undefined) {
+    nextVyapar.webhookSecret = current.vyapar.webhookSecret;
+  }
+
+  if (nextVyapar.apiKey) {
+    nextVyapar.connected = partial.connected !== false;
+    if (nextVyapar.connected && !current.vyapar.connectedAt) {
+      nextVyapar.connectedAt = new Date().toISOString();
+    }
+  } else {
+    // Disconnecting clears the API key, so the secret has nothing left to
+    // protect and must not linger in the database.
+    nextVyapar.connected = false;
+    nextVyapar.webhookSecret = '';
+    nextVyapar.connectedAt = null;
+  }
+
+  return setResellerRechargeSettings(
+    {
+      ...current,
+      provider: nextVyapar.connected ? 'vyapar' : current.provider,
+      vyapar: nextVyapar,
+    },
+    updatedBy
+  );
 }

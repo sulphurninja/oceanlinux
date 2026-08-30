@@ -251,7 +251,9 @@ export async function POST(request) {
       initiatedAt: new Date(),
       paymentMethod: paymentMethodLabel,
       amount: renewalPrice,
-      gatewayAmount: gatewayCharge,
+      // UPI orders can be issued a few paise higher so the gateway can tell
+      // concurrent same-priced payments apart; verification compares against this.
+      gatewayAmount: Number(gatewayResult?.chargedAmount) || gatewayCharge,
       walletAmount: walletApplied,
       walletDeducted: !!walletDebit,
       walletPending: walletApplied > 0 && gatewayCharge > 0,
@@ -292,7 +294,7 @@ export async function POST(request) {
       provider,
       paymentMethod: actualPaymentMethod,
       walletApplied,
-      gatewayCharge,
+      gatewayCharge: Number(gatewayResult.chargedAmount) || gatewayCharge,
       fallbackUsed: gatewayResult.fallbackUsed,
       originalMethod: gatewayResult.originalMethod,
       ...gatewayResult.payload,

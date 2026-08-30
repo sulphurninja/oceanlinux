@@ -1,6 +1,6 @@
 import Order from '@/models/orderModel';
 import { getRazorpayClient } from '@/lib/razorpayClient';
-import { verifyUPIPayment as verifyKwikUpiPayment } from '@/lib/paymentGateways';
+import { verifyUPIPayment as verifyKwikUpiPayment, UPI_PROVIDER_VYAPAR } from '@/lib/paymentGateways';
 import { assignPanelCredentials } from '@/lib/panelCredentials';
 import NotificationService from '@/services/notificationService';
 
@@ -8,7 +8,11 @@ const { resolveOrderExpiryOnPayment } = require('@/lib/advpsOrderExpiry');
 const AutoProvisioningService = require('@/services/autoProvisioningService');
 const WhatsAppService = require('@/services/whatsappService');
 import userWalletService from '@/services/userWalletService';
-import { paymentAmountsMatch, expectedGatewayAmountFromOrder } from '@/lib/paymentAmountValidation';
+import {
+  paymentAmountsMatch,
+  paymentAmountsMatchExact,
+  expectedGatewayAmountFromOrder,
+} from '@/lib/paymentAmountValidation';
 const PaymentOrderLogger = require('@/services/paymentOrderLogger');
 
 function sleep(ms) {
@@ -91,20 +95,27 @@ async function checkRazorpayPayment(order) {
 }
 
 async function checkUpiPayment(order) {
-  const verification = await verifyUPIPayment(order.clientTxnId, order.gatewayOrderId);
+  const verification = await verifyUPIPayment(
+    order.clientTxnId,
+    order.gatewayOrderId,
+    order.paymentDetails?.upiProvider
+  );
   if (!verification.verified) {
     return {
       success: false,
-      status: verification.status?.toUpperCase() || 'PENDING',
+      status: verification.expired ? 'EXPIRED' : verification.status?.toUpperCase() || 'PENDING',
       method: 'upi',
     };
   }
 
-  const expectedAmount =
-    Number(order.paymentDetails?.gatewayAmount) ||
-    Math.max(0, Number(order.price) - (Number(order.walletDeduction?.amount) || 0));
+  const expectedAmount = expectedGatewayAmountFromOrder(order);
   const paidAmount = verification.amount;
-  if (expectedAmount > 0 && Math.abs(paidAmount - expectedAmount) > 1) {
+  const matches =
+    verification.provider === UPI_PROVIDER_VYAPAR
+      ? paymentAmountsMatchExact(paidAmount, expectedAmount)
+      : paymentAmountsMatch(paidAmount, expectedAmount);
+
+  if (expectedAmount > 0 && !matches) {
     return {
       success: false,
       status: 'AMOUNT_MISMATCH',
@@ -120,10 +131,11 @@ async function checkUpiPayment(order) {
     gatewayOrderId: order.gatewayOrderId,
     paymentDetails: {
       upi_txn_id: verification.upi_txn_id,
+      upiProvider: verification.provider,
       verified: true,
       verifiedAmount: paidAmount,
-      // KwikUPI reports the requested order amount, not the amount actually
-      // credited — keep the raw payload so partial payments can be audited.
+      // KwikUPI reports the requested order amount rather than the credited one,
+      // so its raw payload is kept for auditing partial payments.
       kwikRaw: verification.raw || null,
       confirmedAt: new Date(),
     },

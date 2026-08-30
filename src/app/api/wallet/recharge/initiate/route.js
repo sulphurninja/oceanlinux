@@ -114,6 +114,11 @@ export async function POST(request) {
 
   recharge.gatewayOrderId = gatewayResult.gatewayOrderId;
   recharge.paymentMethod = gatewayResult.method;
+  // A UPI order may be issued a few paise higher so the gateway can distinguish
+  // concurrent same-priced payments. Crediting the charged figure keeps the
+  // wallet in step with what actually leaves the customer's bank.
+  const payableAmount = Number(gatewayResult.chargedAmount) || Math.round(amount);
+  recharge.amount = payableAmount;
   await recharge.save();
 
   return NextResponse.json({
@@ -121,6 +126,7 @@ export async function POST(request) {
     message: 'Recharge initiated',
     rechargeId: recharge._id,
     clientTxnId,
+    amount: payableAmount,
     actualPaymentMethod: gatewayResult.method,
     fallbackUsed: gatewayResult.fallbackUsed,
     originalMethod: gatewayResult.originalMethod,

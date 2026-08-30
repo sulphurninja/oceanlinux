@@ -339,6 +339,10 @@ export async function POST(request) {
   }
 
   session.gatewayOrderId = gatewayResult.gatewayOrderId;
+  // A UPI order may be issued a few paise higher so the gateway can distinguish
+  // concurrent same-priced payments; that figure is what must be paid.
+  const payableAmount = Number(gatewayResult.chargedAmount) || gatewayCharge;
+  session.gatewayAmount = payableAmount;
   if (gatewayResult.method !== requestedGateway) {
     // Update payment method label to reflect actual gateway used.
     session.paymentMethod = walletApplied > 0
@@ -353,7 +357,7 @@ export async function POST(request) {
     clientTxnId,
     orderIds,
     walletApplied,
-    gatewayAmount: gatewayCharge,
+    gatewayAmount: payableAmount,
     actualPaymentMethod: gatewayResult.method,
     fallbackUsed: gatewayResult.fallbackUsed,
     originalMethod: gatewayResult.originalMethod,

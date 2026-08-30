@@ -4,7 +4,11 @@ import {
   getPlatformPaymentSettings,
   getPublicPlatformPaymentConfig,
 } from '@/lib/platformPaymentSettings';
-import { getResellerRechargeSettings, getKwikUpiCredentials } from '@/lib/resellerRechargeSettings';
+import {
+  getResellerRechargeSettings,
+  getKwikUpiCredentials,
+  getVyaparCredentials,
+} from '@/lib/resellerRechargeSettings';
 import { getRazorpayClient } from '@/lib/razorpayClient';
 
 export const dynamic = 'force-dynamic';
@@ -22,7 +26,7 @@ export async function GET() {
       getResellerRechargeSettings(),
     ]);
 
-    const kwikupi = getKwikUpiCredentials(rechargeSettings);
+    const upi = !!(getVyaparCredentials(rechargeSettings) || getKwikUpiCredentials(rechargeSettings));
     const razorpay = !!getRazorpayClient();
 
     return NextResponse.json(
@@ -30,7 +34,7 @@ export async function GET() {
         success: true,
         ...getPublicPlatformPaymentConfig(platformSettings),
         gateways: {
-          upi: !!kwikupi,
+          upi,
           razorpay,
         },
       },

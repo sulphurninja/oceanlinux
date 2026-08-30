@@ -6,11 +6,12 @@ import Cart from '@/models/cartModel';
 import userWalletService from '@/services/userWalletService';
 import NotificationService from '@/services/notificationService';
 import { fulfillOrderInventory } from '@/lib/fulfillOrderInventory';
-import { verifyUPIPayment } from '@/lib/paymentGateways';
+import { verifyUPIPayment, UPI_PROVIDER_VYAPAR } from '@/lib/paymentGateways';
 import { getRazorpayClient } from '@/lib/razorpayClient';
 const { resolveOrderExpiryOnPayment } = require('@/lib/advpsOrderExpiry');
 import {
   paymentAmountsMatch,
+  paymentAmountsMatchExact,
   expectedGatewayAmountFromSession,
 } from '@/lib/paymentAmountValidation';
 import { confirmResellerRechargeRequest } from '@/lib/resellerRechargeService';
@@ -32,6 +33,18 @@ const AutoProvisioningService = require('@/services/autoProvisioningService');
  * Returns null if none match, in which case the caller falls back to the
  * existing single-order path that lives in each webhook handler.
  */
+/**
+ * VyaparGateway settles only on an exact amount, so any drift on that provider
+ * is a real discrepancy rather than rounding. KwikUPI keeps the ₹1 tolerance it
+ * has always had, since it reports the requested figure.
+ */
+function upiAmountMatches(result, expected) {
+  if (!expected) return true;
+  return result.provider === UPI_PROVIDER_VYAPAR
+    ? paymentAmountsMatchExact(result.amount, expected)
+    : paymentAmountsMatch(result.amount, expected);
+}
+
 export async function findDispatchTarget(clientTxnId) {
   if (!clientTxnId) return null;
 
@@ -41,7 +54,12 @@ export async function findDispatchTarget(clientTxnId) {
   const recharge = await WalletRecharge.findOne({ clientTxnId });
   if (recharge) return { kind: 'recharge', doc: recharge };
 
-  const resellerRecharge = await ResellerRechargeRequest.findOne({ clientTxnId, method: 'auto_upi' });
+  // VyaparGateway exposes a single webhook URL for the whole account, so
+  // reseller recharges arrive here too rather than on a dedicated endpoint.
+  const resellerRecharge = await ResellerRechargeRequest.findOne({
+    clientTxnId,
+    method: { $in: ['auto_upi', 'vyapar'] },
+  });
   if (resellerRecharge) return { kind: 'reseller_recharge', doc: resellerRecharge };
 
   return null;
@@ -70,7 +88,7 @@ export async function probeCheckoutSessionPayment(session) {
     if (!result.verified) {
       return { verified: false, gateway: 'upi', reason: result.error || 'not paid' };
     }
-    if (result.amount && session.gatewayAmount && Math.abs(result.amount - session.gatewayAmount) > 1) {
+    if (result.amount && !upiAmountMatches(result, session.gatewayAmount)) {
       return { verified: false, gateway: 'upi', reason: 'amount mismatch' };
     }
     return {
@@ -79,6 +97,7 @@ export async function probeCheckoutSessionPayment(session) {
       transactionId: result.upi_txn_id || '',
       paymentDetails: {
         upi_txn_id: result.upi_txn_id,
+        upiProvider: result.provider,
         verifiedAmount: result.amount,
         confirmedAt: new Date(),
       },
@@ -166,7 +185,7 @@ export async function probeWalletRechargePayment(recharge) {
     if (!result.verified) {
       return { verified: false, gateway: 'upi', reason: result.error || 'not paid' };
     }
-    if (result.amount && Math.abs(result.amount - recharge.amount) > 1) {
+    if (result.amount && !upiAmountMatches(result, recharge.amount)) {
       return { verified: false, gateway: 'upi', reason: 'amount mismatch' };
     }
     return {
@@ -175,6 +194,7 @@ export async function probeWalletRechargePayment(recharge) {
       transactionId: result.upi_txn_id || '',
       paymentDetails: {
         upi_txn_id: result.upi_txn_id,
+        upiProvider: result.provider,
         verifiedAmount: result.amount,
         confirmedAt: new Date(),
       },

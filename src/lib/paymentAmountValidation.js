@@ -21,6 +21,18 @@ export function expectedGatewayAmountFromSession(session) {
   return Number(session?.gatewayAmount) || 0;
 }
 
+/**
+ * Strict comparison for gateways that settle on an exact amount.
+ *
+ * VyaparGateway only marks an order paid when the credited amount matches the
+ * requested one to the paise, so a discrepancy here means the record was
+ * tampered with or the expected amount was stored wrong — not rounding. A paise
+ * of slack absorbs float representation only.
+ */
+export function paymentAmountsMatchExact(paid, expected) {
+  return paymentAmountsMatch(paid, expected, 0.01);
+}
+
 export function expectedRenewalGatewayAmount(order) {
   const pending = order?.pendingRenewal;
   if (!pending) return 0;

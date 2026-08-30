@@ -277,6 +277,12 @@ export async function POST(request) {
     let actualPaymentMethod = ['razorpay', 'upi'].includes(paymentMethod) ? paymentMethod : primaryGateway;
     let orderCreationError = null;
     let fallbackUsed = false;
+    // UPI orders can be issued at a slightly higher amount so the gateway can tell
+    // concurrent same-priced payments apart. Verification must compare against
+    // what was actually requested, not what we originally computed.
+    let payableAmount = gatewayCharge;
+    let upiProvider = '';
+    let upiExpiresAt = null;
 
     if (gatewayCharge > 0) {
       try {
@@ -305,6 +311,10 @@ export async function POST(request) {
         gatewayOrderId = gatewayResult.gatewayOrderId;
         actualPaymentMethod = gatewayResult.method;
         fallbackUsed = gatewayResult.fallbackUsed;
+        payableAmount = Number(gatewayResult.chargedAmount) || gatewayCharge;
+        upiProvider = gatewayResult.upiProvider || '';
+        upiExpiresAt = gatewayResult.expiresAt || null;
+        responseData.gatewayCharge = payableAmount;
         Object.assign(responseData, gatewayResult.payload);
       } catch (gatewayError) {
         console.error('[Payment] Gateway order creation failed:', gatewayError.message);
@@ -354,8 +364,10 @@ export async function POST(request) {
       customerEmail: user.email,
       expiryDate: gatewayCharge === 0 ? (confirmedExpiryDate || undefined) : expiryDate,
       paymentDetails: {
-        gatewayAmount: gatewayCharge,
+        gatewayAmount: payableAmount,
         walletAmount: walletApplied,
+        ...(upiProvider ? { upiProvider } : {}),
+        ...(upiExpiresAt ? { upiExpiresAt } : {}),
       },
     };
 

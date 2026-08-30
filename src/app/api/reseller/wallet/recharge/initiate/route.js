@@ -9,10 +9,12 @@ import {
   getResellerRechargeSettings,
   getPaytmCredentials,
   getKwikUpiCredentials,
+  getVyaparCredentials,
 } from '@/lib/resellerRechargeSettings';
 import { createPaytmDynamicQr } from '@/lib/paytmMerchant';
 import { createKwikUpiPayment } from '@/lib/kwikUpi';
 import { buildKwikUpiInlineQr } from '@/lib/kwikUpiQr';
+import { createVyaparOrderWithUniqueAmount } from '@/lib/vyaparGateway';
 import { enforcePaymentRateLimit } from '@/lib/rateLimit';
 
 const REQUEST_TTL_HOURS = 24;
@@ -73,6 +75,71 @@ export async function POST(request) {
     const amount = amountCheck.amount;
     const clientTxnId = buildClientTxnId('RRC');
     const expiresAt = new Date(Date.now() + REQUEST_TTL_HOURS * 60 * 60 * 1000);
+
+    // ---------- VyaparGateway provider ----------
+    if (settings.provider === 'vyapar') {
+      const vyapar = getVyaparCredentials(settings);
+      if (!vyapar) {
+        return NextResponse.json(
+          { success: false, message: 'VyaparGateway is not connected. Ask admin to connect it first.' },
+          { status: 400 }
+        );
+      }
+
+      const appUrl = (process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || '').replace(/\/$/, '');
+      let created;
+      try {
+        created = await createVyaparOrderWithUniqueAmount({
+          apiKey: vyapar.apiKey,
+          amount,
+          clientTxnId,
+          customerName: auth.reseller.businessName || undefined,
+          customerEmail: auth.reseller.email || undefined,
+          redirectUrl: appUrl
+            ? `${appUrl}/payment/callback?type=reseller-wallet&client_txn_id=${encodeURIComponent(clientTxnId)}`
+            : undefined,
+          description: `Reseller wallet ${clientTxnId}`,
+        });
+      } catch (err) {
+        return NextResponse.json(
+          { success: false, message: err.message || 'Failed to create UPI payment' },
+          { status: 500 }
+        );
+      }
+
+      const reqDoc = await ResellerRechargeRequest.create({
+        reseller: auth.reseller._id,
+        user: auth.user._id,
+        // The gateway may have nudged the paise to keep the amount unique, and
+        // that is the figure the reseller has to pay for it to reconcile.
+        amount: created.chargedAmount,
+        method: 'vyapar',
+        clientTxnId,
+        status: 'pending_payment',
+        payeeName: vyapar.displayName,
+        paymentUrl: created.paymentUrl,
+        upiPayload: created.upiLink,
+        qrImageUrl: created.qrImageUrl,
+        gatewayOrderId: created.orderId,
+        paymentMethod: 'vyapar',
+        expiresAt,
+      });
+
+      return NextResponse.json({
+        success: true,
+        request: {
+          _id: reqDoc._id,
+          amount: reqDoc.amount,
+          clientTxnId: reqDoc.clientTxnId,
+          status: reqDoc.status,
+          payeeName: reqDoc.payeeName,
+          paymentUrl: reqDoc.paymentUrl,
+          qrImageUrl: reqDoc.qrImageUrl,
+          qrData: '',
+          expiresAt: created.expiresAt,
+        },
+      });
+    }
 
     // ---------- KwikUPI provider ----------
     if (settings.provider === 'kwikupi') {

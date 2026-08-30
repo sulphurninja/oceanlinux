@@ -9,10 +9,13 @@ import {
   setResellerRechargeSettings,
   updatePaytmCredentials,
   updateKwikUpiCredentials,
+  updateVyaparCredentials,
   getAdminPaytmSettings,
 } from '@/lib/resellerRechargeSettings';
 import { createPaytmDynamicQr, getPaytmWebhookUrl } from '@/lib/paytmMerchant';
 import { createKwikUpiPayment, getKwikUpiWebhookUrl } from '@/lib/kwikUpi';
+import { createVyaparOrderWithUniqueAmount } from '@/lib/vyaparGateway';
+import { getPlatformVyaparWebhookUrl } from '@/lib/paymentGateways';
 
 export async function GET(request) {
   const denied = await enforceAdmin(request);
@@ -53,6 +56,7 @@ export async function GET(request) {
       settings: getAdminPaytmSettings(settings),
       webhookUrl: getPaytmWebhookUrl(),
       kwikUpiWebhookUrl: getKwikUpiWebhookUrl(),
+      vyaparWebhookUrl: getPlatformVyaparWebhookUrl(),
     });
   } catch (error) {
     return NextResponse.json({ success: false, message: error.message }, { status: 500 });
@@ -139,6 +143,70 @@ export async function POST(request) {
         message: 'KwikUPI connected — auto verify ON',
         settings: getAdminPaytmSettings(settings),
         kwikUpiWebhookUrl: getKwikUpiWebhookUrl(),
+      });
+    }
+
+    if (action === 'connect_vyapar') {
+      const { apiKey, webhookSecret, displayName } = body;
+      if (!apiKey) {
+        return NextResponse.json({ success: false, message: 'API Key is required' }, { status: 400 });
+      }
+
+      const settings = await updateVyaparCredentials(
+        {
+          apiKey: String(apiKey).trim(),
+          webhookSecret: String(webhookSecret || '').trim(),
+          displayName: displayName || 'OceanLinux',
+          connected: true,
+        },
+        adminUser?._id || null
+      );
+
+      return NextResponse.json({
+        success: true,
+        message: 'VyaparGateway connected — UPI now verifies the settled amount',
+        settings: getAdminPaytmSettings(settings),
+        vyaparWebhookUrl: getPlatformVyaparWebhookUrl(),
+      });
+    }
+
+    if (action === 'test_vyapar') {
+      const settings = await getResellerRechargeSettings();
+      if (!settings.vyapar.apiKey) {
+        return NextResponse.json({ success: false, message: 'Save VyaparGateway credentials first' }, { status: 400 });
+      }
+
+      try {
+        const test = await createVyaparOrderWithUniqueAmount({
+          apiKey: settings.vyapar.apiKey,
+          amount: 1,
+          clientTxnId: `VGTEST_${Date.now()}`,
+          customerName: 'Connection Test',
+          customerEmail: 'test@oceanlinux.com',
+          description: 'Connection test',
+        });
+        return NextResponse.json({
+          success: true,
+          message: `VyaparGateway OK — test order created for ₹${test.chargedAmount}. It will expire on its own; do not pay it.`,
+        });
+      } catch (err) {
+        return NextResponse.json({ success: false, message: err.message }, { status: 400 });
+      }
+    }
+
+    if (action === 'disconnect_vyapar') {
+      const settings = await updateVyaparCredentials(
+        {
+          connected: false,
+          apiKey: '',
+          webhookSecret: '',
+        },
+        adminUser?._id || null
+      );
+      return NextResponse.json({
+        success: true,
+        message: 'VyaparGateway disconnected',
+        settings: getAdminPaytmSettings(settings),
       });
     }
 

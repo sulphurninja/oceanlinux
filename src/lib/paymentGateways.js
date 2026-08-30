@@ -1,15 +1,28 @@
 import { getRazorpayClient } from '@/lib/razorpayClient';
 import { createKwikUpiPayment, getKwikUpiPaymentStatus } from '@/lib/kwikUpi';
 import { buildKwikUpiInlineQr } from '@/lib/kwikUpiQr';
-import { getKwikUpiCredentials, getResellerRechargeSettings } from '@/lib/resellerRechargeSettings';
+import {
+  getKwikUpiCredentials,
+  getVyaparCredentials,
+  getResellerRechargeSettings,
+} from '@/lib/resellerRechargeSettings';
 import { logKwikRaw } from '@/lib/kwikRawLog';
+import {
+  createVyaparOrderWithUniqueAmount,
+  getVyaparOrderStatus,
+  toPaiseSafe,
+} from '@/lib/vyaparGateway';
 
 /**
  * Shared gateway-order plumbing:
  *   - Wallet recharge, cart checkout, renewals, buy-now
  *
- * Payment methods: razorpay | upi (KwikUPI auto QR behind the scenes)
- * Cashfree removed — no longer used.
+ * Payment methods: razorpay | upi
+ *
+ * UPI runs on VyaparGateway when it is connected, because it reconciles the
+ * amount that actually settled and therefore rejects partial payments. KwikUPI
+ * remains as a fallback for installs that have not switched yet, but it cannot
+ * detect underpayment — it reports back whatever amount was requested.
  */
 
 function getReturnUrl() {
@@ -24,6 +37,26 @@ function getReturnUrl() {
 async function getKwikUpiCreds() {
   const settings = await getResellerRechargeSettings();
   return getKwikUpiCredentials(settings);
+}
+
+async function getVyaparCreds() {
+  const settings = await getResellerRechargeSettings();
+  return getVyaparCredentials(settings);
+}
+
+export const UPI_PROVIDER_VYAPAR = 'vyapar';
+export const UPI_PROVIDER_KWIKUPI = 'kwikupi';
+
+/**
+ * Older records predate the stored provider field. The two gateways mint
+ * structurally different ids, so the provider can be recovered from the id
+ * alone: KwikUPI uses a `pay_` prefix, VyaparGateway a bare 32-char hex string.
+ */
+export function inferUpiProvider(gatewayOrderId) {
+  const id = String(gatewayOrderId || '');
+  if (id.startsWith('pay_')) return UPI_PROVIDER_KWIKUPI;
+  if (/^[a-f0-9]{32}$/i.test(id)) return UPI_PROVIDER_VYAPAR;
+  return null;
 }
 
 /**
@@ -55,10 +88,43 @@ export async function createGatewayOrder({
   const tryOrder = [primary, fallback];
   let lastError = null;
 
-  async function createUpiOrder() {
-    const kwikupi = await getKwikUpiCreds();
-    if (!kwikupi) throw new Error('UPI payments are not configured. Contact support.');
+  async function createVyaparUpiOrder(vyapar) {
+    const result = await createVyaparOrderWithUniqueAmount({
+      apiKey: vyapar.apiKey,
+      amount,
+      clientTxnId,
+      customerName: customer.name,
+      customerEmail: customer.email,
+      customerMobile: customer.phone,
+      redirectUrl: fullCallback,
+      description,
+    });
 
+    return {
+      method: 'upi',
+      upiProvider: UPI_PROVIDER_VYAPAR,
+      gatewayOrderId: result.orderId,
+      // Collisions push the paise upward, so this — not the requested figure —
+      // is what the customer must pay and what verification compares against.
+      chargedAmount: result.chargedAmount,
+      surcharge: result.surcharge,
+      expiresAt: result.expiresAt,
+      payload: {
+        upi: {
+          order_id: result.orderId,
+          payment_id: result.orderId,
+          payment_url: result.paymentUrl,
+          qrImageUrl: result.qrImageUrl,
+          amount: result.chargedAmount,
+          expiresAt: result.expiresAt,
+          provider: UPI_PROVIDER_VYAPAR,
+          currency: 'INR',
+        },
+      },
+    };
+  }
+
+  async function createKwikUpiOrder(kwikupi) {
     const kwResult = await createKwikUpiPayment({
       apiKey: kwikupi.apiKey,
       apiSecret: kwikupi.apiSecret,
@@ -73,23 +139,38 @@ export async function createGatewayOrder({
       throw new Error('Failed to create UPI payment');
     }
 
-    const { upiLink, qrImageUrl } = await buildKwikUpiInlineQr(kwResult.paymentPage);
+    const { qrImageUrl } = await buildKwikUpiInlineQr(kwResult.paymentPage);
 
     return {
       method: 'upi',
+      upiProvider: UPI_PROVIDER_KWIKUPI,
       gatewayOrderId: kwResult.paymentId,
+      chargedAmount: Math.round(amount),
       payload: {
         upi: {
           order_id: kwResult.paymentId,
           payment_id: kwResult.paymentId,
           payment_url: kwResult.paymentPage,
           qrImageUrl,
-          upiLink,
           amount: Math.round(amount),
+          provider: UPI_PROVIDER_KWIKUPI,
           currency: 'INR',
         },
       },
     };
+  }
+
+  async function createUpiOrder() {
+    // Once VyaparGateway is configured it is the only UPI issuer. Falling back to
+    // KwikUPI when Vyapar has a bad minute would silently reopen the partial
+    // payment hole, so a failure here drops through to Razorpay instead.
+    const vyapar = await getVyaparCreds();
+    if (vyapar) return createVyaparUpiOrder(vyapar);
+
+    const kwikupi = await getKwikUpiCreds();
+    if (kwikupi) return createKwikUpiOrder(kwikupi);
+
+    throw new Error('UPI payments are not configured. Contact support.');
   }
 
   async function createRazorpayOrder() {
@@ -111,6 +192,7 @@ export async function createGatewayOrder({
     return {
       method: 'razorpay',
       gatewayOrderId: order.id,
+      chargedAmount: toPaiseSafe(amount),
       payload: {
         razorpay: {
           order_id: order.id,
@@ -134,7 +216,7 @@ export async function createGatewayOrder({
     } catch (err) {
       lastError = err;
       console.error(
-        `[Gateway] ${method === 'upi' ? 'UPI (KwikUPI)' : 'Razorpay'} failed${i === 0 ? `, trying ${fallback}` : ''}:`,
+        `[Gateway] ${method === 'upi' ? 'UPI' : 'Razorpay'} failed${i === 0 ? `, trying ${fallback}` : ''}:`,
         err.message
       );
     }
@@ -168,55 +250,103 @@ export function verifyRazorpaySignature({
 }
 
 /**
- * Verify UPI payment via KwikUPI status API.
- * @param {string} clientTxnId — our order id (for logging)
- * @param {string} [kwikUpiPaymentId] — gatewayOrderId stored on the record
+ * Verify a UPI payment against whichever gateway issued it.
+ *
+ * @param {string} clientTxnId — our own transaction id
+ * @param {string} [gatewayOrderId] — provider order/payment id stored on the record
+ * @param {string} [provider] — 'vyapar' | 'kwikupi'; inferred from the id when omitted
  */
-export async function verifyUPIPayment(clientTxnId, kwikUpiPaymentId) {
-  const paymentId = kwikUpiPaymentId || clientTxnId;
-  const kwikupi = await getKwikUpiCreds();
-  if (!kwikupi) {
-    return { verified: false, error: 'UPI not configured' };
-  }
+export async function verifyUPIPayment(clientTxnId, gatewayOrderId, provider) {
+  const paymentId = gatewayOrderId || clientTxnId;
+  const resolved = provider || inferUpiProvider(paymentId);
 
   try {
-    const result = await getKwikUpiPaymentStatus({
-      apiKey: kwikupi.apiKey,
-      apiSecret: kwikupi.apiSecret,
-      paymentId,
-    });
-
-    if (!result.verified) {
-      return {
-        verified: false,
-        error: result.reason || 'not paid',
-        pending: result.pending,
-        failed: result.failed,
-        raw: result.raw,
-      };
+    if (resolved !== UPI_PROVIDER_KWIKUPI) {
+      const vyapar = await getVyaparCreds();
+      if (vyapar) {
+        return await verifyViaVyapar(vyapar, clientTxnId, paymentId);
+      }
+      // An unknown id with Vyapar disconnected falls through to KwikUPI so
+      // orders created before the switch can still be settled.
     }
 
-    // Only successful lookups are stored: pending polls repeat every few seconds
-    // and would flood the collection without adding any diagnostic value.
-    logKwikRaw({
-      source: 'status-api',
-      paymentId,
-      orderId: result.orderId || clientTxnId,
-      reportedStatus: result.raw?.status || 'SUCCESS',
-      reportedAmount: result.amount,
-      raw: result.raw,
-    }).catch(() => {});
-
-    return {
-      verified: true,
-      amount: result.amount,
-      upi_txn_id: result.transactionId || paymentId,
-      order_id: result.orderId || clientTxnId,
-      raw: result.raw,
-    };
+    const kwikupi = await getKwikUpiCreds();
+    if (!kwikupi) {
+      return { verified: false, error: 'UPI not configured' };
+    }
+    return await verifyViaKwikUpi(kwikupi, clientTxnId, paymentId);
   } catch (err) {
     return { verified: false, error: err.message };
   }
+}
+
+async function verifyViaVyapar(vyapar, clientTxnId, orderId) {
+  const result = await getVyaparOrderStatus({
+    apiKey: vyapar.apiKey,
+    orderId,
+    clientTxnId,
+  });
+
+  if (!result.verified) {
+    return {
+      verified: false,
+      error: result.reason || 'not paid',
+      pending: result.pending,
+      failed: result.failed,
+      expired: result.expired,
+      expiresAt: result.expiresAt,
+      provider: UPI_PROVIDER_VYAPAR,
+      raw: result.raw,
+    };
+  }
+
+  return {
+    verified: true,
+    amount: result.amount,
+    upi_txn_id: result.transactionId || orderId,
+    order_id: result.clientTxnId || clientTxnId,
+    provider: UPI_PROVIDER_VYAPAR,
+    raw: result.raw,
+  };
+}
+
+async function verifyViaKwikUpi(kwikupi, clientTxnId, paymentId) {
+  const result = await getKwikUpiPaymentStatus({
+    apiKey: kwikupi.apiKey,
+    apiSecret: kwikupi.apiSecret,
+    paymentId,
+  });
+
+  if (!result.verified) {
+    return {
+      verified: false,
+      error: result.reason || 'not paid',
+      pending: result.pending,
+      failed: result.failed,
+      provider: UPI_PROVIDER_KWIKUPI,
+      raw: result.raw,
+    };
+  }
+
+  // Only successful lookups are stored: pending polls repeat every few seconds
+  // and would flood the collection without adding any diagnostic value.
+  logKwikRaw({
+    source: 'status-api',
+    paymentId,
+    orderId: result.orderId || clientTxnId,
+    reportedStatus: result.raw?.status || 'SUCCESS',
+    reportedAmount: result.amount,
+    raw: result.raw,
+  }).catch(() => {});
+
+  return {
+    verified: true,
+    amount: result.amount,
+    upi_txn_id: result.transactionId || paymentId,
+    order_id: result.orderId || clientTxnId,
+    provider: UPI_PROVIDER_KWIKUPI,
+    raw: result.raw,
+  };
 }
 
 /** @deprecated Cashfree removed — always returns not verified */
@@ -233,4 +363,9 @@ export function buildClientTxnId(prefix) {
 export function getPlatformKwikUpiWebhookUrl() {
   const base = getReturnUrl();
   return `${base}/api/payment/kwikupi-webhook`;
+}
+
+export function getPlatformVyaparWebhookUrl() {
+  const base = getReturnUrl();
+  return `${base}/api/payment/vyapar-webhook`;
 }

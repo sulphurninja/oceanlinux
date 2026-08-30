@@ -7,22 +7,24 @@ import {
   confirmResellerRechargeRequest,
   probePaytmResellerRecharge,
   probeKwikUpiResellerRecharge,
+  probeVyaparResellerRecharge,
 } from '@/lib/resellerRechargeService';
 import ResellerWalletService from '@/services/resellerWalletService';
 import { enforcePaymentRateLimit } from '@/lib/rateLimit';
 
+const RESELLER_PROBES = {
+  vyapar: probeVyaparResellerRecharge,
+  kwikupi: probeKwikUpiResellerRecharge,
+};
+
 async function probeAndConfirm(reqDoc) {
-  let probe;
-  if (reqDoc.method === 'kwikupi') {
-    probe = await probeKwikUpiResellerRecharge(reqDoc);
-  } else {
-    probe = await probePaytmResellerRecharge(reqDoc);
-  }
+  const probeFn = RESELLER_PROBES[reqDoc.method] || probePaytmResellerRecharge;
+  const probe = await probeFn(reqDoc);
   if (!probe.verified) {
     return { ok: false, probe };
   }
   const result = await confirmResellerRechargeRequest(reqDoc, {
-    paymentMethod: reqDoc.method === 'kwikupi' ? 'kwikupi' : 'paytm',
+    paymentMethod: RESELLER_PROBES[reqDoc.method] ? reqDoc.method : 'paytm',
     transactionId: probe.transactionId,
     paymentDetails: probe.paymentDetails,
   });

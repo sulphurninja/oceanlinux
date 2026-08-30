@@ -7,6 +7,7 @@ import {
   confirmResellerRechargeRequest,
   probePaytmResellerRecharge,
   probeKwikUpiResellerRecharge,
+  probeVyaparResellerRecharge,
 } from '@/lib/resellerRechargeService';
 import ResellerWalletService from '@/services/resellerWalletService';
 import { enforcePaymentRateLimit } from '@/lib/rateLimit';
@@ -53,10 +54,11 @@ export async function POST(request) {
       });
     }
 
-    const isKwik = reqDoc.method === 'kwikupi';
-    const probe = isKwik
-      ? await probeKwikUpiResellerRecharge(reqDoc)
-      : await probePaytmResellerRecharge(reqDoc);
+    const gatewayProbe = {
+      vyapar: probeVyaparResellerRecharge,
+      kwikupi: probeKwikUpiResellerRecharge,
+    }[reqDoc.method];
+    const probe = await (gatewayProbe || probePaytmResellerRecharge)(reqDoc);
 
     if (!probe.verified) {
       return NextResponse.json({
@@ -66,7 +68,7 @@ export async function POST(request) {
     }
 
     const result = await confirmResellerRechargeRequest(reqDoc, {
-      paymentMethod: isKwik ? 'kwikupi' : 'paytm',
+      paymentMethod: gatewayProbe ? reqDoc.method : 'paytm',
       transactionId: probe.transactionId,
       paymentDetails: probe.paymentDetails,
     });

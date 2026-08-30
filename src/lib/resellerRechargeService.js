@@ -7,8 +7,11 @@ import { logKwikRaw } from '@/lib/kwikRawLog';
 import {
   getPaytmCredentials,
   getKwikUpiCredentials,
+  getVyaparCredentials,
   getResellerRechargeSettings,
 } from '@/lib/resellerRechargeSettings';
+import { getVyaparOrderStatus } from '@/lib/vyaparGateway';
+import { paymentAmountsMatchExact } from '@/lib/paymentAmountValidation';
 
 function amountsMatch(a, b) {
   return Math.abs(Number(a) - Number(b)) <= 1;
@@ -146,6 +149,51 @@ export async function probeAutoResellerRecharge(request) {
     transactionId: result.upi_txn_id || '',
     paymentDetails: {
       upi_txn_id: result.upi_txn_id,
+      verifiedAmount: result.amount,
+      confirmedAt: new Date(),
+    },
+  };
+}
+
+export async function probeVyaparResellerRecharge(request) {
+  if (!request || request.method !== 'vyapar') {
+    return { verified: false, reason: 'not a VyaparGateway request' };
+  }
+
+  const vyapar = getVyaparCredentials(await getResellerRechargeSettings());
+  if (!vyapar) {
+    return { verified: false, reason: 'VyaparGateway not connected' };
+  }
+
+  const result = await getVyaparOrderStatus({
+    apiKey: vyapar.apiKey,
+    orderId: request.gatewayOrderId,
+    clientTxnId: request.clientTxnId,
+  });
+
+  if (!result.verified) {
+    return {
+      verified: false,
+      reason: result.reason || 'not paid',
+      pending: result.pending,
+      failed: result.failed,
+      expired: result.expired,
+    };
+  }
+
+  // The gateway settles only on an exact match, so any drift here means the
+  // stored expectation is wrong rather than a rounding difference.
+  if (result.amount && !paymentAmountsMatchExact(result.amount, request.amount)) {
+    return { verified: false, reason: 'amount mismatch' };
+  }
+
+  return {
+    verified: true,
+    transactionId: result.transactionId || '',
+    paymentDetails: {
+      upiProvider: 'vyapar',
+      vyaparOrderId: request.gatewayOrderId,
+      upi_txn_id: result.transactionId,
       verifiedAmount: result.amount,
       confirmedAt: new Date(),
     },
