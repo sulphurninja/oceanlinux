@@ -12,6 +12,7 @@ import { Loader2, RefreshCw, AlertTriangle, ShieldCheck, ShieldAlert } from 'luc
 interface RawLog {
   _id: string;
   source: string;
+  gateway?: string;
   paymentId: string;
   orderId: string;
   reportedStatus: string;
@@ -22,6 +23,15 @@ interface RawLog {
   raw: unknown;
   note: string;
   createdAt: string;
+}
+
+interface TamperResult {
+  originalAmount: string;
+  payAmount: number;
+  upiLink: string;
+  tamperedUpiLink: string;
+  qrImageUrl: string;
+  tamperedQrImageUrl: string;
 }
 
 interface TestPayment {
@@ -49,8 +59,14 @@ export default function KwikPartialPaymentTestPage() {
   const [creating, setCreating] = useState(false);
   const [payment, setPayment] = useState<TestPayment | null>(null);
   const [logs, setLogs] = useState<RawLog[]>([]);
+  const [externalLogs, setExternalLogs] = useState<RawLog[]>([]);
   const [statusProbe, setStatusProbe] = useState<StatusProbe | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+
+  const [tamperLink, setTamperLink] = useState('');
+  const [tamperPayAmount, setTamperPayAmount] = useState(1);
+  const [tampering, setTampering] = useState(false);
+  const [tamperResult, setTamperResult] = useState<TamperResult | null>(null);
 
   const refresh = useCallback(async (paymentId?: string) => {
     setRefreshing(true);
@@ -60,6 +76,7 @@ export default function KwikPartialPaymentTestPage() {
       const data = await res.json();
       if (!data.success) throw new Error(data.message || 'Failed to load logs');
       setLogs(data.logs || []);
+      setExternalLogs(data.externalLogs || []);
       setStatusProbe(data.statusProbe || null);
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Failed to load logs');
@@ -97,6 +114,26 @@ export default function KwikPartialPaymentTestPage() {
       toast.error(err instanceof Error ? err.message : 'Failed to create test payment');
     } finally {
       setCreating(false);
+    }
+  };
+
+  const buildTamperedQr = async () => {
+    setTampering(true);
+    try {
+      const res = await fetch('/api/admin/upi-tamper', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ link: tamperLink, payAmount: tamperPayAmount }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.message || 'Could not build QR');
+      setTamperResult(data);
+      toast.success(`Tampered QR built — ₹${data.originalAmount} lowered to ₹${data.payAmount}`);
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Could not build QR');
+    } finally {
+      setTampering(false);
     }
   };
 
@@ -299,6 +336,117 @@ export default function KwikPartialPaymentTestPage() {
               ))}
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">3 · Test another gateway</CardTitle>
+          <CardDescription>
+            Works without integrating anything. Point the gateway&apos;s webhook URL here, create a payment
+            from its own dashboard, and underpay it.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          <div className="rounded-lg border p-3 space-y-2 text-sm">
+            <p className="font-medium">Step 1 — set this as the gateway&apos;s webhook URL</p>
+            <code className="block font-mono text-xs bg-muted/50 rounded p-2 break-all">
+              https://oceanlinux.com/api/payment/gateway-test-webhook/vyapar
+            </code>
+            <p className="text-muted-foreground text-xs">
+              Replace <code className="font-mono">vyapar</code> with any name to label the gateway. This
+              endpoint only records payloads — it never touches orders or wallets.
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <p className="text-sm font-medium">Step 2 — build an underpaying QR</p>
+            <p className="text-sm text-muted-foreground">
+              Create a payment in the gateway&apos;s dashboard, then paste its payment page URL below. If the
+              page can&apos;t be read, scan its QR with any QR-reader app and paste the{' '}
+              <code className="font-mono">upi://</code> text instead.
+            </p>
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="space-y-1.5 flex-1 min-w-[260px]">
+                <Label htmlFor="tamperLink">Payment page URL or upi:// link</Label>
+                <Input
+                  id="tamperLink"
+                  value={tamperLink}
+                  onChange={(e) => setTamperLink(e.target.value)}
+                  placeholder="https://gateway.example/pay/abc123"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="tamperPay">Pay (₹)</Label>
+                <Input
+                  id="tamperPay"
+                  type="number"
+                  min={1}
+                  value={tamperPayAmount}
+                  onChange={(e) => setTamperPayAmount(Number(e.target.value))}
+                  className="w-24"
+                />
+              </div>
+              <Button onClick={buildTamperedQr} disabled={tampering} variant="secondary">
+                {tampering ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+                Build QR
+              </Button>
+            </div>
+          </div>
+
+          {tamperResult && (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <p className="text-sm font-medium">Original — ₹{tamperResult.originalAmount}</p>
+                {tamperResult.qrImageUrl ? (
+                  <img
+                    src={tamperResult.qrImageUrl}
+                    alt="Original UPI QR"
+                    className="w-44 h-44 rounded-lg border bg-white p-2"
+                  />
+                ) : null}
+              </div>
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-red-600">
+                  Tampered — ₹{tamperResult.payAmount} (scan this)
+                </p>
+                {tamperResult.tamperedQrImageUrl ? (
+                  <img
+                    src={tamperResult.tamperedQrImageUrl}
+                    alt="Tampered UPI QR"
+                    className="w-44 h-44 rounded-lg border-2 border-red-500/50 bg-white p-2"
+                  />
+                ) : null}
+              </div>
+            </div>
+          )}
+
+          <div className="space-y-2">
+            <p className="text-sm font-medium">Step 3 — what the gateway sent us</p>
+            {externalLogs.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Nothing captured yet.</p>
+            ) : (
+              <div className="space-y-3">
+                {externalLogs.map((log) => (
+                  <div key={log._id} className="rounded-lg border p-3 space-y-2 text-sm">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge>{log.gateway || 'unknown'}</Badge>
+                      {log.reportedStatus ? <Badge variant="outline">{log.reportedStatus}</Badge> : null}
+                      <span className="text-xs text-muted-foreground ml-auto">
+                        {new Date(log.createdAt).toLocaleString('en-IN')}
+                      </span>
+                    </div>
+                    <p>
+                      reported amount: <strong>{log.reportedAmount ?? '—'}</strong>
+                    </p>
+                    <pre className="text-xs bg-muted/50 rounded p-2 overflow-x-auto">
+                      {JSON.stringify(log.raw, null, 2)}
+                    </pre>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </CardContent>
       </Card>
     </div>

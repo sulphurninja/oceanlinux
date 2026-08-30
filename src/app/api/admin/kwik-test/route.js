@@ -126,9 +126,12 @@ export async function GET(request) {
     }
 
     const query = paymentId ? { paymentId } : { orderId: /^KWIKTEST_/ };
-    const logs = await KwikRawLog.find(query).sort({ createdAt: -1 }).limit(50).lean();
+    const [logs, externalLogs] = await Promise.all([
+      KwikRawLog.find(query).sort({ createdAt: -1 }).limit(50).lean(),
+      KwikRawLog.find({ source: 'external-webhook' }).sort({ createdAt: -1 }).limit(25).lean(),
+    ]);
 
-    return NextResponse.json({ success: true, statusProbe, logs });
+    return NextResponse.json({ success: true, statusProbe, logs, externalLogs });
   } catch (error) {
     return NextResponse.json({ success: false, message: error.message }, { status: 500 });
   }

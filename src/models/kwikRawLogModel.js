@@ -12,10 +12,13 @@ const kwikRawLogSchema = new mongoose.Schema(
   {
     source: {
       type: String,
-      enum: ['webhook', 'status-api', 'create'],
+      enum: ['webhook', 'status-api', 'create', 'external-webhook'],
       required: true,
       index: true,
     },
+    // Set for 'external-webhook' so payloads from gateways we are evaluating
+    // (VyaparGateway, etc.) can be told apart from KwikUPI's own.
+    gateway: { type: String, default: '' },
     paymentId: { type: String, default: '', index: true },
     orderId: { type: String, default: '', index: true },
     reportedStatus: { type: String, default: '' },

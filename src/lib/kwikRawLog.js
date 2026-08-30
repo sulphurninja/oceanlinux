@@ -15,6 +15,7 @@ export async function logKwikRaw(entry) {
 
     await KwikRawLog.create({
       source: entry.source,
+      gateway: entry.gateway || '',
       paymentId: entry.paymentId || '',
       orderId: entry.orderId || '',
       reportedStatus: entry.reportedStatus || '',
