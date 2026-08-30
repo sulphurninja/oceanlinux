@@ -122,6 +122,9 @@ async function checkUpiPayment(order) {
       upi_txn_id: verification.upi_txn_id,
       verified: true,
       verifiedAmount: paidAmount,
+      // KwikUPI reports the requested order amount, not the amount actually
+      // credited — keep the raw payload so partial payments can be audited.
+      kwikRaw: verification.raw || null,
       confirmedAt: new Date(),
     },
   };

@@ -2,6 +2,7 @@ import { getRazorpayClient } from '@/lib/razorpayClient';
 import { createKwikUpiPayment, getKwikUpiPaymentStatus } from '@/lib/kwikUpi';
 import { buildKwikUpiInlineQr } from '@/lib/kwikUpiQr';
 import { getKwikUpiCredentials, getResellerRechargeSettings } from '@/lib/resellerRechargeSettings';
+import { logKwikRaw } from '@/lib/kwikRawLog';
 
 /**
  * Shared gateway-order plumbing:
@@ -191,14 +192,27 @@ export async function verifyUPIPayment(clientTxnId, kwikUpiPaymentId) {
         error: result.reason || 'not paid',
         pending: result.pending,
         failed: result.failed,
+        raw: result.raw,
       };
     }
+
+    // Only successful lookups are stored: pending polls repeat every few seconds
+    // and would flood the collection without adding any diagnostic value.
+    logKwikRaw({
+      source: 'status-api',
+      paymentId,
+      orderId: result.orderId || clientTxnId,
+      reportedStatus: result.raw?.status || 'SUCCESS',
+      reportedAmount: result.amount,
+      raw: result.raw,
+    }).catch(() => {});
 
     return {
       verified: true,
       amount: result.amount,
       upi_txn_id: result.transactionId || paymentId,
       order_id: result.orderId || clientTxnId,
+      raw: result.raw,
     };
   } catch (err) {
     return { verified: false, error: err.message };

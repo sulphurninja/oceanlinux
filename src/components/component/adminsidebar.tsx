@@ -160,6 +160,12 @@ const AdminSidebar = () => {
       badge: 'Auto UPI'
     },
     {
+      href: '/admin/kwik-test',
+      label: 'UPI Amount Test',
+      icon: IndianRupee,
+      badge: 'Debug'
+    },
+    {
       href: '/admin/companies',
       label: 'Companies',
       icon: Building2,

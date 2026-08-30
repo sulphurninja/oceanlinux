@@ -3,6 +3,7 @@ import ResellerWalletService from '@/services/resellerWalletService';
 import { verifyUPIPayment } from '@/lib/paymentGateways';
 import { getPaytmTransactionStatus } from '@/lib/paytmMerchant';
 import { getKwikUpiPaymentStatus } from '@/lib/kwikUpi';
+import { logKwikRaw } from '@/lib/kwikRawLog';
 import {
   getPaytmCredentials,
   getKwikUpiCredentials,
@@ -171,6 +172,17 @@ export async function probeKwikUpiResellerRecharge(request) {
   if (!result.verified) {
     return { verified: false, reason: result.reason || 'not paid', pending: result.pending, failed: result.failed };
   }
+
+  logKwikRaw({
+    source: 'status-api',
+    paymentId,
+    orderId: request.clientTxnId || '',
+    reportedStatus: result.raw?.status || 'SUCCESS',
+    reportedAmount: result.amount,
+    expectedAmount: request.amount,
+    raw: result.raw,
+    note: 'reseller recharge status check',
+  }).catch(() => {});
 
   if (result.amount && !amountsMatch(result.amount, request.amount)) {
     return { verified: false, reason: 'amount mismatch' };

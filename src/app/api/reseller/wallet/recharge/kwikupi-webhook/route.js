@@ -4,6 +4,7 @@ import ResellerRechargeRequest from '@/models/resellerRechargeRequestModel';
 import { verifyKwikUpiWebhook } from '@/lib/kwikUpi';
 import { getKwikUpiCredentials, getResellerRechargeSettings } from '@/lib/resellerRechargeSettings';
 import { confirmResellerRechargeRequest } from '@/lib/resellerRechargeService';
+import { logKwikRaw } from '@/lib/kwikRawLog';
 
 export const runtime = 'nodejs';
 
@@ -24,11 +25,32 @@ export async function POST(request) {
       return NextResponse.json({ success: false, message: 'KwikUPI not configured' }, { status: 400 });
     }
 
-    if (!verifyKwikUpiWebhook(rawBody, signature, kwikupi.apiSecret)) {
+    const signatureValid = verifyKwikUpiWebhook(rawBody, signature, kwikupi.apiSecret);
+
+    // Captured before any branching so partial-payment diagnostics survive even
+    // when the payload is rejected or has no matching recharge request.
+    let parsedForLog = {};
+    try {
+      parsedForLog = JSON.parse(rawBody || '{}');
+    } catch {
+      parsedForLog = {};
+    }
+    await logKwikRaw({
+      source: 'webhook',
+      paymentId: parsedForLog.payment_id || '',
+      orderId: parsedForLog.order_id || '',
+      reportedStatus: parsedForLog.status || '',
+      reportedAmount: parsedForLog.amount,
+      signatureValid,
+      raw: parsedForLog,
+      note: 'reseller recharge webhook',
+    });
+
+    if (!signatureValid) {
       return NextResponse.json({ success: false, message: 'Invalid signature' }, { status: 400 });
     }
 
-    const data = JSON.parse(rawBody || '{}');
+    const data = parsedForLog;
     const status = String(data.status || '').toUpperCase();
     const orderId = data.order_id || '';
     const paymentId = data.payment_id || '';

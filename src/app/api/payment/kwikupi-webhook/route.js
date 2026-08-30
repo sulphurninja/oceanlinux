@@ -12,6 +12,7 @@ import {
 import { verifyUPIPayment } from '@/lib/paymentGateways';
 import { confirmPendingOrderPayment } from '@/lib/confirmPendingOrderPayment';
 import { paymentAmountsMatch, expectedRenewalGatewayAmount } from '@/lib/paymentAmountValidation';
+import { logKwikRaw } from '@/lib/kwikRawLog';
 
 export const runtime = 'nodejs';
 
@@ -32,11 +33,35 @@ export async function POST(request) {
       return NextResponse.json({ success: false, message: 'UPI not configured' }, { status: 400 });
     }
 
-    if (!verifyKwikUpiWebhook(rawBody, signature, kwikupi.apiSecret)) {
+    const signatureValid = verifyKwikUpiWebhook(rawBody, signature, kwikupi.apiSecret);
+
+    // Captured before any branching so partial-payment diagnostics survive even
+    // when the payload is rejected or has no matching record.
+    let parsedForLog = {};
+    try {
+      parsedForLog = JSON.parse(rawBody || '{}');
+    } catch {
+      parsedForLog = {};
+    }
+    await logKwikRaw({
+      source: 'webhook',
+      paymentId: parsedForLog.payment_id || '',
+      orderId: parsedForLog.order_id || '',
+      reportedStatus: parsedForLog.status || '',
+      reportedAmount: parsedForLog.amount,
+      signatureValid,
+      headers: {
+        'x-webhook-signature': signature ? `${String(signature).slice(0, 12)}…` : '',
+        'content-type': request.headers.get('content-type') || '',
+      },
+      raw: parsedForLog,
+    });
+
+    if (!signatureValid) {
       return NextResponse.json({ success: false, message: 'Invalid signature' }, { status: 400 });
     }
 
-    const data = JSON.parse(rawBody || '{}');
+    const data = parsedForLog;
     const status = String(data.status || '').toUpperCase();
     const orderId = data.order_id || '';
     const paymentId = data.payment_id || '';

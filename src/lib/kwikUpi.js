@@ -67,14 +67,15 @@ export async function getKwikUpiPaymentStatus({ apiKey, apiSecret, paymentId }) 
       amount: Number(data.amount) || 0,
       transactionId: data.transaction_id || data.txn_id || data.payment_id || '',
       paymentDetails: data,
+      raw: data,
     };
   }
 
   if (status === 'TXN_FAILURE' || status === 'FAILED' || status === 'FAILURE') {
-    return { verified: false, reason: 'payment failed', failed: true };
+    return { verified: false, reason: 'payment failed', failed: true, raw: data };
   }
 
-  return { verified: false, reason: 'payment pending', pending: true };
+  return { verified: false, reason: 'payment pending', pending: true, raw: data };
 }
 
 /**
