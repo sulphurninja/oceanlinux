@@ -161,7 +161,7 @@ const AdminSidebar = () => {
     },
     {
       href: '/admin/kwik-test',
-      label: 'UPI Amount Test',
+      label: 'Vyapar UPI Test',
       icon: IndianRupee,
       badge: 'Debug'
     },

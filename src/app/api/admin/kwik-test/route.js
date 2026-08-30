@@ -2,33 +2,28 @@ import { NextResponse } from 'next/server';
 import QRCode from 'qrcode';
 import connectDB from '@/lib/db';
 import { enforceAdmin } from '@/lib/apiSecurity';
-import { createKwikUpiPayment, getKwikUpiPaymentStatus } from '@/lib/kwikUpi';
-import { buildKwikUpiInlineQr } from '@/lib/kwikUpiQr';
-import { getKwikUpiCredentials, getResellerRechargeSettings } from '@/lib/resellerRechargeSettings';
+import { getVyaparCredentials, getResellerRechargeSettings } from '@/lib/resellerRechargeSettings';
+import { createVyaparOrderWithUniqueAmount, getVyaparOrderStatus } from '@/lib/vyaparGateway';
+import { UPI_PROVIDER_VYAPAR } from '@/lib/paymentGateways';
 import { logKwikRaw } from '@/lib/kwikRawLog';
 import KwikRawLog from '@/models/kwikRawLogModel';
 
 export const dynamic = 'force-dynamic';
 
+const TEST_ORDER_PREFIX = 'VGTEST_';
+
 /**
- * KwikUPI partial-payment diagnostics.
+ * VyaparGateway partial-payment diagnostics.
  *
- * Creates a throwaway KwikUPI payment that is not tied to any order, then records
- * every webhook and status-API payload for it. Paying less than the requested
- * amount shows whether KwikUPI reports the credited amount or just echoes back
- * the amount we asked for.
+ * Creates a throwaway payment through the same API production uses, plus a
+ * tampered QR that pays less than the requested amount. VyaparGateway should
+ * leave the order pending/expired on underpay — never mark it success.
  */
 
-async function credentials() {
-  return getKwikUpiCredentials(await getResellerRechargeSettings());
+async function vyaparCredentials() {
+  return getVyaparCredentials(await getResellerRechargeSettings());
 }
 
-/**
- * Rewrites the `am` parameter of a UPI intent link, reproducing exactly what a
- * customer does when they read the link off the network tab and lower the amount.
- * Everything else (payee VPA, transaction ref, note) is left byte-for-byte intact,
- * which is why KwikUPI still ties the payment back to the original order.
- */
 function tamperUpiAmount(upiLink, payAmount) {
   if (!upiLink || !/[?&]am=/i.test(upiLink)) return '';
   return upiLink.replace(/([?&]am=)[^&]*/i, `$1${payAmount.toFixed(2)}`);
@@ -45,25 +40,30 @@ export async function POST(request) {
     const amount = Math.max(2, Math.min(1000, Number(body?.amount) || 10));
     const payAmount = Math.max(1, Math.min(amount, Number(body?.payAmount) || 1));
 
-    const kwikupi = await credentials();
-    if (!kwikupi) {
-      return NextResponse.json({ success: false, message: 'KwikUPI is not connected' }, { status: 400 });
+    const vyapar = await vyaparCredentials();
+    if (!vyapar) {
+      return NextResponse.json(
+        { success: false, message: 'VyaparGateway is not connected. Connect it in Reseller Recharges first.' },
+        { status: 400 }
+      );
     }
 
-    const testOrderId = `KWIKTEST_${Date.now()}`;
-    const created = await createKwikUpiPayment({
-      apiKey: kwikupi.apiKey,
-      apiSecret: kwikupi.apiSecret,
+    const testOrderId = `${TEST_ORDER_PREFIX}${Date.now()}`;
+    const created = await createVyaparOrderWithUniqueAmount({
+      apiKey: vyapar.apiKey,
       amount,
-      orderId: testOrderId,
-      customerName: 'Kwik Diagnostic',
+      clientTxnId: testOrderId,
+      customerName: 'Vyapar Diagnostic',
+      customerEmail: 'test@oceanlinux.com',
+      description: 'Partial payment test',
     });
 
-    if (!created.paymentPage) {
-      return NextResponse.json({ success: false, message: 'KwikUPI did not return a payment page' }, { status: 502 });
+    const chargedAmount = created.chargedAmount;
+    const upiLink = created.upiLink || '';
+    let qrImageUrl = created.qrImageUrl || '';
+    if (!qrImageUrl && upiLink) {
+      qrImageUrl = await QRCode.toDataURL(upiLink, { width: 320, margin: 1 }).catch(() => '');
     }
-
-    const { upiLink, qrImageUrl } = await buildKwikUpiInlineQr(created.paymentPage);
 
     const tamperedUpiLink = tamperUpiAmount(upiLink, payAmount);
     let tamperedQrImageUrl = '';
@@ -73,20 +73,24 @@ export async function POST(request) {
 
     await logKwikRaw({
       source: 'create',
-      paymentId: created.paymentId,
+      gateway: UPI_PROVIDER_VYAPAR,
+      paymentId: created.orderId,
       orderId: testOrderId,
-      expectedAmount: amount,
-      raw: { paymentPage: created.paymentPage, upiLink, tamperedUpiLink },
-      note: `Diagnostic payment created for ₹${amount}, tampered to ₹${payAmount}`,
+      expectedAmount: chargedAmount,
+      raw: { paymentUrl: created.paymentUrl, upiLink, tamperedUpiLink, chargedAmount },
+      note: `Vyapar diagnostic — honest ₹${chargedAmount}, tampered to ₹${payAmount}`,
     });
 
     return NextResponse.json({
       success: true,
+      provider: UPI_PROVIDER_VYAPAR,
       testOrderId,
-      paymentId: created.paymentId,
+      paymentId: created.orderId,
       requestedAmount: amount,
+      chargedAmount,
       payAmount,
-      paymentPage: created.paymentPage,
+      paymentPage: created.paymentUrl,
+      expiresAt: created.expiresAt,
       upiLink,
       qrImageUrl,
       tamperedUpiLink,
@@ -106,32 +110,36 @@ export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
     const paymentId = searchParams.get('paymentId') || '';
+    const clientTxnId = searchParams.get('clientTxnId') || '';
 
     let statusProbe = null;
-    if (paymentId) {
-      const kwikupi = await credentials();
-      if (kwikupi) {
-        const result = await getKwikUpiPaymentStatus({
-          apiKey: kwikupi.apiKey,
-          apiSecret: kwikupi.apiSecret,
-          paymentId,
+    if (paymentId || clientTxnId) {
+      const vyapar = await vyaparCredentials();
+      if (vyapar) {
+        const result = await getVyaparOrderStatus({
+          apiKey: vyapar.apiKey,
+          orderId: paymentId || undefined,
+          clientTxnId: clientTxnId || undefined,
         });
         statusProbe = {
           verified: !!result.verified,
           reason: result.reason || '',
           reportedAmount: result.amount ?? null,
-          raw: result.raw ?? result.paymentDetails ?? null,
+          pending: !!result.pending,
+          expired: !!result.expired,
+          failed: !!result.failed,
+          raw: result.raw ?? null,
         };
       }
     }
 
-    const query = paymentId ? { paymentId } : { orderId: /^KWIKTEST_/ };
-    const [logs, externalLogs] = await Promise.all([
-      KwikRawLog.find(query).sort({ createdAt: -1 }).limit(50).lean(),
-      KwikRawLog.find({ source: 'external-webhook' }).sort({ createdAt: -1 }).limit(25).lean(),
-    ]);
+    const logFilter = paymentId
+      ? { $or: [{ paymentId }, { orderId: clientTxnId || paymentId }] }
+      : { orderId: new RegExp(`^${TEST_ORDER_PREFIX}`) };
 
-    return NextResponse.json({ success: true, statusProbe, logs, externalLogs });
+    const logs = await KwikRawLog.find(logFilter).sort({ createdAt: -1 }).limit(50).lean();
+
+    return NextResponse.json({ success: true, statusProbe, logs, externalLogs: [] });
   } catch (error) {
     return NextResponse.json({ success: false, message: error.message }, { status: 500 });
   }

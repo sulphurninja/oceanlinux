@@ -25,21 +25,14 @@ interface RawLog {
   createdAt: string;
 }
 
-interface TamperResult {
-  originalAmount: string;
-  payAmount: number;
-  upiLink: string;
-  tamperedUpiLink: string;
-  qrImageUrl: string;
-  tamperedQrImageUrl: string;
-}
-
 interface TestPayment {
   testOrderId: string;
   paymentId: string;
   requestedAmount: number;
+  chargedAmount: number;
   payAmount: number;
   paymentPage: string;
+  expiresAt?: string | null;
   upiLink: string;
   qrImageUrl: string;
   tamperedUpiLink: string;
@@ -50,33 +43,38 @@ interface StatusProbe {
   verified: boolean;
   reason: string;
   reportedAmount: number | null;
+  pending?: boolean;
+  expired?: boolean;
+  failed?: boolean;
   raw: unknown;
 }
 
-export default function KwikPartialPaymentTestPage() {
+function logEvent(raw: unknown): string {
+  if (!raw || typeof raw !== 'object') return '';
+  const event = (raw as Record<string, unknown>).event;
+  return typeof event === 'string' ? event : '';
+}
+
+export default function VyaparPartialPaymentTestPage() {
   const [amount, setAmount] = useState(10);
   const [payAmount, setPayAmount] = useState(1);
   const [creating, setCreating] = useState(false);
   const [payment, setPayment] = useState<TestPayment | null>(null);
   const [logs, setLogs] = useState<RawLog[]>([]);
-  const [externalLogs, setExternalLogs] = useState<RawLog[]>([]);
   const [statusProbe, setStatusProbe] = useState<StatusProbe | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  const [tamperLink, setTamperLink] = useState('');
-  const [tamperPayAmount, setTamperPayAmount] = useState(1);
-  const [tampering, setTampering] = useState(false);
-  const [tamperResult, setTamperResult] = useState<TamperResult | null>(null);
-
-  const refresh = useCallback(async (paymentId?: string) => {
+  const refresh = useCallback(async (probe?: { paymentId: string; clientTxnId: string }) => {
     setRefreshing(true);
     try {
-      const qs = paymentId ? `?paymentId=${encodeURIComponent(paymentId)}` : '';
+      const params = new URLSearchParams();
+      if (probe?.paymentId) params.set('paymentId', probe.paymentId);
+      if (probe?.clientTxnId) params.set('clientTxnId', probe.clientTxnId);
+      const qs = params.toString() ? `?${params.toString()}` : '';
       const res = await fetch(`/api/admin/kwik-test${qs}`, { credentials: 'include', cache: 'no-store' });
       const data = await res.json();
       if (!data.success) throw new Error(data.message || 'Failed to load logs');
       setLogs(data.logs || []);
-      setExternalLogs(data.externalLogs || []);
       setStatusProbe(data.statusProbe || null);
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Failed to load logs');
@@ -91,7 +89,10 @@ export default function KwikPartialPaymentTestPage() {
 
   useEffect(() => {
     if (!payment) return;
-    const timer = setInterval(() => refresh(payment.paymentId), 5000);
+    const timer = setInterval(
+      () => refresh({ paymentId: payment.paymentId, clientTxnId: payment.testOrderId }),
+      5000
+    );
     return () => clearInterval(timer);
   }, [payment, refresh]);
 
@@ -108,8 +109,8 @@ export default function KwikPartialPaymentTestPage() {
       if (!data.success) throw new Error(data.message || 'Failed to create test payment');
       setPayment(data);
       setStatusProbe(null);
-      toast.success(`Test payment for ₹${data.requestedAmount} created`);
-      refresh(data.paymentId);
+      toast.success(`VyaparGateway test created — pay ₹${data.chargedAmount} honestly or ₹${data.payAmount} via tampered QR`);
+      refresh({ paymentId: data.paymentId, clientTxnId: data.testOrderId });
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Failed to create test payment');
     } finally {
@@ -117,55 +118,54 @@ export default function KwikPartialPaymentTestPage() {
     }
   };
 
-  const buildTamperedQr = async () => {
-    setTampering(true);
-    try {
-      const res = await fetch('/api/admin/upi-tamper', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ link: tamperLink, payAmount: tamperPayAmount }),
-      });
-      const data = await res.json();
-      if (!data.success) throw new Error(data.message || 'Could not build QR');
-      setTamperResult(data);
-      toast.success(`Tampered QR built — ₹${data.originalAmount} lowered to ₹${data.payAmount}`);
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Could not build QR');
-    } finally {
-      setTampering(false);
-    }
-  };
-
   const verdict = (() => {
     if (!payment) return null;
-    const reported = [
-      statusProbe?.verified ? statusProbe.reportedAmount : null,
-      ...logs
-        .filter((l) => l.source === 'webhook' && l.paymentId === payment.paymentId)
-        .map((l) => l.reportedAmount),
-    ].filter((v): v is number => typeof v === 'number');
 
-    if (reported.length === 0) return null;
-    const anyBelowRequested = reported.some((v) => v + 0.5 < payment.requestedAmount);
-    return anyBelowRequested ? 'reports-real' : 'echoes-order-amount';
+    const relevant = logs.filter(
+      (l) => l.paymentId === payment.paymentId || l.orderId === payment.testOrderId
+    );
+
+    const webhookSuccess = relevant.some(
+      (l) =>
+        l.source === 'webhook' &&
+        (String(l.reportedStatus).toLowerCase() === 'success' || logEvent(l.raw) === 'payment.success')
+    );
+    const webhookExpired = relevant.some(
+      (l) =>
+        l.source === 'webhook' &&
+        (String(l.reportedStatus).toLowerCase() === 'expired' || logEvent(l.raw) === 'payment.expired')
+    );
+
+    if (statusProbe?.verified || webhookSuccess) {
+      return 'honest-paid';
+    }
+    if (statusProbe?.expired || webhookExpired || statusProbe?.reason?.includes('expired')) {
+      return 'fraud-blocked';
+    }
+    if (statusProbe && !statusProbe.verified && !statusProbe.pending) {
+      return 'fraud-blocked';
+    }
+    return null;
   })();
+
+  const honestAmount = payment?.chargedAmount ?? payment?.requestedAmount ?? 0;
 
   return (
     <div className="p-4 md:p-6 space-y-6 max-w-5xl">
       <div>
-        <h1 className="text-2xl font-bold">KwikUPI partial payment test</h1>
+        <h1 className="text-2xl font-bold">VyaparGateway partial payment test</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Creates a real KwikUPI payment plus a tampered QR that pays less than the requested amount — the
-          same trick a customer uses. If KwikUPI reports the amount that actually landed, we can block ₹1
-          fraud automatically.
+          Creates a real VyaparGateway payment (same API as production) plus a tampered ₹1 QR. Scan the
+          tampered one to confirm underpayment stays pending/expired and never marks success.
         </p>
       </div>
 
       <Card>
         <CardHeader>
           <CardTitle className="text-base">1 · Create test payment</CardTitle>
-          <CardDescription>No order is created — this payment is not linked to any customer.</CardDescription>
+          <CardDescription>
+            No customer order is created. Uses your live VyaparGateway credentials.
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-wrap items-end gap-3">
@@ -182,7 +182,7 @@ export default function KwikPartialPaymentTestPage() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="payAmount">Actually pay (₹)</Label>
+              <Label htmlFor="payAmount">Tampered pay (₹)</Label>
               <Input
                 id="payAmount"
                 type="number"
@@ -204,30 +204,37 @@ export default function KwikPartialPaymentTestPage() {
               <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 flex gap-2 text-sm">
                 <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-amber-600" />
                 <p>
-                  UPI apps don&apos;t let you edit the amount after scanning. The fraud works by rewriting the{' '}
-                  <code className="font-mono">am=</code> value in the raw UPI link before opening it — the QR on
-                  the right does exactly that for you. <strong>Scan the right QR</strong> to reproduce it.
+                  <strong>Step A — fraud test:</strong> scan the <strong>red tampered QR</strong> and pay only ₹
+                  {payment.payAmount}. Order should <strong>not</strong> succeed.
+                  <br />
+                  <strong>Step B — honest test:</strong> create a new QR and scan the <strong>left QR</strong> for
+                  the exact amount shown (₹{honestAmount.toFixed(2)}).
                 </p>
               </div>
 
+              {payment.expiresAt && (
+                <p className="text-xs text-muted-foreground">
+                  QR expires ~2 min after creation ({new Date(payment.expiresAt).toLocaleTimeString('en-IN')}).
+                  Create a new test if it expires.
+                </p>
+              )}
+
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
-                  <p className="text-sm font-medium">
-                    Honest QR — ₹{payment.requestedAmount}
-                  </p>
+                  <p className="text-sm font-medium">Honest QR — ₹{honestAmount.toFixed(2)}</p>
                   {payment.qrImageUrl ? (
                     <img
                       src={payment.qrImageUrl}
-                      alt={`UPI QR for ₹${payment.requestedAmount}`}
+                      alt={`UPI QR for ₹${honestAmount}`}
                       className="w-44 h-44 rounded-lg border bg-white p-2"
                     />
                   ) : null}
-                  <p className="text-xs text-muted-foreground">What a normal customer sees.</p>
+                  <p className="text-xs text-muted-foreground">Pay this exact amount for a real success.</p>
                 </div>
 
                 <div className="space-y-2">
                   <p className="text-sm font-medium text-red-600">
-                    Tampered QR — ₹{payment.payAmount} (scan this one)
+                    Tampered QR — ₹{payment.payAmount} (scan for fraud test)
                   </p>
                   {payment.tamperedQrImageUrl ? (
                     <img
@@ -236,21 +243,25 @@ export default function KwikPartialPaymentTestPage() {
                       className="w-44 h-44 rounded-lg border-2 border-red-500/50 bg-white p-2"
                     />
                   ) : (
-                    <p className="text-sm text-muted-foreground">
-                      Could not build — the UPI link has no amount parameter.
-                    </p>
+                    <p className="text-sm text-muted-foreground">Could not build tampered QR.</p>
                   )}
                   <p className="text-xs text-muted-foreground">
-                    Same payee and same transaction ref, only the amount lowered.
+                    Same payee and transaction ref — only the amount lowered to ₹{payment.payAmount}.
                   </p>
                 </div>
               </div>
 
               <div className="space-y-1 text-xs font-mono break-all text-muted-foreground">
-                <p>Payment ID: {payment.paymentId}</p>
+                <p>Order ID: {payment.paymentId}</p>
                 <p>Ref: {payment.testOrderId}</p>
-                <p>Original: {payment.upiLink}</p>
-                <p className="text-red-600/80">Tampered: {payment.tamperedUpiLink || '—'}</p>
+                {payment.paymentPage ? (
+                  <p>
+                    Payment page:{' '}
+                    <a href={payment.paymentPage} target="_blank" rel="noreferrer" className="underline">
+                      open
+                    </a>
+                  </p>
+                ) : null}
               </div>
             </div>
           )}
@@ -260,13 +271,17 @@ export default function KwikPartialPaymentTestPage() {
       <Card>
         <CardHeader className="flex-row items-center justify-between space-y-0">
           <div>
-            <CardTitle className="text-base">2 · What KwikUPI reports</CardTitle>
-            <CardDescription>Auto-refreshes every 5 seconds after a test payment is created.</CardDescription>
+            <CardTitle className="text-base">2 · What VyaparGateway reports</CardTitle>
+            <CardDescription>Auto-refreshes every 5 seconds after a test is created.</CardDescription>
           </div>
           <Button
             variant="outline"
             size="sm"
-            onClick={() => refresh(payment?.paymentId)}
+            onClick={() =>
+              payment
+                ? refresh({ paymentId: payment.paymentId, clientTxnId: payment.testOrderId })
+                : refresh()
+            }
             disabled={refreshing}
           >
             <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
@@ -274,28 +289,34 @@ export default function KwikPartialPaymentTestPage() {
           </Button>
         </CardHeader>
         <CardContent className="space-y-4">
-          {verdict === 'reports-real' && (
+          {verdict === 'fraud-blocked' && (
             <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 flex gap-2 text-sm">
               <ShieldCheck className="h-5 w-5 shrink-0 text-emerald-600" />
               <p>
-                <strong>KwikUPI reports the real amount.</strong> We can reject partial payments automatically —
-                ₹1 fraud can be blocked while keeping KwikUPI.
+                <strong>Fraud blocked.</strong> VyaparGateway did not mark the order as paid after the
+                underpayment. ₹{payAmount} fraud would not deliver a VPS in production.
               </p>
             </div>
           )}
-          {verdict === 'echoes-order-amount' && (
-            <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 flex gap-2 text-sm">
-              <ShieldAlert className="h-5 w-5 shrink-0 text-red-600" />
+          {verdict === 'honest-paid' && (
+            <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 flex gap-2 text-sm">
+              <ShieldCheck className="h-5 w-5 shrink-0 text-emerald-600" />
               <p>
-                <strong>KwikUPI echoes back the requested amount.</strong> It cannot tell us what actually
-                landed, so delivery has to be held until the amount is verified from Paytm.
+                <strong>Honest payment confirmed.</strong> Full amount verified — production checkout would
+                proceed normally.
               </p>
+            </div>
+          )}
+          {verdict === null && payment && statusProbe?.pending && (
+            <div className="rounded-lg border border-sky-500/30 bg-sky-500/10 p-3 flex gap-2 text-sm">
+              <Loader2 className="h-5 w-5 shrink-0 animate-spin text-sky-600" />
+              <p>Waiting for payment or expiry…</p>
             </div>
           )}
 
           {statusProbe && (
             <div className="rounded-lg border p-3 text-sm space-y-1">
-              <p className="font-medium">Status API right now</p>
+              <p className="font-medium">Status API</p>
               <p>
                 verified: <strong>{String(statusProbe.verified)}</strong>
                 {statusProbe.reason ? ` · ${statusProbe.reason}` : ''}
@@ -303,17 +324,20 @@ export default function KwikPartialPaymentTestPage() {
               <p>
                 reported amount: <strong>{statusProbe.reportedAmount ?? '—'}</strong>
               </p>
+              {statusProbe.expired ? <Badge variant="outline">expired</Badge> : null}
+              {statusProbe.pending ? <Badge variant="secondary">pending</Badge> : null}
             </div>
           )}
 
           {logs.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No payloads captured yet.</p>
+            <p className="text-sm text-muted-foreground">No payloads captured yet — pay via one of the QRs above.</p>
           ) : (
             <div className="space-y-3">
               {logs.map((log) => (
                 <div key={log._id} className="rounded-lg border p-3 space-y-2 text-sm">
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge variant={log.source === 'webhook' ? 'default' : 'secondary'}>{log.source}</Badge>
+                    {log.gateway ? <Badge variant="outline">{log.gateway}</Badge> : null}
                     {log.reportedStatus ? <Badge variant="outline">{log.reportedStatus}</Badge> : null}
                     {log.signatureValid === false ? (
                       <Badge variant="destructive">bad signature</Badge>
@@ -329,124 +353,22 @@ export default function KwikPartialPaymentTestPage() {
                     reported amount: <strong>{log.reportedAmount ?? '—'}</strong>
                     {log.expectedAmount != null ? ` · expected: ${log.expectedAmount}` : ''}
                   </p>
-                  <pre className="text-xs bg-muted/50 rounded p-2 overflow-x-auto">
+                  {log.note ? <p className="text-xs text-muted-foreground">{log.note}</p> : null}
+                  <pre className="text-xs bg-muted/50 rounded p-2 overflow-x-auto max-h-48">
                     {JSON.stringify(log.raw, null, 2)}
                   </pre>
                 </div>
               ))}
             </div>
           )}
-        </CardContent>
-      </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">3 · Test another gateway</CardTitle>
-          <CardDescription>
-            Works without integrating anything. Point the gateway&apos;s webhook URL here, create a payment
-            from its own dashboard, and underpay it.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-5">
-          <div className="rounded-lg border p-3 space-y-2 text-sm">
-            <p className="font-medium">Step 1 — set this as the gateway&apos;s webhook URL</p>
-            <code className="block font-mono text-xs bg-muted/50 rounded p-2 break-all">
-              https://oceanlinux.com/api/payment/gateway-test-webhook/vyapar
-            </code>
-            <p className="text-muted-foreground text-xs">
-              Replace <code className="font-mono">vyapar</code> with any name to label the gateway. This
-              endpoint only records payloads — it never touches orders or wallets.
-            </p>
-          </div>
-
-          <div className="space-y-2">
-            <p className="text-sm font-medium">Step 2 — build an underpaying QR</p>
-            <p className="text-sm text-muted-foreground">
-              Create a payment in the gateway&apos;s dashboard, then paste its payment page URL below. If the
-              page can&apos;t be read, scan its QR with any QR-reader app and paste the{' '}
-              <code className="font-mono">upi://</code> text instead.
-            </p>
-            <div className="flex flex-wrap items-end gap-3">
-              <div className="space-y-1.5 flex-1 min-w-[260px]">
-                <Label htmlFor="tamperLink">Payment page URL or upi:// link</Label>
-                <Input
-                  id="tamperLink"
-                  value={tamperLink}
-                  onChange={(e) => setTamperLink(e.target.value)}
-                  placeholder="https://gateway.example/pay/abc123"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="tamperPay">Pay (₹)</Label>
-                <Input
-                  id="tamperPay"
-                  type="number"
-                  min={1}
-                  value={tamperPayAmount}
-                  onChange={(e) => setTamperPayAmount(Number(e.target.value))}
-                  className="w-24"
-                />
-              </div>
-              <Button onClick={buildTamperedQr} disabled={tampering} variant="secondary">
-                {tampering ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
-                Build QR
-              </Button>
-            </div>
-          </div>
-
-          {tamperResult && (
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <p className="text-sm font-medium">Original — ₹{tamperResult.originalAmount}</p>
-                {tamperResult.qrImageUrl ? (
-                  <img
-                    src={tamperResult.qrImageUrl}
-                    alt="Original UPI QR"
-                    className="w-44 h-44 rounded-lg border bg-white p-2"
-                  />
-                ) : null}
-              </div>
-              <div className="space-y-2">
-                <p className="text-sm font-medium text-red-600">
-                  Tampered — ₹{tamperResult.payAmount} (scan this)
-                </p>
-                {tamperResult.tamperedQrImageUrl ? (
-                  <img
-                    src={tamperResult.tamperedQrImageUrl}
-                    alt="Tampered UPI QR"
-                    className="w-44 h-44 rounded-lg border-2 border-red-500/50 bg-white p-2"
-                  />
-                ) : null}
-              </div>
+          {!payment && (
+            <div className="rounded-lg border border-muted p-3 text-sm text-muted-foreground">
+              <ShieldAlert className="h-4 w-4 inline mr-2" />
+              Expected results: tampered ₹1 → <strong>expired / not verified</strong>. Honest full amount →{' '}
+              <strong>success + UTR</strong>.
             </div>
           )}
-
-          <div className="space-y-2">
-            <p className="text-sm font-medium">Step 3 — what the gateway sent us</p>
-            {externalLogs.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Nothing captured yet.</p>
-            ) : (
-              <div className="space-y-3">
-                {externalLogs.map((log) => (
-                  <div key={log._id} className="rounded-lg border p-3 space-y-2 text-sm">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge>{log.gateway || 'unknown'}</Badge>
-                      {log.reportedStatus ? <Badge variant="outline">{log.reportedStatus}</Badge> : null}
-                      <span className="text-xs text-muted-foreground ml-auto">
-                        {new Date(log.createdAt).toLocaleString('en-IN')}
-                      </span>
-                    </div>
-                    <p>
-                      reported amount: <strong>{log.reportedAmount ?? '—'}</strong>
-                    </p>
-                    <pre className="text-xs bg-muted/50 rounded p-2 overflow-x-auto">
-                      {JSON.stringify(log.raw, null, 2)}
-                    </pre>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
         </CardContent>
       </Card>
     </div>
