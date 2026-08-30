@@ -9,7 +9,6 @@ const {
   buildInventoryOwnerMaps,
   groupOrdersByIp,
   shouldSyncPanelDataToOrder,
-  markOrderExpiredIfPastDue,
   buildOrderSyncContext,
   ipAddressRegex,
   commitPanelSyncToOrder,
@@ -32,13 +31,9 @@ function panelExpiryExtendsCustomer(orderExpiry, panelExpiry) {
   return panelMs > orderMs;
 }
 
-/** Customer-facing sync: use panel date when it extends validity or differs. */
+/** Customer order expiry: only extend from panel — never shorten the paid validity period. */
 function shouldApplyPanelExpiryToCustomer(orderExpiry, panelExpiry) {
-  const panelMs = expiryMs(panelExpiry);
-  if (panelMs == null) return false;
-  const orderMs = expiryMs(orderExpiry);
-  if (orderMs == null) return true;
-  return panelMs !== orderMs;
+  return panelExpiryExtendsCustomer(orderExpiry, panelExpiry);
 }
 
 function createResellerApiClient(company) {
@@ -262,7 +257,6 @@ async function syncCompanyOrderExpiriesFromPanelIndex(ipIndex, stockDocs, api = 
     if (!ip) continue;
 
     if (!shouldSyncPanelDataToOrder(order, syncCtx)) {
-      await markOrderExpiredIfPastDue(order);
       skipped.push({
         orderId: String(order._id),
         ipAddress: ip,
@@ -372,7 +366,6 @@ async function syncSingleOrderExpiryFromPanel(order, { force = false, companyDoc
   }
   const syncCtx = buildOrderSyncContext(siblings, [ipStock]);
   if (!shouldSyncPanelDataToOrder(order, syncCtx)) {
-    await markOrderExpiredIfPastDue(order);
     return { order, synced: false, reason: 'not_current_ip_owner' };
   }
 
@@ -482,7 +475,6 @@ async function syncUserHostheavenOrderExpiries(orders) {
       if (!entry?.expiryDate) continue;
 
       if (!shouldSyncPanelDataToOrder(order, syncCtx)) {
-        await markOrderExpiredIfPastDue(order);
         continue;
       }
 
