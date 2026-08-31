@@ -1655,7 +1655,7 @@ class AutoProvisioningService {
       };
       if (groupTag) purchaseBody.groupTag = groupTag;
 
-      L.line(`[NETBAY-PROXY] POST /proxies/purchase ${JSON.stringify({ ...purchaseBody, proxyPass: '***' })}`);
+      L.line(`[NETBAY-PROXY] POST /proxy/purchase ${JSON.stringify({ ...purchaseBody, proxyPass: '***' })}`);
       const { result: purchaseRes, couponUsed: netbayCouponCode } = await this.purchaseNetbayWithCoupons(api, {
         purchaseBody,
         cfg,

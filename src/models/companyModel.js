@@ -75,7 +75,7 @@ const companyNetbayApiSchema = new mongoose.Schema({
   couponLinux: { type: String, default: '' },
   /** Netbay wallet coupon for Windows VPS auto-buy. */
   couponVps: { type: String, default: '' },
-  /** Netbay wallet coupon for proxy auto-buy (POST /proxies/purchase). */
+  /** Netbay wallet coupon for proxy auto-buy (POST /proxy/purchase). */
   couponProxy: { type: String, default: '' },
   /** When true, IP stock availability follows GET /services/stock. When false, use stockCount per plan. */
   useLiveStockApi: { type: Boolean, default: false },

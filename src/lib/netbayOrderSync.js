@@ -167,7 +167,7 @@ function applyNetbayProxyToOrderUpdates(proxyPayload, order) {
   return { dbUpdates, changes, expiryDate };
 }
 
-/** Fetch GET /services/:id or GET /proxies/:id and return order updates (does not write DB). */
+/** Fetch GET /services/:id or GET /proxy/:id and return order updates (does not write DB). */
 async function syncNetbayOrderFromApi(order) {
   const { api, error } = await resolveNetbayApiForOrder(order);
   if (!api) {

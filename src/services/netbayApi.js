@@ -391,16 +391,16 @@ class NetbayApi {
    * @param {number} [opts.pollIntervalMs=4000]
    */
   async listProxyPlans() {
-    return this._request('/api/v1/proxies/plans');
+    return this._request('/api/v1/proxy/plans');
   }
 
   async listProxyTemplates() {
-    return this._request('/api/v1/proxies/templates');
+    return this._request('/api/v1/proxy/templates');
   }
 
   async getProxy(proxyId) {
     if (!proxyId) throw new Error('NetbayApi.getProxy: proxyId is required');
-    return this._request(`/api/v1/proxies/${encodeURIComponent(proxyId)}`);
+    return this._request(`/api/v1/proxy/${encodeURIComponent(proxyId)}`);
   }
 
   /**
@@ -428,7 +428,7 @@ class NetbayApi {
     if (proxyPort) body.proxyPort = Number(proxyPort);
     if (couponCode) body.couponCode = String(couponCode);
     if (callbackUrl) body.callbackUrl = String(callbackUrl);
-    return this._request('/api/v1/proxies/purchase', { method: 'POST', body });
+    return this._request('/api/v1/proxy/purchase', { method: 'POST', body });
   }
 
   async checkProxyStock({ planId, os = 'PROXY', groupTag } = {}) {
@@ -436,7 +436,7 @@ class NetbayApi {
     if (!os) throw new Error('NetbayApi.checkProxyStock: os is required');
     const query = { planId, os: String(os) };
     if (groupTag) query.groupTag = String(groupTag);
-    return this._request('/api/v1/proxies/stock', { query });
+    return this._request('/api/v1/proxy/stock', { query });
   }
 
   async isProxyStockAvailable({ planId, os = 'PROXY', groupTag } = {}) {
@@ -497,7 +497,7 @@ class NetbayApi {
 
   async proxyTaskStatus(taskId) {
     if (!taskId) throw new Error('NetbayApi.proxyTaskStatus: taskId is required');
-    return this._request(`/api/v1/proxies/tasks/${encodeURIComponent(taskId)}`);
+    return this._request(`/api/v1/proxy/tasks/${encodeURIComponent(taskId)}`);
   }
 
   async waitForProxyTask(taskId, { maxWaitMs = 180_000, pollIntervalMs = 4_000 } = {}) {
@@ -522,13 +522,13 @@ class NetbayApi {
 
   async getProxyRenewalPricing(proxyId) {
     if (!proxyId) throw new Error('NetbayApi.getProxyRenewalPricing: proxyId is required');
-    return this._request(`/api/v1/proxies/${encodeURIComponent(proxyId)}/renewal-pricing`);
+    return this._request(`/api/v1/proxy/${encodeURIComponent(proxyId)}/renewal-pricing`);
   }
 
   async renewProxy(proxyId, { months = 1 } = {}) {
     if (!proxyId) throw new Error('NetbayApi.renewProxy: proxyId is required');
     const m = Math.max(1, Math.floor(Number(months) || 1));
-    return this._request(`/api/v1/proxies/${encodeURIComponent(proxyId)}/renew`, {
+    return this._request(`/api/v1/proxy/${encodeURIComponent(proxyId)}/renew`, {
       method: 'POST',
       body: { months: m },
     });

@@ -24,7 +24,7 @@ function resolveNetbayGroupTag(stock, requested) {
   return String(netbayCfgFromStock(stock).groupTag || '').trim();
 }
 
-/** HTTP proxy Applications product (Netbay GET/POST /api/v1/proxies/*). */
+/** HTTP proxy Applications product (Netbay GET/POST /api/v1/proxy/*). */
 function isNetbayProxyStock(stock) {
   const cfg = netbayCfgFromStock(stock);
   const type = String(cfg.productType || '').toLowerCase();
