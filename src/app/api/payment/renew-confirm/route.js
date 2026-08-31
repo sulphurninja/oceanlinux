@@ -26,6 +26,29 @@ const { extractAdvpsStatusCredentials } = require('@/lib/advpsStatusNormalize');
 const HostycareAPI = require('@/services/hostycareApi');
 const { notifyRenewalCompleted } = require('@/lib/renewalNotifications');
 
+/** Resolve Razorpay order id when pendingRenewal.gatewayOrderId was not persisted (race/stale tab). */
+async function resolveRenewalRazorpayOrderId({ order, renewalTxnId, razorpayOrderIdFromClient }) {
+  const stored = String(order.pendingRenewal?.gatewayOrderId || '').trim();
+  const fromClient = String(razorpayOrderIdFromClient || '').trim();
+  if (stored) return stored;
+  if (fromClient) return fromClient;
+  if (!renewalTxnId) return '';
+
+  try {
+    const { getRazorpayClient } = await import('@/lib/razorpayClient');
+    const razorpay = getRazorpayClient();
+    if (!razorpay) return '';
+
+    const from = Math.floor((Date.now() - 6 * 60 * 60 * 1000) / 1000);
+    const listed = await razorpay.orders.all({ from, count: 100 });
+    const match = (listed.items || []).find((o) => o.receipt === renewalTxnId);
+    return match?.id || '';
+  } catch (err) {
+    console.warn('[RENEWAL-CONFIRM] Razorpay receipt lookup failed:', err.message);
+    return '';
+  }
+}
+
 export async function POST(request) {
   const rateLimited = enforcePaymentRateLimit(request);
   if (rateLimited) return rateLimited;
@@ -172,7 +195,21 @@ export async function POST(request) {
     if (!paymentVerified && gatewayPaymentMethod === 'razorpay') {
       console.log('[RENEWAL-CONFIRM] Verifying Razorpay renewal payment');
 
-      const orderIdForSignature = order.pendingRenewal?.gatewayOrderId;
+      const orderIdForSignature = await resolveRenewalRazorpayOrderId({
+        order,
+        renewalTxnId,
+        razorpayOrderIdFromClient: razorpayOrderId,
+      });
+
+      if (orderIdForSignature && !order.pendingRenewal?.gatewayOrderId) {
+        await Order.findByIdAndUpdate(order._id, {
+          $set: { 'pendingRenewal.gatewayOrderId': orderIdForSignature },
+        });
+        if (order.pendingRenewal) {
+          order.pendingRenewal.gatewayOrderId = orderIdForSignature;
+        }
+        console.log('[RENEWAL-CONFIRM] Backfilled pendingRenewal.gatewayOrderId:', orderIdForSignature);
+      }
 
       if (razorpayPaymentId && razorpaySignature && orderIdForSignature) {
         console.log('[RENEWAL-CONFIRM] Using Razorpay order ID for signature:', orderIdForSignature);

@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# EC2 / PM2: run paid-but-pending scan every 15 min via crontab:
-#   */15 * * * * /path/to/oceanlinux/scripts/cron-paid-but-pending.sh >> /home/ec2-user/paid-scan.log 2>&1
-set -euo pipefail
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# EC2 / PM2 — run every 1 min (Vyapar QR expires in ~2 min):
+#   * * * * * /path/to/oceanlinux/scripts/cron-paid-but-pending.sh >> /home/ec2-user/paid-scan.log 2>&1
+set -euo pipefailROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 # Do NOT `source .env` — values like TOKEN_SECRET contain &, %, * which break bash.
 read_env_var() {
@@ -30,7 +29,19 @@ fi
 : "${CRON_SECRET:?CRON_SECRET not set in $ENV_FILE}"
 PORT="${PORT:-3000}"
 
+# Proactive QR refresh before Vyapar 2-min expiry
+curl -fsS -m 120 \
+  -H "x-cron-secret: ${CRON_SECRET}" \
+  "http://127.0.0.1:${PORT}/api/admin/upi-qr-refresh-cron?limit=30" \
+  || echo "[cron] qr-refresh failed $(date -Iseconds)"
+
 curl -fsS -m 280 \
   -H "x-cron-secret: ${CRON_SECRET}" \
-  "http://127.0.0.1:${PORT}/api/admin/paid-but-pending-cron?hours=72&limit=40" \
-  || echo "[cron-paid-but-pending] failed $(date -Iseconds)"
+  "http://127.0.0.1:${PORT}/api/admin/paid-but-pending-cron?hours=72&limit=50" \
+  || echo "[cron-paid-but-pending] scan failed $(date -Iseconds)"
+
+# Shorter lookback, catches fresh stuck orders faster
+curl -fsS -m 280 \
+  -H "x-cron-secret: ${CRON_SECRET}" \
+  -X POST "http://127.0.0.1:${PORT}/api/payment/recover-pending?minutes=180&limit=40" \
+  || echo "[cron-paid-but-pending] recover failed $(date -Iseconds)"

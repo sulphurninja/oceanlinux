@@ -18,7 +18,7 @@ import CheckoutSession from '@/models/checkoutSessionModel';
 import WalletRecharge from '@/models/walletRechargeModel';
 import { getDataFromToken } from '@/helper/getDataFromToken';
 import { enforcePaymentRateLimit } from '@/lib/rateLimit';
-import { paymentAmountsMatch, expectedRenewalGatewayAmount } from '@/lib/paymentAmountValidation';
+import { paymentAmountsMatch, expectedRenewalGatewayAmount, upiVerificationAmountAcceptable } from '@/lib/paymentAmountValidation';
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -102,12 +102,33 @@ export async function POST(request) {
 
       const rawPaymentMethod = orderWithPending?.pendingRenewal?.paymentMethod || 'razorpay';
       const gatewayMethod = renewalGatewayMethod(orderWithPending.pendingRenewal);
-      const gatewayOrderId = orderWithPending?.pendingRenewal?.gatewayOrderId;
+      let gatewayOrderId = orderWithPending?.pendingRenewal?.gatewayOrderId;
       const returnedFromPayment = !!reqBody.returnedFromPayment;
       const maxAttempts = returnedFromPayment ? 6 : 2;
       const delayMs = returnedFromPayment ? 1500 : 0;
 
       console.log(`[PAYMENT-STATUS] Pending renewal found, method=${rawPaymentMethod}, gateway=${gatewayMethod}`);
+
+      // Razorpay renewal — recover order id if pendingRenewal.gatewayOrderId was not saved
+      if (gatewayMethod === 'razorpay' && !gatewayOrderId) {
+        try {
+          const razorpay = getRazorpayClient();
+          if (razorpay) {
+            const from = Math.floor((Date.now() - 6 * 60 * 60 * 1000) / 1000);
+            const listed = await razorpay.orders.all({ from, count: 100 });
+            const match = (listed.items || []).find((o) => o.receipt === txnId);
+            if (match?.id) {
+              gatewayOrderId = match.id;
+              await Order.findByIdAndUpdate(orderWithPending._id, {
+                $set: { 'pendingRenewal.gatewayOrderId': match.id },
+              });
+              console.log('[PAYMENT-STATUS] Backfilled Razorpay order id from receipt:', match.id);
+            }
+          }
+        } catch (lookupErr) {
+          console.warn('[PAYMENT-STATUS] Razorpay receipt lookup failed:', lookupErr.message);
+        }
+      }
 
       // UPI (KwikUPI) renewal — probe gateway with retries after redirect
       if (gatewayMethod === 'upi') {
@@ -116,13 +137,22 @@ export async function POST(request) {
           const upiCheck = await verifyUPIPayment(txnId, gatewayOrderId);
           if (upiCheck.verified) {
             const expected = expectedRenewalGatewayAmount(orderWithPending);
-            if (expected > 0 && !paymentAmountsMatch(upiCheck.amount, expected)) {
+            if (expected > 0 && !upiVerificationAmountAcceptable(upiCheck, expected)) {
               return NextResponse.json({
                 isRenewal: true,
                 renewalTxnId: txnId,
                 paymentStatus: 'AMOUNT_MISMATCH',
                 paymentMethod: rawPaymentMethod,
                 message: 'UPI renewal amount mismatch',
+              });
+            }
+            if (
+              upiCheck.amount > 0 &&
+              expected > 0 &&
+              Math.abs(upiCheck.amount - expected) > 0.001
+            ) {
+              await Order.findByIdAndUpdate(orderWithPending._id, {
+                $set: { 'pendingRenewal.gatewayAmount': upiCheck.amount },
               });
             }
             return NextResponse.json({

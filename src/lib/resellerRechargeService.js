@@ -11,7 +11,7 @@ import {
   getResellerRechargeSettings,
 } from '@/lib/resellerRechargeSettings';
 import { getVyaparOrderStatus } from '@/lib/vyaparGateway';
-import { paymentAmountsMatchExact } from '@/lib/paymentAmountValidation';
+import { upiVerificationAmountAcceptable } from '@/lib/paymentAmountValidation';
 
 function amountsMatch(a, b) {
   return Math.abs(Number(a) - Number(b)) <= 1;
@@ -181,9 +181,10 @@ export async function probeVyaparResellerRecharge(request) {
     };
   }
 
-  // The gateway settles only on an exact match, so any drift here means the
-  // stored expectation is wrong rather than a rounding difference.
-  if (result.amount && !paymentAmountsMatchExact(result.amount, request.amount)) {
+  if (
+    result.amount &&
+    !upiVerificationAmountAcceptable({ ...result, provider: 'vyapar', verified: true }, request.amount)
+  ) {
     return { verified: false, reason: 'amount mismatch' };
   }
 

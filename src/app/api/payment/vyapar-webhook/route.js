@@ -12,7 +12,7 @@ import {
 import { verifyUPIPayment, UPI_PROVIDER_VYAPAR } from '@/lib/paymentGateways';
 import { confirmPendingOrderPayment } from '@/lib/confirmPendingOrderPayment';
 import {
-  paymentAmountsMatchExact,
+  upiVerificationAmountAcceptable,
   expectedRenewalGatewayAmount,
   expectedGatewayAmountFromOrder,
 } from '@/lib/paymentAmountValidation';
@@ -119,11 +119,17 @@ export async function POST(request) {
 
     const expectedAmount = expectedGatewayAmountFromOrder(order);
     const paidAmount = verification.amount || amount;
-    if (expectedAmount > 0 && !paymentAmountsMatchExact(paidAmount, expectedAmount)) {
+    if (expectedAmount > 0 && !upiVerificationAmountAcceptable(verification, expectedAmount)) {
       return NextResponse.json(
         { success: false, message: `Amount mismatch: expected ${expectedAmount}, got ${paidAmount}` },
         { status: 400 }
       );
+    }
+
+    if (paidAmount > 0 && expectedAmount > 0 && Math.abs(paidAmount - expectedAmount) > 0.001) {
+      order.paymentDetails = { ...(order.paymentDetails || {}), gatewayAmount: paidAmount };
+      order.markModified('paymentDetails');
+      await order.save();
     }
 
     const result = await confirmPendingOrderPayment(order, {
@@ -163,11 +169,17 @@ async function handleRenewal({ clientTxnId, vyaparOrderId, upiTxnId, amount }) {
 
   const expected = expectedRenewalGatewayAmount(pendingOrder);
   const paidAmount = verification.amount || amount;
-  if (expected > 0 && !paymentAmountsMatchExact(paidAmount, expected)) {
+  if (expected > 0 && !upiVerificationAmountAcceptable(verification, expected)) {
     return NextResponse.json(
       { success: false, message: `Amount mismatch: expected ${expected}, got ${paidAmount}` },
       { status: 400 }
     );
+  }
+
+  if (paidAmount > 0 && expected > 0 && Math.abs(paidAmount - expected) > 0.001) {
+    pendingOrder.pendingRenewal.gatewayAmount = paidAmount;
+    pendingOrder.markModified('pendingRenewal');
+    await pendingOrder.save();
   }
 
   const { handleRenewalWebhook } = await import('@/app/api/payment/webhook/route.js');
@@ -194,11 +206,21 @@ async function handleDispatch({ dispatch, clientTxnId, vyaparOrderId, upiTxnId, 
 
   const expectedAmount = dispatch.kind === 'checkout' ? dispatch.doc.gatewayAmount : dispatch.doc.amount;
   const paidAmount = verification.amount || amount;
-  if (expectedAmount && !paymentAmountsMatchExact(paidAmount, expectedAmount)) {
+  if (expectedAmount && !upiVerificationAmountAcceptable(verification, expectedAmount)) {
     return NextResponse.json(
       { success: false, message: `Amount mismatch: expected ${expectedAmount}, got ${paidAmount}` },
       { status: 400 }
     );
+  }
+
+  if (paidAmount > 0 && expectedAmount > 0 && Math.abs(paidAmount - expectedAmount) > 0.001) {
+    if (dispatch.kind === 'checkout') {
+      dispatch.doc.gatewayAmount = paidAmount;
+      await dispatch.doc.save();
+    } else if (dispatch.kind === 'recharge') {
+      dispatch.doc.amount = paidAmount;
+      await dispatch.doc.save();
+    }
   }
 
   const transactionId = verification.upi_txn_id || upiTxnId || vyaparOrderId;

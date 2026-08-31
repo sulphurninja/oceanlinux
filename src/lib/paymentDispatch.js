@@ -11,7 +11,7 @@ import { getRazorpayClient } from '@/lib/razorpayClient';
 const { resolveOrderExpiryOnPayment } = require('@/lib/advpsOrderExpiry');
 import {
   paymentAmountsMatch,
-  paymentAmountsMatchExact,
+  upiVerificationAmountAcceptable,
   expectedGatewayAmountFromSession,
 } from '@/lib/paymentAmountValidation';
 import { confirmResellerRechargeRequest } from '@/lib/resellerRechargeService';
@@ -33,16 +33,10 @@ const AutoProvisioningService = require('@/services/autoProvisioningService');
  * Returns null if none match, in which case the caller falls back to the
  * existing single-order path that lives in each webhook handler.
  */
-/**
- * VyaparGateway settles only on an exact amount, so any drift on that provider
- * is a real discrepancy rather than rounding. KwikUPI keeps the ₹1 tolerance it
- * has always had, since it reports the requested figure.
- */
+/** Vyapar verified lookups are trusted; KwikUPI keeps ₹1 tolerance. */
 function upiAmountMatches(result, expected) {
   if (!expected) return true;
-  return result.provider === UPI_PROVIDER_VYAPAR
-    ? paymentAmountsMatchExact(result.amount, expected)
-    : paymentAmountsMatch(result.amount, expected);
+  return upiVerificationAmountAcceptable(result, expected);
 }
 
 export async function findDispatchTarget(clientTxnId) {

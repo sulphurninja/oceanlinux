@@ -1,3 +1,26 @@
+export const UPI_PROVIDER_VYAPAR = 'vyapar';
+
+/**
+ * Vyapar only marks an order paid when the credited amount matches their order
+ * amount to the paise. When verified:true, trust the gateway — our DB
+ * gatewayAmount can be stale (base price without unique-paise surcharge).
+ */
+export function vyaparPaymentVerified(verification) {
+  return verification?.provider === UPI_PROVIDER_VYAPAR && verification?.verified === true;
+}
+
+/**
+ * Whether a verified UPI lookup should be accepted against a stored expected amount.
+ */
+export function upiVerificationAmountAcceptable(verification, expectedAmount) {
+  if (!verification?.verified) return false;
+  if (vyaparPaymentVerified(verification)) return true;
+  const paid = Number(verification.amount);
+  const expected = Number(expectedAmount);
+  if (!Number.isFinite(expected) || expected <= 0) return true;
+  return paymentAmountsMatch(paid, expected);
+}
+
 /**
  * Compare gateway-reported amount (INR) with expected order/session amount.
  * Allows ₹1 tolerance for rounding.

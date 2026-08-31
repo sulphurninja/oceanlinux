@@ -10,9 +10,13 @@ const WhatsAppService = require('@/services/whatsappService');
 import userWalletService from '@/services/userWalletService';
 import {
   paymentAmountsMatch,
-  paymentAmountsMatchExact,
+  upiVerificationAmountAcceptable,
   expectedGatewayAmountFromOrder,
 } from '@/lib/paymentAmountValidation';
+import {
+  refreshVyaparUpiForTxnId,
+  shouldRefreshVyaparUpi,
+} from '@/lib/refreshVyaparUpiOrder';
 const PaymentOrderLogger = require('@/services/paymentOrderLogger');
 
 function sleep(ms) {
@@ -95,11 +99,61 @@ async function checkRazorpayPayment(order) {
 }
 
 async function checkUpiPayment(order) {
+  let activeOrder = order;
+
+  if (
+    activeOrder.paymentDetails?.upiProvider === UPI_PROVIDER_VYAPAR &&
+    shouldRefreshVyaparUpi(activeOrder)
+  ) {
+    const refresh = await refreshVyaparUpiForTxnId(activeOrder.clientTxnId, {
+      doc: activeOrder,
+      force: true,
+    });
+    if (refresh.refreshed) {
+      activeOrder = (await Order.findById(order._id)) || activeOrder;
+    }
+  }
+
   const verification = await verifyUPIPayment(
-    order.clientTxnId,
-    order.gatewayOrderId,
-    order.paymentDetails?.upiProvider
+    activeOrder.clientTxnId,
+    activeOrder.gatewayOrderId,
+    activeOrder.paymentDetails?.upiProvider
   );
+
+  if (
+    !verification.verified &&
+    verification.expired &&
+    activeOrder.paymentDetails?.upiProvider === UPI_PROVIDER_VYAPAR
+  ) {
+    const refresh = await refreshVyaparUpiForTxnId(activeOrder.clientTxnId, {
+      doc: activeOrder,
+      force: true,
+    });
+    if (refresh.refreshed) {
+      activeOrder = (await Order.findById(order._id)) || activeOrder;
+      const retry = await verifyUPIPayment(
+        activeOrder.clientTxnId,
+        activeOrder.gatewayOrderId,
+        activeOrder.paymentDetails?.upiProvider
+      );
+      if (!retry.verified) {
+        return {
+          success: false,
+          status: retry.expired ? 'EXPIRED' : retry.status?.toUpperCase() || 'PENDING',
+          method: 'upi',
+          qrRefreshed: true,
+        };
+      }
+      Object.assign(verification, retry);
+    } else if (!verification.verified) {
+      return {
+        success: false,
+        status: 'EXPIRED',
+        method: 'upi',
+      };
+    }
+  }
+
   if (!verification.verified) {
     return {
       success: false,
@@ -108,14 +162,10 @@ async function checkUpiPayment(order) {
     };
   }
 
-  const expectedAmount = expectedGatewayAmountFromOrder(order);
+  const expectedAmount = expectedGatewayAmountFromOrder(activeOrder);
   const paidAmount = verification.amount;
-  const matches =
-    verification.provider === UPI_PROVIDER_VYAPAR
-      ? paymentAmountsMatchExact(paidAmount, expectedAmount)
-      : paymentAmountsMatch(paidAmount, expectedAmount);
 
-  if (expectedAmount > 0 && !matches) {
+  if (expectedAmount > 0 && !upiVerificationAmountAcceptable(verification, expectedAmount)) {
     return {
       success: false,
       status: 'AMOUNT_MISMATCH',
@@ -124,16 +174,27 @@ async function checkUpiPayment(order) {
     };
   }
 
+  if (
+    verification.provider === UPI_PROVIDER_VYAPAR &&
+    paidAmount > 0 &&
+    expectedAmount > 0 &&
+    Math.abs(paidAmount - expectedAmount) > 0.001
+  ) {
+    activeOrder.paymentDetails = { ...(activeOrder.paymentDetails || {}), gatewayAmount: paidAmount };
+    activeOrder.markModified?.('paymentDetails');
+  }
+
   return {
     success: true,
     method: 'upi',
-    transactionId: verification.upi_txn_id || order.gatewayOrderId,
-    gatewayOrderId: order.gatewayOrderId,
+    transactionId: verification.upi_txn_id || activeOrder.gatewayOrderId,
+    gatewayOrderId: activeOrder.gatewayOrderId,
     paymentDetails: {
       upi_txn_id: verification.upi_txn_id,
       upiProvider: verification.provider,
       verified: true,
       verifiedAmount: paidAmount,
+      gatewayAmount: paidAmount,
       // KwikUPI reports the requested order amount rather than the credited one,
       // so its raw payload is kept for auditing partial payments.
       kwikRaw: verification.raw || null,
@@ -323,11 +384,17 @@ export async function confirmPendingOrderPayment(order, gatewayResult, opts = {}
   order.gatewayOrderId = gatewayResult.gatewayOrderId || order.gatewayOrderId;
   order.paymentMethod = paymentMethod;
   if (expiryDate) order.expiryDate = expiryDate;
-  order.paymentDetails = {
+  const mergedPaymentDetails = {
     ...(order.paymentDetails || {}),
     ...gatewayResult.paymentDetails,
     recoveredAt: new Date(),
   };
+  if (gatewayResult.paymentDetails?.gatewayAmount != null) {
+    mergedPaymentDetails.gatewayAmount = gatewayResult.paymentDetails.gatewayAmount;
+  } else if (gatewayResult.paymentDetails?.verifiedAmount != null) {
+    mergedPaymentDetails.gatewayAmount = gatewayResult.paymentDetails.verifiedAmount;
+  }
+  order.paymentDetails = mergedPaymentDetails;
   delete order.paymentDetails.unpaidReleased;
   delete order.paymentDetails.unpaidReason;
   delete order.paymentDetails.unpaidReleasedAt;

@@ -45,7 +45,7 @@ async function mapWithConcurrency(items, concurrency, fn) {
  */
 export async function runPaidButPendingScan(opts = {}) {
   const hours = Math.min(Math.max(Number(opts.hours) || 72, 1), 168);
-  const limit = Math.min(Math.max(Number(opts.limit) || 40, 1), 100);
+  const limit = Math.min(Math.max(Number(opts.limit) || 50, 1), 100);
   const autoRecover = opts.autoRecover !== false;
   const logSource = opts.logSource || 'scan';
 

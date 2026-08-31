@@ -180,10 +180,10 @@ export function UpiQrPaymentDialog({
         /* keep polling */
       }
 
-      timer = setTimeout(poll, 4000);
+      timer = setTimeout(poll, 2000);
     };
 
-    timer = setTimeout(poll, 3000);
+    timer = setTimeout(poll, 2000);
     return () => {
       cancelled = true;
       clearTimeout(timer);
@@ -245,9 +245,16 @@ export function UpiQrPaymentDialog({
                       Scan with GPay, PhonePe, Paytm, or any UPI app
                     </p>
                     {secondsLeft !== null && (
-                      <p className="text-xs text-muted-foreground">
-                        QR refreshes in {Math.floor(secondsLeft / 60)}:
-                        {String(secondsLeft % 60).padStart(2, '0')}
+                      <p
+                        className={`text-xs text-center ${
+                          secondsLeft <= 30
+                            ? 'font-medium text-amber-600 dark:text-amber-400'
+                            : 'text-muted-foreground'
+                        }`}
+                      >
+                        {secondsLeft <= 30
+                          ? `QR expires in ${secondsLeft}s — pay now or a fresh QR will load automatically`
+                          : `QR refreshes in ${Math.floor(secondsLeft / 60)}:${String(secondsLeft % 60).padStart(2, '0')}`}
                       </p>
                     )}
                   </div>
