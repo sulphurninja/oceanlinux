@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # EC2 / PM2 — run every 1 min (Vyapar QR expires in ~2 min):
 #   * * * * * /path/to/oceanlinux/scripts/cron-paid-but-pending.sh >> /home/ec2-user/paid-scan.log 2>&1
-set -euo pipefailROOT="$(cd "$(dirname "$0")/.." && pwd)"
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 # Do NOT `source .env` — values like TOKEN_SECRET contain &, %, * which break bash.
 read_env_var() {
