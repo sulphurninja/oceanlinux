@@ -39,15 +39,8 @@ async function retryByProvider(order) {
     return retryHostycare(order);
   }
   if (order.advpsServiceId) {
-    const AdvpsApi = require('@/services/advpsApi');
-    const { getCompanyAdvpsApiConfig } = require('@/lib/companyAdvpsApi');
-    const IPStock = require('@/models/ipStockModel');
-    const Company = (await import('@/models/companyModel')).default;
-    const ipStock = await IPStock.findById(order.ipStockId).select('company').lean();
-    const company = ipStock?.company ? await Company.findById(ipStock.company).lean() : null;
-    const cfg = company ? getCompanyAdvpsApiConfig(company) : null;
-    const api = cfg ? new AdvpsApi(cfg) : null;
-    if (!api) throw new Error('ADVPS not configured');
+    const AdvpsAPI = require('@/services/advpsApi');
+    const api = new AdvpsAPI();
     const out = await executeAdvpsUpstreamRenewal(api, order, { Order });
     return { ...out, provider: 'advps' };
   }
