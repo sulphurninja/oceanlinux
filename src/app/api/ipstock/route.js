@@ -107,7 +107,7 @@ function enrichIpStocksForStore(ipStocks) {
     return ipStocks.map((stock) => {
         const hasInventory = usesPreconfiguredInventory(stock);
         const inventoryForStore = hasInventory && inventoryDrivesStoreAvailability(stock);
-        const { inventoryItems, defaultConfigurations, promoCodes, ...safeStock } = stock;
+        const { inventoryItems, defaultConfigurations, promoCodes, inventoryItemCount, ...safeStock } = stock;
         const smartvpsAllowedRams = Array.isArray(defaultConfigurations?.smartvps?.allowedRams)
             ? defaultConfigurations.smartvps.allowedRams
             : [];
@@ -258,13 +258,46 @@ export async function GET(request) {
             }
         }
 
-        let dbQuery = IPStock.find(query).lean().maxTimeMS(10000);
+        let ipStocks;
         if (customerView) {
-            dbQuery = dbQuery.select(
-                'name description available hiddenFromStore stockCount availabilityManual company serverType tags memoryOptions promoCodes defaultConfigurations inventoryItems.allocated'
-            );
+            ipStocks = await IPStock.aggregate([
+                { $match: query },
+                {
+                    $addFields: {
+                        inventoryItemCount: { $size: { $ifNull: ['$inventoryItems', []] } },
+                        inventoryAvailable: {
+                            $size: {
+                                $filter: {
+                                    input: { $ifNull: ['$inventoryItems', []] },
+                                    as: 'item',
+                                    cond: { $ne: ['$$item.allocated', true] },
+                                },
+                            },
+                        },
+                    },
+                },
+                {
+                    $project: {
+                        name: 1,
+                        description: 1,
+                        available: 1,
+                        hiddenFromStore: 1,
+                        stockCount: 1,
+                        availabilityManual: 1,
+                        company: 1,
+                        serverType: 1,
+                        tags: 1,
+                        memoryOptions: 1,
+                        promoCodes: 1,
+                        defaultConfigurations: 1,
+                        inventoryItemCount: 1,
+                        inventoryAvailable: 1,
+                    },
+                },
+            ]).option({ maxTimeMS: 10000 });
+        } else {
+            ipStocks = await IPStock.find(query).lean().maxTimeMS(10000);
         }
-        const ipStocks = await dbQuery;
         console.log(`[IPSTOCK-API] Found ${ipStocks?.length || 0} IP stocks`);
 
         if (!ipStocks) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, Suspense, useMemo, memo, useCallback } from "react";
+import { useEffect, useState, Suspense, useMemo, memo, useCallback, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { dashboardFetch } from '@/lib/dashboardFetch';
@@ -106,8 +106,14 @@ declare global {
   }
 }
 
-/** Upstream provider stock sync costs several seconds — don't repeat it per visit. */
+/** Catalog paints from Mongo first. Live provider syncs run one-by-one in the background. */
 const STOCK_SYNC_MIN_INTERVAL_MS = 2 * 60 * 1000;
+const LIVE_STOCK_SYNC_ENDPOINTS = [
+  '/api/advps/refresh-stock',
+  '/api/reseller-panel/refresh-stock',
+  '/api/kurohost/refresh-stock',
+  '/api/smartvps/sync',
+] as const;
 
 interface MemoryOptionDetails {
   price: number | null;
@@ -521,62 +527,64 @@ function IPStockContent() {
     }
   }, [paymentConfig.loaded, paymentConfig.primaryGateway]);
 
-  // Tab filter state — read initial category from URL
-  const searchParams = useSearchParams();
-  const categoryParam = searchParams.get('category');
-  const [activeTab, setActiveTab] = useState<string>(categoryParam || 'all');
-
   const router = useRouter();
 
-  useEffect(() => {
-    setActiveTab(categoryParam || 'all');
-  }, [categoryParam]);
+  // Tab filter — URL is updated via history so Next.js does not remount this
+  // page (router.push + useSearchParams was re-fetching the whole catalog).
+  const searchParams = useSearchParams();
+  const [activeTab, setActiveTab] = useState<string>(searchParams.get('category') || 'all');
 
   const handleTabChange = (tabId: string) => {
     setActiveTab(tabId);
-    if (tabId === 'all') {
-      router.push('/dashboard/ipStock', { scroll: false });
-    } else {
-      router.push(`/dashboard/ipStock?category=${tabId}`, { scroll: false });
+    const url = tabId === 'all' ? '/dashboard/ipStock' : `/dashboard/ipStock?category=${tabId}`;
+    if (typeof window !== 'undefined') {
+      window.history.replaceState(window.history.state, '', url);
     }
   };
 
-  const loadPlans = useCallback(async (options?: { silent?: boolean; forceAdvps?: boolean; waitForLiveSync?: boolean; skipUpstreamSync?: boolean }) => {
+  const liveSyncAbortRef = useRef<AbortController | null>(null);
+
+  const loadPlans = useCallback(async (options?: { silent?: boolean; waitForLiveSync?: boolean; skipUpstreamSync?: boolean }) => {
     const silent = options?.silent ?? false;
-    const forceAdvps = options?.forceAdvps ?? false;
     const waitForLiveSync = options?.waitForLiveSync ?? false;
     const skipUpstreamSync = options?.skipUpstreamSync ?? false;
 
     const parseIpStockRows = (ipData: unknown): IPStock[] =>
       (Array.isArray(ipData) ? ipData : []).filter((s) => !s.hiddenFromStore);
 
-    const reloadIpStocks = async () => {
-      const ipRes = await dashboardFetch("/api/ipstock", { cache: "no-store" });
-      if (!ipRes.ok) return;
+    const reloadIpStocks = async (signal?: AbortSignal) => {
+      if (signal?.aborted) return;
+      const ipRes = await dashboardFetch("/api/ipstock", { cache: "no-store", signal });
+      if (!ipRes.ok || signal?.aborted) return;
       const ipData = await ipRes.json();
       const rows = parseIpStockRows(ipData);
       writeDashboardCache(DASHBOARD_CACHE_KEYS.ipStock, rows);
       setIpStocks(rows);
     };
 
-    const syncLiveStockInBackground = async () => {
+    const syncLiveStockSequentially = async (signal: AbortSignal) => {
       setIsRefreshingStock(true);
       try {
-        const refreshUrl = forceAdvps
-          ? "/api/advps/refresh-stock?force=1"
-          : "/api/advps/refresh-stock";
-        await Promise.allSettled([
-          dashboardFetch(refreshUrl, { cache: "no-store" }),
-          dashboardFetch("/api/reseller-panel/refresh-stock", { cache: "no-store" }),
-          dashboardFetch("/api/kurohost/refresh-stock", { cache: "no-store" }),
-          dashboardFetch("/api/smartvps/sync", { cache: "no-store" }),
-        ]);
-        writeDashboardCache(DASHBOARD_CACHE_KEYS.stockSyncedAt, Date.now());
-        await reloadIpStocks();
+        // Let the catalog paint first so the page does not compete with live APIs.
+        await new Promise((resolve) => window.setTimeout(resolve, 400));
+        for (const url of LIVE_STOCK_SYNC_ENDPOINTS) {
+          if (signal.aborted) return;
+          try {
+            await dashboardFetch(url, { cache: "no-store", signal });
+          } catch (err) {
+            if (signal.aborted) return;
+            console.warn("[IP Stock] background live sync skipped", url, err);
+          }
+          if (signal.aborted) return;
+          await reloadIpStocks(signal);
+        }
+        if (!signal.aborted) {
+          writeDashboardCache(DASHBOARD_CACHE_KEYS.stockSyncedAt, Date.now());
+        }
       } catch (e) {
-        console.warn("[IP Stock] Live stock sync error", e);
+        if (!signal.aborted) console.warn("[IP Stock] Live stock sync error", e);
       } finally {
-        setIsRefreshingStock(false);
+        if (!signal.aborted) setIsRefreshingStock(false);
       }
     };
 
@@ -614,10 +622,13 @@ function IPStockContent() {
 
     if (skipUpstreamSync) return;
 
+    liveSyncAbortRef.current?.abort();
+    const ac = new AbortController();
+    liveSyncAbortRef.current = ac;
     if (waitForLiveSync) {
-      await syncLiveStockInBackground();
+      await syncLiveStockSequentially(ac.signal);
     } else {
-      void syncLiveStockInBackground();
+      void syncLiveStockSequentially(ac.signal);
     }
   }, []);
 
@@ -636,7 +647,14 @@ function IPStockContent() {
     }
 
     const syncAge = dashboardCacheAge(DASHBOARD_CACHE_KEYS.stockSyncedAt);
-    loadPlans({ silent: hasCache, skipUpstreamSync: syncAge < STOCK_SYNC_MIN_INTERVAL_MS });
+    loadPlans({
+      silent: hasCache,
+      skipUpstreamSync: syncAge < STOCK_SYNC_MIN_INTERVAL_MS,
+    });
+
+    return () => {
+      liveSyncAbortRef.current?.abort();
+    };
   }, [loadPlans]);
 
   const filteredIpStocks = useMemo(() => {
@@ -750,7 +768,7 @@ function IPStockContent() {
     });
   }, [showDialog]);
 
-  const openOutOfStockPopup = (opts: {
+  const openOutOfStockPopup = useCallback((opts: {
     message: string;
     productName?: string;
     memory?: string;
@@ -764,11 +782,11 @@ function IPStockContent() {
       memory: opts.memory,
     });
     if (opts.refreshPlans !== false) {
-      loadPlans({ silent: true, forceAdvps: true });
+      loadPlans({ silent: true, skipUpstreamSync: true });
     }
-  };
+  }, [loadPlans]);
 
-  const verifyLiveStock = async (payload: {
+  const verifyLiveStock = useCallback(async (payload: {
     ipStockId?: string;
     slotIpPackageId?: string;
     memory?: string;
@@ -782,10 +800,10 @@ function IPStockContent() {
     });
     const data = await res.json().catch(() => ({}));
     return { ok: res.ok && data.ok, message: data.message as string | undefined, data };
-  };
+  }, []);
 
   // Handle buy now with ipStockId (regular) or slotIpPackageId (slot)
-  const handleBuyNow = async (
+  const handleBuyNow = useCallback(async (
     productName: string,
     memory: string,
     price: number,
@@ -845,7 +863,7 @@ function IPStockContent() {
     } finally {
       setVerifyingPurchaseKey(null);
     }
-  };
+  }, [openOutOfStockPopup, paymentConfig.loaded, paymentConfig.primaryGateway, verifyLiveStock]);
 
   const resolvePromoForCheckout = async (): Promise<{
     code: string | null;
@@ -1100,7 +1118,7 @@ function IPStockContent() {
             refreshPlans: false,
             slot: !!selectedProduct.slotIpPackageId,
           });
-          loadPlans({ silent: true, forceAdvps: true });
+          loadPlans({ silent: true, skipUpstreamSync: true });
         } else {
           toast.error(data.message || "Failed to initiate payment");
         }
@@ -1459,8 +1477,8 @@ function IPStockContent() {
                     size="sm"
                     className="h-9 shrink-0 border-white/15 bg-white/[0.04] text-white/70 hover:text-white hover:bg-white/[0.08]"
                     disabled={isRefreshingStock}
-                    onClick={() => loadPlans({ silent: true, forceAdvps: true, waitForLiveSync: true })}
-                    title="Refresh stock from ADVPS"
+                    onClick={() => loadPlans({ silent: true, waitForLiveSync: true })}
+                    title="Refresh live stock"
                   >
                     <RefreshCw className={cn("h-3.5 w-3.5", isRefreshingStock && "animate-spin")} />
                     <span className="sr-only">Refresh stock</span>

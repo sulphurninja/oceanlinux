@@ -48,7 +48,9 @@ function normalizeOsForServerType(rawOs, serverType) {
 
 /** Company stock uses embedded inventory rows (vs plain stockCount). */
 function usesPreconfiguredInventory(stock) {
-  return !!(stock?.company && Array.isArray(stock.inventoryItems) && stock.inventoryItems.length > 0);
+  if (!stock?.company) return false;
+  if (typeof stock.inventoryItemCount === 'number') return stock.inventoryItemCount > 0;
+  return Array.isArray(stock.inventoryItems) && stock.inventoryItems.length > 0;
 }
 
 function stockHasLivePanelPlan(stock) {
@@ -200,6 +202,9 @@ async function setCompanyFulfillmentMode(stockId, mode) {
 }
 
 function countUnallocatedInventory(stock) {
+  if (typeof stock?.inventoryAvailable === 'number' && !Array.isArray(stock?.inventoryItems)) {
+    return stock.inventoryAvailable;
+  }
   if (!Array.isArray(stock?.inventoryItems)) return 0;
   return stock.inventoryItems.filter((i) => !i.allocated).length;
 }
