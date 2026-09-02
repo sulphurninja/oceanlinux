@@ -14,6 +14,13 @@ function expiryMs(value) {
 
 /** Order past expiry with no renewal that extended service past now. */
 function isOrderExpiredWithoutRenewal(order, nowMs = Date.now()) {
+  try {
+    const { isExpiredServiceForCustomer } = require('@/lib/expiryHelper');
+    if (isExpiredServiceForCustomer(order)) return true;
+  } catch {
+    // fall through to timestamp check
+  }
+
   const expMs = expiryMs(order?.expiryDate);
   if (expMs == null || expMs >= nowMs) return false;
 

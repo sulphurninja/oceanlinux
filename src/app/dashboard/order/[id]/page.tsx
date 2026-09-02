@@ -55,7 +55,7 @@ import { cn } from '@/lib/utils';
 import { OsIcon, isWindowsOsName, isUbuntuOsName, isCentosOsName } from '@/components/os/OsIcon';
 import { premiumBtnOutline, premiumBadge } from '@/lib/premium-badges';
 import { ADVPS_REBUILD_LIMIT, getAdvpsRebuildUsage } from '@/lib/advpsRebuildLimit';
-import { isWithinRenewalWindow, getDaysUntilExpiryIST } from '@/lib/expiryHelper';
+import { isWithinRenewalWindow, getDaysUntilExpiryIST, isExpiredServiceForCustomer } from '@/lib/expiryHelper';
 import { getOrderRenewalPrice, getOrderRenewalPriceNote, getCurrentListPriceFromStock } from '@/lib/orderRenewalPricing';
 import { getCustomerProviderDisplayName } from '@/lib/customerProviderDisplay';
 import { customerServiceErrorMessage, customerProvisioningErrorMessage, customerSuccessMessage } from '@/lib/customerFacingErrors';
@@ -525,6 +525,7 @@ const OrderDetails = () => {
   // server-action request status to populate the request UI.
   useEffect(() => {
     if (order && !loading && !isSlotIpOrder(order) && order.netbayProductKind !== 'proxy') {
+      if (isExpiredServiceForCustomer(order)) return;
       const provider = getProviderFromOrder(order, ipStock);
       const hasNativeServiceId = (provider === 'hostycare' && order.hostycareServiceId) ||
         (provider === 'smartvps' && (order.smartvpsServiceId || order.ipAddress)) ||
@@ -1123,6 +1124,7 @@ const OrderDetails = () => {
 
   const fetchServerPowerState = async (opts?: { force?: boolean }): Promise<typeof serverPowerState | null> => {
     if (!order) return null;
+    if (isExpiredServiceForCustomer(order)) return null;
 
     const provider = getProviderFromOrder(order, ipStock);
 
@@ -1257,6 +1259,7 @@ const OrderDetails = () => {
 
   const loadServiceDetails = async (opts?: { skipPowerRefresh?: boolean }) => {
     if (!order) return;
+    if (isExpiredServiceForCustomer(order)) return;
 
     const provider = getProviderFromOrder(order, ipStock);
 
@@ -1321,7 +1324,13 @@ const OrderDetails = () => {
           const changed = data.syncResult.changes?.length
             ? data.syncResult.changes.join(', ')
             : 'IP/credentials';
-          if (provider === 'netbay') {
+          if (provider === 'reseller-api') {
+            toast.success(
+              data.syncResult.expiryUpdated
+                ? `Synced: expiry updated (${changed})`
+                : `Synced: ${changed} updated`
+            );
+          } else if (provider === 'netbay') {
             if (data.syncResult.changes?.includes('password')) setShowPassword(true);
             toast.success(`Synced: ${changed} updated`, { duration: 6000 });
           } else if (hasCompanyJoyAutomation(ipStock) && isOrderCompanyAutomated(order, ipStock)) {
@@ -1336,7 +1345,7 @@ const OrderDetails = () => {
           }
         } else if (provider === 'advps') {
           toast.success('Server credentials are already up to date');
-        } else if (provider === 'netbay') {
+        } else if (provider === 'netbay' || provider === 'reseller-api') {
           toast.success('Already up to date with your server');
         } else if (hasCompanyJoyAutomation(ipStock) && isOrderCompanyAutomated(order, ipStock)) {
           toast.success('Already up to date with your server');
@@ -1862,8 +1871,8 @@ const OrderDetails = () => {
 
   // Add this function after the other utility functions
   const isExpired = (order: Order | null) => {
-    if (!order || !order.expiryDate) return false;
-    return getDaysUntilExpiryIST(order.expiryDate) < 0;
+    if (!order) return false;
+    return isExpiredServiceForCustomer(order);
   };
 
   const getRenewalDaysLeft = (order: Order | null) => {
@@ -2551,6 +2560,7 @@ const OrderDetails = () => {
               </div>
             </div>
             <div className="flex items-center gap-2 flex-shrink-0 sm:ml-auto">
+              {!isUnpaid(order) && !isExpired(order) && (
               <Button
                 variant="outline"
                 size="sm"
@@ -2570,6 +2580,7 @@ const OrderDetails = () => {
                 <RefreshCw className={`h-4 w-4 ${(loading || serviceLoading) ? 'animate-spin' : ''}`} />
                 <span className="hidden sm:inline">Sync</span>
               </Button>
+              )}
             </div>
           </div>
         </div>

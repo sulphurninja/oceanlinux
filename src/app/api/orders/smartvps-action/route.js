@@ -18,6 +18,7 @@ const {
   assertSmartVpsActionOk,
 } = require('@/lib/smartvpsPowerActions');
 const { parseSmartVpsExpiryDate, resolveSmartVpsOrderIp } = require('@/lib/smartvpsOrderSync');
+const { isExpiredServiceForCustomer, expiredPanelSyncPayload, isExpiredPanelActionBlocked } = require('@/lib/expiredPanelSync');
 const {
   buildOrderSyncContext,
   shouldSyncPanelDataToOrder,
@@ -240,6 +241,10 @@ export async function GET(request) {
       return customerJson({ success: false, message: 'Order not found' }, 404, 'sync');
     }
 
+    if (isExpiredServiceForCustomer(order)) {
+      return customerJson(expiredPanelSyncPayload('sync'), 409, 'sync');
+    }
+
     const serviceIdentifier = resolveSmartVpsOrderIp(order);
     if (!serviceIdentifier) {
       console.log('[SMARTVPS-ACTION][GET] No SmartVPS service ID or IP address attached to order');
@@ -409,6 +414,10 @@ export async function POST(request) {
     if (!order) {
       console.log('[SMARTVPS-ACTION][POST] Order not found');
       return customerJson({ success: false, message: 'Order not found' }, 404, action);
+    }
+
+    if (isExpiredServiceForCustomer(order) && isExpiredPanelActionBlocked(action)) {
+      return customerJson(expiredPanelSyncPayload(action || 'sync'), 409, action || 'sync');
     }
 
     const suspended = assertOrderNotAdminSuspended(order, { isAdmin: resolved.isAdmin });

@@ -26,6 +26,7 @@ const {
 } = require('@/lib/advpsOrderSync');
 const { extractPasswordFromGenerateError } = require('@/lib/advpsPasswordFetch');
 const { sanitizeCustomerApiPayload, customerServiceErrorMessage } = require('@/lib/customerFacingErrors');
+const { isExpiredServiceForCustomer, expiredPanelSyncPayload, isExpiredPanelActionBlocked } = require('@/lib/expiredPanelSync');
 
 function customerJson(body, status = 200, action = null) {
   return NextResponse.json(sanitizeCustomerApiPayload(body, { action }), { status });
@@ -68,6 +69,10 @@ export async function GET(request) {
     const access = await resolveOrderForUserOrAdmin(request, orderId);
     if (access.error) return access.error;
     const order = access.order;
+
+    if (isExpiredServiceForCustomer(order)) {
+      return customerJson(expiredPanelSyncPayload('sync'), 409, 'sync');
+    }
 
     const api = new AdvpsAPI();
     const resolved = await resolveServiceIdForOrder(api, order, orderId);
@@ -166,6 +171,10 @@ export async function POST(request) {
     const access = await resolveOrderForUserOrAdmin(request, orderId);
     if (access.error) return access.error;
     const order = access.order;
+
+    if (isExpiredServiceForCustomer(order) && isExpiredPanelActionBlocked(action)) {
+      return customerJson(expiredPanelSyncPayload(action || 'sync'), 409, action || 'sync');
+    }
 
     const { assertOrderNotAdminSuspended } = require('@/lib/orderAdminSuspend');
     const suspended = assertOrderNotAdminSuspended(order, { isAdmin: access.isAdmin });

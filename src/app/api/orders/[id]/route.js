@@ -24,6 +24,8 @@ export async function GET(request, { params }) {
         // for several seconds (felt like a hang).
         void (async () => {
             try {
+                const { isExpiredServiceForCustomer } = require('@/lib/expiredPanelSync');
+                if (isExpiredServiceForCustomer(order)) return;
                 await syncSingleOrderExpiryFromPanel(order, { force: false });
                 await maybeSyncResellerOrderOnFetch(order);
             } catch (syncErr) {

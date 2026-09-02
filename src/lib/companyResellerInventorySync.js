@@ -13,6 +13,7 @@ const {
   ipAddressRegex,
   commitPanelSyncToOrder,
 } = require('@/lib/orderIpOwnership');
+const { resolvePanelSyncExpiryDate } = require('@/lib/expiryHelper');
 
 const EXPIRY_FETCH_COOLDOWN_MS = 5 * 60 * 1000;
 
@@ -31,9 +32,9 @@ function panelExpiryExtendsCustomer(orderExpiry, panelExpiry) {
   return panelMs > orderMs;
 }
 
-/** Customer order expiry: only extend from panel — never shorten the paid validity period. */
-function shouldApplyPanelExpiryToCustomer(orderExpiry, panelExpiry) {
-  return panelExpiryExtendsCustomer(orderExpiry, panelExpiry);
+/** Customer order expiry: Hostheaven panel date when it is ahead; never shorten below paid renewal. */
+function shouldApplyPanelExpiryToCustomer(order, panelExpiry) {
+  return resolvePanelSyncExpiryDate(order, panelExpiry);
 }
 
 function createResellerApiClient(company) {
@@ -294,18 +295,16 @@ async function syncCompanyOrderExpiriesFromPanelIndex(ipIndex, stockDocs, api = 
       continue;
     }
 
-    const before = expiryMs(order.expiryDate);
-    const after = expiryMs(panelExpiry);
     const orderUpdates = { lastSyncTime: new Date() };
     if (entry.vmId && !order.resellerVmId) {
       orderUpdates.resellerVmId = String(entry.vmId);
       orderUpdates.provider = 'reseller-api';
     }
 
+    const nextExpiry = shouldApplyPanelExpiryToCustomer(order, panelExpiry);
     const extendsCustomer = panelExpiryExtendsCustomer(order.expiryDate, panelExpiry);
-    const shouldUpdate = shouldApplyPanelExpiryToCustomer(order.expiryDate, panelExpiry);
 
-    if (!shouldUpdate) {
+    if (!nextExpiry) {
       if (orderUpdates.resellerVmId) {
         await Order.findByIdAndUpdate(order._id, orderUpdates);
       }
@@ -313,14 +312,14 @@ async function syncCompanyOrderExpiriesFromPanelIndex(ipIndex, stockDocs, api = 
       continue;
     }
 
-    orderUpdates.expiryDate = panelExpiry;
+    orderUpdates.expiryDate = nextExpiry;
     await Order.findByIdAndUpdate(order._id, orderUpdates);
 
     if (order.inventoryItemId) {
       const IPStock = require('@/models/ipStockModel');
       await IPStock.updateOne(
         { 'inventoryItems._id': order.inventoryItemId },
-        { $set: { 'inventoryItems.$.expiryDate': panelExpiry } }
+        { $set: { 'inventoryItems.$.expiryDate': nextExpiry } }
       );
     }
 
@@ -328,7 +327,7 @@ async function syncCompanyOrderExpiriesFromPanelIndex(ipIndex, stockDocs, api = 
       orderId: String(order._id),
       ipAddress: ip,
       previousExpiry: order.expiryDate,
-      expiryDate: panelExpiry,
+      expiryDate: nextExpiry,
       extended: extendsCustomer,
     });
   }
@@ -342,6 +341,11 @@ async function syncCompanyOrderExpiriesFromPanelIndex(ipIndex, stockDocs, api = 
 async function syncSingleOrderExpiryFromPanel(order, { force = false, companyDoc = null } = {}) {
   if (!order?.ipAddress || !order?.ipStockId) {
     return { order, synced: false };
+  }
+
+  const { isExpiredServiceForCustomer } = require('@/lib/expiredPanelSync');
+  if (isExpiredServiceForCustomer(order)) {
+    return { order, synced: false, reason: 'order_expired' };
   }
 
   const IPStock = require('@/models/ipStockModel');
@@ -383,8 +387,8 @@ async function syncSingleOrderExpiryFromPanel(order, { force = false, companyDoc
     return { order, synced: false, error: err.message };
   }
 
+  const nextExpiry = shouldApplyPanelExpiryToCustomer(order, panel.expiryDate);
   const extendsCustomer = panelExpiryExtendsCustomer(order.expiryDate, panel.expiryDate);
-  const shouldUpdate = shouldApplyPanelExpiryToCustomer(order.expiryDate, panel.expiryDate);
 
   const updates = { lastSyncTime: new Date() };
   if (panel.vmId && !order.resellerVmId) {
@@ -392,8 +396,8 @@ async function syncSingleOrderExpiryFromPanel(order, { force = false, companyDoc
     updates.provider = 'reseller-api';
   }
 
-  if (shouldUpdate) {
-    updates.expiryDate = panel.expiryDate;
+  if (nextExpiry) {
+    updates.expiryDate = nextExpiry;
   }
 
   const committed = await commitPanelSyncToOrder(order, updates);
@@ -401,18 +405,18 @@ async function syncSingleOrderExpiryFromPanel(order, { force = false, companyDoc
     ? await Order.findById(order._id).lean()
     : await Order.findById(order._id).lean();
 
-  if (committed.applied && shouldUpdate && order.inventoryItemId) {
+  if (committed.applied && nextExpiry && order.inventoryItemId) {
     await IPStock.updateOne(
       { 'inventoryItems._id': order.inventoryItemId },
-      { $set: { 'inventoryItems.$.expiryDate': panel.expiryDate } }
+      { $set: { 'inventoryItems.$.expiryDate': nextExpiry } }
     );
   }
 
   return {
     order: updated,
-    synced: committed.applied && shouldUpdate,
+    synced: committed.applied && !!nextExpiry,
     extended: extendsCustomer,
-    expiryDate: panel.expiryDate,
+    expiryDate: nextExpiry || panel.expiryDate,
   };
 }
 
@@ -478,10 +482,11 @@ async function syncUserHostheavenOrderExpiries(orders) {
         continue;
       }
 
-      if (!panelExpiryExtendsCustomer(order.expiryDate, entry.expiryDate)) continue;
+      const nextExpiry = shouldApplyPanelExpiryToCustomer(order, entry.expiryDate);
+      if (!nextExpiry) continue;
 
       await commitPanelSyncToOrder(order, {
-        expiryDate: entry.expiryDate,
+        expiryDate: nextExpiry,
         lastSyncTime: new Date(),
         ...(entry.vmId && !order.resellerVmId
           ? { resellerVmId: String(entry.vmId), provider: 'reseller-api' }
@@ -491,11 +496,11 @@ async function syncUserHostheavenOrderExpiries(orders) {
       if (order.inventoryItemId) {
         await IPStock.updateOne(
           { 'inventoryItems._id': order.inventoryItemId },
-          { $set: { 'inventoryItems.$.expiryDate': entry.expiryDate } }
+          { $set: { 'inventoryItems.$.expiryDate': nextExpiry } }
         );
       }
 
-      const fresh = { ...order, expiryDate: entry.expiryDate };
+      const fresh = { ...order, expiryDate: nextExpiry };
       orderById.set(String(order._id), fresh);
       updated += 1;
       extended += 1;

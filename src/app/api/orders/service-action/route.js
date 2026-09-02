@@ -48,6 +48,7 @@ const { mapKurohostOsLabel, runKurohostPostReinstallFlow } = require('@/lib/kuro
 const { toUserFacingNetbayError } = require('@/lib/netbayApiErrors');
 const { sanitizeCustomerApiPayload, customerServiceErrorMessage } = require('@/lib/customerFacingErrors');
 const { assertOrderNotAdminSuspended } = require('@/lib/orderAdminSuspend');
+const { isExpiredServiceForCustomer, expiredPanelSyncPayload, isExpiredPanelActionBlocked } = require('@/lib/expiredPanelSync');
 
 function actionJson(body, status = 200, action = null) {
   return NextResponse.json(sanitizeCustomerApiPayload(body, { action }), { status });
@@ -623,6 +624,10 @@ export async function POST(request) {
     const resolved = await resolveOrderForAction(request, orderId);
     if (resolved.error) return resolved.error;
     const order = resolved.order;
+
+    if (isExpiredServiceForCustomer(order) && isExpiredPanelActionBlocked(action)) {
+      return actionJson(expiredPanelSyncPayload(action || 'sync'), 409, action || 'sync');
+    }
 
     console.log(`[SERVICE-ACTION][POST] Action: ${action}, Order: ${orderId}, Template: ${templateId}`);
 
@@ -1397,8 +1402,12 @@ export async function POST(request) {
                   powerSource: source,
                   provider: 'reseller-api',
                   vmId: found.vmId,
+                  expiryDate: synced.updates.expiryDate || order.expiryDate || null,
                   syncResult: {
-                    credentialsUpdated: synced.changes.length > 0,
+                    credentialsUpdated: synced.changes.some((c) =>
+                      ['password', 'username', 'ipAddress'].includes(c)
+                    ),
+                    expiryUpdated: synced.changes.includes('expiryDate'),
                     changes: synced.changes,
                     lastSyncTime: new Date().toISOString(),
                   },
@@ -2374,6 +2383,10 @@ export async function GET(request) {
     if (resolved.error) return resolved.error;
     const order = resolved.order;
 
+    if (isExpiredServiceForCustomer(order)) {
+      return actionJson(expiredPanelSyncPayload('sync'), 409, 'sync');
+    }
+
     console.log(`[SERVICE-ACTION][GET] Loading service details for order: ${orderId}`);
 
     // Resolve IP from common locations on the order document.
@@ -2634,8 +2647,12 @@ export async function GET(request) {
               rawStatus,
               powerSource: source,
               details: found.raw || null,
+              expiryDate: synced.updates.expiryDate || order.expiryDate || null,
               syncResult: {
-                credentialsUpdated: synced.changes.length > 0,
+                credentialsUpdated: synced.changes.some((c) =>
+                  ['password', 'username', 'ipAddress'].includes(c)
+                ),
+                expiryUpdated: synced.changes.includes('expiryDate'),
                 changes: synced.changes,
                 lastSyncTime: new Date().toISOString(),
               },

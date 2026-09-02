@@ -22,6 +22,7 @@ const {
   normalizePanelOsForOrder,
   normalizePanelUsernameForOrder,
 } = require('@/lib/orderOs');
+const { resolvePanelSyncExpiryDate } = require('@/lib/expiryHelper');
 const {
   commitPanelSyncToOrder,
   finalizeIpAssignmentForOrder,
@@ -512,7 +513,12 @@ async function syncResellerVmCredentials(api, order, vmId) {
   }
 
   const details = await api.getVmDetails(effectiveVmId);
-  const overviewRow = await resolveOverviewRowForVm(api, effectiveVmId);
+  const resolvedRaw = resolved?.raw || null;
+  const resolvedMatchesVm =
+    resolvedRaw && String(extractOverviewVmId(resolvedRaw)) === String(effectiveVmId);
+  const overviewRow =
+    (resolvedMatchesVm ? resolvedRaw : null) ||
+    (await resolveOverviewRowForVm(api, effectiveVmId, { maxPages: 100 }));
   const password = ResellerApi.extractVmPassword(details);
   const rawUsername = ResellerApi.extractVmUsername(details);
   const rawOs = ResellerApi.extractVmOs(details);
@@ -520,6 +526,7 @@ async function syncResellerVmCredentials(api, order, vmId) {
   const username = normalizePanelUsernameForOrder(rawUsername, order.productName, order.username, rawOs || os);
   const panelIp =
     ResellerApi.extractOverviewRowIp(overviewRow) ||
+    ResellerApi.extractOverviewRowIp(resolvedRaw) ||
     details?.ipAddress ||
     details?.ip ||
     null;
@@ -527,7 +534,8 @@ async function syncResellerVmCredentials(api, order, vmId) {
   const resolvedIp = cleanOrderIp(resolved?.ip);
   // Admin/customer order IP wins when it maps to a live VM on the panel.
   const ip = orderIp || resolvedIp || cleanOrderIp(panelIp) || null;
-  const expiryDate = ResellerApi.extractVmExpiryDate(overviewRow, details);
+  const panelExpiry = ResellerApi.extractVmExpiryDate(overviewRow, resolvedRaw, details);
+  const expiryDate = resolvePanelSyncExpiryDate(order, panelExpiry);
 
   const updates = { lastSyncTime: new Date(), resellerVmId: effectiveVmId };
   const changes = [];
@@ -544,7 +552,7 @@ async function syncResellerVmCredentials(api, order, vmId) {
     updates.ipAddress = ip;
     changes.push('ipAddress');
   }
-  if (expiryDate && String(expiryDate) !== String(order.expiryDate || '')) {
+  if (expiryDate) {
     updates.expiryDate = expiryDate;
     changes.push('expiryDate');
   }
@@ -1127,6 +1135,8 @@ const RESELLER_FETCH_SYNC_COOLDOWN_MS = 8000;
  */
 async function maybeSyncResellerOrderOnFetch(order) {
   if (!order) return order;
+  const { isExpiredServiceForCustomer } = require('@/lib/expiredPanelSync');
+  if (isExpiredServiceForCustomer(order)) return order;
   const ip = (order.ipAddress || '').trim();
   const pwd = (order.password || '').trim();
 

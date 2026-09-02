@@ -32,6 +32,11 @@ export async function POST(request) {
     const order = await Order.findById(orderId);
     if (!order) return NextResponse.json({ success: false, error: 'Order not found' }, { status: 404 });
 
+    const { isExpiredServiceForCustomer, expiredPanelSyncPayload, isExpiredPanelActionBlocked } = require('@/lib/expiredPanelSync');
+    if (isExpiredServiceForCustomer(order) && isExpiredPanelActionBlocked(action)) {
+      return NextResponse.json(expiredPanelSyncPayload(action), { status: 409 });
+    }
+
     const serviceId = order.advpsServiceId;
     if (!serviceId) return NextResponse.json({ success: false, error: 'No ADVPS service ID' }, { status: 400 });
 
