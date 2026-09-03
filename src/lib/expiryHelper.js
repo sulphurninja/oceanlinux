@@ -127,10 +127,10 @@ export function isWithinRenewalWindow(expiryDate) {
 }
 
 /**
- * True once this order's paid validity has ended — including the same calendar
- * day after the expiry timestamp. Stops panel Sync from copying a resold IP's
- * new expiry onto the old customer. Paid renewals that still have remaining
- * time keep the order syncable even if `status` was left as expired.
+ * True after the IST expiry *calendar day* has ended (daysLeft < 0).
+ * Expiry day itself is 0 days — renew stays open (2 days before through 0).
+ * Panel Sync is blocked only with this same popup, so a same-day clock
+ * rollover does not hide Renew or treat the VPS as fully expired.
  */
 export function isExpiredServiceForCustomer(order, nowMs = Date.now()) {
   if (!order) return false;
@@ -142,12 +142,11 @@ export function isExpiredServiceForCustomer(order, nowMs = Date.now()) {
     paidMs != null && (currentMs == null || paidMs > currentMs) ? paidMs : currentMs;
   const effective = effectiveMs != null ? new Date(effectiveMs) : order.expiryDate;
 
-  if (effectiveMs != null && effectiveMs < nowMs) return true;
   if (effective && getDaysUntilExpiryIST(effective) < 0) return true;
 
   if (String(order.status || '').toLowerCase() === 'expired') {
-    if (effectiveMs != null && effectiveMs >= nowMs) return false;
     if (effective && getDaysUntilExpiryIST(effective) >= 0) return false;
+    if (effectiveMs != null && effectiveMs >= nowMs) return false;
     return true;
   }
 
