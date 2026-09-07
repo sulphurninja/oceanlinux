@@ -9,7 +9,7 @@ const RenewalLog = require('@/models/renewalLogModel').default;
  *   await logger.finalize(true, newExpiryDate);
  */
 class RenewalLogger {
-    constructor(order, renewalTxnId, processedVia = 'confirm-api') {
+    constructor(order, renewalTxnId, processedVia = 'confirm-api', extraContext = {}) {
         this.orderId = order._id;
         this.renewalTxnId = renewalTxnId;
         this.processedVia = processedVia;
@@ -25,7 +25,9 @@ class RenewalLogger {
             price: order.price,
             currentExpiry: order.expiryDate,
             hostycareServiceId: order.hostycareServiceId,
-            smartvpsServiceId: order.smartvpsServiceId
+            smartvpsServiceId: order.smartvpsServiceId,
+            resellerVmId: order.resellerVmId,
+            ...extraContext,
         };
 
         this.paymentInfo = {};

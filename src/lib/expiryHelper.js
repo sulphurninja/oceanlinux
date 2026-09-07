@@ -172,23 +172,38 @@ export function latestPaidRenewalExpiry(order) {
 
 /**
  * Expiry to apply during panel sync.
- * Uses panel when it is ahead; never downgrades below order expiry or paid renewals.
+ *
+ * Default: use panel when it is ahead; never downgrades below order expiry or paid renewals.
+ * `panelIsAuthoritative` (Hostheaven / reseller-api): panel `expiresAt` is billing truth —
+ * always mirror it on sync, including when OL was inflated by a bad upstream renew response.
+ *
+ * @param {object} [options]
+ * @param {boolean} [options.panelIsAuthoritative=false]
  * @returns {Date|null} expiry to write, or null when unchanged
  */
-export function resolvePanelSyncExpiryDate(order, panelExpiry) {
+export function resolvePanelSyncExpiryDate(order, panelExpiry, { panelIsAuthoritative = false } = {}) {
   if (isExpiredServiceForCustomer(order)) return null;
 
   const panelMs = expiryTimeMs(panelExpiry);
   const currentMs = expiryTimeMs(order?.expiryDate);
-  const paidMs = expiryTimeMs(latestPaidRenewalExpiry(order));
-  const floorMs = Math.max(currentMs || 0, paidMs || 0) || null;
 
   if (panelMs == null) {
+    if (panelIsAuthoritative) return null;
+    const paidMs = expiryTimeMs(latestPaidRenewalExpiry(order));
+    const floorMs = Math.max(currentMs || 0, paidMs || 0) || null;
     if (floorMs != null && (currentMs == null || currentMs < floorMs)) {
       return new Date(floorMs);
     }
     return null;
   }
+
+  if (panelIsAuthoritative) {
+    if (currentMs == null || panelMs !== currentMs) return panelExpiry;
+    return null;
+  }
+
+  const paidMs = expiryTimeMs(latestPaidRenewalExpiry(order));
+  const floorMs = Math.max(currentMs || 0, paidMs || 0) || null;
 
   if (floorMs != null && panelMs < floorMs) {
     if (currentMs == null || currentMs < floorMs) return new Date(floorMs);

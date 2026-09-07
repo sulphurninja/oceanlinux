@@ -22,12 +22,11 @@ const { executeResellerPanelUpstreamRenewal } = require('@/lib/resellerPanelRene
 const { resolveRenewalExpiryFromPanel } = require('@/lib/companyResellerInventorySync');
 const { pickAdvpsExpiryDate } = require('@/lib/advpsOrderExpiry');
 const { extractAdvpsStatusCredentials } = require('@/lib/advpsStatusNormalize');
+const RenewalLogger = require('@/services/renewalLogger');
 
 async function resolveResellerRenewalPrice(order, reseller) {
-  if (order.price && order.price > 0) {
-    return Math.ceil(Number(order.price));
-  }
-
+  // Always use current reseller API rate (custom price / markup), same as new orders.
+  // Do not charge order.price — that may be an old list rate stored at purchase time.
   if (order.ipStockId && order.memory && reseller) {
     const stock = await IPStock.findById(order.ipStockId);
     if (stock) {
@@ -42,6 +41,10 @@ async function resolveResellerRenewalPrice(order, reseller) {
         });
       }
     }
+  }
+
+  if (order.price && order.price > 0) {
+    return Math.ceil(Number(order.price));
   }
 
   return Math.ceil(Number(order.price) || 0);
@@ -113,61 +116,72 @@ async function runProviderRenewal(order, orderId, provider) {
 }
 
 export async function renewResellerOrder(reseller, order, orderId) {
+  const renewalTxnId = `RESELLER_RENEW_${Date.now()}_${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+  const logger = new RenewalLogger(order, renewalTxnId, 'reseller-api', {
+    resellerId: String(reseller._id),
+    resellerEmail: reseller.email || '',
+    businessName: reseller.businessName || '',
+  });
+
+  const failEarly = async (status, body, errorMessage) => {
+    logger.logError(errorMessage || body.message, body);
+    await logger.finalize(false, null, errorMessage || body.message);
+    return { ok: false, status, body };
+  };
+
   if (isSlotIpOrder(order)) {
-    return { ok: false, status: 400, body: { success: false, message: SLOT_IP_NO_RENEWAL_MESSAGE } };
+    return failEarly(400, { success: false, message: SLOT_IP_NO_RENEWAL_MESSAGE }, SLOT_IP_NO_RENEWAL_MESSAGE);
   }
 
   if (!order.expiryDate) {
-    return { ok: false, status: 400, body: { success: false, message: 'Order has no expiry date' } };
+    return failEarly(400, { success: false, message: 'Order has no expiry date' }, 'Order has no expiry date');
   }
 
   const diffDays = getDaysUntilExpiryIST(order.expiryDate);
   if (!isWithinRenewalWindow(order.expiryDate)) {
-    return {
-      ok: false,
-      status: 400,
-      body: {
-        success: false,
-        message:
-          diffDays > RENEWAL_DAYS_BEFORE_EXPIRY
-            ? `Renewal opens within ${RENEWAL_DAYS_BEFORE_EXPIRY} days of expiry.`
-            : 'This VPS has expired. Renewal is no longer available.',
-      },
-    };
+    const message =
+      diffDays > RENEWAL_DAYS_BEFORE_EXPIRY
+        ? `Renewal opens within ${RENEWAL_DAYS_BEFORE_EXPIRY} days of expiry.`
+        : 'This VPS has expired. Renewal is no longer available.';
+    return failEarly(400, { success: false, message }, message);
   }
 
   const companyCheck = await detectCompanyManagedRenewal(order);
   if (companyCheck.isCompany) {
-    return {
-      ok: false,
-      status: 400,
-      body: {
+    return failEarly(
+      400,
+      {
         success: false,
         message: 'This product requires manual renewal approval. Contact OceanLinux admin.',
         code: 'COMPANY_MANUAL_RENEWAL',
       },
-    };
+      'Company-managed renewal not allowed via reseller API',
+    );
   }
 
   const renewalPrice = await resolveResellerRenewalPrice(order, reseller);
   if (!renewalPrice || renewalPrice <= 0) {
-    return { ok: false, status: 400, body: { success: false, message: 'Invalid renewal price' } };
+    return failEarly(400, { success: false, message: 'Invalid renewal price' }, 'Invalid renewal price');
   }
+
+  logger.logInfo('Reseller renewal price resolved', { renewalPrice, resellerId: String(reseller._id) });
 
   const hasFunds = await ResellerWalletService.hasSufficientBalance(reseller._id, renewalPrice);
   if (!hasFunds) {
-    return {
-      ok: false,
-      status: 402,
-      body: { success: false, message: 'Insufficient wallet balance', required: renewalPrice },
-    };
+    return failEarly(
+      402,
+      { success: false, message: 'Insufficient wallet balance', required: renewalPrice },
+      'Insufficient wallet balance',
+    );
   }
 
   const provider = await resolveRenewalProvider(order);
   const currentExpiry = order.expiryDate;
   const useCompanyValidity = shouldUseCompanyValidityForRenewal(companyCheck, provider);
   let newExpiryDate = resolveOrderRenewalExpiryDate(currentExpiry, { useCompanyValidity });
-  const renewalTxnId = `RESELLER_RENEW_${Date.now()}_${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+
+  logger.logInfo('Provider determined', { provider });
+  logger.setPaymentInfo('reseller_wallet', renewalTxnId, renewalPrice, renewalTxnId);
 
   try {
     await ResellerWalletService.deductForRenewal(
@@ -176,12 +190,29 @@ export async function renewResellerOrder(reseller, order, orderId) {
       orderId,
       `Reseller API renewal ${orderId} — ${order.productName}`,
     );
+    logger.logSuccess('Reseller wallet debited', { amount: renewalPrice, renewalTxnId });
   } catch (err) {
+    logger.logError('Wallet deduction failed', err);
+    await logger.finalize(false, null, err.message);
     return { ok: false, status: 402, body: { success: false, message: err.message } };
   }
 
+  const providerStart = Date.now();
   const { providerRenewalResult, providerRenewalSuccess, providerNewExpiryDate } =
     await runProviderRenewal(order, orderId, provider);
+  const providerDuration = Date.now() - providerStart;
+
+  if (providerRenewalSuccess) {
+    logger.setProviderApiResult(provider, true, providerRenewalResult, null, providerDuration);
+  } else {
+    logger.setProviderApiResult(
+      provider,
+      false,
+      providerRenewalResult,
+      { message: providerRenewalResult?.error || 'Upstream renewal failed' },
+      providerDuration,
+    );
+  }
 
   if (provider === 'reseller-api' && providerRenewalSuccess && providerNewExpiryDate) {
     newExpiryDate = providerNewExpiryDate;
@@ -243,6 +274,8 @@ export async function renewResellerOrder(reseller, order, orderId) {
   );
 
   notifyRenewalCompleted(updatedOrder, newExpiryDate, renewalTxnId).catch(() => {});
+
+  await logger.finalize(true, newExpiryDate);
 
   const freshReseller = await Reseller.findById(reseller._id).lean();
 

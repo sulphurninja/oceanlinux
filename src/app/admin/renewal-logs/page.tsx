@@ -504,6 +504,14 @@ export default function RenewalLogsPage() {
                                                     {log.orderContext?.productName || 'N/A'}
                                                 </span>
                                             </div>
+                                            {log.orderContext?.resellerEmail ? (
+                                                <div className="min-w-0 break-words">
+                                                    <span className="text-gray-500">Reseller:</span>{' '}
+                                                    <span className="text-orange-300">
+                                                        {log.orderContext.resellerEmail}
+                                                    </span>
+                                                </div>
+                                            ) : null}
                                             <div className="min-w-0">
                                                 <span className="text-gray-500">Duration:</span>{' '}
                                                 <span className="text-yellow-400">

@@ -106,6 +106,11 @@ function applyNetbayServiceToOrderUpdates(svc, order) {
     const displayIp = formatIpAddress(freshIp, 'netbay', order?.os);
     if (displayIp !== order?.ipAddress) changes.push('ipAddress');
     dbUpdates.ipAddress = displayIp;
+    if (!order?.ipAddress && displayIp) {
+      dbUpdates.status = 'active';
+      dbUpdates.provisioningStatus = 'active';
+      dbUpdates.provisioningError = '';
+    }
   }
 
   if (svc.username) {
@@ -219,7 +224,20 @@ async function syncAllNetbayOrdersFromApi() {
       }
 
       const hasFieldUpdates = sync.changes.length > 0;
-      if (hasFieldUpdates) {
+      const firstIp =
+        sync.changes.includes('ipAddress') &&
+        sync.dbUpdates?.ipAddress &&
+        !order.ipAddress;
+      if (firstIp) {
+        const { finalizeIpAssignmentForOrder } = require('@/lib/orderIpOwnership');
+        try {
+          await finalizeIpAssignmentForOrder(order, sync.dbUpdates.ipAddress, sync.dbUpdates);
+          updated += 1;
+          if (sync.changes.includes('expiryDate')) expirySynced += 1;
+        } catch (err) {
+          errors.push({ orderId: String(order._id), error: err.message });
+        }
+      } else if (hasFieldUpdates) {
         const committed = await commitPanelSyncToOrder(order, sync.dbUpdates);
         if (committed.applied) updated += 1;
         if (committed.applied && sync.changes.includes('expiryDate')) expirySynced += 1;

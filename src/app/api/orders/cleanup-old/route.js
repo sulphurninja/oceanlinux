@@ -6,10 +6,13 @@ const { deleteExpiredOrders } = require('@/lib/cleanupExpiredOrders');
 const { deleteStaleNullExpiryOrders } = require('@/lib/cleanupNullExpiryOrders');
 const { purgeExpiredSlotIpHistory } = require('@/lib/slotIpExpiryCleanup');
 
+/** Unpaid checkout orders (pending/initiated/processing) older than this are purged. */
+const PENDING_ORDER_TTL_DAYS = 2;
+
 /**
  * DELETE old orders that are stuck or abandoned:
  * 1. Expired orders (3+ days past expiry)
- * 2. Pending/unconfirmed orders (3+ days old)
+ * 2. Pending/unconfirmed orders (2+ days old — unpaid checkout abandoned)
  * 3. Orders with null expiry (30+ days since purchase)
  * 
  * NOTE: Failed orders are NEVER deleted (kept for audit/debugging purposes)
@@ -51,8 +54,8 @@ export async function POST(request) {
       console.log(`[CLEANUP-ALL]   ✨ No expired orders found`);
     }
 
-    const threeDaysAgo = new Date();
-    threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
+    const pendingCutoff = new Date();
+    pendingCutoff.setDate(pendingCutoff.getDate() - PENDING_ORDER_TTL_DAYS);
 
     // 2. SKIP FAILED ORDERS (NEVER DELETE - kept for audit/debugging)
     console.log('\n[CLEANUP-ALL] 🔒 Phase 2: Checking failed orders...');
@@ -65,12 +68,12 @@ export async function POST(request) {
     console.log(`[CLEANUP-ALL]   ℹ️  Found ${failedOrdersCount} failed orders (PRESERVED - never deleted)`);
     console.log(`[CLEANUP-ALL]   ℹ️  Failed orders are kept for debugging and audit purposes`);
 
-    // 3. DELETE PENDING/UNCONFIRMED ORDERS (3+ days old)
-    console.log('\n[CLEANUP-ALL] 🗑️  Phase 3: Deleting old pending orders...');
+    // 3. DELETE PENDING/UNCONFIRMED ORDERS (2+ days old, never paid)
+    console.log(`\n[CLEANUP-ALL] 🗑️  Phase 3: Deleting pending orders older than ${PENDING_ORDER_TTL_DAYS} days...`);
     
     const pendingOrders = await Order.find({
       status: { $in: ['pending', 'initiated', 'processing'] },
-      createdAt: { $lt: threeDaysAgo }
+      createdAt: { $lt: pendingCutoff }
     }).select('_id productName status createdAt');
 
     if (pendingOrders.length > 0) {

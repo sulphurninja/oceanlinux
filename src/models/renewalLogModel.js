@@ -35,7 +35,7 @@ const renewalLogSchema = new mongoose.Schema({
     success: { type: Boolean, required: true, index: true },
     processedVia: {
         type: String,
-        enum: ['webhook', 'confirm-api', 'manual'],
+        enum: ['webhook', 'confirm-api', 'manual', 'reseller-api'],
         required: true
     },
 

@@ -16,7 +16,8 @@ function expiryMs(value) {
 function isOrderExpiredWithoutRenewal(order, nowMs = Date.now()) {
   try {
     const { isExpiredServiceForCustomer } = require('@/lib/expiryHelper');
-    if (isExpiredServiceForCustomer(order)) return true;
+    // Same IST calendar rule as the expired popup / Renew window (0 days still syncs).
+    return isExpiredServiceForCustomer(order, nowMs);
   } catch {
     // fall through to timestamp check
   }
@@ -289,6 +290,37 @@ async function loadSyncContextForOrder(order) {
 async function guardPanelSyncUpdate(order, updates = {}) {
   if (!order?._id) {
     return { allowed: false, updates: {}, markedExpired: false, reason: 'no_order' };
+  }
+
+  // Netbay/Hostheaven etc. — upstream buy succeeds before IP appears; sync must
+  // be able to write the first IP even though order.ipAddress is still empty.
+  const incomingIp = cleanOrderIp(updates.ipAddress);
+  const orderHasIp = !!cleanOrderIp(order.ipAddress);
+  if (!orderHasIp && incomingIp) {
+    if (isOrderExpiredWithoutRenewal(order)) {
+      const markedExpired = await markOrderExpiredIfPastDue(order);
+      return {
+        allowed: false,
+        updates: { lastSyncTime: new Date() },
+        markedExpired,
+        reason: 'order_expired',
+      };
+    }
+    const conflict = await findActiveIpConflict(incomingIp, order._id);
+    if (conflict) {
+      return {
+        allowed: false,
+        updates: { lastSyncTime: new Date() },
+        markedExpired: false,
+        reason: 'ip_conflict',
+      };
+    }
+    return {
+      allowed: true,
+      updates: { ...updates, lastSyncTime: updates.lastSyncTime || new Date() },
+      markedExpired: false,
+      reason: null,
+    };
   }
 
   const ctx = await loadSyncContextForOrder(order);

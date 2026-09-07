@@ -535,7 +535,7 @@ async function syncResellerVmCredentials(api, order, vmId) {
   // Admin/customer order IP wins when it maps to a live VM on the panel.
   const ip = orderIp || resolvedIp || cleanOrderIp(panelIp) || null;
   const panelExpiry = ResellerApi.extractVmExpiryDate(overviewRow, resolvedRaw, details);
-  const expiryDate = resolvePanelSyncExpiryDate(order, panelExpiry);
+  const expiryDate = resolvePanelSyncExpiryDate(order, panelExpiry, { panelIsAuthoritative: true });
 
   const updates = { lastSyncTime: new Date(), resellerVmId: effectiveVmId };
   const changes = [];
@@ -567,6 +567,12 @@ async function syncResellerVmCredentials(api, order, vmId) {
 function isCouponRenewFailure(err) {
   const msg = String(err?.message || err?.body?.error || err?.body?.message || '').toLowerCase();
   return /coupon|minimum order amount|promo/i.test(msg);
+}
+
+/** Hostheaven rejects coupon when discounted total is below ₹1000 — retry at full panel price. */
+function isCouponMinimumOrderFailure(err) {
+  const msg = String(err?.message || err?.body?.error || err?.body?.message || '').toLowerCase();
+  return /minimum order amount/i.test(msg);
 }
 
 function couponAppliedOnCalculate(calc) {
@@ -664,11 +670,14 @@ async function upgradeRenewWithCouponFallback(api, vmId, renewBody, gateway, { c
   } catch (err) {
     if (!renewBody.couponCode || !isCouponRenewFailure(err)) throw err;
 
-    // Coupon was pre-validated on calculate-renewal — do not silently drop it unless
-    // the quote never applied the discount (Hostheaven would reject upgrade-renew).
-    if (calcWithCoupon && couponAppliedOnCalculate(calcWithCoupon)) {
-      throw err;
-    }
+    // calculate-renewal can show coupon applied but upgrade-renew rejects when the
+    // discounted total is below Hostheaven's minimum (e.g. UME299 on ~₹1173 VM → ₹874).
+    // Fall back to full panel price so the renew still completes upstream.
+    const allowFallback =
+      isCouponMinimumOrderFailure(err) ||
+      !(calcWithCoupon && couponAppliedOnCalculate(calcWithCoupon));
+
+    if (!allowFallback) throw err;
 
     console.warn(
       `[RESELLER-RENEW] Coupon renew failed for VM ${vmId} (${renewBody.couponCode}), retrying without coupon:`,
@@ -833,20 +842,22 @@ async function renewResellerPanelVm({ api, order, ipStock, Order, companyCoupon 
     };
   }
 
-  let newExpiryDate =
-    parseAdvpsExpiryDate(renewRes?.newExpiry || renewRes?.expiresAt) ||
-    ResellerApi.extractVmExpiryDate(overviewRow?.raw, overviewRow);
-
+  let newExpiryDate = null;
   try {
     const freshOverview = await resolveOverviewRowForVm(api, vmId, { maxPages: 5 });
-    newExpiryDate =
-      ResellerApi.extractVmExpiryDate(freshOverview?.raw, freshOverview) ||
-      newExpiryDate;
+    newExpiryDate = ResellerApi.extractVmExpiryDate(freshOverview?.raw, freshOverview);
     if (!newExpiryDate) {
       const details = await api.getVmDetails(vmId);
       newExpiryDate = ResellerApi.extractVmExpiryDate(details);
     }
   } catch (_) { /* best effort */ }
+
+  if (!newExpiryDate) {
+    const { parseHostheavenExpiryDate } = require('@/lib/expiryHelper');
+    newExpiryDate =
+      parseHostheavenExpiryDate(renewRes?.newExpiry || renewRes?.expiresAt) ||
+      ResellerApi.extractVmExpiryDate(overviewRow?.raw, overviewRow);
+  }
 
   const panelExpiryAfter = panelExpiryMs(newExpiryDate);
   if (!panelExpiryWasExtended(panelExpiryBefore, panelExpiryAfter)) {
