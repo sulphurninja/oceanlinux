@@ -902,8 +902,8 @@ function PackageRow({
                 <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
                   <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
                   <p>
-                    {duplicateCount} duplicate available IP(s) detected. Use &quot;Remove Duplicates&quot; or delete
-                    individual rows. Sold/allocated duplicates must be removed manually after unallocating.
+                    {duplicateCount} multi-sale row(s) — same proxy listed twice so two different customers can buy it.
+                    The same customer will never get the same proxy twice. Remove extras only if added by mistake.
                   </p>
                 </div>
               )}
@@ -934,7 +934,7 @@ function PackageRow({
                           <span>{ip.proxy}</span>
                           {isDuplicate && (
                             <Badge variant="outline" className="text-[10px] border-amber-300 text-amber-700">
-                              Duplicate
+                              Multi-sale
                             </Badge>
                           )}
                         </div>
