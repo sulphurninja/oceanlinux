@@ -299,7 +299,7 @@ function planNameLower(stock: IPStock) {
   return String(stock.name || '').trim().toLowerCase();
 }
 
-/** SmartVPS / Ocean Linux rows — show under All, Linux, and Windows tabs. */
+/** SmartVPS / Ocean Linux product family (4GB Linux vs 8GB+ Windows VPS tiers). */
 function isOceanLinuxCategoryPlan(stock: IPStock) {
   return stockTagsNormalized(stock).some(
     (t) => t === 'ocean linux' || t === 'oceanlinux' || t.includes('ocean linux'),
@@ -361,27 +361,62 @@ function isPremiumProxyPlan(stock: IPStock) {
   return name.includes('proxy') || name.includes('multi-ip');
 }
 
-/** Linux tab — serverType, tags, or name (many IP rows are tagged VPS but named Linux 4GB). */
+function planHasLinuxSignals(stock: IPStock) {
+  const tags = stockTagsNormalized(stock);
+  const name = planNameLower(stock);
+  return (
+    stock.serverType === 'Linux' ||
+    tags.some((t) => (t.includes('linux') || t.includes('ocean')) && !t.includes('windows')) ||
+    (name.includes('linux') && !name.includes('windows'))
+  );
+}
+
+function planHasWindowsSignals(stock: IPStock) {
+  const tags = stockTagsNormalized(stock);
+  const name = planNameLower(stock);
+  return (
+    stock.serverType === 'VPS' ||
+    tags.some((t) => t.includes('windows') || t === 'vps') ||
+    name.includes('windows') ||
+    /\bwindows vps\b/.test(name)
+  );
+}
+
+/** Whether a memory tier belongs on Linux vs Windows VPS tab (SmartVPS only). */
+function memoryMatchesCategoryTab(memory: string, tab: string, stock: IPStock) {
+  if (!tab || tab === 'all' || tab === 'SlotIP') return true;
+  if (!isOceanSmartVpsPlan(stock)) return true;
+  const type = oceanSmartVpsPlanType(memory);
+  if (tab === 'Linux') return type === 'Linux';
+  if (tab === 'VPS') return type === 'VPS';
+  return true;
+}
+
+/** Linux tab — SmartVPS 4GB tiers + dedicated Linux plans. */
 function isLinuxCategoryPlan(stock: IPStock) {
   if (isPremiumProxyPlan(stock)) return false;
-  if (isOceanLinuxCategoryPlan(stock)) return true;
-  if (stock.serverType === 'Linux' || stock.serverType === 'Windows & Linux') return true;
-  const tags = stockTagsNormalized(stock);
-  if (tags.some((t) => t.includes('linux') || t.includes('ocean'))) return true;
-  const name = planNameLower(stock);
-  if (name.includes('linux') && !name.includes('windows vps')) return true;
-  return false;
+  if (isOceanSmartVpsPlan(stock)) {
+    return Object.keys(stock.memoryOptions || {}).some(
+      (mem) => memoryMatchesCategoryTab(mem, 'Linux', stock),
+    );
+  }
+  const hasLinux = planHasLinuxSignals(stock);
+  const hasWindows = planHasWindowsSignals(stock);
+  if (stock.serverType === 'Windows & Linux') return hasLinux || !hasWindows;
+  return hasLinux;
 }
 
 function isVpsCategoryPlan(stock: IPStock) {
   if (isPremiumProxyPlan(stock)) return false;
-  if (isOceanLinuxCategoryPlan(stock)) return true;
-  if (stock.serverType === 'VPS' || stock.serverType === 'Windows & Linux') return true;
-  const tags = stockTagsNormalized(stock);
-  if (tags.some((t) => t.includes('windows') || t === 'vps')) return true;
-  const name = planNameLower(stock);
-  if (name.includes('windows') || /\bvps\b/.test(name)) return true;
-  return false;
+  if (isOceanSmartVpsPlan(stock)) {
+    return Object.keys(stock.memoryOptions || {}).some(
+      (mem) => memoryMatchesCategoryTab(mem, 'VPS', stock),
+    );
+  }
+  const hasLinux = planHasLinuxSignals(stock);
+  const hasWindows = planHasWindowsSignals(stock);
+  if (stock.serverType === 'Windows & Linux') return hasWindows || !hasLinux;
+  return hasWindows;
 }
 
 function matchesCategoryTab(stock: IPStock, tab: string) {
@@ -1608,6 +1643,7 @@ function IPStockContent() {
                       <CompactServerPlanRow
                         key={stock._id}
                         stock={stock}
+                        categoryTab={activeTab}
                         onBuyNow={handleBuyNow}
                         verifyingPurchaseKey={verifyingPurchaseKey}
                       />
@@ -1678,6 +1714,7 @@ function IPStockContent() {
                               <CompactServerPlanRow
                                 key={stock._id}
                                 stock={stock}
+                                categoryTab={activeTab}
                                 onBuyNow={handleBuyNow}
                                 verifyingPurchaseKey={verifyingPurchaseKey}
                               />
@@ -1702,6 +1739,7 @@ function IPStockContent() {
                               <CompactServerPlanRow
                                 key={stock._id}
                                 stock={stock}
+                                categoryTab={activeTab}
                                 onBuyNow={handleBuyNow}
                                 verifyingPurchaseKey={verifyingPurchaseKey}
                               />
@@ -1955,10 +1993,12 @@ function IPStockContent() {
 // Modern Compact List Row Component
 const CompactServerPlanRow = memo(function CompactServerPlanRow({
   stock,
+  categoryTab = 'all',
   onBuyNow,
   verifyingPurchaseKey,
 }: {
   stock: IPStock;
+  categoryTab?: string;
   onBuyNow: (name: string, memory: string, price: number, id: string, slotIpPackageId?: string, stockAvailable?: boolean, netbayGroupTag?: string) => void | Promise<void>;
   verifyingPurchaseKey?: string | null;
 }) {
@@ -1974,6 +2014,7 @@ const CompactServerPlanRow = memo(function CompactServerPlanRow({
   const memoryOptions = sortMemoryOptionEntries(
     Object.entries(stock.memoryOptions || {}).filter(([memory]) => {
       if (!memory || String(memory).startsWith('$')) return false;
+      if (!memoryMatchesCategoryTab(memory, categoryTab, stock)) return false;
       const allowed = stock.defaultConfigurations?.smartvps?.allowedRams;
       if (Array.isArray(allowed) && allowed.length > 0) {
         const gb = String(memory).match(/(\d+)/)?.[1];
@@ -1986,6 +2027,16 @@ const CompactServerPlanRow = memo(function CompactServerPlanRow({
   const pricedMemoryOptions = memoryOptions.filter(
     ([, details]) => details.price != null && Number(details.price) > 0
   );
+
+  if (
+    categoryTab !== 'all' &&
+    categoryTab !== 'SlotIP' &&
+    isOceanSmartVps &&
+    pricedMemoryOptions.length === 0
+  ) {
+    return null;
+  }
+
   const netbayGroupTags = listNetbayGroupTags(stock);
   const isProxyProduct = isNetbayProxyStock(stock);
   const proxyBillingKey = isProxyProduct ? pickPricedMemoryKey(stock.memoryOptions) : '';
