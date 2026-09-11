@@ -564,17 +564,14 @@ function IPStockContent() {
 
   const router = useRouter();
 
-  // Tab filter — URL is updated via history so Next.js does not remount this
-  // page (router.push + useSearchParams was re-fetching the whole catalog).
+  // Category tab — URL is the source of truth (sidebar links + in-page tabs).
   const searchParams = useSearchParams();
-  const [activeTab, setActiveTab] = useState<string>(searchParams.get('category') || 'all');
+  const activeTab = searchParams.get('category') || 'all';
 
   const handleTabChange = (tabId: string) => {
-    setActiveTab(tabId);
-    const url = tabId === 'all' ? '/dashboard/ipStock' : `/dashboard/ipStock?category=${tabId}`;
-    if (typeof window !== 'undefined') {
-      window.history.replaceState(window.history.state, '', url);
-    }
+    const url =
+      tabId === 'all' ? '/dashboard/ipStock' : `/dashboard/ipStock?category=${encodeURIComponent(tabId)}`;
+    router.replace(url, { scroll: false });
   };
 
   const liveSyncAbortRef = useRef<AbortController | null>(null);
