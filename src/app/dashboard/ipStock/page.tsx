@@ -73,6 +73,8 @@ import {
   RefreshCw,
   CheckCircle2,
   XCircle,
+  Globe,
+  ArrowRight,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { z } from "zod";
@@ -1440,6 +1442,35 @@ function IPStockContent() {
                 );
               })}
             </div>
+
+            {/* Proxy checker — quick access for proxy buyers */}
+            {(activeTab === 'all' || activeTab === 'SlotIP') && (
+              <Link
+                href="/dashboard/proxy-checker"
+                className="group mb-4 sm:mb-5 flex flex-col sm:flex-row sm:items-center gap-3 rounded-xl border border-orange-400/25 bg-gradient-to-r from-orange-500/10 via-orange-500/5 to-transparent p-3 sm:p-4 transition-colors hover:border-orange-400/40 hover:from-orange-500/15"
+              >
+                <div className="flex items-start gap-3 min-w-0 flex-1">
+                  <div className="h-10 w-10 rounded-xl bg-orange-500/20 border border-orange-400/30 flex items-center justify-center shrink-0">
+                    <Globe className="h-5 w-5 text-orange-300" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="font-semibold text-sm text-white">Proxy IP Checker</p>
+                      <Badge variant="outline" className="text-[10px] h-5 px-1.5 border-emerald-400/30 bg-emerald-500/10 text-emerald-200">
+                        Free
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-white/50 mt-0.5">
+                      Paste <code className="text-orange-200/90">ip:port:user:pass</code> and test IRCTC, Google & more before you buy.
+                    </p>
+                  </div>
+                </div>
+                <span className="inline-flex items-center justify-center gap-1.5 text-xs font-medium text-orange-200 group-hover:text-orange-100 shrink-0 sm:px-3 sm:py-2 sm:rounded-lg sm:border sm:border-orange-400/25 sm:bg-orange-500/10">
+                  Open checker
+                  <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+                </span>
+              </Link>
+            )}
 
             {/* Search & filters — compact toolbar */}
             <div className="premium-dashboard-card rounded-xl p-2 sm:p-2.5 mb-4 sm:mb-5">

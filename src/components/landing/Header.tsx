@@ -21,6 +21,7 @@ const RESOURCE_LINKS = [
   { href: "/knowledge-base", label: "Knowledge Base" },
   { href: "/docs/api", label: "API Docs" },
   { href: "/tools/proxy-setup", label: "Proxy Setup Tool" },
+  { href: "/tools/proxy-checker", label: "Proxy IP Checker" },
 ];
 
 const navLinkClass =

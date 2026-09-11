@@ -25,6 +25,7 @@ import {
   ShoppingCart,
   Ticket,
   Tag,
+  Globe,
 } from 'lucide-react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { cn } from "@/lib/utils";
@@ -207,6 +208,12 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
       href: '/dashboard/scripts',
       label: 'PuTTY / SSH',
       icon: Terminal,
+    },
+    {
+      href: '/dashboard/proxy-checker',
+      label: 'Proxy IP Checker',
+      icon: Globe,
+      badge: 'Free',
     },
     // Customer wallet + cart entries (hidden for resellers — they have
     // their own reseller wallet flow below).

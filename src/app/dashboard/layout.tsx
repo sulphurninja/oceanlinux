@@ -36,6 +36,7 @@ import {
     Settings,
     Lock,
     FileText,
+    Globe,
     ChevronRight,
     Store,
     Wallet as WalletIcon,
@@ -351,6 +352,11 @@ export default function DashboardLayout({
                 description: 'Connect to your Linux server and run proxy setup',
                 icon: FileText,
                 // breadcrumb: [{ name: 'Dashboard', href: '/dashboard' }]
+            },
+            '/dashboard/proxy-checker': {
+                title: 'Proxy IP Checker',
+                description: 'Test your proxy on IRCTC, Google, YouTube and more',
+                icon: Globe,
             },
             '/dashboard/my-account': {
                 title: 'My Account',

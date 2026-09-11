@@ -45,6 +45,17 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
+import {
+    DEFAULT_PROXY_SETUP_PORT,
+    listProxySetupPorts,
+} from '@/lib/proxySetupPorts';
 
 type Step = 'credentials' | 'connecting' | 'proxy-setup' | 'complete';
 type LogType = 'info' | 'success' | 'error' | 'command' | 'output';
@@ -54,6 +65,8 @@ interface LogEntry {
     message: string;
     timestamp: Date;
 }
+
+const PROXY_PORT_OPTIONS = listProxySetupPorts();
 
 const ProxySetupTerminal = () => {
     const router = useRouter();
@@ -70,6 +83,7 @@ const ProxySetupTerminal = () => {
     const [serverUsername, setServerUsername] = useState('root');
     const [serverPassword, setServerPassword] = useState('');
     const [showServerPassword, setShowServerPassword] = useState(false);
+    const [proxyPort, setProxyPort] = useState(String(DEFAULT_PROXY_SETUP_PORT));
 
     // Detected info
     const [detectedOs, setDetectedOs] = useState<string | null>(null);
@@ -210,6 +224,7 @@ const ProxySetupTerminal = () => {
                     password: serverPassword,
                     proxyUsername: proxyUsername,
                     proxyPassword: proxyPassword,
+                    proxyPort: Number(proxyPort),
                     action: 'full-setup'
                 })
             });
@@ -223,7 +238,7 @@ const ProxySetupTerminal = () => {
                 addLog('success', '✓ Squid proxy installed');
                 addLog('success', '✓ Configuration applied');
                 addLog('success', `✓ User "${proxyUsername}" created`);
-                addLog('success', '✓ Firewall port 3128 opened');
+                addLog('success', `✓ Firewall port ${proxyPort} opened`);
                 addLog('success', '✓ Proxy server is running!');
                 
                 setProxyResult(data.proxyDetails);
@@ -249,6 +264,7 @@ const ProxySetupTerminal = () => {
         setServerIp('');
         setServerUsername('root');
         setServerPassword('');
+        setProxyPort(String(DEFAULT_PROXY_SETUP_PORT));
         setDetectedOs(null);
         setIsSquidInstalled(false);
         setProxyUsername('');
@@ -288,8 +304,9 @@ const ProxySetupTerminal = () => {
                                     <Terminal className="h-6 w-6 text-emerald-300" />
                                 </div>
                                 <div>
-                                    <p className="text-sm text-white/45 mt-1">
-                                        One-click proxy server installation on port 3128
+                                    <p className="text-sm text-muted-foreground mt-1">
+                                        One-click Squid proxy — choose port{' '}
+                                        {PROXY_PORT_OPTIONS.join(', ')}
                                     </p>
                                 </div>
                             </div>
@@ -418,6 +435,33 @@ const ProxySetupTerminal = () => {
                                                 {showServerPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                                             </Button>
                                         </div>
+                                    </div>
+
+                                    <div className="space-y-2">
+                                        <Label htmlFor="proxy-port" className="flex items-center gap-2">
+                                            <Settings className="h-4 w-4 text-muted-foreground" />
+                                            Proxy Port
+                                        </Label>
+                                        <Select
+                                            value={proxyPort}
+                                            onValueChange={setProxyPort}
+                                            disabled={step !== 'credentials'}
+                                        >
+                                            <SelectTrigger id="proxy-port" className="premium-dashboard-select">
+                                                <SelectValue placeholder="Select proxy port" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {PROXY_PORT_OPTIONS.map((port) => (
+                                                    <SelectItem key={port} value={String(port)}>
+                                                        {port}
+                                                        {port === DEFAULT_PROXY_SETUP_PORT ? ' (default)' : ''}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                        <p className="text-xs text-muted-foreground">
+                                            Squid will listen on this port after setup. Pick the port your apps use.
+                                        </p>
                                     </div>
                                 </div>
 
@@ -563,7 +607,7 @@ const ProxySetupTerminal = () => {
                                             <Terminal className="h-12 w-12 text-slate-600" />
                                             <p>Enter server credentials to begin</p>
                                             <p className="text-xs text-slate-600">
-                                                Proxy will be installed on port 3128
+                                                Proxy will be installed on port {proxyPort}
                                             </p>
                                         </div>
                                     ) : (
@@ -659,7 +703,7 @@ const ProxySetupTerminal = () => {
                                     Detected: <strong className="capitalize">{detectedOs}</strong>
                                 </span>
                                 <Badge variant="outline" className="ml-auto text-xs">
-                                    Port 3128
+                                    Port {proxyPort}
                                 </Badge>
                             </div>
                         )}

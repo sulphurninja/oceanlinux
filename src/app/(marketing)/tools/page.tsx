@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { Terminal, Zap, Server, ArrowRight, Wrench, CheckCircle } from 'lucide-react';
+import { Terminal, Zap, Server, ArrowRight, Wrench, CheckCircle, Globe } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import type { Metadata } from 'next';
 import PublicPageHero from '@/components/landing/PublicPageHero';
@@ -32,6 +32,14 @@ const tools = [
     href: "/tools/proxy-setup",
     badge: "Popular",
     features: ["One-click setup", "Port 3128", "User authentication", "2-minute install"]
+  },
+  {
+    title: "Proxy IP Checker",
+    description: "Test if your HTTP proxy works on Google, IRCTC, YouTube, Amazon and more. Paste ip:port:user:pass.",
+    icon: Globe,
+    href: "/tools/proxy-checker",
+    badge: "New",
+    features: ["Multi-site test", "IRCTC & Google", "Live status", "Free & instant"]
   }
 ];
 

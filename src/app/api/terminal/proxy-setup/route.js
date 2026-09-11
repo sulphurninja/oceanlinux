@@ -1,6 +1,11 @@
 import { NextResponse } from 'next/server';
 import { NodeSSH } from 'node-ssh';
 import { enforceRateLimit } from '@/lib/rateLimit';
+import {
+  DEFAULT_PROXY_SETUP_PORT,
+  normalizeProxySetupPort,
+  PROXY_SETUP_PORTS,
+} from '@/lib/proxySetupPorts';
 
 const SSH_PORTS = [22, 3052];
 
@@ -83,7 +88,19 @@ export async function POST(request) {
   const ssh = new NodeSSH();
 
   try {
-    const { ip, username, password, proxyUsername, proxyPassword, action } = await request.json();
+    const { ip, username, password, proxyUsername, proxyPassword, proxyPort, action } =
+      await request.json();
+
+    const listenPort = normalizeProxySetupPort(proxyPort) ?? DEFAULT_PROXY_SETUP_PORT;
+    if (proxyPort != null && proxyPort !== '' && normalizeProxySetupPort(proxyPort) == null) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: `Invalid proxy port. Allowed: ${PROXY_SETUP_PORTS.join(', ')}`,
+        },
+        { status: 400 }
+      );
+    }
 
     // Validate required fields
     if (!ip || !username || !password) {
@@ -210,8 +227,8 @@ export async function POST(request) {
       // Create new Squid configuration
       const squidConfig = `
 # OceanLinux Squid Proxy Configuration
-# Port 3128
-http_port 3128
+# Port ${listenPort}
+http_port ${listenPort}
 
 # Authentication
 auth_param basic program /usr/lib/squid/basic_ncsa_auth ${passwdPath}
@@ -308,9 +325,10 @@ SQUIDEOF`);
         message: `User ${proxyUsername} added successfully`,
         proxyDetails: {
           ip: ip,
-          port: 3128,
+          port: listenPort,
           username: proxyUsername,
-          password: proxyPassword
+          password: proxyPassword,
+          format: `${ip}:${listenPort}:${proxyUsername}:${proxyPassword}`,
         }
       };
     }
@@ -357,7 +375,7 @@ SQUIDEOF`);
         : '/usr/lib64/squid/basic_ncsa_auth';
 
       const squidConfig = `
-http_port 3128
+http_port ${listenPort}
 auth_param basic program ${basicAuthPath} ${passwdPath}
 auth_param basic children 5
 auth_param basic realm OceanLinux Proxy
@@ -389,9 +407,11 @@ EOF`);
       await ssh.execCommand('systemctl restart squid');
 
       // Step 5: Open firewall port
-      await ssh.execCommand('firewall-cmd --permanent --add-port=3128/tcp 2>/dev/null || true');
+      await ssh.execCommand(
+        `firewall-cmd --permanent --add-port=${listenPort}/tcp 2>/dev/null || true`
+      );
       await ssh.execCommand('firewall-cmd --reload 2>/dev/null || true');
-      await ssh.execCommand('ufw allow 3128/tcp 2>/dev/null || true');
+      await ssh.execCommand(`ufw allow ${listenPort}/tcp 2>/dev/null || true`);
 
       // Verify
       const statusResult = await ssh.execCommand('systemctl is-active squid');
@@ -403,10 +423,10 @@ EOF`);
         message: isRunning ? 'Proxy setup completed successfully!' : 'Setup completed but service may need attention',
         proxyDetails: {
           ip: ip,
-          port: 3128,
+          port: listenPort,
           username: proxyUsername,
           password: proxyPassword,
-          format: `${ip}:3128:${proxyUsername}:${proxyPassword}`
+          format: `${ip}:${listenPort}:${proxyUsername}:${proxyPassword}`,
         }
       };
     }
