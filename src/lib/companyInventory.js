@@ -135,6 +135,19 @@ function readLivePanelVariantAvailable(stock, company) {
     const variants = cfg.variantStock && typeof cfg.variantStock === 'object' ? cfg.variantStock : {};
     return Object.values(variants).some((v) => v && typeof v === 'object' && v.available === true);
   }
+  const {
+    usesHostdzireLiveStock,
+    stockHasHostdzirePlans,
+  } = require('@/lib/ipStockAvailability');
+  if (usesHostdzireLiveStock(stock, company) && stockHasHostdzirePlans(stock)) {
+    const cfg = toPlainConfigurations(stock.defaultConfigurations)?.hostdzire || {};
+    const variants = cfg.variantStock && typeof cfg.variantStock === 'object' ? cfg.variantStock : {};
+    if (Object.keys(variants).length) {
+      return Object.values(variants).some((v) => v && typeof v === 'object' && v.available === true);
+    }
+    if (cfg.liveQty != null) return Number(cfg.liveQty) > 0;
+    return !!stock?.available;
+  }
   return !!stock?.available;
 }
 
@@ -167,6 +180,9 @@ function isCompanyStockPurchasable(stock, company, quantity = 1) {
     return readLivePanelVariantAvailable(stock, company);
   }
   if (usesKurohostLiveStock(stock, company) && stockHasKurohostPlans(stock)) {
+    return readLivePanelVariantAvailable(stock, company);
+  }
+  if (usesHostdzireLiveStock(stock, company) && stockHasHostdzirePlans(stock)) {
     return readLivePanelVariantAvailable(stock, company);
   }
   return getIpStockRemainingFromInventoryOrUnits(stock) >= quantity;

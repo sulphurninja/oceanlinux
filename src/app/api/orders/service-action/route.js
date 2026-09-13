@@ -29,7 +29,10 @@ const { getCompanyKurohostApiConfig } = require('@/lib/companyKurohostApi');
 const NetbayApi = require('@/services/netbayApi');
 const KurohostApi = require('@/services/kurohostApi');
 const { getCompanyJoyApiConfig, resolveJoyApiForOrder } = require('@/lib/companyJoyApi');
+const { resolveHostdzireApiForOrder } = require('@/lib/companyHostdzireApi');
 const JoyApi = require('@/services/joyApi');
+const HostdzireApi = require('@/services/hostdzireApi');
+const { extractHostdzireExpiryFromDetails } = require('@/lib/hostdzireRenewal');
 const { applyJoyMachineToOrderUpdates } = require('@/lib/joyOrderSync');
 const { runNetbayPostRebuildFlow } = require('@/lib/netbayPostRebuildFlow');
 const { applyNetbayServiceToOrderUpdates, resolveNetbayPowerState, syncNetbayOrderFromApi, commitNetbayOrderSync } = require('@/lib/netbayOrderSync');
@@ -244,6 +247,10 @@ async function runKurohostPowerAction(api, instanceId, action) {
  */
 async function resolveCompanyJoyApi(order) {
   return resolveJoyApiForOrder(order, { Company, IPStock });
+}
+
+async function resolveCompanyHostdzireApi(order) {
+  return resolveHostdzireApiForOrder(order, { Company, IPStock });
 }
 
 /**
@@ -1170,6 +1177,118 @@ export async function POST(request) {
           code: facing.code,
           nextAvailableAt: facing.nextAvailableAt || undefined,
         }, facing.status || 500, action);
+      }
+    }
+
+    // -------------------- HostDzire branch --------------------
+    // POST https://hostdzire.com/api/vps/ — action + ip (start/stop/reboot/details/…)
+    if (!isSmartVps && !isNetbay && !order.hostycareServiceId) {
+      const { config: hostdzireCfg, companyName: hostdzireCompanyName } = await resolveCompanyHostdzireApi(order);
+      if (hostdzireCfg) {
+        const supportedActions = new Set(['start', 'stop', 'restart', 'reboot', 'status', 'sync', 'reinstall']);
+        if (!supportedActions.has(action)) {
+          return actionJson({
+            success: false,
+            error: `Action '${action}' is not available for this server.`,
+          }, 400, action);
+        }
+        if (!ipAddress) {
+          return actionJson({
+            success: false,
+            error: 'This server is still being set up. Please try again shortly.',
+          }, 409, action);
+        }
+
+        console.log(`[SERVICE-ACTION][POST] Routing via HostDzire (${hostdzireCfg.baseUrl}) action=${action} company=${hostdzireCompanyName || 'unknown'} ip=${ipAddress}`);
+
+        let hostdzireApi;
+        try {
+          hostdzireApi = new HostdzireApi(hostdzireCfg);
+        } catch (apiErr) {
+          return actionJson({
+            success: false,
+            error: apiErr.message || 'Server management is temporarily unavailable.',
+          }, 500, action);
+        }
+
+        try {
+          switch (action) {
+            case 'start': {
+              const apiRes = await hostdzireApi.start(ipAddress);
+              await Order.findByIdAndUpdate(orderId, { lastAction: 'start', lastActionTime: new Date() });
+              return NextResponse.json({ success: true, powerState: 'running', result: { success: true, message: apiRes?.message || 'Start initiated', apiResponse: apiRes } });
+            }
+            case 'stop': {
+              const apiRes = await hostdzireApi.stop(ipAddress);
+              await Order.findByIdAndUpdate(orderId, { lastAction: 'stop', lastActionTime: new Date() });
+              return NextResponse.json({ success: true, powerState: 'stopped', result: { success: true, message: apiRes?.message || 'Stop initiated', apiResponse: apiRes } });
+            }
+            case 'restart':
+            case 'reboot': {
+              const apiRes = await hostdzireApi.reboot(ipAddress);
+              await Order.findByIdAndUpdate(orderId, { lastAction: 'restart', lastActionTime: new Date() });
+              return NextResponse.json({ success: true, result: { success: true, message: apiRes?.message || 'Reboot initiated', apiResponse: apiRes } });
+            }
+            case 'reinstall': {
+              const osParam = body?.os || body?.osName || order?.os || undefined;
+              const apiRes = await hostdzireApi.reinstall(ipAddress, osParam);
+              await Order.findByIdAndUpdate(orderId, { lastAction: 'reinstall', lastActionTime: new Date() });
+              return NextResponse.json({ success: true, result: { success: true, message: apiRes?.message || 'Reinstall initiated', apiResponse: apiRes } });
+            }
+            case 'status':
+            case 'sync': {
+              const detailsRes = await hostdzireApi.getDetails(ipAddress);
+              const powerState = HostdzireApi.resolvePowerState(detailsRes);
+              const data = detailsRes?.data || {};
+              const now = new Date();
+              const dbUpdates = { lastSyncTime: now };
+              const changes = ['lastSyncTime'];
+              if (data.password && data.password !== order.password) {
+                dbUpdates.password = data.password;
+                changes.push('password');
+              }
+              if (data.hostname && data.hostname !== order.hostname) {
+                dbUpdates.hostname = data.hostname;
+                changes.push('hostname');
+              }
+              if (data.os && data.os !== order.os) {
+                dbUpdates.os = data.os;
+                changes.push('os');
+              }
+              const syncedExpiry = extractHostdzireExpiryFromDetails(detailsRes);
+              if (
+                syncedExpiry &&
+                (!order.expiryDate || syncedExpiry.getTime() !== new Date(order.expiryDate).getTime())
+              ) {
+                dbUpdates.expiryDate = syncedExpiry;
+                changes.push('expiryDate');
+              }
+              await commitPanelSyncToOrder(order, dbUpdates);
+              return NextResponse.json({
+                success: true,
+                powerState,
+                provider: 'hostdzire',
+                serviceId: ipAddress,
+                details: data,
+                syncResult: {
+                  credentialsUpdated: changes.includes('password'),
+                  expiryUpdated: changes.includes('expiryDate'),
+                  changes,
+                  lastSyncTime: now.toISOString(),
+                },
+                expiryDate: dbUpdates.expiryDate || order.expiryDate || null,
+                lastSync: now.toISOString(),
+              });
+            }
+          }
+        } catch (hostdzireErr) {
+          console.error(`[SERVICE-ACTION][POST] HostDzire action '${action}' failed:`, hostdzireErr.message);
+          return actionJson({
+            success: false,
+            error: hostdzireErr.message || 'HostDzire action failed',
+            code: hostdzireErr.code || undefined,
+          }, typeof hostdzireErr.status === 'number' ? hostdzireErr.status : 500, action);
+        }
       }
     }
 

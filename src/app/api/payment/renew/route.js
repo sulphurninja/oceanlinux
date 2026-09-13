@@ -138,6 +138,21 @@ export async function POST(request) {
       });
     }
 
+    // 7c. HostDzire — require IP for pay_invoice_by_ip.
+    if (provider === 'hostdzire' && !companyCheck.isCompany) {
+      const ip = String(order.ipAddress || '').split(':')[0].trim();
+      if (!/^\d{1,3}(?:\.\d{1,3}){3}$/.test(ip)) {
+        return NextResponse.json({
+          message: 'This server is still being set up. Please wait a few minutes and try again.',
+        }, { status: 400 });
+      }
+      console.log('[RENEWAL-INIT] HostDzire renewal eligible:', {
+        hostdzireOrderId: order.hostdzireOrderId,
+        ipAddress: ip,
+        diffDays,
+      });
+    }
+
     // 8. Generate a unique renewal transaction ID
     renewalTxnId = `RENEWAL_${Date.now()}_${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
 

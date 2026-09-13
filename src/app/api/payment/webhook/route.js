@@ -31,6 +31,7 @@ const { getAdvpsRebuildResetFields, isAdvpsOrder } = require('@/lib/advpsRebuild
 const { executeAdvpsUpstreamRenewal } = require('@/lib/advpsRenewal');
 const { executeNetbayUpstreamRenewal } = require('@/lib/netbayRenewal');
 const { executeResellerPanelUpstreamRenewal } = require('@/lib/resellerPanelRenewal');
+const { executeHostdzireUpstreamRenewal } = require('@/lib/hostdzireRenewal');
 const { resolveRenewalExpiryFromPanel } = require('@/lib/companyResellerInventorySync');
 
 export async function POST(request) {
@@ -719,6 +720,40 @@ export async function handleRenewalWebhook(renewalTxnId, payment, webhookStartTi
       } catch (panelErr) {
         logger.setProviderApiResult('reseller-api', false, null, panelErr);
         providerRenewalResult = { error: panelErr.message };
+        providerRenewalSuccess = false;
+      }
+    } else if (provider === 'hostdzire') {
+      console.log(`[WEBHOOK-RENEWAL] Processing HostDzire renewal:`, {
+        hostdzireOrderId: order.hostdzireOrderId,
+        ipAddress: order.ipAddress,
+      });
+
+      try {
+        const apiStart = Date.now();
+        const hostdzireRenew = await executeHostdzireUpstreamRenewal(order);
+        const apiDuration = Date.now() - apiStart;
+
+        providerRenewalResult = hostdzireRenew.result || {
+          error: hostdzireRenew.error,
+          ipAddress: hostdzireRenew.ipAddress,
+        };
+        providerRenewalSuccess = hostdzireRenew.success;
+
+        if (hostdzireRenew.success) {
+          console.log(`[WEBHOOK-RENEWAL] ✅ HostDzire renewal API success`);
+          logger.setProviderApiResult('hostdzire', true, hostdzireRenew.result, null, apiDuration);
+          if (hostdzireRenew.newExpiryDate) {
+            newExpiryDate = hostdzireRenew.newExpiryDate;
+            console.log(`[WEBHOOK-RENEWAL] HostDzire expiry after renew: ${newExpiryDate.toISOString()}`);
+          }
+        } else {
+          console.error(`[WEBHOOK-RENEWAL] HostDzire renewal API failed:`, hostdzireRenew.error);
+          logger.setProviderApiResult('hostdzire', false, hostdzireRenew.result, { message: hostdzireRenew.error }, apiDuration);
+        }
+      } catch (hostdzireErr) {
+        console.error(`[WEBHOOK-RENEWAL] HostDzire renewal threw:`, hostdzireErr.message);
+        logger.setProviderApiResult('hostdzire', false, null, hostdzireErr);
+        providerRenewalResult = { error: hostdzireErr.message };
         providerRenewalSuccess = false;
       }
     } else {

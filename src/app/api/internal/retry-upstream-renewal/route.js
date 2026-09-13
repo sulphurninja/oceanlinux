@@ -8,6 +8,7 @@ const SmartVPSAPI = require('@/services/smartvpsApi');
 const { executeAdvpsUpstreamRenewal } = require('@/lib/advpsRenewal');
 const { executeNetbayUpstreamRenewal } = require('@/lib/netbayRenewal');
 const { executeResellerPanelUpstreamRenewal } = require('@/lib/resellerPanelRenewal');
+const { executeHostdzireUpstreamRenewal } = require('@/lib/hostdzireRenewal');
 
 function pickHostycareExpiry(payload) {
   if (!payload || typeof payload !== 'object') return null;
@@ -47,6 +48,10 @@ async function retryByProvider(order) {
   if (order.netbayServiceId) {
     const out = await executeNetbayUpstreamRenewal(order);
     return { ...out, provider: 'netbay' };
+  }
+  if (String(order.provider || '').toLowerCase() === 'hostdzire' || order.hostdzireOrderId) {
+    const out = await executeHostdzireUpstreamRenewal(order);
+    return { ...out, provider: 'hostdzire' };
   }
   if (String(order.provider || '').toLowerCase() === 'reseller-api' || order.resellerVmId) {
     const out = await executeResellerPanelUpstreamRenewal(order, { Order });

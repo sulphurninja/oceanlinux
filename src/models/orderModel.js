@@ -83,6 +83,10 @@ const orderSchema = new mongoose.Schema({
     /** Set when a configured coupon was not applied (audit / support). */
     netbayCouponSkipReason: { type: String },
 
+    // HostDzire WHMCS VPS API (https://hostdzire.com/api/vps/)
+    hostdzireOrderId: { type: String },
+    hostdzireInventoryKey: { type: String },
+
     // KuroHost Cloud Platform (https://kurohost.com/cloud/docs)
     kurohostInstanceId: { type: String },
     kurohostJobId: { type: String },

@@ -20,6 +20,7 @@ const { getAdvpsRebuildResetFields, isAdvpsOrder } = require('@/lib/advpsRebuild
 const { executeAdvpsUpstreamRenewal } = require('@/lib/advpsRenewal');
 const { executeNetbayUpstreamRenewal } = require('@/lib/netbayRenewal');
 const { executeResellerPanelUpstreamRenewal } = require('@/lib/resellerPanelRenewal');
+const { executeHostdzireUpstreamRenewal } = require('@/lib/hostdzireRenewal');
 const { resolveRenewalExpiryFromPanel } = require('@/lib/companyResellerInventorySync');
 const { pickAdvpsExpiryDate } = require('@/lib/advpsOrderExpiry');
 const { extractAdvpsStatusCredentials } = require('@/lib/advpsStatusNormalize');
@@ -732,6 +733,44 @@ export async function POST(request) {
         logger.setProviderApiResult('reseller-api', false, null, panelErr);
       }
       console.log('[RENEWAL-CONFIRM] === RESELLER PANEL RENEWAL END ===');
+    } else if (provider === 'hostdzire') {
+      console.log('[RENEWAL-CONFIRM] === HOSTDZIRE RENEWAL PROCESS START ===');
+      console.log('[RENEWAL-CONFIRM] HostDzire identifiers:', {
+        hostdzireOrderId: order.hostdzireOrderId,
+        ipAddress: order.ipAddress,
+      });
+
+      try {
+        const apiStart = Date.now();
+        const hostdzireRenew = await executeHostdzireUpstreamRenewal(order);
+        const apiDuration = Date.now() - apiStart;
+
+        providerRenewalResult = hostdzireRenew.result || {
+          error: hostdzireRenew.error,
+          ipAddress: hostdzireRenew.ipAddress,
+        };
+        providerRenewalSuccess = hostdzireRenew.success;
+
+        if (hostdzireRenew.success) {
+          console.log('[RENEWAL-CONFIRM] ✅ HostDzire renewal API success:', JSON.stringify(hostdzireRenew.result, null, 2));
+          logger.setProviderApiResult('hostdzire', true, hostdzireRenew.result, null, apiDuration);
+          if (hostdzireRenew.newExpiryDate) {
+            newExpiryDate = hostdzireRenew.newExpiryDate;
+            console.log(`[RENEWAL-CONFIRM] HostDzire expiry after renew: ${newExpiryDate.toISOString()}`);
+          }
+        } else {
+          console.error('[RENEWAL-CONFIRM] ❌ HostDzire renewal API failed:', hostdzireRenew.error);
+          logger.setProviderApiResult('hostdzire', false, hostdzireRenew.result, { message: hostdzireRenew.error }, apiDuration);
+        }
+      } catch (hostdzireErr) {
+        console.error('[RENEWAL-CONFIRM] ❌ HostDzire renewal threw:', hostdzireErr.message);
+        logger.setProviderApiResult('hostdzire', false, null, hostdzireErr);
+        providerRenewalResult = { error: hostdzireErr.message };
+        providerRenewalSuccess = false;
+        console.log('[RENEWAL-CONFIRM] Continuing — customer payment succeeded; expiry will still be extended');
+      }
+
+      console.log('[RENEWAL-CONFIRM] === HOSTDZIRE RENEWAL PROCESS END ===');
     } else {
       console.log(`[RENEWAL-CONFIRM] ${provider} renewal - no additional API call needed`);
       providerRenewalSuccess = true; // OceanLinux renewals are handled internally

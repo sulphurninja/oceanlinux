@@ -100,6 +100,22 @@ function normalizeJoyApiEntry(v) {
   };
 }
 
+function normalizeHostdzireApiEntry(v) {
+  if (v === null) return null;
+  const enabled = asBool(v?.enabled);
+  return {
+    enabled,
+    label: typeof v?.label === 'string' ? v.label.trim() : '',
+    baseUrl: typeof v?.baseUrl === 'string'
+      ? v.baseUrl.trim().replace(/\/+$/, '')
+      : '',
+    apiKey: typeof v?.apiKey === 'string' ? v.apiKey.trim() : '',
+    email: typeof v?.email === 'string' ? v.email.trim() : '',
+    couponCode: typeof v?.couponCode === 'string' ? v.couponCode.trim() : '',
+    useLiveStockApi: enabled && asBool(v?.useLiveStockApi),
+  };
+}
+
 function pickAllowedUpdates(body) {
   const out = {};
   if (typeof body?.name === 'string') out.name = body.name;
@@ -145,6 +161,12 @@ function pickAllowedUpdates(body) {
     out.joyApi = body.joyApi === null
       ? null
       : normalizeJoyApiEntry(body.joyApi);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body || {}, 'hostdzireApi')) {
+    out.hostdzireApi = body.hostdzireApi === null
+      ? null
+      : normalizeHostdzireApiEntry(body.hostdzireApi);
   }
 
   return out;
@@ -198,6 +220,14 @@ export async function PUT(request, { params }) {
       { $set: { joyApi: updates.joyApi } }
     );
     delete updates.joyApi;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(updates, 'hostdzireApi')) {
+    await Company.collection.updateOne(
+      { _id: company._id },
+      { $set: { hostdzireApi: updates.hostdzireApi } }
+    );
+    delete updates.hostdzireApi;
   }
 
   if (Object.keys(updates).length > 0) {

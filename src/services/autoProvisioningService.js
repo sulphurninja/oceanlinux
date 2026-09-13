@@ -23,6 +23,14 @@ const {
   resolveKurohostFlavorId,
   resolveKurohostOsTemplateId,
 } = require('@/lib/kurohostStockConfig');
+const HostdzireApi = require('./hostdzireApi');
+const { fetchHostdzireExpiry } = require('@/lib/hostdzireRenewal');
+const { getCompanyHostdzireApiConfig } = require('@/lib/companyHostdzireApi');
+const {
+  readHostdzireStockConfig,
+  resolveHostdzirePlaceOrderOs,
+  resolveHostdzireInventoryForMemory,
+} = require('@/lib/hostdzireStockConfig');
 const { getCompanyResellerApiConfig } = require('@/lib/companyResellerApi');
 const {
   readResellerApiStockConfig,
@@ -124,6 +132,28 @@ class AutoProvisioningService {
     return isKurohost;
   }
 
+  isHostdzireStock(ipStock, order) {
+    const tags = Array.isArray(ipStock?.tags) ? ipStock.tags : [];
+    const provider = (ipStock?.provider || '').toString().toLowerCase();
+
+    const hasHostdzireConfig = !!(ipStock?.defaultConfigurations?.hostdzire ||
+      ipStock?.defaultConfigurations?.get?.('hostdzire'));
+    const taggedHostdzire = tags.some(t => String(t).toLowerCase() === 'hostdzire');
+    const byProvider = provider === 'hostdzire';
+    const byOrder = !!order?.hostdzireOrderId || order?.provider === 'hostdzire';
+
+    const cfg = readHostdzireStockConfig(ipStock);
+    const hasInventoryKey = !!cfg.inventoryKey ||
+      Object.values(cfg.inventoryByMemory || {}).some((v) => v?.inventoryKey);
+    const isHostdzire = hasHostdzireConfig || taggedHostdzire || byProvider || byOrder || hasInventoryKey;
+
+    L.kv('HostDzire detection', {
+      hasHostdzireConfig, taggedHostdzire, byProvider, byOrder, hasInventoryKey, result: isHostdzire,
+    });
+
+    return isHostdzire;
+  }
+
   async resolveKurohostConfigForStock(ipStock) {
     if (!ipStock?.company) {
       L.line('[KUROHOST] IPStock has no company link — cannot resolve API credentials');
@@ -176,6 +206,29 @@ class AutoProvisioningService {
       return { ...merged, companyName: company.name };
     } catch (err) {
       L.line(`[NETBAY] Failed to load company config: ${err.message}`);
+      return null;
+    }
+  }
+
+  async resolveHostdzireConfigForStock(ipStock) {
+    if (!ipStock?.company) {
+      L.line('[HOSTDZIRE] IPStock has no company link — cannot resolve API credentials');
+      return null;
+    }
+    try {
+      const company = await Company.findById(ipStock.company).select('hostdzireApi name').lean();
+      if (!company) {
+        L.line(`[HOSTDZIRE] Company ${ipStock.company} not found`);
+        return null;
+      }
+      const cfg = getCompanyHostdzireApiConfig(company);
+      if (!cfg) {
+        L.line(`[HOSTDZIRE] Company "${company.name}" has no enabled/complete HostDzire API config`);
+        return null;
+      }
+      return { ...cfg, companyName: company.name };
+    } catch (err) {
+      L.line(`[HOSTDZIRE] Failed to load company config: ${err.message}`);
       return null;
     }
   }
@@ -1094,10 +1147,11 @@ class AutoProvisioningService {
 
       const advps = this.isAdvpsStock(ipStock, order);
       const netbay = !advps && this.isNetbayStock(ipStock, order);
-      const kurohost = !advps && !netbay && this.isKurohostStock(ipStock, order);
-      const resellerPanel = !advps && !netbay && !kurohost && isResellerApiStock(ipStock, order);
-      const smartVps = !advps && !netbay && !kurohost && !resellerPanel && this.isSmartVpsStock(ipStock, order);
-      const providerName = advps ? 'ADVPS' : netbay ? 'Netbay' : kurohost ? 'KuroHost' : resellerPanel ? 'ResellerPanel' : smartVps ? 'SmartVPS' : 'Hostycare';
+      const hostdzire = !advps && !netbay && this.isHostdzireStock(ipStock, order);
+      const kurohost = !advps && !netbay && !hostdzire && this.isKurohostStock(ipStock, order);
+      const resellerPanel = !advps && !netbay && !hostdzire && !kurohost && isResellerApiStock(ipStock, order);
+      const smartVps = !advps && !netbay && !hostdzire && !kurohost && !resellerPanel && this.isSmartVpsStock(ipStock, order);
+      const providerName = advps ? 'ADVPS' : netbay ? 'Netbay' : hostdzire ? 'HostDzire' : kurohost ? 'KuroHost' : resellerPanel ? 'ResellerPanel' : smartVps ? 'SmartVPS' : 'Hostycare';
       L.line(`➡ Provider route selected: ${providerName}`);
 
       // Branch
@@ -1105,6 +1159,8 @@ class AutoProvisioningService {
         return await this.provisionViaAdvps(order, ipStock, startTime);
       } else if (netbay) {
         return await this.provisionViaNetbay(order, ipStock, startTime);
+      } else if (hostdzire) {
+        return await this.provisionViaHostdzire(order, ipStock, startTime);
       } else if (kurohost) {
         return await this.provisionViaKurohost(order, ipStock, startTime);
       } else if (resellerPanel) {
@@ -2063,6 +2119,184 @@ class AutoProvisioningService {
       productId: planId || null,
       totalTime,
       ...(fullyProvisioned ? {} : { error: `Netbay service ${netbayServiceId} pending IP/credentials` }),
+    };
+  }
+
+  // --- HOSTDZIRE PATH --------------------------------------------------------
+  async provisionViaHostdzire(order, ipStock, startTime) {
+    L.head(`HOSTDZIRE PATH — order ${order._id}`);
+
+    const isWindowsProduct = this.isWindowsOrder(order, ipStock);
+    const orderOs = isWindowsProduct ? 'Windows 2022 64' : 'Ubuntu 22';
+
+    await Order.findByIdAndUpdate(order._id, {
+      provisioningStatus: 'provisioning',
+      provisioningError: '',
+      autoProvisioned: true,
+      lastProvisionAttempt: new Date(),
+      provider: 'hostdzire',
+      os: order.os || orderOs,
+    });
+
+    const cfg = await this.resolveHostdzireConfigForStock(ipStock);
+    if (!cfg) {
+      throw new Error(
+        'HostDzire API is not configured for this company. Enable it under /admin/companies → HostDzire.'
+      );
+    }
+    L.kv('[HOSTDZIRE] Using company', cfg.companyName);
+
+    const stockCfg = readHostdzireStockConfig(ipStock);
+    L.kv('[HOSTDZIRE] Stock config', stockCfg);
+
+    const ram = order.memory || order.ram || '';
+    const inventorySlot = resolveHostdzireInventoryForMemory(stockCfg, ram);
+    const inventoryKey = order.hostdzireInventoryKey || inventorySlot?.inventoryKey;
+    if (!inventoryKey) {
+      throw new Error(
+        `HostDzire inventory_key missing for RAM "${ram}" on IPStock "${ipStock.name}". ` +
+        'Open /admin/manageIpStock → HostDzire Configuration → map each RAM tier (4GB, 8GB) to an inventory row.'
+      );
+    }
+    L.kv('[HOSTDZIRE] Resolved inventory', { memory: ram, inventoryKey, ip: inventorySlot?.ip || stockCfg.ip });
+
+    const placeOrderOs = resolveHostdzirePlaceOrderOs(stockCfg, {
+      isWindows: isWindowsProduct,
+      orderOs: order.os || orderOs,
+    });
+    L.kv('[HOSTDZIRE] place_order OS', placeOrderOs);
+
+    const api = new HostdzireApi(cfg);
+    let hostdzireOrderId = order.hostdzireOrderId || '';
+
+    if (!hostdzireOrderId) {
+      L.line(`[HOSTDZIRE] place_order inventory_key=${inventoryKey} os=${placeOrderOs}`);
+      const placeRes = await api.placeOrder({
+        inventoryKey,
+        os: placeOrderOs,
+        quantity: 1,
+        coupon: cfg.couponCode || undefined,
+      });
+
+      hostdzireOrderId = String(placeRes?.order_id || placeRes?.orderId || '').trim();
+      if (!hostdzireOrderId) {
+        throw new Error(
+          `HostDzire place_order did not return order_id. Response: ${JSON.stringify(placeRes).slice(0, 400)}`
+        );
+      }
+
+      await Order.findByIdAndUpdate(order._id, {
+        hostdzireOrderId,
+        hostdzireInventoryKey: inventoryKey,
+        provider: 'hostdzire',
+        autoProvisioned: true,
+      });
+      L.kv('[HOSTDZIRE] order_id', hostdzireOrderId);
+    } else {
+      L.line(`[HOSTDZIRE] Resuming — order_id=${hostdzireOrderId}, inventory_key=${inventoryKey}`);
+    }
+
+    const expectedIpHint = inventorySlot?.ip || stockCfg.ip || '';
+    const isFullIpv4 = (ip) => /^\d{1,3}(?:\.\d{1,3}){3}$/.test(String(ip || '').trim());
+    let ipAddress = isFullIpv4(order.ipAddress) ? order.ipAddress : '';
+    let username = isWindowsProduct ? 'Administrator' : 'root';
+    let password = order.password || '';
+    let hostname = '';
+    let resolvedOs = order.os || orderOs;
+
+    const deadline = Date.now() + 180_000;
+    while (Date.now() < deadline && (!ipAddress || !password)) {
+      if (isFullIpv4(expectedIpHint) && !ipAddress) {
+        try {
+          const detailsRes = await api.getDetails(expectedIpHint);
+          const ipv4 = HostdzireApi.extractIpv4(detailsRes);
+          const creds = HostdzireApi.extractCredentials(detailsRes);
+          if (ipv4) ipAddress = ipv4;
+          if (creds.username) username = creds.username;
+          if (creds.password) password = creds.password;
+          if (creds.hostname) hostname = creds.hostname;
+          if (creds.os) resolvedOs = creds.os;
+        } catch (detailErr) {
+          L.line(`[HOSTDZIRE] details(${expectedIpHint}): ${detailErr.message}`);
+        }
+      }
+
+      if (!ipAddress) {
+        try {
+          const ordersRes = await api.getOrders();
+          const orders = Array.isArray(ordersRes?.orders) ? ordersRes.orders : [];
+          const match = orders.find((o) => String(o.id) === String(hostdzireOrderId));
+          const candidateIp = String(match?.ip || match?.dedicatedip || match?.ipv4 || '').trim();
+          if (isFullIpv4(candidateIp)) {
+            const detailsRes = await api.getDetails(candidateIp);
+            ipAddress = HostdzireApi.extractIpv4(detailsRes) || candidateIp;
+            const creds = HostdzireApi.extractCredentials(detailsRes);
+            if (creds.username) username = creds.username;
+            if (creds.password) password = creds.password;
+            if (creds.hostname) hostname = creds.hostname;
+            if (creds.os) resolvedOs = creds.os;
+          }
+        } catch (ordersErr) {
+          L.line(`[HOSTDZIRE] orders poll: ${ordersErr.message}`);
+        }
+      }
+
+      if (ipAddress && password) break;
+      await new Promise((r) => setTimeout(r, 5000));
+    }
+
+    const fullyProvisioned = !!(ipAddress && password);
+    const updateData = {
+      status: fullyProvisioned ? 'active' : 'confirmed',
+      provisioningStatus: fullyProvisioned ? 'active' : 'provisioning',
+      provisioningError: fullyProvisioned
+        ? ''
+        : `PENDING: HostDzire order ${hostdzireOrderId} placed, awaiting IP/credentials. Will retry automatically.`,
+      provider: 'hostdzire',
+      hostdzireOrderId,
+      hostdzireInventoryKey: inventoryKey,
+      username,
+      password: password || order.password || '',
+      os: resolvedOs,
+      autoProvisioned: true,
+      lastSyncTime: new Date(),
+    };
+    if (hostname) updateData.hostname = hostname;
+
+    if (fullyProvisioned && ipAddress) {
+      try {
+        const panelExpiry = await fetchHostdzireExpiry(api, ipAddress, hostdzireOrderId);
+        if (panelExpiry) {
+          updateData.expiryDate = panelExpiry;
+          L.kv('[HOSTDZIRE] expiry from panel', panelExpiry.toISOString());
+        } else {
+          const { calculateCompanyExpiryDate } = await import('@/lib/expiryHelper');
+          updateData.expiryDate = calculateCompanyExpiryDate();
+        }
+      } catch (expiryErr) {
+        L.line(`[HOSTDZIRE] expiry fetch failed: ${expiryErr.message}`);
+        const { calculateCompanyExpiryDate } = await import('@/lib/expiryHelper');
+        updateData.expiryDate = calculateCompanyExpiryDate();
+      }
+      await finalizeIpAssignmentForOrder(order, ipAddress, updateData);
+    } else {
+      await Order.findByIdAndUpdate(order._id, updateData);
+    }
+
+    const totalTime = Date.now() - startTime;
+    console.log(`[HOSTDZIRE] ✅ PROVISIONING ${fullyProvisioned ? 'COMPLETED' : 'PENDING — cron will check'}`);
+    console.log(`   - Order ID: ${order._id}`);
+    console.log(`   - HostDzire order_id: ${hostdzireOrderId}`);
+    console.log(`   - IP: ${ipAddress || 'pending'}`);
+
+    return {
+      success: fullyProvisioned,
+      hostdzirePending: !fullyProvisioned,
+      orderId: hostdzireOrderId,
+      ipAddress: ipAddress || null,
+      credentials: { username, password },
+      totalTime,
+      ...(fullyProvisioned ? {} : { error: `HostDzire order ${hostdzireOrderId} pending IP/credentials` }),
     };
   }
 

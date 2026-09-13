@@ -44,6 +44,12 @@ export function usesResellerLiveStock(stock, company) {
   return company.resellerApi.useLiveStockApi === true;
 }
 
+/** IP stock has HostDzire inventory_key configured for place_order auto-buy. */
+export function stockHasHostdzirePlans(stock) {
+  const { stockHasHostdzirePlans: hasPlans } = require('@/lib/hostdzireStockConfig');
+  return hasPlans(stock);
+}
+
 /** IP stock has KuroHost zone + flavor mapping for auto-buy. */
 export function stockHasKurohostPlans(stock) {
   const { stockHasKurohostPlans: hasPlans } = require('@/lib/kurohostStockConfig');
@@ -73,10 +79,21 @@ export function usesNetbayLiveStock(stock, company) {
   return company.netbayApi.useLiveStockApi === true;
 }
 
+/**
+ * HostDzire inventory_key plans with live qty sync (company.hostdzireApi.useLiveStockApi).
+ */
+export function usesHostdzireLiveStock(stock, company) {
+  if (!stockHasHostdzirePlans(stock)) return false;
+  if (!company) return false;
+  if (!company?.hostdzireApi?.enabled) return false;
+  return company.hostdzireApi.useLiveStockApi === true;
+}
+
 /** Company-linked IP stocks use numeric inventory; live API stock plans do not. */
 export function usesStockCount(stock, company) {
   if (usesCompanyUnitFulfillment(stock)) return true;
   if (usesNetbayLiveStock(stock, company)) return false;
+  if (usesHostdzireLiveStock(stock, company)) return false;
   if (usesKurohostLiveStock(stock, company)) return false;
   if (usesResellerLiveStock(stock, company)) return false;
   return !!(stock?.company);
@@ -93,7 +110,12 @@ export function getIpStockRemaining(stock, company) {
   }
   if (stock?.company && company) {
     const { isCompanyStockPurchasable } = require('@/lib/companyInventory');
-    if (usesResellerLiveStock(stock, company) || usesNetbayLiveStock(stock, company) || usesKurohostLiveStock(stock, company)) {
+    if (
+      usesResellerLiveStock(stock, company) ||
+      usesNetbayLiveStock(stock, company) ||
+      usesHostdzireLiveStock(stock, company) ||
+      usesKurohostLiveStock(stock, company)
+    ) {
       return isCompanyStockPurchasable(stock, company) ? Number.POSITIVE_INFINITY : 0;
     }
   }

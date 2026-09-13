@@ -33,6 +33,10 @@
       "schedule": "*/8 * * * *"
     },
     {
+      "path": "/api/hostdzire/refresh-stock?force=1",
+      "schedule": "*/8 * * * *"
+    },
+    {
       "path": "/api/orders/expiry-reminders",
       "schedule": "0 4 * * *"
     },

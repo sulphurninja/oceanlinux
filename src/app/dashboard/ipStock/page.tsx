@@ -112,6 +112,7 @@ const LIVE_STOCK_SYNC_ENDPOINTS = [
   '/api/advps/refresh-stock',
   '/api/reseller-panel/refresh-stock',
   '/api/kurohost/refresh-stock',
+  '/api/hostdzire/refresh-stock',
   '/api/smartvps/sync',
 ] as const;
 
@@ -143,6 +144,7 @@ interface IPStock {
   company?: string | null;
   netbayUseLiveStockApi?: boolean | null;
   kurohostUseLiveStockApi?: boolean | null;
+  hostdzireUseLiveStockApi?: boolean | null;
   resellerUseLiveStockApi?: boolean | null;
   serverType: string;
   tags: string[];
@@ -165,6 +167,14 @@ function isNetbayLiveStock(stock: IPStock) {
   return stock.netbayUseLiveStockApi === true;
 }
 
+function isHostdzireLiveStock(stock: IPStock) {
+  const cfg = stock.defaultConfigurations?.hostdzire;
+  if (!cfg) return false;
+  const hasByMemory = Object.values(cfg.inventoryByMemory || {}).some(Boolean);
+  if (!hasByMemory) return false;
+  return stock.hostdzireUseLiveStockApi === true;
+}
+
 function stockHasResellerPanelConfig(stock: IPStock) {
   const cfg = stock.defaultConfigurations?.resellerApi;
   if (cfg && typeof cfg === 'object') return true;
@@ -185,14 +195,14 @@ function usesCompanyManualUnits(stock: IPStock) {
 
 function isCompanyStock(stock: IPStock) {
   if (usesCompanyManualUnits(stock)) return true;
-  return !!stock.company && !isNetbayLiveStock(stock) && !isKurohostLiveStock(stock) && !isResellerLiveStock(stock);
+  return !!stock.company && !isNetbayLiveStock(stock) && !isHostdzireLiveStock(stock) && !isKurohostLiveStock(stock) && !isResellerLiveStock(stock);
 }
 
 function getStockUnitsRemaining(stock: IPStock) {
   if (usesCompanyManualUnits(stock)) {
     return Math.max(0, stock.stockCount ?? 0);
   }
-  if (isNetbayLiveStock(stock) || isKurohostLiveStock(stock) || isResellerLiveStock(stock)) {
+  if (isNetbayLiveStock(stock) || isHostdzireLiveStock(stock) || isKurohostLiveStock(stock) || isResellerLiveStock(stock)) {
     return stock.available ? Number.POSITIVE_INFINITY : 0;
   }
   if (isCompanyStock(stock)) {
@@ -234,6 +244,18 @@ function resellerVariantValues(stock: IPStock) {
     .map(([, v]) => v as { available?: boolean; skipped?: boolean });
 }
 
+function isHostdzireMemoryInStock(stock: IPStock, memory: string) {
+  const hd = stock.defaultConfigurations?.hostdzire;
+  const variant = hd?.variantStock?.[memory];
+  if (variant && typeof variant === 'object') {
+    return variant.available === true;
+  }
+  if (hd?.inventoryByMemory?.[memory]) {
+    return stock.available !== false;
+  }
+  return false;
+}
+
 function isResellerMemoryInStock(stock: IPStock, memory: string) {
   if (stock.available) return true;
   const reseller = stock.defaultConfigurations?.resellerApi;
@@ -268,6 +290,14 @@ function isStockPurchasable(stock: IPStock, memory?: string) {
     if (stock.available) return true;
     const variants: Array<{ available?: boolean }> = Object.values(
       stock.defaultConfigurations?.kurohost?.variantStock || {}
+    );
+    return variants.some((v) => v?.available === true);
+  }
+  if (isHostdzireLiveStock(stock)) {
+    if (memory) return isHostdzireMemoryInStock(stock, memory);
+    if (stock.available) return true;
+    const variants: Array<{ available?: boolean }> = Object.values(
+      stock.defaultConfigurations?.hostdzire?.variantStock || {}
     );
     return variants.some((v) => v?.available === true);
   }

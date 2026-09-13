@@ -70,9 +70,19 @@ interface CompanyOption {
     _id: string;
     name: string;
     netbayApi?: { enabled?: boolean; useLiveStockApi?: boolean; apiKey?: string; apiSecret?: string } | null;
+    hostdzireApi?: { enabled?: boolean; useLiveStockApi?: boolean; apiKey?: string } | null;
     kurohostApi?: { enabled?: boolean; apiKey?: string } | null;
     resellerApi?: { enabled?: boolean; useLiveStockApi?: boolean } | null;
 }
+
+type HostdzireInventoryRow = {
+    inventoryKey: string;
+    ip: string;
+    qty: number;
+    pid?: number | null;
+    vps?: number | null;
+    available: boolean;
+};
 
 type PanelZone = {
     id: number;
@@ -186,6 +196,22 @@ function companyUsesNetbayLiveForStock(stock: IPStock, companies: CompanyOption[
     return !!(c?.netbayApi?.enabled && c?.netbayApi?.useLiveStockApi);
 }
 
+function stockHasHostdzireConfig(stock: IPStock | null) {
+    const cfg = stock?.defaultConfigurations?.hostdzire;
+    if (String(cfg?.inventoryKey || '').trim()) return true;
+    const byMem = cfg?.inventoryByMemory;
+    if (byMem && typeof byMem === 'object') {
+        return Object.values(byMem).some((v: any) => v?.inventoryKey);
+    }
+    return false;
+}
+
+function companyUsesHostdzireLiveForStock(stock: IPStock, companies: CompanyOption[]) {
+    if (!stock.company || !stockHasHostdzireConfig(stock)) return false;
+    const c = companies.find((co) => co._id === stock.company);
+    return !!(c?.hostdzireApi?.enabled && c?.hostdzireApi?.useLiveStockApi);
+}
+
 function stockHasResellerPanelConfig(stock: IPStock | null) {
     const cfg = stock?.defaultConfigurations?.resellerApi;
     if (cfg && typeof cfg === 'object') return true;
@@ -201,6 +227,7 @@ function companyUsesResellerLiveForStock(stock: IPStock, companies: CompanyOptio
 
 function isStockOutOfStock(stock: IPStock, companies: CompanyOption[]): boolean {
     if (companyUsesNetbayLiveForStock(stock, companies)) return !stock.available;
+    if (companyUsesHostdzireLiveForStock(stock, companies)) return !stock.available;
     if (companyUsesResellerLiveForStock(stock, companies)) return !stock.available;
     if (stock.company) return (stock.stockCount ?? 0) <= 0;
     return !stock.available;
@@ -223,6 +250,47 @@ function readNetbayConfig(stock: IPStock | null): {
         groupTags,
         planByMemory,
         defaultOs,
+    };
+}
+
+type HostdzireMemorySlot = {
+    inventoryKey: string;
+    ip: string;
+    pid?: number | null;
+    vps?: number | null;
+};
+
+function readHostdzireConfig(stock: IPStock | null): {
+    inventoryKey: string;
+    ip: string;
+    pid: number | null;
+    vps: number | null;
+    inventoryByMemory: Record<string, HostdzireMemorySlot>;
+    variantStock: Record<string, { available?: boolean; qty?: number; inventoryKey?: string; ip?: string }>;
+    defaultOs: { Linux?: string; Windows?: string };
+    liveQty: number | null;
+    lastStockSync: string;
+} {
+    const cfg: any = stock?.defaultConfigurations?.hostdzire || {};
+    const defaultOs = (cfg?.defaultOs && typeof cfg.defaultOs === 'object') ? { ...cfg.defaultOs } : {};
+    const inventoryByMemory =
+        cfg?.inventoryByMemory && typeof cfg.inventoryByMemory === 'object'
+            ? { ...cfg.inventoryByMemory }
+            : {};
+    const variantStock =
+        cfg?.variantStock && typeof cfg.variantStock === 'object'
+            ? { ...cfg.variantStock }
+            : {};
+    return {
+        inventoryKey: cfg.inventoryKey || '',
+        ip: cfg.ip || '',
+        pid: cfg.pid != null ? Number(cfg.pid) : null,
+        vps: cfg.vps != null ? Number(cfg.vps) : null,
+        inventoryByMemory,
+        variantStock,
+        defaultOs,
+        liveQty: cfg.liveQty != null ? Number(cfg.liveQty) : null,
+        lastStockSync: cfg.lastStockSync || '',
     };
 }
 
@@ -265,6 +333,8 @@ const ManageIpStock = () => {
     const [panelZonesLoading, setPanelZonesLoading] = useState(false);
     const [kurohostZones, setKurohostZones] = useState<Array<{ id: string; name: string; code?: string }>>([]);
     const [kurohostZonesLoading, setKurohostZonesLoading] = useState(false);
+    const [hostdzireInventory, setHostdzireInventory] = useState<HostdzireInventoryRow[]>([]);
+    const [hostdzireInventoryLoading, setHostdzireInventoryLoading] = useState(false);
     const [refreshingLiveStock, setRefreshingLiveStock] = useState(false);
     const [hideOutDialogOpen, setHideOutDialogOpen] = useState(false);
     const [unhideOutDialogOpen, setUnhideOutDialogOpen] = useState(false);
@@ -328,6 +398,46 @@ const ManageIpStock = () => {
             toast.success(j.throttled ? 'KuroHost stock recently synced' : `KuroHost zones synced (${j.inStock ?? 0} in stock)`);
         } catch (e: unknown) {
             toast.error(e instanceof Error ? e.message : 'KuroHost refresh failed');
+        } finally {
+            setRefreshingLiveStock(false);
+        }
+    };
+
+    const fetchHostdzireInventory = async (companyId: string, silent = false) => {
+        if (!companyId) return;
+        setHostdzireInventoryLoading(true);
+        try {
+            const r = await fetch(`/api/admin/companies/${companyId}/hostdzire-inventory`, {
+                credentials: 'include',
+                cache: 'no-store',
+            });
+            const j = await r.json();
+            if (!r.ok || !j.success) throw new Error(j.error || 'Failed to load HostDzire inventory');
+            setHostdzireInventory(Array.isArray(j.items) ? j.items : []);
+            if (!silent) {
+                toast.success(`Loaded ${j.availableCount ?? 0} available / ${j.total ?? 0} HostDzire slots`);
+            }
+        } catch (e: unknown) {
+            setHostdzireInventory([]);
+            if (!silent) toast.error(e instanceof Error ? e.message : 'HostDzire inventory load failed');
+        } finally {
+            setHostdzireInventoryLoading(false);
+        }
+    };
+
+    const refreshHostdzireLiveStock = async () => {
+        setRefreshingLiveStock(true);
+        try {
+            const r = await fetch('/api/hostdzire/refresh-stock?force=1', { credentials: 'include', cache: 'no-store' });
+            const j = await r.json();
+            if (!r.ok && !j.skipped) throw new Error(j.error || 'Refresh failed');
+            await reloadIpStocks();
+            if (currentStock?.company) {
+                await fetchHostdzireInventory(String(currentStock.company), true);
+            }
+            toast.success(`HostDzire stock synced (${j.inStock ?? 0} in stock)`);
+        } catch (e: unknown) {
+            toast.error(e instanceof Error ? e.message : 'HostDzire refresh failed');
         } finally {
             setRefreshingLiveStock(false);
         }
@@ -718,6 +828,59 @@ const ManageIpStock = () => {
         updateNetbayConfig({ planByMemory: next });
     };
 
+    const updateHostdzireConfig = (patch: Partial<ReturnType<typeof readHostdzireConfig>>) => {
+        if (!currentStock) return;
+        const merged = { ...readHostdzireConfig(currentStock), ...patch };
+        const hasDefault = !!merged.inventoryKey;
+        const hasByMemory = Object.values(merged.inventoryByMemory || {}).some((v) => v?.inventoryKey);
+        const isEmpty = !hasDefault && !hasByMemory && !merged.defaultOs?.Linux && !merged.defaultOs?.Windows;
+        const nextDefaults = { ...(currentStock.defaultConfigurations || {}) } as Record<string, any>;
+        if (isEmpty) {
+            delete nextDefaults.hostdzire;
+        } else {
+            nextDefaults.hostdzire = merged;
+        }
+        const tags = currentStock.tags.includes('hostdzire')
+            ? currentStock.tags
+            : [...currentStock.tags, 'hostdzire'];
+        setCurrentStock({ ...currentStock, defaultConfigurations: nextDefaults, tags });
+    };
+
+    const selectHostdzireInventoryForMemory = (item: HostdzireInventoryRow, memory: string) => {
+        if (!currentStock) return;
+        const cfg = readHostdzireConfig(currentStock);
+        const nextByMemory = {
+            ...cfg.inventoryByMemory,
+            [memory]: {
+                inventoryKey: item.inventoryKey,
+                ip: item.ip,
+                pid: item.pid ?? null,
+                vps: item.vps ?? null,
+            },
+        };
+        const nextDefaults = {
+            ...(currentStock.defaultConfigurations || {}),
+            hostdzire: {
+                ...cfg,
+                inventoryByMemory: nextByMemory,
+            },
+        };
+        const tags = currentStock.tags.includes('hostdzire')
+            ? currentStock.tags
+            : [...currentStock.tags, 'hostdzire'];
+        const anyInStock =
+            item.qty > 0 ||
+            Object.values(cfg.variantStock || {}).some((v) => v?.available) ||
+            cfg.liveQty != null && cfg.liveQty > 0;
+        setCurrentStock({
+            ...currentStock,
+            defaultConfigurations: nextDefaults,
+            tags,
+            available: anyInStock || item.qty > 0,
+        });
+        toast.success(`${memory} → ${item.ip} (${item.inventoryKey})`);
+    };
+
     const updateKurohostConfig = (patch: Partial<ReturnType<typeof readKurohostConfig>>) => {
         if (!currentStock) return;
         const merged = { ...readKurohostConfig(currentStock), ...patch };
@@ -861,11 +1024,31 @@ const ManageIpStock = () => {
         return !!(c?.netbayApi?.enabled && c?.netbayApi?.useLiveStockApi);
     })();
 
+    const selectedCompanyHasHostdzire = (() => {
+        if (!currentStock?.company) return false;
+        const c = companies.find((co) => co._id === currentStock.company);
+        return !!(c?.hostdzireApi?.enabled);
+    })();
+
+    const selectedCompanyUsesHostdzireLiveStock = (() => {
+        if (!currentStock?.company) return false;
+        const c = companies.find((co) => co._id === currentStock.company);
+        return !!(c?.hostdzireApi?.enabled && c?.hostdzireApi?.useLiveStockApi);
+    })();
+
     const selectedCompanyHasKurohost = (() => {
         if (!currentStock?.company) return false;
         const c = companies.find((co) => co._id === currentStock.company);
         return !!(c?.kurohostApi?.enabled);
     })();
+
+    useEffect(() => {
+        if (selectedCompanyHasHostdzire && currentStock?.company) {
+            void fetchHostdzireInventory(String(currentStock.company), true);
+        } else {
+            setHostdzireInventory([]);
+        }
+    }, [selectedCompanyHasHostdzire, currentStock?.company]);
 
     useEffect(() => {
         if (selectedCompanyHasKurohost && currentStock?.company) {
@@ -1686,6 +1869,173 @@ const ManageIpStock = () => {
                                             <strong>Name</strong> or <strong>OS ID</strong> — purchase sends the name; ID is resolved from catalog.
                                             <code> Windows Server 2022</code> when blank.
                                         </p>
+                                    </div>
+                                )}
+
+                                {selectedCompanyHasHostdzire && (
+                                    <div className="border rounded-lg p-4 bg-sky-50/40 dark:bg-sky-950/10 border-sky-200/60 dark:border-sky-900/40 space-y-3">
+                                        <div className="flex items-center justify-between gap-3 flex-wrap">
+                                            <div>
+                                                <Label className="text-base font-semibold flex items-center gap-2">
+                                                    <Cloud className="h-4 w-4 text-sky-600" />
+                                                    HostDzire Configuration
+                                                </Label>
+                                                <p className="text-xs text-muted-foreground mt-0.5">
+                                                    Har RAM tier (4GB, 8GB…) ko alag HostDzire inventory map karo.
+                                                    Customer 4GB buy kare → 4GB wala <code>inventory_key</code> · 8GB buy → 8GB wala.
+                                                </p>
+                                            </div>
+                                            <div className="flex flex-wrap gap-2">
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    size="sm"
+                                                    className="gap-1.5 h-8"
+                                                    disabled={hostdzireInventoryLoading || !currentStock.company}
+                                                    onClick={() => currentStock.company && fetchHostdzireInventory(String(currentStock.company))}
+                                                >
+                                                    {hostdzireInventoryLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                                                    Load inventory
+                                                </Button>
+                                                {selectedCompanyUsesHostdzireLiveStock && (
+                                                    <Button
+                                                        type="button"
+                                                        variant="outline"
+                                                        size="sm"
+                                                        className="gap-1.5 h-8"
+                                                        disabled={refreshingLiveStock}
+                                                        onClick={refreshHostdzireLiveStock}
+                                                    >
+                                                        Sync live qty
+                                                    </Button>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        {Object.keys(currentStock.memoryOptions).length > 0 ? (
+                                            <div className="rounded-md border bg-background/80 p-3 text-xs space-y-2">
+                                                <p className="font-medium">Per-RAM HostDzire mapping</p>
+                                                {Object.keys(currentStock.memoryOptions).map((mem) => {
+                                                    const slot = readHostdzireConfig(currentStock).inventoryByMemory[mem];
+                                                    const variant = readHostdzireConfig(currentStock).variantStock[mem];
+                                                    return (
+                                                        <div key={mem} className="flex flex-wrap items-center gap-2">
+                                                            <span className="font-semibold min-w-[3rem]">{mem}</span>
+                                                            {slot?.inventoryKey ? (
+                                                                <>
+                                                                    <code className="text-[11px]">{slot.inventoryKey}</code>
+                                                                    <span className="text-muted-foreground">· {slot.ip}</span>
+                                                                    {variant?.qty != null ? (
+                                                                        <Badge variant={variant.qty > 0 ? 'default' : 'secondary'}>
+                                                                            qty {variant.qty}
+                                                                        </Badge>
+                                                                    ) : null}
+                                                                </>
+                                                            ) : (
+                                                                <span className="text-amber-700 dark:text-amber-400">
+                                                                    Not mapped — table se Assign dabao
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                })}
+                                                {readHostdzireConfig(currentStock).lastStockSync ? (
+                                                    <p className="text-muted-foreground pt-1">
+                                                        Last sync: {readHostdzireConfig(currentStock).lastStockSync}
+                                                    </p>
+                                                ) : null}
+                                            </div>
+                                        ) : (
+                                            <p className="text-xs text-amber-700 dark:text-amber-400">
+                                                Pehle memory options add karo (4GB, 8GB…), phir neeche se map karo.
+                                            </p>
+                                        )}
+
+                                        {hostdzireInventory.length > 0 ? (
+                                            <div className="max-h-64 overflow-auto rounded-md border">
+                                                <Table>
+                                                    <TableHeader>
+                                                        <TableRow>
+                                                            <TableHead>IP</TableHead>
+                                                            <TableHead>inventory_key</TableHead>
+                                                            <TableHead>Qty</TableHead>
+                                                            <TableHead>PID</TableHead>
+                                                            <TableHead>Assign to RAM</TableHead>
+                                                        </TableRow>
+                                                    </TableHeader>
+                                                    <TableBody>
+                                                        {hostdzireInventory.map((item) => (
+                                                            <TableRow key={item.inventoryKey}>
+                                                                <TableCell className="font-mono text-xs">{item.ip}</TableCell>
+                                                                <TableCell className="font-mono text-[11px]">{item.inventoryKey}</TableCell>
+                                                                <TableCell>
+                                                                    <Badge variant={item.qty > 0 ? 'default' : 'secondary'}>
+                                                                        {item.qty}
+                                                                    </Badge>
+                                                                </TableCell>
+                                                                <TableCell className="text-xs">{item.pid ?? '—'}</TableCell>
+                                                                <TableCell>
+                                                                    <div className="flex flex-wrap gap-1">
+                                                                        {Object.keys(currentStock.memoryOptions).map((mem) => {
+                                                                            const mapped =
+                                                                                readHostdzireConfig(currentStock).inventoryByMemory[mem]
+                                                                                    ?.inventoryKey === item.inventoryKey;
+                                                                            return (
+                                                                                <Button
+                                                                                    key={`${item.inventoryKey}-${mem}`}
+                                                                                    type="button"
+                                                                                    variant={mapped ? 'default' : 'outline'}
+                                                                                    size="sm"
+                                                                                    className="h-7 px-2 text-[11px]"
+                                                                                    onClick={() => selectHostdzireInventoryForMemory(item, mem)}
+                                                                                >
+                                                                                    {mem}
+                                                                                </Button>
+                                                                            );
+                                                                        })}
+                                                                    </div>
+                                                                </TableCell>
+                                                            </TableRow>
+                                                        ))}
+                                                    </TableBody>
+                                                </Table>
+                                            </div>
+                                        ) : (
+                                            <p className="text-xs text-muted-foreground">
+                                                &quot;Load inventory&quot; dabao — HostDzire se saari available slots aayengi.
+                                            </p>
+                                        )}
+
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                            <div>
+                                                <Label className="text-xs">Default Linux OS (place_order):</Label>
+                                                <Input
+                                                    type="text"
+                                                    placeholder="Ubuntu 22 64"
+                                                    value={readHostdzireConfig(currentStock).defaultOs.Linux || ''}
+                                                    onChange={(e) => {
+                                                        const cfg = readHostdzireConfig(currentStock);
+                                                        updateHostdzireConfig({
+                                                            defaultOs: { ...cfg.defaultOs, Linux: e.target.value },
+                                                        });
+                                                    }}
+                                                />
+                                            </div>
+                                            <div>
+                                                <Label className="text-xs">Default Windows OS (place_order):</Label>
+                                                <Input
+                                                    type="text"
+                                                    placeholder="Windows 2022 64"
+                                                    value={readHostdzireConfig(currentStock).defaultOs.Windows || ''}
+                                                    onChange={(e) => {
+                                                        const cfg = readHostdzireConfig(currentStock);
+                                                        updateHostdzireConfig({
+                                                            defaultOs: { ...cfg.defaultOs, Windows: e.target.value },
+                                                        });
+                                                    }}
+                                                />
+                                            </div>
+                                        </div>
                                     </div>
                                 )}
 

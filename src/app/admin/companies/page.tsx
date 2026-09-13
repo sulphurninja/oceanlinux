@@ -97,6 +97,16 @@ interface CompanyJoyApi {
   apiKey: string;
 }
 
+interface CompanyHostdzireApi {
+  enabled: boolean;
+  label: string;
+  baseUrl: string;
+  apiKey: string;
+  email: string;
+  couponCode?: string;
+  useLiveStockApi?: boolean;
+}
+
 interface Company {
   _id: string;
   name: string;
@@ -111,6 +121,7 @@ interface Company {
   netbayApi?: Partial<CompanyNetbayApi> | null;
   kurohostApi?: Partial<CompanyKurohostApi> | null;
   joyApi?: Partial<CompanyJoyApi> | null;
+  hostdzireApi?: Partial<CompanyHostdzireApi> | null;
 }
 
 const NEW_VIRT_ENTRY = (): CompanyVirtualizor => ({
@@ -228,6 +239,24 @@ const JOY_API_DIALOG_DEFAULTS: CompanyJoyApi = {
   apiKey: '',
 };
 
+const EMPTY_HOSTDZIRE_API = (): CompanyHostdzireApi => ({
+  enabled: false,
+  label: '',
+  baseUrl: '',
+  apiKey: '',
+  email: '',
+});
+
+const HOSTDZIRE_API_DIALOG_DEFAULTS: CompanyHostdzireApi = {
+  enabled: true,
+  label: 'HostDzire',
+  baseUrl: 'https://hostdzire.com/api/vps/',
+  apiKey: '',
+  email: 'raftare3t5@gmail.com',
+  couponCode: '',
+  useLiveStockApi: false,
+};
+
 interface VirtTestState {
   loading: boolean;
   result: { success: boolean; message: string } | null;
@@ -310,6 +339,13 @@ export default function CompaniesPage() {
   const [joyTesting, setJoyTesting] = useState(false);
   const [joyTestResult, setJoyTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [showJoyKey, setShowJoyKey] = useState(false);
+
+  const [hostdzireCompany, setHostdzireCompany] = useState<Company | null>(null);
+  const [hostdzireForm, setHostdzireForm] = useState<CompanyHostdzireApi>(EMPTY_HOSTDZIRE_API());
+  const [hostdzireSaving, setHostdzireSaving] = useState(false);
+  const [hostdzireTesting, setHostdzireTesting] = useState(false);
+  const [hostdzireTestResult, setHostdzireTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [showHostdzireKey, setShowHostdzireKey] = useState(false);
 
   const [stocksCompany, setStocksCompany] = useState<Company | null>(null);
   const [companyStocks, setCompanyStocks] = useState<CompanyStock[]>([]);
@@ -1155,6 +1191,123 @@ export default function CompaniesPage() {
     }
   };
 
+  const openHostdzireDialog = (c: Company) => {
+    const r = c.hostdzireApi || null;
+    setHostdzireForm({
+      enabled: r?.enabled === true,
+      label: r?.label || HOSTDZIRE_API_DIALOG_DEFAULTS.label,
+      baseUrl: r?.baseUrl || HOSTDZIRE_API_DIALOG_DEFAULTS.baseUrl,
+      apiKey: r?.apiKey || '',
+      email: r?.email || HOSTDZIRE_API_DIALOG_DEFAULTS.email,
+      couponCode: r?.couponCode || '',
+      useLiveStockApi: r?.useLiveStockApi === true,
+    });
+    setHostdzireTestResult(null);
+    setShowHostdzireKey(false);
+    setHostdzireCompany(c);
+  };
+
+  const closeHostdzireDialog = () => {
+    if (hostdzireSaving || hostdzireTesting) return;
+    setHostdzireCompany(null);
+    setHostdzireForm(EMPTY_HOSTDZIRE_API());
+    setHostdzireTestResult(null);
+    setShowHostdzireKey(false);
+  };
+
+  const updateHostdzireField = <K extends keyof CompanyHostdzireApi>(key: K, value: CompanyHostdzireApi[K]) => {
+    setHostdzireForm(prev => ({ ...prev, [key]: value }));
+    setHostdzireTestResult(null);
+  };
+
+  const handleTestHostdzireApi = async () => {
+    if (!hostdzireCompany) return;
+    setHostdzireTesting(true);
+    setHostdzireTestResult(null);
+    try {
+      const res = await fetch(`/api/admin/companies/${hostdzireCompany._id}/test-hostdzire-api`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hostdzireApi: hostdzireForm }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setHostdzireTestResult({ success: true, message: data.message || 'Connected' });
+      } else {
+        setHostdzireTestResult({ success: false, message: data.error || 'Connection failed' });
+      }
+    } catch (err: any) {
+      setHostdzireTestResult({ success: false, message: err?.message || 'Request failed' });
+    } finally {
+      setHostdzireTesting(false);
+    }
+  };
+
+  const handleSaveHostdzireApi = async () => {
+    if (!hostdzireCompany) return;
+    if (hostdzireForm.enabled && !hostdzireForm.apiKey.trim()) {
+      toast.error('API key is required when HostDzire is enabled');
+      return;
+    }
+    setHostdzireSaving(true);
+    try {
+      const res = await fetch(`/api/admin/companies/${hostdzireCompany._id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hostdzireApi: { ...hostdzireForm, enabled: hostdzireForm.enabled === true } }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        const saved = data as Company;
+        setCompanies((prev) =>
+          prev.map((c) => (String(c._id) === String(saved._id) ? saved : c))
+        );
+        openHostdzireDialog(saved);
+        toast.success('HostDzire config saved');
+      } else {
+        toast.error(data.error || 'Failed to save');
+      }
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to save');
+    } finally {
+      setHostdzireSaving(false);
+    }
+  };
+
+  const handleClearHostdzireApi = async () => {
+    if (!hostdzireCompany) return;
+    const ok = await confirm({
+      title: 'Clear HostDzire API',
+      description: <>Clear HostDzire API config for <strong>{hostdzireCompany.name}</strong>?</>,
+      confirmLabel: 'Clear',
+      destructive: true,
+    });
+    if (!ok) return;
+    setHostdzireSaving(true);
+    try {
+      const res = await fetch(`/api/admin/companies/${hostdzireCompany._id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hostdzireApi: null }),
+      });
+      if (res.ok) {
+        toast.success('HostDzire API configuration cleared');
+        setHostdzireCompany(null);
+        setHostdzireForm(EMPTY_HOSTDZIRE_API());
+        setHostdzireTestResult(null);
+        setShowHostdzireKey(false);
+        fetchCompanies();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error || 'Failed to clear');
+      }
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to clear');
+    } finally {
+      setHostdzireSaving(false);
+    }
+  };
+
   const handleClearJoyApi = async () => {
     if (!joyCompany) return;
     const ok = await confirm({
@@ -1390,6 +1543,17 @@ export default function CompaniesPage() {
                           </Badge>
                         );
                       }
+                      const hd = c.hostdzireApi;
+                      if (hd?.enabled) {
+                        let host = hd.baseUrl || 'hostdzire.com/api/vps';
+                        try { if (hd.baseUrl) host = new URL(hd.baseUrl).host; } catch { /* keep as-is */ }
+                        return (
+                          <Badge variant="outline" className="gap-1 text-sky-600 border-sky-200">
+                            <Building2 className="h-3 w-3" />
+                            HostDzire: {host} · Manage
+                          </Badge>
+                        );
+                      }
                       return (
                         <Badge variant="outline" className="gap-1 text-muted-foreground">
                           <ShieldAlert className="h-3 w-3" />
@@ -1426,6 +1590,10 @@ export default function CompaniesPage() {
                       <Button variant="ghost" size="sm" className="h-8 gap-1.5" onClick={() => openJoyDialog(c)}>
                         <Sparkles className="h-3.5 w-3.5" />
                         Joy
+                      </Button>
+                      <Button variant="ghost" size="sm" className="h-8 gap-1.5" onClick={() => openHostdzireDialog(c)}>
+                        <Building2 className="h-3.5 w-3.5" />
+                        HostDzire
                       </Button>
                       {c.netbayApi?.enabled && (
                         <Button variant="ghost" size="sm" className="h-8 gap-1.5" asChild>
@@ -2752,6 +2920,181 @@ export default function CompaniesPage() {
             </Button>
             <Button onClick={handleSaveJoyApi} disabled={joySaving}>
               {joySaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!hostdzireCompany} onOpenChange={(open) => !open && closeHostdzireDialog()}>
+        <DialogContent className="max-w-xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Building2 className="h-5 w-5" />
+              HostDzire VPS API
+            </DialogTitle>
+          </DialogHeader>
+          {hostdzireCompany && (
+            <div className="space-y-4">
+              <div className="rounded-md border p-3 text-sm">
+                <p className="font-medium">{hostdzireCompany.name}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  WHMCS-style API: POST{' '}
+                  <code className="text-foreground">https://hostdzire.com/api/vps/</code>{' '}
+                  with <code>api_key</code> + <code>action</code> (+ <code>ip</code>).
+                  Supports start, stop, reboot, details/sync, reinstall, and{' '}
+                  <code>place_order</code> for auto-provision (inventory_key on IP stock).
+                </p>
+                <p className="text-xs text-muted-foreground mt-2">
+                  Whitelist your OceanLinux server IP on the HostDzire API key or requests return
+                  &quot;IP address is not authorized&quot;.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-between rounded-md border p-2.5">
+                <div className="text-sm">
+                  <p className="font-medium">Enabled</p>
+                  <p className="text-xs text-muted-foreground">
+                    Disable to stop using HostDzire without losing saved config.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className={`text-xs font-bold uppercase tracking-wide min-w-[2rem] text-right ${
+                    hostdzireForm.enabled ? 'text-emerald-600' : 'text-muted-foreground'
+                  }`}>
+                    {hostdzireForm.enabled ? 'ON' : 'OFF'}
+                  </span>
+                  <Switch
+                    checked={!!hostdzireForm.enabled}
+                    onCheckedChange={(c) => {
+                      setHostdzireForm((prev) => ({ ...prev, enabled: c }));
+                      setHostdzireTestResult(null);
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <Label className="text-xs">Label (optional)</Label>
+                <Input
+                  placeholder="e.g. HostDzire Production"
+                  value={hostdzireForm.label}
+                  onChange={(e) => updateHostdzireField('label', e.target.value)}
+                  className="mt-1"
+                />
+              </div>
+
+              <div>
+                <Label className="text-xs">Base URL</Label>
+                <Input
+                  placeholder="https://hostdzire.com/api/vps/"
+                  value={hostdzireForm.baseUrl}
+                  onChange={(e) => updateHostdzireField('baseUrl', e.target.value)}
+                  className="mt-1"
+                />
+              </div>
+
+              <div>
+                <Label className="text-xs">Default coupon (place_order)</Label>
+                <Input
+                  placeholder="Optional — wallet coupon for auto-buy"
+                  value={hostdzireForm.couponCode || ''}
+                  onChange={(e) => updateHostdzireField('couponCode', e.target.value)}
+                  className="mt-1 font-mono text-xs"
+                />
+              </div>
+
+              <div className="flex items-center justify-between rounded-md border p-2.5">
+                <div className="text-sm">
+                  <p className="font-medium">Live inventory API</p>
+                  <p className="text-xs text-muted-foreground">
+                    When ON, stock qty follows <code>available_cloud_vps_data</code> on /admin/manageIpStock.
+                  </p>
+                </div>
+                <Switch
+                  checked={!!hostdzireForm.useLiveStockApi}
+                  onCheckedChange={(c) => updateHostdzireField('useLiveStockApi', c)}
+                />
+              </div>
+
+              <div>
+                <Label className="text-xs">Account email (reference)</Label>
+                <Input
+                  placeholder="you@example.com"
+                  value={hostdzireForm.email}
+                  onChange={(e) => updateHostdzireField('email', e.target.value)}
+                  className="mt-1"
+                />
+              </div>
+
+              <div>
+                <Label className="text-xs">Bearer API Key</Label>
+                <div className="relative mt-1">
+                  <Input
+                    type={showHostdzireKey ? 'text' : 'password'}
+                    placeholder="64-character HostDzire API key"
+                    value={hostdzireForm.apiKey}
+                    onChange={(e) => updateHostdzireField('apiKey', e.target.value)}
+                    className="font-mono text-xs"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowHostdzireKey((s) => !s)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    tabIndex={-1}
+                  >
+                    {showHostdzireKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {hostdzireTestResult && (
+                <div
+                  className={`flex items-start gap-2 rounded-md border p-2.5 text-xs ${
+                    hostdzireTestResult.success
+                      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                      : 'border-red-200 bg-red-50 text-red-700'
+                  }`}
+                >
+                  {hostdzireTestResult.success
+                    ? <CheckCircle2 className="h-4 w-4 mt-0.5" />
+                    : <XCircle className="h-4 w-4 mt-0.5" />}
+                  <span>{hostdzireTestResult.message}</span>
+                </div>
+              )}
+
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleTestHostdzireApi}
+                  disabled={hostdzireTesting || hostdzireSaving}
+                  className="gap-2"
+                >
+                  {hostdzireTesting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+                  Test Credentials
+                </Button>
+                {hostdzireCompany.hostdzireApi && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleClearHostdzireApi}
+                    disabled={hostdzireSaving || hostdzireTesting}
+                    className="gap-2 text-red-600 hover:text-red-700"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Clear Config
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
+          <DialogFooter className="gap-2">
+            <Button variant="ghost" onClick={closeHostdzireDialog} disabled={hostdzireSaving || hostdzireTesting}>
+              Cancel
+            </Button>
+            <Button onClick={handleSaveHostdzireApi} disabled={hostdzireSaving}>
+              {hostdzireSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
               Save
             </Button>
           </DialogFooter>

@@ -7,6 +7,7 @@ import { requireAdmin } from '@/lib/adminAuth';
 const { companyUsesNetbayLiveStock } = require('@/lib/companyNetbayApi');
 const { companyUsesKurohostLiveStock } = require('@/lib/companyKurohostApi');
 const { companyUsesResellerLiveStock } = require('@/lib/companyResellerApi');
+const { companyUsesHostdzireLiveStock } = require('@/lib/companyHostdzireApi');
 const { usesResellerLiveStock, usesKurohostLiveStock, stockHasResellerPanelPlans, stockHasKurohostPlans } = require('@/lib/ipStockAvailability');
 const { syncResellerIpStockRow } = require('@/lib/resellerLiveStock');
 const { syncKurohostIpStockRow } = require('@/lib/kurohostLiveStock');
@@ -69,6 +70,17 @@ function slimDefaultConfigurationsForStore(defaultConfigurations) {
     if (dc.resellerApi && typeof dc.resellerApi === 'object') {
         slim.resellerApi = {
             variantStock: slimVariantStock(dc.resellerApi.variantStock),
+        };
+    }
+
+    if (dc.hostdzire && typeof dc.hostdzire === 'object') {
+        const inventoryByMemory = {};
+        for (const [memory, slot] of Object.entries(toPlainMap(dc.hostdzire.inventoryByMemory))) {
+            if (slot?.inventoryKey) inventoryByMemory[memory] = true;
+        }
+        slim.hostdzire = {
+            inventoryByMemory,
+            variantStock: slimVariantStock(dc.hostdzire.variantStock),
         };
     }
 
@@ -139,7 +151,7 @@ async function enrichIpStocksWithProviderModes(ipStocks) {
     if (!companyIds.length) return ipStocks;
 
     const companies = await Company.find({ _id: { $in: companyIds } })
-        .select('netbayApi kurohostApi resellerApi')
+        .select('netbayApi kurohostApi hostdzireApi resellerApi')
         .lean();
     const companyMap = Object.fromEntries(companies.map((c) => [String(c._id), c]));
 
@@ -154,6 +166,9 @@ async function enrichIpStocksWithProviderModes(ipStocks) {
             : null,
         resellerUseLiveStockApi: stock.company
             ? companyUsesResellerLiveStock(companyMap[String(stock.company)])
+            : null,
+        hostdzireUseLiveStockApi: stock.company
+            ? companyUsesHostdzireLiveStock(companyMap[String(stock.company)])
             : null,
     }));
 }

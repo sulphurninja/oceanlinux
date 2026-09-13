@@ -15,6 +15,7 @@ import {
   usesStockCount,
   isIpStockHiddenFromStore,
   usesNetbayLiveStock,
+  usesHostdzireLiveStock,
   usesResellerLiveStock,
   usesKurohostLiveStock,
   storeAutoUnhideUpdate,
@@ -34,6 +35,12 @@ const {
   verifyKurohostMemoryInStock,
   isKurohostVariantInStock,
 } = require('@/lib/kurohostLiveStock');
+
+const {
+  isHostdzireIpStock,
+  syncHostdzireIpStockRow,
+  isHostdzireVariantInStock,
+} = require('@/lib/hostdzireLiveStock');
 
 const {
   isResellerIpStock,
@@ -189,7 +196,7 @@ function isResellerVariantInStock(stock, memory, company) {
 
 async function loadCompanyForStock(stock) {
   if (!stock?.company) return null;
-  return Company.findById(stock.company).select('netbayApi resellerApi').lean();
+  return Company.findById(stock.company).select('netbayApi hostdzireApi resellerApi kurohostApi').lean();
 }
 
 /**
@@ -211,6 +218,7 @@ export async function refreshAndVerifyIpStockPurchase(ipStockId, memory) {
   const { resolveNetbayBillingMemory } = require('@/lib/netbayGroupTags');
   const checkMemory = resolveNetbayBillingMemory(stock, memory) || memory;
   const netbayLive = isNetbayIpStock(stock) && usesNetbayLiveStock(stock, company);
+  const hostdzireLive = isHostdzireIpStock(stock) && usesHostdzireLiveStock(stock, company);
   const kurohostLive = isKurohostIpStock(stock) && usesKurohostLiveStock(stock, company);
   const resellerLive = isResellerIpStock(stock) && usesResellerLiveStock(stock, company);
 
@@ -221,6 +229,8 @@ export async function refreshAndVerifyIpStockPurchase(ipStockId, memory) {
       stock = await syncSmartVpsIpStockRow(stock);
     } else if (netbayLive) {
       stock = await syncNetbayIpStockRow(stock, { force: true, memoryOnly: checkMemory || null });
+    } else if (hostdzireLive) {
+      stock = await syncHostdzireIpStockRow(stock, { force: true, memoryOnly: memory || null });
     } else if (kurohostLive) {
       stock = await syncKurohostIpStockRow(stock, { force: true, memoryOnly: memory || null });
     } else if (resellerLive) {
@@ -293,6 +303,19 @@ export async function refreshAndVerifyIpStockPurchase(ipStockId, memory) {
     if (liveVerify.result?.available === true) {
       company = company || (await loadCompanyForStock(stock));
     }
+  }
+
+  if (hostdzireLive && !isHostdzireVariantInStock(stock, company, memory)) {
+    return {
+      ok: false,
+      message: customerStockUnavailableMessage(
+        memory
+          ? `${memory} is currently out of stock on HostDzire. Please refresh or pick another plan.`
+          : 'This IP is currently out of stock on HostDzire. Please refresh or pick another plan.'
+      ),
+      stock: stock.toObject?.() || stock,
+      synced: true,
+    };
   }
 
   if (kurohostLive && memory && !isKurohostVariantInStock(stock, memory, company)) {
@@ -372,7 +395,7 @@ export async function refreshAndVerifyIpStockPurchase(ipStockId, memory) {
     ok: true,
     message: 'In stock',
     stock: stock.toObject?.() || stock,
-    synced: isAdvpsPlan(stock) || isSmartVpsPlan(stock) || netbayLive || kurohostLive || resellerLive,
+    synced: isAdvpsPlan(stock) || isSmartVpsPlan(stock) || netbayLive || hostdzireLive || kurohostLive || resellerLive,
   };
 }
 

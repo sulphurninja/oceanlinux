@@ -113,6 +113,22 @@ const companyJoyApiSchema = new mongoose.Schema({
   apiKey: { type: String, default: '' },    // x-api-key   — associated key
 }, { _id: false });
 
+/**
+ * HostDzire WHMCS VPS API (https://hostdzire.com/api/vps/).
+ * Form POST with api_key + action — manage by IP, optional place_order auto-buy.
+ */
+const companyHostdzireApiSchema = new mongoose.Schema({
+  enabled: { type: Boolean, default: false },
+  label: { type: String, default: '' },
+  baseUrl: { type: String, default: '' }, // e.g. https://hostdzire.com/api/vps/
+  apiKey: { type: String, default: '' },
+  email: { type: String, default: '' },
+  /** Default coupon sent on place_order auto-provision. */
+  couponCode: { type: String, default: '' },
+  /** When true, stock qty follows available_cloud_vps_data inventory keys. */
+  useLiveStockApi: { type: Boolean, default: false },
+}, { _id: false });
+
 const companySchema = new mongoose.Schema({
   name: { type: String, required: true, unique: true },
   slug: { type: String, required: true, unique: true },
@@ -124,6 +140,7 @@ const companySchema = new mongoose.Schema({
   netbayApi: { type: companyNetbayApiSchema, default: null },
   kurohostApi: { type: companyKurohostApiSchema, default: null },
   joyApi: { type: companyJoyApiSchema, default: null },
+  hostdzireApi: { type: companyHostdzireApiSchema, default: null },
 }, { timestamps: true });
 
 companySchema.index({ slug: 1 });
@@ -138,6 +155,7 @@ if (
     !mongoose.models.Company.schema.paths['netbayApi.couponProxy'] ||
     !mongoose.models.Company.schema.paths['kurohostApi.apiKey'] ||
     !mongoose.models.Company.schema.paths['joyApi.apiToken'] ||
+    !mongoose.models.Company.schema.paths['hostdzireApi.apiKey'] ||
     !mongoose.models.Company.schema.paths['resellerApi.useLiveStockApi'])
 ) {
   delete mongoose.models.Company;

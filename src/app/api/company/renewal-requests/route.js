@@ -13,7 +13,12 @@ const { executeResellerPanelUpstreamRenewal } = require('@/lib/resellerPanelRene
 const { resolveRenewalExpiryFromPanel } = require('@/lib/companyResellerInventorySync');
 const { resolveProviderFromOrder } = require('@/lib/orderAnnouncementTarget');
 const { isKurohostOrder, executeKurohostRenewalOnApprove } = require('@/lib/kurohostRenewal');
-const { canRenewHostheavenPanelOnCompanyApprove, isHostheavenDirectRenewEligible } = require('@/lib/companyRenewal');
+const {
+  canRenewHostheavenPanelOnCompanyApprove,
+  canRenewHostdzireOnCompanyApprove,
+  isHostheavenDirectRenewEligible,
+} = require('@/lib/companyRenewal');
+const { executeHostdzireUpstreamRenewal, pickHostdzireExpiryDate } = require('@/lib/hostdzireRenewal');
 
 /**
  * GET /api/company/renewal-requests?status=pending|approved|rejected
@@ -95,15 +100,33 @@ export async function POST(request) {
     let providerRenewalSuccess = true;
     let providerRenewalResult = null;
     let hostheavenPanelRenewAttempted = false;
+    let hostdzireRenewAttempted = false;
     const provider = resolveProviderFromOrder(order);
-    const companyDoc = await Company.findById(company.id).select('resellerApi name').lean();
+    const companyDoc = await Company.findById(company.id).select('resellerApi hostdzireApi name').lean();
+    const hostdzireRenewEligible =
+      provider === 'hostdzire' || canRenewHostdzireOnCompanyApprove(order, companyDoc);
     const panelRenewEligible =
       renewOnHostheavenPanel !== false &&
+      !hostdzireRenewEligible &&
       (provider === 'reseller-api' ||
         (await isHostheavenDirectRenewEligible(order)) ||
         canRenewHostheavenPanelOnCompanyApprove(order, companyDoc));
 
-    if (panelRenewEligible && !isKurohostOrder(order)) {
+    if (hostdzireRenewEligible && !isKurohostOrder(order)) {
+      hostdzireRenewAttempted = true;
+      const hostdzireRenew = await executeHostdzireUpstreamRenewal(order);
+      providerRenewalSuccess = hostdzireRenew.success;
+      providerRenewalResult = hostdzireRenew.result || { error: hostdzireRenew.error };
+      if (hostdzireRenew.newExpiryDate) {
+        newExpiry = hostdzireRenew.newExpiryDate;
+      } else if (hostdzireRenew.success) {
+        const fallbackExpiry = pickHostdzireExpiryDate(hostdzireRenew.result);
+        if (fallbackExpiry) newExpiry = fallbackExpiry;
+      }
+      if (!hostdzireRenew.success) {
+        console.warn('[COMPANY-RENEWAL] HostDzire renew on approve failed:', hostdzireRenew.error);
+      }
+    } else if (panelRenewEligible && !isKurohostOrder(order)) {
       hostheavenPanelRenewAttempted = true;
       const panelRenew = await executeResellerPanelUpstreamRenewal(order, {
         months: 1,
@@ -172,6 +195,10 @@ export async function POST(request) {
       ? providerRenewalSuccess
         ? 'Renewal approved — site expiry extended and KuroHost VM started/synced.'
         : 'Renewal approved — site expiry extended. KuroHost action had issues; check providerRenewalResult.'
+      : hostdzireRenewAttempted
+        ? providerRenewalSuccess
+          ? 'Renewal approved — order extended and HostDzire invoice paid.'
+          : 'Renewal approved — order extended on OceanLinux. HostDzire renew failed; pay invoice manually on HostDzire.'
       : hostheavenPanelRenewAttempted
         ? providerRenewalSuccess
           ? 'Renewal approved — order extended and Hostheaven panel renewed.'
@@ -183,6 +210,9 @@ export async function POST(request) {
       message: approveMessage,
       orderId: String(order._id),
       newExpiryDate: newExpiry,
+      hostdzireRenew: hostdzireRenewAttempted
+        ? { attempted: true, success: providerRenewalSuccess, result: providerRenewalResult }
+        : undefined,
       hostheavenPanelRenew: hostheavenPanelRenewAttempted
         ? { attempted: true, success: providerRenewalSuccess, result: providerRenewalResult }
         : undefined,
