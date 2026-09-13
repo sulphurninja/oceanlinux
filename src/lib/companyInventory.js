@@ -169,9 +169,11 @@ function isCompanyStockPurchasable(stock, company, quantity = 1) {
     usesResellerLiveStock,
     usesNetbayLiveStock,
     usesKurohostLiveStock,
+    usesHostdzireLiveStock,
     stockHasResellerPanelPlans,
     stockHasNetbayPlans,
     stockHasKurohostPlans,
+    stockHasHostdzirePlans,
   } = require('@/lib/ipStockAvailability');
   if (usesResellerLiveStock(stock, company) && stockHasResellerPanelPlans(stock)) {
     return readLivePanelVariantAvailable(stock, company);
