@@ -296,6 +296,7 @@ function PaymentCallbackContent() {
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 renewalTxnId: clientTxnId,
+                orderId: orderId || searchParams.get("order_id"),
                 returnedFromPayment: true,
               }),
             });

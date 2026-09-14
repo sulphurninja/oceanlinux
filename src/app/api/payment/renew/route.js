@@ -153,10 +153,7 @@ export async function POST(request) {
       });
     }
 
-    // 8. Generate a unique renewal transaction ID
-    renewalTxnId = `RENEWAL_${Date.now()}_${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
-
-    // 9. Renewal = current product list price − locked promo discount
+    // 8. Renewal = current product list price − locked promo discount
     const renewalPrice = await resolveOrderRenewalPrice(order);
     console.log(
       `[RENEWAL-INIT] Renewal price: ₹${renewalPrice} ` +
@@ -179,6 +176,33 @@ export async function POST(request) {
       walletApplied = Math.min(balance, renewalPrice);
     }
     const gatewayCharge = Math.max(0, Math.round((renewalPrice - walletApplied) * 100) / 100);
+
+    const {
+      evaluateExistingPendingRenewal,
+      buildRazorpayReusePayload,
+    } = await import('@/lib/renewalOrderLookup');
+
+    const pendingEval = await evaluateExistingPendingRenewal(order, renewalPrice);
+    if (pendingEval.action === 'block') {
+      return NextResponse.json(
+        {
+          message: pendingEval.message,
+          renewalTxnId: pendingEval.renewalTxnId,
+          orderId: order._id,
+          paymentPendingConfirm: true,
+        },
+        { status: 409 }
+      );
+    }
+
+    let reusePendingSession = pendingEval.action === 'reuse';
+
+    if (reusePendingSession && pendingEval.renewalTxnId) {
+      renewalTxnId = pendingEval.renewalTxnId;
+    }
+    if (!renewalTxnId) {
+      renewalTxnId = `RENEWAL_${Date.now()}_${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+    }
 
     // Only debit wallet immediately for wallet-only renewals.
     // When gateway payment is also required, wallet is debited on renew-confirm
@@ -209,7 +233,24 @@ export async function POST(request) {
     let gatewayResult = null;
     let actualPaymentMethod = gatewayCharge === 0 ? 'wallet' : preferredMethod;
 
-    if (gatewayCharge > 0) {
+    if (reusePendingSession) {
+      const reuseGatewayAmount = Number(pendingEval.pending?.gatewayAmount) || gatewayCharge;
+      actualPaymentMethod =
+        String(pendingEval.pending?.paymentMethod || preferredMethod).replace(/^wallet\+/, '') ||
+        preferredMethod;
+      if (reuseGatewayAmount > 0 && pendingEval.gatewayOrderId) {
+        gatewayResult = buildRazorpayReusePayload(pendingEval.gatewayOrderId, reuseGatewayAmount);
+        console.log('[RENEWAL-INIT] ♻️ Reusing open renewal session:', renewalTxnId);
+      } else {
+        reusePendingSession = false;
+      }
+    }
+
+    if (gatewayCharge > 0 && !gatewayResult) {
+      if (reusePendingSession) {
+        renewalTxnId = `RENEWAL_${Date.now()}_${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+        console.log('[RENEWAL-INIT] Open session not reusable — new renewal txn:', renewalTxnId);
+      }
       try {
         gatewayResult = await createGatewayOrder({
           preferredMethod,

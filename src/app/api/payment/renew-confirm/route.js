@@ -100,6 +100,23 @@ export async function POST(request) {
       );
     }
 
+    try {
+      const { alignPendingRenewalForConfirm } = await import('@/lib/renewalOrderLookup');
+      order = await alignPendingRenewalForConfirm(order, renewalTxnId);
+    } catch (alignErr) {
+      console.error('[RENEWAL-CONFIRM] pendingRenewal align failed:', alignErr.message);
+      return NextResponse.json(
+        { success: false, message: alignErr.message || 'Renewal session mismatch' },
+        { status: alignErr.status || 400 }
+      );
+    }
+    if (!order) {
+      return NextResponse.json(
+        { success: false, message: 'Order not found' },
+        { status: 404 }
+      );
+    }
+
     const { assertOrderNotAdminSuspended } = require('@/lib/orderAdminSuspend');
     const suspended = assertOrderNotAdminSuspended(order);
     if (suspended) {

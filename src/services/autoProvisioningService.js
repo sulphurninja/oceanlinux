@@ -48,6 +48,7 @@ const {
   buildResellerLocationContext,
   ipMatchesOrderedRange,
   validateCreatedVmId,
+  scheduleResellerPendingCompletion,
 } = require('@/lib/resellerApiOrderSync');
 const ResellerApi = require('@/services/resellerApi');
 const { pickNetbayExpiryDate } = require('@/lib/netbayOrderSync');
@@ -2806,6 +2807,8 @@ class AutoProvisioningService {
             lastProvisionAttempt: new Date(),
           });
 
+          scheduleResellerPendingCompletion(order._id);
+
           return {
             success: false,
             resellerApiPending: true,
@@ -2888,6 +2891,10 @@ class AutoProvisioningService {
 
     const totalTime = Date.now() - startTime;
     L.line(`[RESELLER-API] ${fullyProvisioned ? 'COMPLETED' : 'PENDING'} in ${totalTime}ms`);
+
+    if (!fullyProvisioned) {
+      scheduleResellerPendingCompletion(order._id);
+    }
 
     return {
       success: fullyProvisioned,

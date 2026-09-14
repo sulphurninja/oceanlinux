@@ -85,9 +85,12 @@ export async function POST(request) {
         });
       }
 
-      // Find the order with this pending renewal
-      const orderWithPending = await Order.findOne({
-        'pendingRenewal.renewalTxnId': txnId
+      const { resolveOrderForRenewalTransaction, alignPendingRenewalForConfirm } =
+        await import('@/lib/renewalOrderLookup');
+
+      let orderWithPending = await resolveOrderForRenewalTransaction({
+        renewalTxnId: txnId,
+        orderIdHint: reqBody.orderId || reqBody.order_id || null,
       });
 
       if (!orderWithPending) {
@@ -95,6 +98,10 @@ export async function POST(request) {
           { message: 'Renewal order not found' },
           { status: 404 }
         );
+      }
+
+      if (orderWithPending.pendingRenewal?.renewalTxnId !== txnId) {
+        orderWithPending = await alignPendingRenewalForConfirm(orderWithPending, txnId);
       }
 
       const pendingAccessDenied = await enforceOrderAccess(request, orderWithPending);

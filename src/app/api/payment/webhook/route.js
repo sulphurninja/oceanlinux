@@ -395,8 +395,22 @@ export async function handleRenewalWebhook(renewalTxnId, payment, webhookStartTi
   let logger = null; // Will be initialized after finding order
 
   try {
-    // Find order by pending renewal transaction ID
-    const order = await Order.findOne({ 'pendingRenewal.renewalTxnId': renewalTxnId });
+    const {
+      resolveOrderForRenewalTransaction,
+      alignPendingRenewalForConfirm,
+    } = await import('@/lib/renewalOrderLookup');
+
+    let order = await Order.findOne({ 'pendingRenewal.renewalTxnId': renewalTxnId });
+
+    if (!order) {
+      order = await resolveOrderForRenewalTransaction({ renewalTxnId });
+      if (order) {
+        order = await alignPendingRenewalForConfirm(order, renewalTxnId);
+        console.log(
+          `[WEBHOOK-RENEWAL] ✅ Resolved order ${order._id} after pendingRenewal mismatch`
+        );
+      }
+    }
 
     if (!order) {
       console.error(`[WEBHOOK-RENEWAL] ❌ No order found with pending renewal: ${renewalTxnId}`);

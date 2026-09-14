@@ -14,9 +14,13 @@ export async function checkAdvpsPendingOrders() {
     advpsOrderId: { $exists: true, $ne: '' },
     status: 'confirmed',
     provisioningStatus: 'provisioning',
-    provisioningError: { $regex: /^ADVPS_PENDING/ },
     ipAddress: { $in: [null, '', undefined] },
     lastProvisionAttempt: { $lt: TWO_MIN_AGO },
+    $or: [
+      { provisioningError: { $regex: /^ADVPS_PENDING/ } },
+      // Some orders miss the ADVPS_PENDING marker after purchase — still need sync.
+      { provisioningError: { $in: [null, '', undefined] } },
+    ],
   }).limit(3);
 
   if (pendingOrders.length === 0) return [];
