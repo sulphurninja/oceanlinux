@@ -84,7 +84,7 @@ export async function POST(request) {
     }
 
     // Find the order to renew
-    const order = await Order.findById(orderId);
+    let order = await Order.findById(orderId);
     if (!order) {
       console.error(`Order not found: ${orderId}`);
       return NextResponse.json(
