@@ -481,7 +481,7 @@ const ResellerApi = require('@/services/resellerApi');
     stock.stockCount = count;
     stock.available = count > 0;
     stock.availabilityManual = true;
-    if (count > 0) {
+    if (count > 0 && stock.autoHiddenFromStore) {
       stock.hiddenFromStore = false;
       stock.autoHiddenFromStore = false;
     }

@@ -8,7 +8,13 @@ const { companyUsesNetbayLiveStock } = require('@/lib/companyNetbayApi');
 const { companyUsesKurohostLiveStock } = require('@/lib/companyKurohostApi');
 const { companyUsesResellerLiveStock } = require('@/lib/companyResellerApi');
 const { companyUsesHostdzireLiveStock } = require('@/lib/companyHostdzireApi');
-const { usesResellerLiveStock, usesKurohostLiveStock, stockHasResellerPanelPlans, stockHasKurohostPlans } = require('@/lib/ipStockAvailability');
+const {
+    usesResellerLiveStock,
+    usesKurohostLiveStock,
+    stockHasResellerPanelPlans,
+    stockHasKurohostPlans,
+    relistAutoHiddenStocksNowInStock,
+} = require('@/lib/ipStockAvailability');
 const { syncResellerIpStockRow } = require('@/lib/resellerLiveStock');
 const { syncKurohostIpStockRow } = require('@/lib/kurohostLiveStock');
 const { getCompanyFulfillmentMode, countUnallocatedInventory, usesPreconfiguredInventory, inventoryDrivesStoreAvailability } = require('@/lib/companyInventory');
@@ -270,6 +276,14 @@ export async function GET(request) {
             if (admin) {
                 query = {};
                 customerView = false;
+            }
+        }
+
+        if (customerView) {
+            try {
+                await relistAutoHiddenStocksNowInStock();
+            } catch (relistErr) {
+                console.warn('[IPSTOCK-API] auto-relist hidden in-stock plans failed:', relistErr.message);
             }
         }
 

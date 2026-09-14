@@ -248,6 +248,9 @@ async function syncResellerIpStockRow(stock, { force = false, memoryOnly = null,
     await IPStock.findByIdAndUpdate(stock._id, { availabilityManual: false });
     stock.availabilityManual = false;
   } else if (stock.availabilityManual === true) {
+    const { applyAutoStoreRelist } = require('@/lib/ipStockAvailability');
+    const count = Math.max(0, Number(stock.stockCount) || 0);
+    await applyAutoStoreRelist(stock._id, count > 0 || stock.available === true);
     return IPStock.findById(stock._id).lean();
   }
 
@@ -352,13 +355,8 @@ async function syncResellerIpStockRow(stock, { force = false, memoryOnly = null,
     const hybridAvailable = shouldAvailable || invRemaining > 0;
     updatePayload.available = hybridAvailable;
     // Live panel stock: when region/zone is live, plan must show on the store.
-    if (hybridAvailable && usesResellerLiveStock(stock, company)) {
-      updatePayload.hiddenFromStore = false;
-      updatePayload.autoHiddenFromStore = false;
-    } else if (hybridAvailable && stock.autoHiddenFromStore) {
-      updatePayload.hiddenFromStore = false;
-      updatePayload.autoHiddenFromStore = false;
-    }
+    const { storeAutoUnhideUpdate } = require('@/lib/ipStockAvailability');
+    Object.assign(updatePayload, storeAutoUnhideUpdate(stock, hybridAvailable));
   }
   // Manual override wins over panel zone status — owner set count by hand.
   if (usesResellerLiveStock(stock, company) && !stock.availabilityManual) {
@@ -515,17 +513,27 @@ async function refreshResellerStockForCustomer({ force = false } = {}) {
   };
   cache.lastAt = now;
   cache.lastResult = result;
+  try {
+    const { relistAutoHiddenStocksNowInStock } = require('@/lib/ipStockAvailability');
+    result.relisted = await relistAutoHiddenStocksNowInStock();
+  } catch (err) {
+    console.warn(`${LOG} auto-relist after refresh failed:`, err.message);
+  }
   return result;
 }
 
 async function restoreResellerManualStockAvailability(companyId) {
   const stocks = await IPStock.find({ company: companyId });
+  const { applyAutoStoreRelist } = require('@/lib/ipStockAvailability');
   for (const stock of stocks) {
     if (!isResellerIpStock(stock)) continue;
     const count = Math.max(0, Number(stock.stockCount) || 0);
     await IPStock.findByIdAndUpdate(stock._id, {
       available: count > 0,
     });
+    if (count > 0) {
+      await applyAutoStoreRelist(stock._id, true);
+    }
   }
 }
 

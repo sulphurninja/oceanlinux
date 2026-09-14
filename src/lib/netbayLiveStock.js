@@ -217,6 +217,9 @@ async function syncNetbayIpStockRow(stock, { force = false, sharedCheckCache = n
   }
 
   if (stock.availabilityManual === true) {
+    const { applyAutoStoreRelist } = require('@/lib/ipStockAvailability');
+    const count = Math.max(0, Number(stock.stockCount) || 0);
+    await applyAutoStoreRelist(stock._id, count > 0 || stock.available === true);
     return IPStock.findById(stock._id).lean();
   }
 
@@ -390,13 +393,8 @@ async function syncNetbayIpStockRow(stock, { force = false, sharedCheckCache = n
     const invRemaining = hasUnallocatedCompanyInventory(stock) ? countUnallocatedInventory(stock) : 0;
     const hybridAvailable = shouldAvailable || invRemaining > 0;
     updatePayload.available = hybridAvailable;
-    if (hybridAvailable && usesNetbayLiveStock(stock, company)) {
-      updatePayload.hiddenFromStore = false;
-      updatePayload.autoHiddenFromStore = false;
-    } else if (hybridAvailable && stock.autoHiddenFromStore) {
-      updatePayload.hiddenFromStore = false;
-      updatePayload.autoHiddenFromStore = false;
-    }
+    const { storeAutoUnhideUpdate } = require('@/lib/ipStockAvailability');
+    Object.assign(updatePayload, storeAutoUnhideUpdate(stock, hybridAvailable));
   }
 
   if (usesNetbayLiveStock(stock, company)) {
@@ -557,6 +555,12 @@ async function refreshNetbayStockForCustomer({ force = false } = {}) {
 
   cache.lastAt = now;
   cache.lastResult = result;
+  try {
+    const { relistAutoHiddenStocksNowInStock } = require('@/lib/ipStockAvailability');
+    result.relisted = await relistAutoHiddenStocksNowInStock();
+  } catch (err) {
+    console.warn(`${LOG} auto-relist after refresh failed:`, err.message);
+  }
   return result;
 }
 
@@ -568,8 +572,12 @@ async function restoreNetbayManualStockAvailability(companyId) {
     const count = Math.max(0, Number(stock.stockCount) || 0);
     await IPStock.collection.updateOne(
       { _id: stock._id },
-      { $set: { available: count > 0, stockCount: count } }
+      { $set: { available: count > 0, stockCount: count, availabilityManual: true } }
     );
+    if (count > 0) {
+      const { applyAutoStoreRelist } = require('@/lib/ipStockAvailability');
+      await applyAutoStoreRelist(stock._id, true);
+    }
   }
 }
 

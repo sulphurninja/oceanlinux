@@ -138,6 +138,29 @@ export function storeAutoUnhideUpdate(stock, inStock) {
   return { hiddenFromStore: false, autoHiddenFromStore: false };
 }
 
+/** Bulk hide sets autoHiddenFromStore — relist on store when stock is back (manual units or live sync). */
+export async function relistAutoHiddenStocksNowInStock() {
+  const result = await IPStock.updateMany(
+    {
+      autoHiddenFromStore: true,
+      hiddenFromStore: true,
+      $or: [{ stockCount: { $gt: 0 } }, { available: true }],
+    },
+    { $set: { hiddenFromStore: false, autoHiddenFromStore: false } }
+  );
+  return result.modifiedCount ?? 0;
+}
+
+export async function applyAutoStoreRelist(stockOrId, inStock) {
+  if (!inStock) return;
+  const id = stockOrId?._id ?? stockOrId;
+  if (!id) return;
+  await IPStock.updateOne(
+    { _id: id, autoHiddenFromStore: true },
+    { $set: { hiddenFromStore: false, autoHiddenFromStore: false } }
+  );
+}
+
 export function isIpStockPurchasable(stock, quantity = 1, company) {
   if (!stock) return false;
   if (isIpStockHiddenFromStore(stock)) return false;
@@ -208,6 +231,7 @@ export async function decrementIpStockForOrder(order) {
   }
 
   updated.available = updated.stockCount > 0;
+  Object.assign(updated, storeAutoUnhideUpdate(updated, updated.stockCount > 0));
   await updated.save();
 
   await Order.findByIdAndUpdate(order._id, { inventoryDecremented: true });
@@ -216,10 +240,15 @@ export async function decrementIpStockForOrder(order) {
 
 export async function setIpStockCount(stockId, stockCount) {
   const count = Math.max(0, Math.floor(Number(stockCount) || 0));
-  await IPStock.collection.updateOne(
-    { _id: stockId },
-    { $set: { stockCount: count, available: count > 0 } }
-  );
+  const stock = await IPStock.findById(stockId).select('company').lean();
+  const $set = { stockCount: count, available: count > 0 };
+  if (stock?.company) {
+    $set.availabilityManual = true;
+  }
+  await IPStock.collection.updateOne({ _id: stockId }, { $set });
+  if (count > 0) {
+    await applyAutoStoreRelist(stockId, true);
+  }
   return IPStock.findById(stockId);
 }
 
@@ -232,7 +261,13 @@ export async function setAllCompanyIpStockCounts(companyId, stockCount, company)
 
   await IPStock.collection.updateMany(
     { _id: { $in: ids } },
-    { $set: { stockCount: count, available: count > 0 } }
+    { $set: { stockCount: count, available: count > 0, availabilityManual: true } }
   );
+  if (count > 0) {
+    await IPStock.updateMany(
+      { _id: { $in: ids }, autoHiddenFromStore: true },
+      { $set: { hiddenFromStore: false, autoHiddenFromStore: false } }
+    );
+  }
   return IPStock.find({ _id: { $in: ids } }).sort({ name: 1 });
 }
