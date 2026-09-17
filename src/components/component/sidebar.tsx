@@ -26,6 +26,7 @@ import {
   Ticket,
   Tag,
   Globe,
+  Sparkles,
 } from 'lucide-react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { cn } from "@/lib/utils";
@@ -184,6 +185,11 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
         href: '/dashboard/ipStock?category=SlotIP',
         label: 'Premium IP Proxies',
         icon: Zap,
+      },
+      {
+        href: '/dashboard/ipStock?category=Trial',
+        label: 'Trial VPS',
+        icon: Sparkles,
       },
     ] : []),
     // Reseller rate card lives on its own page — linked above Manage Orders.

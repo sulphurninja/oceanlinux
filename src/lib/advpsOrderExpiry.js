@@ -69,6 +69,13 @@ async function resolveOrderExpiryOnPayment(order, options = {}) {
     return null;
   }
 
+  if (order?.trialVpsPackageId) {
+    const TrialVpsPackage = require('@/models/trialVpsPackageModel');
+    const pkg = await TrialVpsPackage.findById(order.trialVpsPackageId).select('trialDays').lean();
+    const { calculateTrialExpiryDate } = require('@/lib/trialVpsBulkParse');
+    return calculateTrialExpiryDate(pkg?.trialDays ?? 7);
+  }
+
   if (order?.ipStockId) {
     const Stock = options.IPStock || require('@/models/ipStockModel');
     const ipStock = await Stock.findById(order.ipStockId).select('company').lean();

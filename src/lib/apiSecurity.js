@@ -5,6 +5,7 @@ import { getAdminPanelPassword } from '@/lib/adminGate';
 import User from '@/models/userModel';
 import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
+import { inferTrialVpsPlanCategory } from '@/lib/trialVpsCatalog';
 
 /** Returns true when request carries a valid CRON_SECRET. */
 export function isCronAuthorized(request) {
@@ -145,6 +146,55 @@ export async function enforceProxyServerAccess(request, ip) {
     );
   }
   return null;
+}
+
+export function sanitizeTrialVpsPackage(pkg, { includeSlots = false } = {}) {
+  const slots = pkg.slots || [];
+  const totalCount = slots.length;
+  const allocatedCount = slots.filter((s) => s.allocated).length;
+  const availableCount = totalCount - allocatedCount;
+  const planCategory = inferTrialVpsPlanCategory(pkg);
+
+  const manageCompanyId = pkg.manageCompanyId ? String(pkg.manageCompanyId) : null;
+  const manageIpStockId = pkg.manageIpStockId ? String(pkg.manageIpStockId) : null;
+
+  const base = {
+    _id: pkg._id,
+    name: pkg.name,
+    description: pkg.description,
+    trialDays: pkg.trialDays,
+    memoryGb: pkg.memoryGb ?? 4,
+    planCategory,
+    price: pkg.price,
+    available: pkg.available,
+    promoCodes: pkg.promoCodes,
+    manageCompanyId,
+    manageIpStockId,
+    totalCount,
+    availableCount,
+    allocatedCount,
+    createdAt: pkg.createdAt,
+    updatedAt: pkg.updatedAt,
+  };
+
+  if (includeSlots) {
+    return {
+      ...base,
+      slots: slots.map((s) => ({
+        _id: s._id,
+        ipAddress: s.ipAddress,
+        port: s.port || '',
+        username: s.username,
+        password: s.password,
+        os: s.os,
+        allocated: !!s.allocated,
+        orderId: s.orderId ? String(s.orderId) : null,
+        allocatedAt: s.allocatedAt || null,
+        soldAt: s.soldAt || null,
+      })),
+    };
+  }
+  return base;
 }
 
 export function sanitizeSlotPackage(pkg, { includeIps = false } = {}) {

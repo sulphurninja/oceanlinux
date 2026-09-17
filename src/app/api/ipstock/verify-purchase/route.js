@@ -10,7 +10,7 @@ export const maxDuration = 60;
 /**
  * POST /api/ipstock/verify-purchase
  * Live-sync ADVPS/SmartVPS stock for one plan before Buy Now / checkout.
- * Body: { ipStockId?, slotIpPackageId?, memory? }
+ * Body: { ipStockId?, slotIpPackageId?, trialVpsPackageId?, memory? }
  */
 export async function POST(request) {
   let slotIpPackageId;
@@ -26,8 +26,14 @@ export async function POST(request) {
     const body = await request.json();
     const { ipStockId, memory } = body || {};
     slotIpPackageId = body?.slotIpPackageId;
+    const trialVpsPackageId = body?.trialVpsPackageId;
 
-    const result = await refreshAndVerifyPurchase({ ipStockId, slotIpPackageId, memory });
+    const result = await refreshAndVerifyPurchase({
+      ipStockId,
+      slotIpPackageId,
+      trialVpsPackageId,
+      memory,
+    });
 
     if (!result.ok) {
       result.message = customerStockUnavailableMessage(result.message, {

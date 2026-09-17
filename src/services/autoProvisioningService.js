@@ -953,6 +953,38 @@ class AutoProvisioningService {
         };
       }
 
+      if (paymentCheckOrder.trialVpsPackageId) {
+        if (paymentCheckOrder.trialVpsSlotId && paymentCheckOrder.ipAddress) {
+          return {
+            success: true,
+            alreadyProvisioned: true,
+            message: 'Trial VPS already assigned',
+            ipAddress: paymentCheckOrder.ipAddress,
+            totalTime: Date.now() - startTime,
+          };
+        }
+        const { fulfillOrderInventory } = require('@/lib/fulfillOrderInventory');
+        await fulfillOrderInventory(paymentCheckOrder);
+        const trialOrder = await Order.findById(orderId);
+        if (trialOrder?.trialVpsSlotId && trialOrder?.ipAddress) {
+          return {
+            success: true,
+            message: 'Trial VPS assigned',
+            ipAddress: trialOrder.ipAddress,
+            totalTime: Date.now() - startTime,
+          };
+        }
+        const trialErr =
+          trialOrder?.provisioningError || 'No trial VPS slots available in this package';
+        return {
+          success: false,
+          trialVpsOrder: true,
+          error: trialErr,
+          message: trialErr,
+          totalTime: Date.now() - startTime,
+        };
+      }
+
       // Never re-block an order that was already delivered.
       const alreadyDelivered =
         paymentCheckOrder.provisioningStatus === 'active' && !!paymentCheckOrder.ipAddress;

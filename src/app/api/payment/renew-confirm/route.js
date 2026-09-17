@@ -8,6 +8,11 @@ import { resolveOrderRenewalExpiryDate } from '@/lib/expiryHelper';
 import { assignPanelCredentials } from '@/lib/panelCredentials';
 import { detectCompanyManagedRenewal, resolveRenewalProvider, shouldUseCompanyValidityForRenewal } from '@/lib/companyRenewal';
 import { isSlotIpOrder, SLOT_IP_NO_RENEWAL_MESSAGE } from '@/lib/slotIpOrder';
+import {
+  isNonRenewablePackageOrder,
+  isTrialVpsOrder,
+  TRIAL_VPS_NO_RENEWAL_MESSAGE,
+} from '@/lib/trialVpsOrder';
 import { resolveOrderRenewalPrice } from '@/lib/orderRenewalPricingServer';
 const { customerApiCatchPayload } = require('@/lib/customerFacingErrors');
 import { debitPendingRenewalWallet } from '@/lib/renewalWallet';
@@ -93,9 +98,12 @@ export async function POST(request) {
       );
     }
 
-    if (isSlotIpOrder(order)) {
+    if (isNonRenewablePackageOrder(order)) {
       return NextResponse.json(
-        { success: false, message: SLOT_IP_NO_RENEWAL_MESSAGE },
+        {
+          success: false,
+          message: isTrialVpsOrder(order) ? TRIAL_VPS_NO_RENEWAL_MESSAGE : SLOT_IP_NO_RENEWAL_MESSAGE,
+        },
         { status: 400 }
       );
     }

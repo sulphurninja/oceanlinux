@@ -1,4 +1,4 @@
-import { isSlotIpOrder } from '@/lib/slotIpOrder';
+import { isNonRenewablePackageOrder, isTrialVpsPanelManageOrder } from '@/lib/trialVpsOrder';
 
 export type PowerState = 'running' | 'stopped' | 'suspended' | 'busy' | 'unknown';
 
@@ -21,6 +21,8 @@ export type OrderPowerLike = {
   ipAddress?: string;
   ipStockId?: string;
   slotIpPackageId?: string;
+  trialVpsPackageId?: string;
+  trialVpsPanelManage?: boolean;
   netbayProductKind?: string;
   productName?: string;
   status?: string;
@@ -31,7 +33,7 @@ export function getProviderFromOrder(
   order: OrderPowerLike,
   ipStock: IPStockLike | null
 ): 'hostycare' | 'smartvps' | 'oceanlinux' | 'advps' | 'netbay' | 'kurohost' {
-  if (isSlotIpOrder(order)) return 'oceanlinux';
+  if (isNonRenewablePackageOrder(order) && !isTrialVpsPanelManageOrder(order)) return 'oceanlinux';
 
   if (String(order.netbayProductKind || '').toLowerCase() === 'proxy') return 'netbay';
 
@@ -102,7 +104,7 @@ export function canShowLivePowerState(
   order: OrderPowerLike,
   ipStock: IPStockLike | null
 ): boolean {
-  if (isSlotIpOrder(order)) return false;
+  if (isNonRenewablePackageOrder(order) && !isTrialVpsPanelManageOrder(order)) return false;
   if (String(order.netbayProductKind || '').toLowerCase() === 'proxy') return false;
 
   const provider = getProviderFromOrder(order, ipStock);
@@ -129,7 +131,8 @@ export function canShowLivePowerState(
 
 /** Only oceanlinux / company-automation orders need an ipStock lookup. */
 export function orderNeedsIpStockForPowerState(order: OrderPowerLike): boolean {
-  if (!order.ipStockId || isSlotIpOrder(order)) return false;
+  if (!order.ipStockId) return false;
+  if (isNonRenewablePackageOrder(order) && !isTrialVpsPanelManageOrder(order)) return false;
   if (order.hostycareServiceId || order.smartvpsServiceId || order.advpsServiceId || order.netbayServiceId || order.kurohostInstanceId) {
     return false;
   }

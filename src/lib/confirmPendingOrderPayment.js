@@ -276,7 +276,7 @@ async function startProvisioningIfNeeded(order) {
     freshOrder?.provisioningStatus === 'active' ||
     freshOrder?.ipAddress;
 
-  if (alreadyProvisioning || freshOrder?.slotIpPackageId) return;
+  if (alreadyProvisioning || freshOrder?.slotIpPackageId || freshOrder?.trialVpsPackageId) return;
 
   try {
     await NotificationService.notifyOrderProvisioning(order.user, order);

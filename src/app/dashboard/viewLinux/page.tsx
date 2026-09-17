@@ -68,6 +68,7 @@ import {
     shouldPollOrderForDelivery,
 } from '@/lib/orderDeliveryStatus';
 import { isWithinRenewalWindow } from '@/lib/expiryHelper';
+import { isTrialVpsOrder } from '@/lib/trialVpsOrder';
 import { OsIcon, humanizeOsLabel } from '@/components/os/OsIcon';
 
 interface Order {
@@ -306,7 +307,7 @@ const ViewLinux = () => {
 
     const isRenewalEligible = (order: Order | null) => {
         if (!order || !order.expiryDate) return false;
-        if (order.slotIpPackageId || order.provider === 'slotip') return false;
+        if (order.slotIpPackageId || order.provider === 'slotip' || isTrialVpsOrder(order)) return false;
         return isWithinRenewalWindow(order.expiryDate);
     };
 
@@ -373,8 +374,10 @@ const ViewLinux = () => {
 
     const provider = order ? getProviderDisplayName(order) : 'Unknown';
     const isSlotIp = !!(order?.slotIpPackageId || order?.provider === 'slotip');
+    const isTrialVps = isTrialVpsOrder(order ?? null);
     const isAutoProvisionedProvider =
         isSlotIp ||
+        isTrialVps ||
         provider === 'Hostycare' ||
         provider === 'SmartVPS' ||
         provider === 'ADVPS' ||

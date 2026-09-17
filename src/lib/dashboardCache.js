@@ -96,6 +96,7 @@ export const DASHBOARD_CACHE_KEYS = {
   currentUser: 'users:me',
   ipStock: 'ipstock:store:v2',
   slotIps: 'slotips:customer',
+  trialVps: 'trialvps:customer',
   ordersMe: 'orders:me',
   wallet: 'wallet',
   dashboardStats: (timeframe) => `dashboard:stats:${timeframe}`,

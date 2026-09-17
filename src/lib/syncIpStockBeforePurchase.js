@@ -434,7 +434,42 @@ export async function refreshAndVerifySlotIpPurchase(slotIpPackageId, quantity =
   };
 }
 
-export async function refreshAndVerifyPurchase({ ipStockId, slotIpPackageId, memory, quantity }) {
+export async function refreshAndVerifyTrialVpsPurchase(trialVpsPackageId, quantity = 1) {
+  await connectDB();
+  const TrialVpsPackage = require('@/models/trialVpsPackageModel');
+  const pkg = await TrialVpsPackage.findById(trialVpsPackageId);
+  if (!pkg) {
+    return {
+      ok: false,
+      message: customerStockUnavailableMessage('Trial package not found', { kind: 'plan' }),
+      synced: false,
+    };
+  }
+  const available = (pkg.slots || []).filter((s) => !s.allocated);
+  const need = Math.max(1, Math.floor(Number(quantity) || 1));
+  if (!pkg.available || available.length < need) {
+    return {
+      ok: false,
+      message: customerStockUnavailableMessage(
+        available.length === 0 ? 'No trial VPS slots available' : `Only ${available.length} trial slot(s) left`,
+        { kind: 'plan' }
+      ),
+      synced: true,
+    };
+  }
+  return { ok: true, message: 'In stock', available: available.length, synced: true };
+}
+
+export async function refreshAndVerifyPurchase({
+  ipStockId,
+  slotIpPackageId,
+  trialVpsPackageId,
+  memory,
+  quantity,
+}) {
+  if (trialVpsPackageId) {
+    return refreshAndVerifyTrialVpsPurchase(trialVpsPackageId, quantity);
+  }
   if (slotIpPackageId) {
     return refreshAndVerifySlotIpPurchase(slotIpPackageId, quantity);
   }

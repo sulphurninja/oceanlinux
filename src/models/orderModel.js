@@ -19,6 +19,13 @@ const orderSchema = new mongoose.Schema({
     inventoryFulfilmentClaimedAt: { type: Date, default: null },
     slotIpPackageId: { type: String },
     slotIpId: { type: String },
+    trialVpsPackageId: { type: String },
+    trialVpsSlotId: { type: String },
+    /** linux | windows | premium_proxy — copied from trial package at purchase. */
+    trialVpsPlanCategory: { type: String },
+    /** Trial with linked company or IP stock — panel start/stop via API. */
+    trialVpsPanelManage: { type: Boolean, default: false },
+    trialManageCompanyId: { type: String, default: '' },
     /** Pre-configured company inventory row assigned on payment */
     inventoryItemId: { type: String },
     transactionId: { type: String, default: '' },
@@ -51,7 +58,7 @@ const orderSchema = new mongoose.Schema({
     // Provider identification
     provider: {
         type: String,
-        enum: ['hostycare', 'smartvps', 'slotip', 'advps', 'netbay', 'kurohost', 'reseller-api'],
+        enum: ['hostycare', 'smartvps', 'slotip', 'trialvps', 'advps', 'netbay', 'kurohost', 'reseller-api'],
         default: 'hostycare'
     },
 

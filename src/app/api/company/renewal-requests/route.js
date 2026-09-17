@@ -5,7 +5,12 @@ import RenewalRequest from '@/models/renewalRequestModel';
 import Order from '@/models/orderModel';
 import Company from '@/models/companyModel';
 import { calculateCompanyRenewalExpiryDate } from '@/lib/expiryHelper';
-import { isSlotIpOrder, SLOT_IP_NO_RENEWAL_MESSAGE } from '@/lib/slotIpOrder';
+import { SLOT_IP_NO_RENEWAL_MESSAGE } from '@/lib/slotIpOrder';
+import {
+  isNonRenewablePackageOrder,
+  isTrialVpsOrder,
+  TRIAL_VPS_NO_RENEWAL_MESSAGE,
+} from '@/lib/trialVpsOrder';
 import { toObjectIdString } from '@/lib/queryIds';
 const { getAdvpsRebuildResetFields, isAdvpsOrder } = require('@/lib/advpsRebuildLimit');
 const { notifyRenewalCompleted } = require('@/lib/renewalNotifications');
@@ -85,8 +90,11 @@ export async function POST(request) {
     return NextResponse.json({ error: 'Linked order no longer exists' }, { status: 404 });
   }
 
-  if (isSlotIpOrder(order)) {
-    return NextResponse.json({ error: SLOT_IP_NO_RENEWAL_MESSAGE }, { status: 400 });
+  if (isNonRenewablePackageOrder(order)) {
+    return NextResponse.json(
+      { error: isTrialVpsOrder(order) ? TRIAL_VPS_NO_RENEWAL_MESSAGE : SLOT_IP_NO_RENEWAL_MESSAGE },
+      { status: 400 }
+    );
   }
 
   if (action === 'approve') {

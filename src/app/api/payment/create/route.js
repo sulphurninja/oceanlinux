@@ -5,6 +5,7 @@ import Order from '@/models/orderModel';
 import User from '@/models/userModel';
 import IPStock from '@/models/ipStockModel';
 const SlotIPPackage = require('@/models/slotIpPackageModel');
+const TrialVpsPackage = require('@/models/trialVpsPackageModel');
 const AutoProvisioningService = require('@/services/autoProvisioningService');
 const WhatsAppService = require('@/services/whatsappService');
 import { assertIpStockPurchasable } from '@/lib/ipStockAvailability';
@@ -79,6 +80,7 @@ export async function POST(request) {
       promoCode, 
       ipStockId,
       slotIpPackageId,
+      trialVpsPackageId,
       useWallet = false,
       netbayGroupTag = '',
     } = reqBody;
@@ -88,8 +90,61 @@ export async function POST(request) {
 
     let originalPrice, price, promoDiscount = 0;
     let isSlotIpPurchase = false;
+    let isTrialVpsPurchase = false;
+    /** Set when loading trial package — used for order memory (e.g. 8GB). */
+    let trialVpsPkgDoc = null;
 
-    if (slotIpPackageId) {
+    if (trialVpsPackageId) {
+      isTrialVpsPurchase = true;
+      if (!productName) {
+        return NextResponse.json({ message: 'Missing productName' }, { status: 400 });
+      }
+      const trialPkg = await TrialVpsPackage.findById(trialVpsPackageId);
+      trialVpsPkgDoc = trialPkg;
+      if (!trialPkg) {
+        return NextResponse.json({ message: 'Trial VPS package not found' }, { status: 404 });
+      }
+      if (!trialPkg.available) {
+        return NextResponse.json({ message: 'This trial package is unavailable' }, { status: 400 });
+      }
+      const availableSlots = (trialPkg.slots || []).filter((s) => !s.allocated);
+      if (availableSlots.length === 0) {
+        return NextResponse.json({ message: 'No trial VPS slots available' }, { status: 400 });
+      }
+      const trialLive = await refreshAndVerifyPurchase({ trialVpsPackageId });
+      if (!trialLive.ok) {
+        return NextResponse.json(
+          { message: customerStockUnavailableMessage(trialLive.message, { kind: 'plan' }) },
+          { status: 409 }
+        );
+      }
+      originalPrice = trialPkg.price;
+      if (user.userType === 'reseller' && user.resellerId) {
+        const { getResellerForUserId, resellerPriceForSlot } = await import('@/lib/resellerStorePricing');
+        const reseller = await getResellerForUserId(userId);
+        if (reseller) originalPrice = resellerPriceForSlot(reseller, trialPkg, originalPrice);
+      }
+      price = originalPrice;
+      const normalizedPromo = normalizePromoCode(promoCode);
+      if (normalizedPromo) {
+        const promoResult = resolvePromoForPrice({
+          promoCodes: trialPkg.promoCodes,
+          promoCode: normalizedPromo,
+          originalPrice,
+        });
+        if (!promoResult.valid) {
+          return NextResponse.json(
+            { message: promoResult.message || 'Invalid or inactive promo code' },
+            { status: 400 }
+          );
+        }
+        promoDiscount = promoResult.discount;
+        price = promoResult.finalPrice;
+      }
+      console.log(
+        `[Payment] Trial VPS: pkg=${trialPkg.name}, days=${trialPkg.trialDays}, price=${price}, slots=${availableSlots.length}`
+      );
+    } else if (slotIpPackageId) {
       // ===== SLOT IP PURCHASE FLOW =====
       isSlotIpPurchase = true;
 
@@ -284,6 +339,14 @@ export async function POST(request) {
     let upiProvider = '';
     let upiExpiresAt = null;
 
+    const { resolveTrialVpsOrderMemory } = require('@/lib/trialVpsCatalog');
+    const resolvedOrderMemory =
+      isTrialVpsPurchase && trialVpsPkgDoc
+        ? resolveTrialVpsOrderMemory(trialVpsPkgDoc)
+        : isSlotIpPurchase
+          ? 'Slot IP'
+          : memory;
+
     if (gatewayCharge > 0) {
       try {
         const gatewayResult = await createGatewayOrder({
@@ -299,7 +362,7 @@ export async function POST(request) {
           callbackPath: '/payment/callback',
           notes: {
             product_name: productName,
-            memory: isSlotIpPurchase ? 'Slot IP' : memory,
+            memory: resolvedOrderMemory,
             promo_code: promoCode || '',
             original_price: originalPrice || price,
             discount: promoDiscount || 0,
@@ -342,15 +405,18 @@ export async function POST(request) {
     const appliedPromoCode = promoDiscount > 0 ? promoCode : null;
 
     let confirmedExpiryDate = gatewayCharge === 0 ? calculateExpiryDate() : null;
-    if (gatewayCharge === 0 && !isSlotIpPurchase) {
+    if (gatewayCharge === 0 && !isSlotIpPurchase && !isTrialVpsPurchase) {
       const resolvedExpiry = await resolveOrderExpiryOnPayment({ ipStockId, productName });
       confirmedExpiryDate = resolvedExpiry;
+    }
+    if (gatewayCharge === 0 && isTrialVpsPurchase) {
+      confirmedExpiryDate = await resolveOrderExpiryOnPayment({ trialVpsPackageId, productName });
     }
 
     const orderData = {
       user: userId,
       productName,
-      memory: isSlotIpPurchase ? 'Slot IP' : memory,
+      memory: resolvedOrderMemory,
       price: Math.round(price),
       originalPrice: originalPrice,
       promoCode: appliedPromoCode,
@@ -397,7 +463,23 @@ export async function POST(request) {
       };
     }
 
-    if (isSlotIpPurchase) {
+    if (isTrialVpsPurchase) {
+      orderData.trialVpsPackageId = trialVpsPackageId;
+      orderData.trialVpsPlanCategory = trialVpsPkgDoc?.planCategory || 'linux';
+      orderData.provider = 'trialvps';
+      const trialManageCompanyId = trialVpsPkgDoc?.manageCompanyId
+        ? String(trialVpsPkgDoc.manageCompanyId)
+        : '';
+      const trialManageStockId = trialVpsPkgDoc?.manageIpStockId
+        ? String(trialVpsPkgDoc.manageIpStockId)
+        : '';
+      const trialCat = String(trialVpsPkgDoc?.planCategory || 'linux').toLowerCase();
+      if (trialCat !== 'premium_proxy' && (trialManageCompanyId || trialManageStockId)) {
+        orderData.trialVpsPanelManage = true;
+        if (trialManageCompanyId) orderData.trialManageCompanyId = trialManageCompanyId;
+        if (trialManageStockId) orderData.ipStockId = trialManageStockId;
+      }
+    } else if (isSlotIpPurchase) {
       orderData.slotIpPackageId = slotIpPackageId;
       orderData.provider = 'slotip';
     } else {
@@ -427,7 +509,7 @@ export async function POST(request) {
         console.error('[Payment] notifyOrderConfirmed failed:', notifError.message);
       }
 
-      if (!isSlotIpPurchase) {
+      if (!isSlotIpPurchase && !isTrialVpsPurchase) {
         try {
           const provisioningService = new AutoProvisioningService();
           await NotificationService.notifyOrderProvisioning(newOrder.user, newOrder);

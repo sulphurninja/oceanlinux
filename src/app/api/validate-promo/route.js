@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import connectDB from '../../../lib/db';
 import IPStock from '../../../models/ipStockModel';
 const SlotIPPackage = require('../../../models/slotIpPackageModel');
+const TrialVpsPackage = require('../../../models/trialVpsPackageModel');
 const { resolvePromoForPrice } = require('../../../lib/promoCode');
 import { enforceRateLimit } from '@/lib/rateLimit';
 import { toObjectIdString } from '@/lib/queryIds';
@@ -17,7 +18,7 @@ export async function POST(req) {
   if (rateLimited) return rateLimited;
 
   try {
-    const { promoCode, ipStockId, slotIpPackageId, productPrice } = await req.json();
+    const { promoCode, ipStockId, slotIpPackageId, trialVpsPackageId, productPrice } = await req.json();
 
     await connectDB();
 
@@ -35,6 +36,17 @@ export async function POST(req) {
       }
       promoCodes = slotPkg.promoCodes || [];
       if (!price) price = Number(slotPkg.price) || 0;
+    } else if (trialVpsPackageId) {
+      const packageId = toObjectIdString(trialVpsPackageId);
+      if (!packageId) {
+        return NextResponse.json({ valid: false, message: 'Package not found' }, { status: 404 });
+      }
+      const trialPkg = await TrialVpsPackage.findById(packageId);
+      if (!trialPkg) {
+        return NextResponse.json({ valid: false, message: 'Package not found' }, { status: 404 });
+      }
+      promoCodes = trialPkg.promoCodes || [];
+      if (!price) price = Number(trialPkg.price) || 0;
     } else {
       const stockId = toObjectIdString(ipStockId);
       if (!stockId) {

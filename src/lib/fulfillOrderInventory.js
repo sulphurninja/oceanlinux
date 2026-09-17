@@ -1,6 +1,7 @@
 const IPStock = require('@/models/ipStockModel');
 const { decrementIpStockForOrder } = require('@/lib/ipStockAvailability');
 const { allocateSlotIpForOrder } = require('@/lib/allocateSlotIpForOrder');
+const { allocateTrialVpsForOrder } = require('@/lib/allocateTrialVpsForOrder');
 const {
   shouldAssignCompanyInventoryForOrder,
   allocateCompanyInventoryForOrder,
@@ -76,15 +77,17 @@ async function fulfillOrderInventory(order, options = {}) {
   }
 
   const wantsSlotIp = !!order.slotIpPackageId && !order.slotIpId;
+  const wantsTrialVps = !!order.trialVpsPackageId && !order.trialVpsSlotId;
   const wantsStock =
     !order.slotIpPackageId &&
+    !order.trialVpsPackageId &&
     !!order.ipStockId &&
     !order.inventoryItemId &&
     !order.inventoryDecremented;
 
   // Cheap in-memory check first, so an obviously-finished order costs no write.
-  if (!wantsSlotIp && !wantsStock) {
-    if (order.slotIpPackageId) return { allocated: false, skipped: true };
+  if (!wantsSlotIp && !wantsTrialVps && !wantsStock) {
+    if (order.slotIpPackageId || order.trialVpsPackageId) return { allocated: false, skipped: true };
     return { skipped: true, alreadyDone: !!order.inventoryDecremented };
   }
 
@@ -94,7 +97,7 @@ async function fulfillOrderInventory(order, options = {}) {
 
   let result;
   try {
-    result = await runFulfilment(order, wantsSlotIp);
+    result = await runFulfilment(order, { wantsSlotIp, wantsTrialVps });
   } catch (err) {
     await releaseFulfilment(order._id);
     throw err;
@@ -109,7 +112,10 @@ async function fulfillOrderInventory(order, options = {}) {
   return result;
 }
 
-async function runFulfilment(order, wantsSlotIp) {
+async function runFulfilment(order, { wantsSlotIp, wantsTrialVps }) {
+  if (wantsTrialVps) {
+    return allocateTrialVpsForOrder(order);
+  }
   if (wantsSlotIp) {
     return allocateSlotIpForOrder(order);
   }

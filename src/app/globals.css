@@ -934,6 +934,34 @@ html {
       padding-top: 0.5rem;
     }
 
+    /* Connection / proxy credential rows — no horizontal overflow on narrow screens */
+    .premium-order-detail-page .premium-connection-copy-row {
+      display: flex;
+      gap: 0.5rem;
+      min-width: 0;
+      width: 100%;
+    }
+
+    .premium-order-detail-page .premium-connection-copy-row > input {
+      flex: 1 1 0%;
+      min-width: 0;
+      font-size: 0.75rem;
+    }
+
+    .premium-order-detail-page .premium-connection-copy-row--multi {
+      flex-wrap: wrap;
+    }
+
+    .premium-order-detail-page .premium-connection-copy-row--multi > input {
+      flex: 1 1 100%;
+      min-width: 0;
+    }
+
+    .premium-order-detail-page .premium-connection-copy-row--multi > button {
+      flex: 1 1 calc(50% - 0.25rem);
+      max-width: calc(50% - 0.25rem);
+    }
+
     .premium-order-action-grid {
       grid-template-columns: 1fr !important;
     }
@@ -941,6 +969,16 @@ html {
     .premium-order-action-grid > button {
       width: 100%;
       justify-content: center;
+    }
+
+    /* IP Stock / Trial tab — keep filters inside viewport */
+    .premium-dashboard-page .premium-dashboard-card.rounded-xl {
+      max-width: 100%;
+    }
+
+    .premium-dashboard-page .premium-dashboard-select {
+      min-width: 0;
+      max-width: 100%;
     }
   }
 
@@ -1267,6 +1305,14 @@ html {
 
   .premium-dashboard-page {
     @apply relative min-w-0 overflow-x-hidden;
+  }
+
+  .premium-order-detail-page .premium-connection-copy-row {
+    @apply flex gap-2 min-w-0 w-full;
+  }
+
+  .premium-order-detail-page .premium-connection-copy-row > input {
+    @apply flex-1 min-w-0;
   }
 
   .premium-dashboard-page-inner {

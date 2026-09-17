@@ -57,6 +57,18 @@ function getOrderIp(order) {
 async function resolveHostdzireApiForOrder(order, { Company, IPStock } = {}) {
   if (!order) return { config: null, companyName: null, matchedBy: null };
 
+  if (order.trialManageCompanyId && Company) {
+    try {
+      const company = await Company.findById(order.trialManageCompanyId).select('hostdzireApi name').lean();
+      const config = getCompanyHostdzireApiConfig(company);
+      if (config) {
+        return { config, companyName: company?.name || null, matchedBy: 'trialCompany' };
+      }
+    } catch (err) {
+      console.warn('[companyHostdzireApi] trial company lookup failed:', err.message);
+    }
+  }
+
   if (order.ipStockId && IPStock && Company) {
     try {
       const ipStock = await IPStock.findById(order.ipStockId).select('company').lean();

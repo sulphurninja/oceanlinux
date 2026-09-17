@@ -59,6 +59,7 @@ import { isWithinRenewalWindow, getDaysUntilExpiryIST, isExpiredServiceForCustom
 import { getOrderRenewalPrice, getOrderRenewalPriceNote, getCurrentListPriceFromStock } from '@/lib/orderRenewalPricing';
 import { getCustomerProviderDisplayName } from '@/lib/customerProviderDisplay';
 import { customerServiceErrorMessage, customerProvisioningErrorMessage, customerSuccessMessage } from '@/lib/customerFacingErrors';
+import { contactCustomerSupport } from '@/lib/customerSupportContact';
 import { useSessionAlert } from '@/components/session-alert';
 import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 import {
@@ -125,6 +126,12 @@ type SlotIpConnection = {
   password: string;
 };
 
+import {
+  isNonRenewablePackageOrder,
+  isTrialVpsOrder,
+  isTrialVpsProxyOrder,
+  isTrialVpsPanelManageOrder,
+} from '@/lib/trialVpsOrder';
 import { isSlotIpOrder } from '@/lib/slotIpOrder';
 import { isNetbayProxyManageAvailable, isNetbayProxyOrder } from '@/lib/netbayProxyOrder';
 import { isOrderAwaitingDelivery, isOrderPaid, hasOrderBeenDelivered, shouldPollOrderForDelivery } from '@/lib/orderDeliveryStatus';
@@ -165,6 +172,28 @@ function parseSlotIpConnection(order: Order): SlotIpConnection | null {
   };
 }
 
+type CompanyAutomationMeta = NonNullable<IPStock['companyAutomation']>;
+
+/** Prefer IP stock automation; fall back to order GET payload (trial company manage). */
+function resolveOrderCompanyAutomation(
+  order: Pick<Order, 'companyAutomation'> | null,
+  stock: IPStock | null,
+): CompanyAutomationMeta | null | undefined {
+  if (stock?.companyAutomation?.enabled) return stock.companyAutomation;
+  if (order?.companyAutomation?.enabled) return order.companyAutomation;
+  return stock?.companyAutomation ?? order?.companyAutomation ?? null;
+}
+
+function mergeAutomationStock(order: Order | null, stock: IPStock | null): IPStock | null {
+  const auto = resolveOrderCompanyAutomation(order, stock);
+  if (!auto?.enabled) return stock;
+  return { ...(stock ?? {}), companyAutomation: auto } as IPStock;
+}
+
+function hasOrderPanelAutomation(order: Order | null, stock: IPStock | null): boolean {
+  return !!resolveOrderCompanyAutomation(order, stock)?.enabled;
+}
+
 interface Order {
   _id: string;
   productName: string;
@@ -180,7 +209,7 @@ interface Order {
   password?: string;
   expiryDate?: Date;
   createdAt?: Date;
-  provider?: 'hostycare' | 'smartvps' | 'oceanlinux' | 'slotip' | 'advps' | 'netbay' | 'kurohost';
+  provider?: 'hostycare' | 'smartvps' | 'oceanlinux' | 'slotip' | 'advps' | 'netbay' | 'kurohost' | 'trialvps';
   hostycareServiceId?: string;
   smartvpsServiceId?: string;
   advpsServiceId?: string;
@@ -194,6 +223,12 @@ interface Order {
   advpsRebuildCountMonth?: string;
   slotIpPackageId?: string;
   slotIpId?: string;
+  trialVpsPackageId?: string;
+  trialVpsSlotId?: string;
+  trialVpsPlanCategory?: string;
+  trialVpsPanelManage?: boolean;
+  trialManageCompanyId?: string;
+  companyAutomation?: IPStock['companyAutomation'];
   provisioningStatus?: string;
   provisioningError?: string;
   serverDetails?: {
@@ -438,6 +473,7 @@ const OrderDetails = () => {
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
+  const [supportContactLoading, setSupportContactLoading] = useState(false);
 
   // Service management states
   const [serviceDetails, setServiceDetails] = useState<any | null>(null);
@@ -524,27 +560,43 @@ const OrderDetails = () => {
   // Virtualizor automation enabled; otherwise we just fetch the manual
   // server-action request status to populate the request UI.
   useEffect(() => {
-    if (order && !loading && !isSlotIpOrder(order) && order.netbayProductKind !== 'proxy') {
-      if (isExpiredServiceForCustomer(order)) return;
-      const provider = getProviderFromOrder(order, ipStock);
-      const hasNativeServiceId = (provider === 'hostycare' && order.hostycareServiceId) ||
-        (provider === 'smartvps' && (order.smartvpsServiceId || order.ipAddress)) ||
-        (provider === 'advps' && order.advpsServiceId) ||
-        (provider === 'netbay' && order.netbayServiceId) ||
-        (provider === 'kurohost' && order.kurohostInstanceId);
-      const isCompanyAutomated = hasCompanyAnyAutomation(ipStock) &&
-        (provider === 'oceanlinux' || !hasNativeServiceId);
+    if (!order || loading || order.netbayProductKind === 'proxy') return;
+    const allowPowerPolling =
+      !isNonRenewablePackageOrder(order) || isTrialVpsPanelManageOrder(order);
+    if (!allowPowerPolling) return;
 
-      if (hasNativeServiceId || isCompanyAutomated) {
-        fetchServerPowerState({ force: true });
-      }
-      // Manual request fallback only applies to oceanlinux orders that
-      // don't have any automation configured at the company level.
-      if (provider === 'oceanlinux' && !isCompanyAutomated) {
-        fetchPendingRequest();
-      }
+    if (isExpiredServiceForCustomer(order)) return;
+
+    const autoStock = mergeAutomationStock(order, ipStock);
+    const provider = getProviderFromOrder(order, ipStock);
+    const hasNativeServiceId = (provider === 'hostycare' && order.hostycareServiceId) ||
+      (provider === 'smartvps' && (order.smartvpsServiceId || order.ipAddress)) ||
+      (provider === 'advps' && order.advpsServiceId) ||
+      (provider === 'netbay' && order.netbayServiceId) ||
+      (provider === 'kurohost' && order.kurohostInstanceId);
+    const trialPanelManage = isTrialVpsPanelManageOrder(order);
+    const isCompanyAutomated = hasOrderPanelAutomation(order, ipStock) &&
+      (provider === 'oceanlinux' || provider === 'trialvps' || !hasNativeServiceId);
+
+    if (hasNativeServiceId || isCompanyAutomated || trialPanelManage) {
+      fetchServerPowerState({ force: true });
     }
-  }, [order?.hostycareServiceId, order?.smartvpsServiceId, order?.advpsServiceId, order?.netbayServiceId, order?.kurohostInstanceId, order?.ipAddress, ipStock, loading]);
+    if (provider === 'oceanlinux' && !isCompanyAutomated && !isTrialVpsPanelManageOrder(order)) {
+      fetchPendingRequest();
+    }
+  }, [
+    order?.hostycareServiceId,
+    order?.smartvpsServiceId,
+    order?.advpsServiceId,
+    order?.netbayServiceId,
+    order?.kurohostInstanceId,
+    order?.ipAddress,
+    order?.trialVpsPanelManage,
+    order?.trialManageCompanyId,
+    order?.companyAutomation,
+    ipStock,
+    loading,
+  ]);
 
   // Auto-refresh while ADVPS or SmartVPS is provisioning (poll every 15s)
   useEffect(() => {
@@ -660,6 +712,10 @@ const OrderDetails = () => {
         setIpStock({
           companyAutomation: orderData.companyAutomation,
         } as IPStock);
+      } else if (orderData.trialManageCompanyId || orderData.trialVpsPanelManage) {
+        setIpStock({
+          companyAutomation: orderData.companyAutomation ?? null,
+        } as IPStock);
       } else {
         console.log('[ORDER-DETAILS] No ipStockId found in order');
       }
@@ -707,8 +763,8 @@ const OrderDetails = () => {
       productName: order.productName
     });
 
-    // Slot IP proxies are OceanLinux-managed inventory
-    if (isSlotIpOrder(order)) return 'oceanlinux';
+    // Slot IP / plain trial — no upstream API (trial with linked stock falls through)
+    if (isNonRenewablePackageOrder(order) && !isTrialVpsPanelManageOrder(order)) return 'oceanlinux';
 
     if (String(order.netbayProductKind || '').toLowerCase() === 'proxy') return 'netbay';
 
@@ -821,11 +877,14 @@ const OrderDetails = () => {
         setOsProgress('');
         setOsLoading(false);
       } else {
-        throw new Error(templatesData.error || 'Failed to load templates');
+        throw new Error(templatesData.error || templatesData.message || 'Failed to load templates');
       }
     } catch (err: any) {
-      setOsProgress(customerServiceErrorMessage(err.message, { action: 'templates' }));
+      const msg = customerServiceErrorMessage(err.message, { action: 'templates' });
+      setOsProgress(msg);
       setOsLoading(false);
+      setOsDialogOpen(false);
+      showServiceError(msg, { action: 'templates', title: 'Reinstall unavailable' });
     }
   };
 
@@ -972,10 +1031,18 @@ const OrderDetails = () => {
 
   // Check if server management actions are available
   const isServerManagementAvailable = (order: Order, ipStock: IPStock | null): boolean => {
-    // Manual Slot IP inventory — no upstream API. Netbay HTTP proxy (Premium tab) is allowed.
-    if (isSlotIpOrder(order)) return false;
+    // Manual Slot IP / creds-only trial — no upstream API. Netbay HTTP proxy (Premium tab) is allowed.
+    if (isNonRenewablePackageOrder(order) && !isTrialVpsPanelManageOrder(order)) return false;
 
     if (isNetbayProxyManageAvailable(order, ipStock)) return true;
+
+    if (isTrialVpsPanelManageOrder(order)) {
+      if (hasOrderPanelAutomation(order, ipStock)) return true;
+      const trialProv = getProviderFromOrder(order, ipStock);
+      if (trialProv === 'smartvps' && order.ipAddress) return true;
+      if (trialProv === 'advps' && (order.advpsServiceId || order.ipAddress)) return true;
+      if (order.trialManageCompanyId && order.ipAddress) return true;
+    }
 
     const provider = getProviderFromOrder(order, ipStock);
 
@@ -1039,6 +1106,14 @@ const OrderDetails = () => {
     return !!(stock?.companyAutomation?.enabled && stock?.companyAutomation?.provider === 'joy');
   };
 
+  const hasCompanyKurohostAutomation = (stock: IPStock | null): boolean => {
+    return !!(stock?.companyAutomation?.enabled && stock?.companyAutomation?.provider === 'kurohost');
+  };
+
+  const hasCompanyHostdzireAutomation = (stock: IPStock | null): boolean => {
+    return !!(stock?.companyAutomation?.enabled && stock?.companyAutomation?.provider === 'hostdzire');
+  };
+
   /**
    * True when the order's company has ANY automation configured (Virtualizor,
    * reseller API, or Netbay). Use this anywhere the difference between the
@@ -1049,7 +1124,9 @@ const OrderDetails = () => {
       hasCompanyVirtualizorAutomation(stock) ||
       hasCompanyResellerApiAutomation(stock) ||
       hasCompanyNetbayAutomation(stock) ||
-      hasCompanyJoyAutomation(stock)
+      hasCompanyJoyAutomation(stock) ||
+      hasCompanyKurohostAutomation(stock) ||
+      hasCompanyHostdzireAutomation(stock)
     );
   };
 
@@ -1063,8 +1140,9 @@ const OrderDetails = () => {
    */
   const isOrderCompanyAutomated = (orderArg: Order | null, stock: IPStock | null): boolean => {
     if (!orderArg) return false;
-    if (isSlotIpOrder(orderArg)) return false;
-    if (!hasCompanyAnyAutomation(stock)) return false;
+    if (isNonRenewablePackageOrder(orderArg) && !isTrialVpsPanelManageOrder(orderArg)) return false;
+    const autoStock = mergeAutomationStock(orderArg, stock);
+    if (!hasCompanyAnyAutomation(autoStock)) return false;
     const prov = getProviderFromOrder(orderArg, stock);
     if (prov === 'oceanlinux') return true;
     const hasNativeServiceId = (prov === 'hostycare' && !!orderArg.hostycareServiceId) ||
@@ -1133,10 +1211,11 @@ const OrderDetails = () => {
     const isAdvps = provider === 'advps' && order.advpsServiceId;
     const isNetbay = provider === 'netbay' && !!order.netbayServiceId;
     const isKurohost = provider === 'kurohost' && !!order.kurohostInstanceId;
-    const isCompanyAuto = hasCompanyAnyAutomation(ipStock) &&
-      (provider === 'oceanlinux' || (!isHostycare && !isSmartVPS && !isAdvps && !isNetbay && !isKurohost));
+    const trialPanelManage = isTrialVpsPanelManageOrder(order);
+    const isCompanyAuto = hasOrderPanelAutomation(order, ipStock) &&
+      (provider === 'oceanlinux' || provider === 'trialvps' || (!isHostycare && !isSmartVPS && !isAdvps && !isNetbay && !isKurohost));
 
-    if (!isHostycare && !isSmartVPS && !isAdvps && !isNetbay && !isKurohost && !isCompanyAuto) {
+    if (!isHostycare && !isSmartVPS && !isAdvps && !isNetbay && !isKurohost && !isCompanyAuto && !trialPanelManage) {
       return null;
     }
 
@@ -1568,11 +1647,15 @@ const OrderDetails = () => {
       (provider === 'hostycare' && action === 'reinstall' && order.hostycareServiceId) ||
       (provider === 'netbay' && action === 'reinstall' && order.netbayServiceId) ||
       (provider === 'kurohost' && action === 'reinstall' && order.kurohostInstanceId) ||
-      (action === 'reinstall' && isOrderCompanyAutomated(order, ipStock))) {
+      (action === 'reinstall' &&
+        (isOrderCompanyAutomated(order, ipStock) || isTrialVpsPanelManageOrder(order)))) {
       await openOsDialog(provider);
       return;
     }
 
+    const panelManagedReinstall =
+      action === 'reinstall' &&
+      (isOrderCompanyAutomated(order, ipStock) || isTrialVpsPanelManageOrder(order));
 
     // For other providers, open the legacy template/password dialog
     try {
@@ -1605,6 +1688,13 @@ const OrderDetails = () => {
         if (Object.keys(templateList).length > 0) {
           setActionBusy(null);
           openLegacyActionDialog(action, actionLabel, templateList);
+        } else if (panelManagedReinstall) {
+          setActionBusy(null);
+          showServiceError(
+            customerServiceErrorMessage(templatesData.error || templatesData.message, { action: 'templates' }) ||
+              'No operating systems are available for this server on the linked panel.',
+            { action: 'templates', title: 'Reinstall unavailable' },
+          );
         } else {
           setActionBusy(null);
           openLegacyActionDialog(
@@ -1614,6 +1704,13 @@ const OrderDetails = () => {
             `No templates available. Proceed with default ${actionLabel}.`,
           );
         }
+      } else if (panelManagedReinstall) {
+        setActionBusy(null);
+        showServiceError(
+          customerServiceErrorMessage(templatesData.error || templatesData.message, { action: 'templates' }) ||
+            'Could not load operating systems. The server may not exist on the API plan selected for this trial.',
+          { action: 'templates', title: 'Reinstall unavailable' },
+        );
       } else {
         setActionBusy(null);
         openLegacyActionDialog(
@@ -1625,7 +1722,14 @@ const OrderDetails = () => {
       }
     } catch (error) {
       console.error(`Error in ${action} process:`, error);
-      toast.error(`Failed to initiate ${action}`);
+      if (panelManagedReinstall) {
+        showServiceError(
+          customerServiceErrorMessage(error instanceof Error ? error.message : String(error), { action: 'templates' }),
+          { action: 'templates', title: 'Reinstall unavailable' },
+        );
+      } else {
+        toast.error(`Failed to initiate ${action}`);
+      }
       setActionBusy(null);
     }
   };
@@ -1863,7 +1967,7 @@ const OrderDetails = () => {
 
   const isRenewalEligible = (order: Order | null) => {
     if (!order || !order.expiryDate) return false;
-    if (isSlotIpOrder(order)) return false;
+    if (isNonRenewablePackageOrder(order)) return false;
     return isWithinRenewalWindow(order.expiryDate);
   };
 
@@ -2229,6 +2333,22 @@ const OrderDetails = () => {
     const companyAutomated = isOrderCompanyAutomated(order ?? null, ipStock);
     const hasAssignedIp = !!(order?.ipAddress?.trim());
 
+    if (order && isTrialVpsOrder(order)) {
+      if (order.expiryDate && getDaysUntilExpiry(order.expiryDate) < 0) {
+        return (
+          <Badge className="bg-destructive/10 text-destructive border-destructive/20">
+            Trial expired
+          </Badge>
+        );
+      }
+      return (
+        <Badge className="bg-violet-500/10 text-violet-600 border-violet-500/20">
+          <div className="w-2 h-2 bg-violet-500 rounded-full mr-2 animate-pulse"></div>
+          Trial active
+        </Badge>
+      );
+    }
+
     if (order && isOrderPaid(order) && hasOrderBeenDelivered(order)) {
       return (
         <Badge className="bg-primary/10 text-green-500 border-primary/20">
@@ -2436,27 +2556,53 @@ const OrderDetails = () => {
   const provider = getProviderFromOrder(order, ipStock);
   const isPrimeVpsOsPicker = hasCompanyResellerApiAutomation(ipStock);
   const isCustomerSuspended = !isAdminView && Boolean(order.adminSuspended);
-  const canManageServer = !isCustomerSuspended && isServerManagementAvailable(order, ipStock);
-  const slotIpOrder = isSlotIpOrder(order);
+  const trialVpsOrder = isTrialVpsOrder(order);
+  const trialPanelManage = isTrialVpsPanelManageOrder(order);
+  const canManageServer =
+    !isCustomerSuspended &&
+    (!trialVpsOrder || trialPanelManage) &&
+    isServerManagementAvailable(order, ipStock);
+  const trialProxyOrder = isTrialVpsProxyOrder(order);
+  const trialServerOrder = trialVpsOrder && !trialProxyOrder;
+  const slotIpOnlyOrder = isSlotIpOrder(order);
+  const inventoryDetailsOnly = isNonRenewablePackageOrder(order);
   const netbayProxyOrder = isNetbayProxyOrder(order, ipStock);
-  const proxyStyleOrder = slotIpOrder || netbayProxyOrder;
+  const proxyStyleOrder = slotIpOnlyOrder || netbayProxyOrder || trialProxyOrder;
+  const trialDisplayIp = (order.ipAddress || '').split(':')[0].trim();
   const slotIpConnection = proxyStyleOrder ? parseSlotIpConnection(order) : null;
   const hasConnectionDetails = proxyStyleOrder
     ? !!(slotIpConnection?.ip && (slotIpConnection?.username || slotIpConnection?.port))
-    : !!(order.ipAddress && order.username);
+    : trialServerOrder
+      ? !!(trialDisplayIp && order.username)
+      : !!(order.ipAddress && order.username);
   const usesLivePowerUi =
     !proxyStyleOrder &&
-    (provider === 'hostycare' ||
-    provider === 'smartvps' ||
-    (provider === 'advps' && !!order.advpsServiceId) ||
-    (provider === 'netbay' && !!order.netbayServiceId) ||
-    (provider === 'kurohost' && !!order.kurohostInstanceId) ||
-    isOrderCompanyAutomated(order, ipStock));
+    ((trialPanelManage && canManageServer) ||
+      provider === 'hostycare' ||
+      provider === 'smartvps' ||
+      (provider === 'advps' && !!order.advpsServiceId) ||
+      (provider === 'netbay' && !!order.netbayServiceId) ||
+      (provider === 'kurohost' && !!order.kurohostInstanceId) ||
+      isOrderCompanyAutomated(order, ipStock));
   const currentListPrice = getCurrentListPriceFromStock(ipStock, order.memory);
   const renewalPrice = renewalPaymentTotals.total;
   const renewalPriceNote = getOrderRenewalPriceNote(order, currentListPrice);
   const suspendMessage =
     order.adminSuspendMessage?.trim() || 'This service has been suspended. Please contact support.';
+
+  const handleExpiredContactSupport = async () => {
+    setSupportContactLoading(true);
+    try {
+      await contactCustomerSupport({
+        router,
+        message: `Expired service: ${order.productName}\nConfiguration: ${order.memory}\nOrder ID: ${order._id}`,
+      });
+    } catch {
+      router.push('/dashboard/support/tickets');
+    } finally {
+      setSupportContactLoading(false);
+    }
+  };
 
   return (
     <div className='premium-dashboard-page premium-order-detail-page min-h-0 relative'>
@@ -2817,10 +2963,15 @@ const OrderDetails = () => {
                       </p>
                       <Button
                         variant="outline"
-                        onClick={() => router.push('/support/tickets')}
+                        onClick={handleExpiredContactSupport}
+                        disabled={supportContactLoading}
                         className="w-full gap-2"
                       >
-                        <LifeBuoy className="h-4 w-4" />
+                        {supportContactLoading ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <LifeBuoy className="h-4 w-4" />
+                        )}
                         Contact Support
                       </Button>
                     </div>
@@ -2993,12 +3144,22 @@ const OrderDetails = () => {
                         <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
                           <Network className="h-4 w-4 text-primary" />
                         </div>
-                        {proxyStyleOrder ? 'Proxy Connection Details' : 'Connection Details'}
+                        {trialProxyOrder
+                          ? 'Trial Proxy Details'
+                          : trialServerOrder
+                            ? 'Trial VPS Details'
+                            : proxyStyleOrder
+                              ? 'Proxy Connection Details'
+                              : 'Connection Details'}
                       </CardTitle>
                       <CardDescription className="text-xs lg:text-sm">
-                        {proxyStyleOrder
-                          ? 'Use these credentials to connect to your HTTP proxy'
-                          : 'Use these credentials to connect to your server'}
+                        {trialProxyOrder
+                          ? 'HTTP proxy credentials for your trial period'
+                          : trialServerOrder
+                            ? 'RDP/SSH login — no panel start/stop or renewal'
+                            : proxyStyleOrder
+                              ? 'Use these credentials to connect to your HTTP proxy'
+                              : 'Use these credentials to connect to your server'}
                       </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-3">
@@ -3013,11 +3174,11 @@ const OrderDetails = () => {
                                 </div>
                                 <span className="text-muted-foreground">IP Address</span>
                               </Label>
-                              <div className="flex gap-2">
+                              <div className="premium-connection-copy-row">
                                 <Input
                                   readOnly
                                   value={slotIpConnection.ip}
-                                  className="font-mono bg-background/50 border-border text-sm min-w-0 h-9"
+                                  className="font-mono bg-background/50 border-border text-sm sm:text-sm min-w-0 h-9"
                                 />
                                 <Button
                                   variant="outline"
@@ -3041,7 +3202,7 @@ const OrderDetails = () => {
                                   </div>
                                   <span className="text-muted-foreground">Port</span>
                                 </Label>
-                                <div className="flex gap-2">
+                                <div className="premium-connection-copy-row">
                                   <Input
                                     readOnly
                                     value={slotIpConnection.port}
@@ -3069,7 +3230,7 @@ const OrderDetails = () => {
                                 </div>
                                 <span className="text-muted-foreground">Username</span>
                               </Label>
-                              <div className="flex gap-2">
+                              <div className="premium-connection-copy-row">
                                 <Input
                                   readOnly
                                   value={slotIpConnection.username}
@@ -3096,7 +3257,7 @@ const OrderDetails = () => {
                                 </div>
                                 <span className="text-muted-foreground">Password</span>
                               </Label>
-                              <div className="flex gap-2">
+                              <div className="premium-connection-copy-row premium-connection-copy-row--multi">
                                 <Input
                                   readOnly
                                   type={showPassword ? 'text' : 'password'}
@@ -3147,16 +3308,21 @@ const OrderDetails = () => {
                             </div>
                             <span className="text-muted-foreground">Server IP Address</span>
                           </Label>
-                          <div className="flex gap-2">
+                          <div className="premium-connection-copy-row">
                             <Input
                               readOnly
-                              value={order.ipAddress}
+                              value={trialVpsOrder ? trialDisplayIp : order.ipAddress}
                               className="font-mono bg-background/50 border-border text-sm min-w-0 h-9"
                             />
                             <Button
                               variant="outline"
                               size="icon"
-                              onClick={() => copyToClipboard(order.ipAddress!, 'IP Address')}
+                              onClick={() =>
+                                copyToClipboard(
+                                  trialVpsOrder ? trialDisplayIp : order.ipAddress!,
+                                  'IP Address'
+                                )
+                              }
                               className="shrink-0 h-9 w-9 hover:bg-primary/10 hover:border-primary/30"
                             >
                               {copied === 'IP Address' ? (
@@ -3178,7 +3344,7 @@ const OrderDetails = () => {
                             </div>
                             <span className="text-muted-foreground">Username</span>
                           </Label>
-                          <div className="flex gap-2">
+                          <div className="premium-connection-copy-row">
                             <Input
                               readOnly
                               value={order.username}
@@ -3209,7 +3375,7 @@ const OrderDetails = () => {
                             </div>
                             <span className="text-muted-foreground">Password</span>
                           </Label>
-                          <div className="flex gap-2">
+                          <div className="premium-connection-copy-row premium-connection-copy-row--multi">
                             <Input
                               readOnly
                               type={showPassword ? "text" : "password"}
@@ -3273,7 +3439,20 @@ const OrderDetails = () => {
                         )}
                       </div>
 
-                      {/* SSH/RDP Command */}
+                      {trialServerOrder && order.os && (
+                        <div className="p-3 bg-violet-500/5 rounded-lg border border-violet-500/20 text-sm">
+                          <span className="text-muted-foreground">OS: </span>
+                          <span className="font-medium">{order.os}</span>
+                          {order.expiryDate && (
+                            <p className="text-xs text-muted-foreground mt-2">
+                              Trial valid until {formatDate(order.expiryDate)} — purchase a regular plan when it ends.
+                            </p>
+                          )}
+                        </div>
+                      )}
+
+                      {/* SSH/RDP Command — hidden for trial (credentials above are enough) */}
+                      {!trialVpsOrder && (
                       <div className="pt-1">
                         <div className="p-3 bg-primary/5 rounded-lg border border-primary/20">
                           <Label className="flex items-center gap-2 text-xs font-medium mb-2">
@@ -3334,6 +3513,7 @@ const OrderDetails = () => {
                           </div>
                         </div>
                       </div>
+                      )}
                         </>
                       )}
                     </CardContent>
@@ -3400,7 +3580,7 @@ const OrderDetails = () => {
                 )}
 
                 {/* Recent Activity */}
-                {(order.lastAction || order.lastActionTime) && !slotIpOrder && (
+                {(order.lastAction || order.lastActionTime) && !inventoryDetailsOnly && (
                   <Card className="border-border hover:shadow-md transition-shadow">
                     <CardHeader className="pb-3">
                       <CardTitle className="flex items-center gap-2 text-base lg:text-lg">
@@ -3445,7 +3625,7 @@ const OrderDetails = () => {
                 {/* Manual Server Action Requests - For non-auto-provisioned products.
                     Hidden when the company has Virtualizor or reseller-API automation;
                     those orders use the regular Server Control card above. */}
-                {provider === 'oceanlinux' && !hasCompanyAnyAutomation(ipStock) && !slotIpOrder && (
+                {provider === 'oceanlinux' && !hasCompanyAnyAutomation(ipStock) && !inventoryDetailsOnly && (
                   <Card className="border-border hover:shadow-md transition-shadow">
                     <CardHeader className="pb-3">
                       <CardTitle className="flex items-center gap-2 text-base lg:text-lg">
@@ -3904,12 +4084,13 @@ const OrderDetails = () => {
 
                         {(() => {
                           const isAdvps = provider === 'advps';
-                          const isCompanyResellerApi = hasCompanyResellerApiAutomation(ipStock) &&
+                          const autoStock = mergeAutomationStock(order, ipStock);
+                          const isCompanyResellerApi = hasCompanyResellerApiAutomation(autoStock) &&
                             isOrderCompanyAutomated(order, ipStock);
                           // Joy Services is manage-only (power actions + status). Its
                           // connect API has no reinstall/OS-change endpoint, so we hide
                           // the destructive reinstall control for Joy-backed orders.
-                          const isCompanyJoy = hasCompanyJoyAutomation(ipStock) &&
+                          const isCompanyJoy = hasCompanyJoyAutomation(autoStock) &&
                             isOrderCompanyAutomated(order, ipStock);
                           const { count: rebuildCount, remaining: rebuildsRemaining, limitReached } = getAdvpsRebuildUsage(order);
                           const rebuildLimitReached = isAdvps && limitReached;
@@ -4046,8 +4227,8 @@ const OrderDetails = () => {
                       )}
                     </CardContent>
                   </Card>
-                ) : (
-                  /* Show info card when management is not available */
+                ) : !trialVpsOrder ? (
+                  /* Show info card when management is not available (trial orders: details-only) */
                   <Card className="border-border">
                     <CardHeader className="pb-3">
                       <CardTitle className="flex items-center gap-2 text-base lg:text-lg">
@@ -4068,11 +4249,13 @@ const OrderDetails = () => {
                               {getProviderDisplayName(provider)} Service
                             </h4>
                             <p className="text-xs text-muted-foreground mb-2">
-                              {slotIpOrder
-                                ? 'This is a Slot IP proxy order. Use the connection details above — start, stop, and server controls are not available.'
-                                : provider === 'oceanlinux'
-                                  ? 'This service is directly managed by OceanLinux. Server management tools are not available through this interface.'
-                                  : 'This service is offered with a partner provider.'}
+                              {trialVpsOrder
+                                ? 'This is a trial VPS. Only login details are provided — start/stop is not linked to an API plan.'
+                                : slotIpOnlyOrder
+                                  ? 'This is a Slot IP proxy order. Use the connection details above — start, stop, and server controls are not available.'
+                                  : provider === 'oceanlinux'
+                                    ? 'This service is directly managed by OceanLinux. Server management tools are not available through this interface.'
+                                    : 'This service is offered with a partner provider.'}
                             </p>
                             {order.ipAddress && (
                               <p className="text-xs text-muted-foreground">
@@ -4084,10 +4267,35 @@ const OrderDetails = () => {
                       </div>
                     </CardContent>
                   </Card>
+                ) : null}
+
+                {trialVpsOrder && order.expiryDate && (
+                  <Card className="border-violet-500/25 bg-violet-500/5">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-base flex items-center gap-2">
+                        <Clock className="h-4 w-4 text-violet-500" />
+                        Trial period
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="text-sm space-y-2">
+                      <p>
+                        Access until <strong>{formatDate(order.expiryDate)}</strong> —{' '}
+                        {getDaysUntilExpiry(order.expiryDate) < 0
+                          ? 'trial ended'
+                          : `${getDaysUntilExpiry(order.expiryDate)} day(s) left`}
+                        .
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {trialPanelManage
+                          ? 'One-time trial — start/stop works via your linked API plan. Renewal is not available; buy a regular plan when it ends.'
+                          : 'One-time trial only. No server manage controls and no renewal — buy a regular plan when it ends.'}
+                      </p>
+                    </CardContent>
+                  </Card>
                 )}
 
                 {/* Billing & Renewal — show for all billable orders (incl. manual company stocks) */}
-                {order.expiryDate && !isSlotIpOrder(order) && (
+                {order.expiryDate && !isNonRenewablePackageOrder(order) && (
                   <Card className="border-border hover:shadow-md transition-shadow">
                     <CardHeader className="pb-3">
                       <CardTitle className="flex items-center gap-2 text-base lg:text-lg">

@@ -1,6 +1,6 @@
 import IPStock from '@/models/ipStockModel';
 import Company from '@/models/companyModel';
-import { isSlotIpOrder } from '@/lib/slotIpOrder';
+import { isNonRenewablePackageOrder } from '@/lib/trialVpsOrder';
 import { getCompanyResellerApiConfig } from '@/lib/companyResellerApi';
 import { getCompanyHostdzireApiConfig, resolveHostdzireApiForOrder } from '@/lib/companyHostdzireApi';
 import { stockHasResellerPanelPlans } from '@/lib/ipStockAvailability';
@@ -27,7 +27,7 @@ function ipStockLooksHostdzire(ipStock) {
  * (skip company approval queue).
  */
 export async function isHostdzireDirectRenewEligible(order, ipStock = null) {
-  if (!order || isSlotIpOrder(order)) return false;
+  if (!order || isNonRenewablePackageOrder(order)) return false;
 
   const ip = String(order.ipAddress || '').split(':')[0].trim();
   if (!looksLikeIpv4(ip)) return false;
@@ -55,7 +55,7 @@ export async function isHostdzireDirectRenewEligible(order, ipStock = null) {
 
 /** True when company approval should also renew on HostDzire upstream. */
 export function canRenewHostdzireOnCompanyApprove(order, companyDoc) {
-  if (!order || isSlotIpOrder(order)) return false;
+  if (!order || isNonRenewablePackageOrder(order)) return false;
   if (!getCompanyHostdzireApiConfig(companyDoc)) return false;
   const ip = String(order.ipAddress || '').split(':')[0].trim();
   return looksLikeIpv4(ip) && (isHostdzireOrder(order) || !!order.ipStockId);
@@ -79,7 +79,7 @@ export function stockUsesHostheavenResellerApi(ipStock) {
  * directly on Hostheaven when the customer pays.
  */
 export async function isHostheavenDirectRenewEligible(order, ipStock = null) {
-  if (!order || isSlotIpOrder(order)) return false;
+  if (!order || isNonRenewablePackageOrder(order)) return false;
   if (order.kurohostInstanceId || order.provider === 'kurohost') return false;
   if (order.netbayServiceId && order.provider === 'netbay') return false;
   if (order.resellerVmId || order.provider === 'reseller-api') return true;
@@ -104,7 +104,7 @@ export async function isHostheavenDirectRenewEligible(order, ipStock = null) {
  * Hostheaven / reseller panel (lookup VM by IP if resellerVmId is missing).
  */
 export function canRenewHostheavenPanelOnCompanyApprove(order, companyDoc) {
-  if (!order || isSlotIpOrder(order)) return false;
+  if (!order || isNonRenewablePackageOrder(order)) return false;
   if (order.kurohostInstanceId || order.provider === 'kurohost') return false;
   if (order.netbayServiceId && order.provider === 'netbay') return false;
   if (!getCompanyResellerApiConfig(companyDoc)) return false;
@@ -125,7 +125,7 @@ export function canRenewHostheavenPanelOnCompanyApprove(order, companyDoc) {
  */
 export async function detectCompanyManagedRenewal(order) {
   if (!order) return { isCompany: false };
-  if (isSlotIpOrder(order)) return { isCompany: false };
+  if (isNonRenewablePackageOrder(order)) return { isCompany: false };
   if (order.hostycareServiceId) return { isCompany: false };
   if (order.smartvpsServiceId) return { isCompany: false };
   if (order.advpsServiceId) return { isCompany: false };

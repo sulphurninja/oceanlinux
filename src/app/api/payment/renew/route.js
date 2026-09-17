@@ -11,6 +11,11 @@ import {
   isWithinRenewalWindow,
   RENEWAL_DAYS_BEFORE_EXPIRY,
 } from '@/lib/expiryHelper';
+import {
+  isNonRenewablePackageOrder,
+  isTrialVpsOrder,
+  TRIAL_VPS_NO_RENEWAL_MESSAGE,
+} from '@/lib/trialVpsOrder';
 import { isSlotIpOrder, SLOT_IP_NO_RENEWAL_MESSAGE } from '@/lib/slotIpOrder';
 import { resolveOrderRenewalPrice } from '@/lib/orderRenewalPricingServer';
 const { customerApiCatchPayload } = require('@/lib/customerFacingErrors');
@@ -66,8 +71,13 @@ export async function POST(request) {
     const user = resolved.user;
     const order = resolved.order;
 
-    if (isSlotIpOrder(order)) {
-      return NextResponse.json({ message: SLOT_IP_NO_RENEWAL_MESSAGE }, { status: 400 });
+    if (isNonRenewablePackageOrder(order)) {
+      return NextResponse.json(
+        {
+          message: isTrialVpsOrder(order) ? TRIAL_VPS_NO_RENEWAL_MESSAGE : SLOT_IP_NO_RENEWAL_MESSAGE,
+        },
+        { status: 400 }
+      );
     }
 
     const { assertOrderNotAdminSuspended } = require('@/lib/orderAdminSuspend');

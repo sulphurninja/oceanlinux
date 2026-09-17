@@ -104,11 +104,9 @@ async function resolveOrderForAction(request, orderId) {
  * should fall back to the regular provider/manual flow in that case.
  */
 async function resolveCompanyVirtualizorAccounts(order) {
-  if (!order?.ipStockId) return { accounts: [], companyName: null };
   try {
-    const ipStock = await IPStock.findById(order.ipStockId).select('company').lean();
-    if (!ipStock?.company) return { accounts: [], companyName: null };
-    const company = await Company.findById(ipStock.company).select('virtualizors virtualizor name').lean();
+    const { getManageCompanyDocForOrder } = require('@/lib/orderManageCompany');
+    const company = await getManageCompanyDocForOrder(order);
     if (!company) return { accounts: [], companyName: null };
     const accounts = getCompanyVirtualizorAccounts(company);
     return { accounts, companyName: company.name };
@@ -125,13 +123,9 @@ async function resolveCompanyVirtualizorAccounts(order) {
  * handled by the caller before this is consulted).
  */
 async function resolveCompanyResellerApi(order) {
-  if (!order?.ipStockId) return { config: null, companyName: null };
   try {
-    const ipStock = await IPStock.findById(order.ipStockId).select('company').lean();
-    if (!ipStock?.company) return { config: null, companyName: null };
-    const company = await Company.findById(ipStock.company)
-      .select('resellerApi name')
-      .lean();
+    const { getManageCompanyDocForOrder } = require('@/lib/orderManageCompany');
+    const company = await getManageCompanyDocForOrder(order);
     if (!company) return { config: null, companyName: null };
     const config = getCompanyResellerApiConfig(company);
     return { config, companyName: company.name };
@@ -150,13 +144,9 @@ async function resolveCompanyResellerApi(order) {
  * exists.
  */
 async function resolveCompanyNetbayApi(order) {
-  if (!order?.ipStockId) return { config: null, companyName: null };
   try {
-    const ipStock = await IPStock.findById(order.ipStockId).select('company').lean();
-    if (!ipStock?.company) return { config: null, companyName: null };
-    const company = await Company.findById(ipStock.company)
-      .select('netbayApi name')
-      .lean();
+    const { getManageCompanyDocForOrder } = require('@/lib/orderManageCompany');
+    const company = await getManageCompanyDocForOrder(order);
     if (!company) return { config: null, companyName: null };
     const config = getCompanyNetbayApiConfig(company);
     return { config, companyName: company.name };
@@ -167,13 +157,9 @@ async function resolveCompanyNetbayApi(order) {
 }
 
 async function resolveCompanyKurohostApi(order) {
-  if (!order?.ipStockId) return { config: null, companyName: null };
   try {
-    const ipStock = await IPStock.findById(order.ipStockId).select('company').lean();
-    if (!ipStock?.company) return { config: null, companyName: null };
-    const company = await Company.findById(ipStock.company)
-      .select('kurohostApi name')
-      .lean();
+    const { getManageCompanyDocForOrder } = require('@/lib/orderManageCompany');
+    const company = await getManageCompanyDocForOrder(order);
     if (!company) return { config: null, companyName: null };
     const config = getCompanyKurohostApiConfig(company);
     return { config, companyName: company.name };
@@ -251,6 +237,35 @@ async function resolveCompanyJoyApi(order) {
 
 async function resolveCompanyHostdzireApi(order) {
   return resolveHostdzireApiForOrder(order, { Company, IPStock });
+}
+
+/** HostDzire/Joy run only when they are the company's primary manage API (see companyAutomationMeta). */
+async function resolvePrimaryCompanyAutomationProvider(order) {
+  const { getPrimaryCompanyAutomationProviderForOrder } = require('@/lib/companyAutomationMeta');
+  return getPrimaryCompanyAutomationProviderForOrder(order);
+}
+
+async function hydrateOrderForPanelActions(rawOrder) {
+  let order = rawOrder?.toObject ? rawOrder.toObject() : rawOrder;
+  if (!order?.trialVpsPackageId) return order;
+  try {
+    const { enrichTrialVpsPanelManageFromPackage } = require('@/lib/trialVpsManageEnrich');
+    const enriched = await enrichTrialVpsPanelManageFromPackage(order);
+    return enriched.order;
+  } catch (err) {
+    console.warn('[SERVICE-ACTION] trial manage enrich failed:', err.message);
+    return order;
+  }
+}
+
+function trialPanelManageNoRouteError(order, ipAddress) {
+  const { isTrialVpsPanelManageOrder } = require('@/lib/trialVpsOrder');
+  if (!isTrialVpsPanelManageOrder(order)) return null;
+  if (!order.trialManageCompanyId && !order.ipStockId) {
+    return 'Trial VPS manage is enabled but no company is linked on this order. Re-save the trial package in admin or contact support.';
+  }
+  const ip = ipAddress ? ` (${ipAddress})` : '';
+  return `Could not manage this trial server${ip}. The IP must exist on the company panel linked in Admin → Trial VPS. Contact support if this continues.`;
 }
 
 /**
@@ -630,7 +645,7 @@ export async function POST(request) {
 
     const resolved = await resolveOrderForAction(request, orderId);
     if (resolved.error) return resolved.error;
-    const order = resolved.order;
+    const order = await hydrateOrderForPanelActions(resolved.order);
 
     if (isExpiredServiceForCustomer(order) && isExpiredPanelActionBlocked(action)) {
       return actionJson(expiredPanelSyncPayload(action || 'sync'), 409, action || 'sync');
@@ -1184,7 +1199,8 @@ export async function POST(request) {
     // POST https://hostdzire.com/api/vps/ — action + ip (start/stop/reboot/details/…)
     if (!isSmartVps && !isNetbay && !order.hostycareServiceId) {
       const { config: hostdzireCfg, companyName: hostdzireCompanyName } = await resolveCompanyHostdzireApi(order);
-      if (hostdzireCfg) {
+      const primaryProvider = await resolvePrimaryCompanyAutomationProvider(order);
+      if (hostdzireCfg && primaryProvider === 'hostdzire') {
         const supportedActions = new Set(['start', 'stop', 'restart', 'reboot', 'status', 'sync', 'reinstall']);
         if (!supportedActions.has(action)) {
           return actionJson({
@@ -1299,7 +1315,8 @@ export async function POST(request) {
     // automation configured. Reinstall/OS is not offered by the Joy connect API.
     if (!isSmartVps && !isNetbay && !order.hostycareServiceId) {
       const { config: joyCfg, companyName: joyCompanyName } = await resolveCompanyJoyApi(order);
-      if (joyCfg) {
+      const primaryProviderJoy = await resolvePrimaryCompanyAutomationProvider(order);
+      if (joyCfg && primaryProviderJoy === 'joy') {
         const supportedActions = new Set(['start', 'stop', 'restart', 'reboot', 'status', 'sync']);
         if (!supportedActions.has(action)) {
           return actionJson({
@@ -1408,8 +1425,8 @@ export async function POST(request) {
       // configured — that way an admin can swap a company over from one
       // automation type to the other simply by clearing the Virtualizor list
       // and saving the reseller config.
-      const { accounts: virtPeek } = await resolveCompanyVirtualizorAccounts(order);
-      if (virtPeek.length === 0) {
+      const primaryResellerPath = await resolvePrimaryCompanyAutomationProvider(order);
+      if (primaryResellerPath === 'reseller-api') {
         const { config: resellerCfg, companyName: resellerCompanyName } = await resolveCompanyResellerApi(order);
         if (resellerCfg) {
           const supportedActions = new Set(['start', 'stop', 'restart', 'reboot', 'status', 'sync', 'templates', 'reinstall', 'resetmac', 'changepassword', 'reconfigure-network']);
@@ -1701,7 +1718,8 @@ export async function POST(request) {
       }
 
       const { accounts: companyVirtAccounts } = await resolveCompanyVirtualizorAccounts(order);
-      if (companyVirtAccounts.length > 0) {
+      const primaryVirtPath = await resolvePrimaryCompanyAutomationProvider(order);
+      if (companyVirtAccounts.length > 0 && primaryVirtPath === 'virtualizor') {
         const supportedActions = new Set(['start', 'stop', 'restart', 'status', 'sync', 'templates', 'reinstall']);
         if (!supportedActions.has(action)) {
           return actionJson({
@@ -1875,10 +1893,18 @@ export async function POST(request) {
       }
     }
 
+    const trialManageBlocked = trialPanelManageNoRouteError(order, ipAddress);
+    if (trialManageBlocked) {
+      return actionJson({ success: false, error: trialManageBlocked }, 503, action);
+    }
+
     if (isSmartVps) {
       smartvpsApi = new SmartVpsAPI();
       console.log('[SERVICE-ACTION][POST] Using SmartVPS API');
-    } else if (hasHostycareService || order.provider === 'hostycare' || !order.provider) {
+    } else if (
+      (hasHostycareService || order.provider === 'hostycare' || !order.provider) &&
+      String(order.provider || '').toLowerCase() !== 'trialvps'
+    ) {
       hostycareApi = new HostycareAPI();
       console.log('[SERVICE-ACTION][POST] Using Hostycare API', hasHostycareService ? `(serviceId=${order.hostycareServiceId})` : '(no serviceId yet)');
 
@@ -2500,7 +2526,7 @@ export async function GET(request) {
 
     const resolved = await resolveOrderForAction(request, orderId);
     if (resolved.error) return resolved.error;
-    const order = resolved.order;
+    const order = await hydrateOrderForPanelActions(resolved.order);
 
     if (isExpiredServiceForCustomer(order)) {
       return actionJson(expiredPanelSyncPayload('sync'), 409, 'sync');
@@ -2653,7 +2679,8 @@ export async function GET(request) {
     // 1a-joy) Joy Services path — manage-only, IP-matched via machine_list.
     if (!order.hostycareServiceId && !order.netbayServiceId && order.provider !== 'netbay') {
       const { config: joyCfg, companyName: joyCompanyName } = await resolveCompanyJoyApi(order);
-      if (joyCfg) {
+      const primaryProviderJoyGet = await resolvePrimaryCompanyAutomationProvider(order);
+      if (joyCfg && primaryProviderJoyGet === 'joy') {
         if (!ipAddress) {
           return actionJson({
             success: false,
@@ -2716,8 +2743,8 @@ export async function GET(request) {
     //     VM id by looking up the order's IP in the reseller's order list,
     //     then drive a `metrics` call to extract the power state.
     if (!order.hostycareServiceId) {
-      const { accounts: virtPeek } = await resolveCompanyVirtualizorAccounts(order);
-      if (virtPeek.length === 0) {
+      const primaryResellerGet = await resolvePrimaryCompanyAutomationProvider(order);
+      if (primaryResellerGet === 'reseller-api') {
         const { config: resellerCfg, companyName: resellerCompanyName } = await resolveCompanyResellerApi(order);
         if (resellerCfg) {
           if (!ipAddress) {
@@ -2793,7 +2820,8 @@ export async function GET(request) {
     //    (covers pure oceanlinux orders AND mislabeled "company" orders).
     if (!order.hostycareServiceId) {
       const { accounts: companyVirtAccounts, companyName } = await resolveCompanyVirtualizorAccounts(order);
-      if (companyVirtAccounts.length > 0) {
+      const primaryVirtGet = await resolvePrimaryCompanyAutomationProvider(order);
+      if (companyVirtAccounts.length > 0 && primaryVirtGet === 'virtualizor') {
         if (!ipAddress) {
           return actionJson({
             success: false,
@@ -2894,6 +2922,11 @@ export async function GET(request) {
           error: err.message || 'Could not load server status',
         }, 500, 'sync');
       }
+    }
+
+    const trialGetBlocked = trialPanelManageNoRouteError(order, ipAddress);
+    if (trialGetBlocked) {
+      return actionJson({ success: false, error: trialGetBlocked }, 503, 'sync');
     }
 
     // 3) Nothing to query.

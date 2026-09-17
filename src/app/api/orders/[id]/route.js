@@ -20,6 +20,16 @@ export async function GET(request, { params }) {
 
         let order = resolved.order;
 
+        if (order?.trialVpsPackageId) {
+            try {
+                const { enrichTrialVpsPanelManageFromPackage } = require('@/lib/trialVpsManageEnrich');
+                const enriched = await enrichTrialVpsPanelManageFromPackage(order);
+                if (enriched.updated) order = enriched.order;
+            } catch (enrichErr) {
+                console.warn('[orders/:id] trial manage enrich failed:', enrichErr.message);
+            }
+        }
+
         // Return DB order immediately. Panel calls were blocking the manage page
         // for several seconds (felt like a hang).
         void (async () => {
@@ -52,6 +62,21 @@ export async function GET(request, { params }) {
                     matchedBy: joyMatch.matchedBy,
                 },
             };
+        }
+
+        if (!order.companyAutomation?.enabled && order.trialManageCompanyId) {
+            try {
+                const { buildCompanyAutomationMetaForOrder } = require('@/lib/companyAutomationMeta');
+                const company = await Company.findById(order.trialManageCompanyId)
+                    .select('virtualizors virtualizor resellerApi netbayApi kurohostApi joyApi hostdzireApi name')
+                    .lean();
+                const meta = buildCompanyAutomationMetaForOrder(company, order);
+                if (meta) {
+                    order = { ...order, companyAutomation: meta };
+                }
+            } catch (metaErr) {
+                console.warn('[orders/:id] trial company automation meta failed:', metaErr.message);
+            }
         }
 
         return NextResponse.json(sanitizeOrderForCustomer(order, { isAdmin: resolved.isAdmin }));

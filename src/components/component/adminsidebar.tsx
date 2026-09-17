@@ -121,6 +121,12 @@ const AdminSidebar = () => {
       badge: 'New'
     },
     {
+      href: '/admin/trialVps',
+      label: 'Trial VPS',
+      icon: ServerIcon,
+      badge: 'New'
+    },
+    {
       href: '/admin/manageOrders',
       label: 'Orders',
       icon: BarChart3,
