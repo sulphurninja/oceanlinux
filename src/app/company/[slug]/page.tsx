@@ -1289,13 +1289,7 @@ export default function CompanyDashboard() {
               const live = stock.liveStock;
               const usesLivePanel = live?.enabled && !live.manualOverride;
               const invFree = stock.inventoryAvailable ?? 0;
-              const manualUnitsSoldOut =
-                stock.fulfillmentMode === 'units' && !usesLivePanel && count <= 0;
-              const inStock = usesLivePanel
-                ? !!live?.zoneLive || invFree > 0
-                : manualUnitsSoldOut
-                  ? false
-                  : invFree > 0 || count > 0;
+              const inStock = usesLivePanel ? (!!live?.zoneLive || invFree > 0) : (invFree > 0 || count > 0);
               const hasPreconfig = stock.usesPreconfiguredInventory;
               const form = getInventoryForm(stock);
               const osOptions = osOptionsForStock(stock.serverType);
