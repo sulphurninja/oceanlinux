@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const TrialVpsPackage = require('@/models/trialVpsPackageModel');
 const Order = require('@/models/orderModel').default;
 const { trialVpsPlanCategoryLabel, inferTrialVpsPlanCategory } = require('@/lib/trialVpsCatalog');
@@ -15,19 +16,33 @@ function slotConnectionLine(slot, planCategory) {
 /**
  * Trial ended but slot still marked allocated — ready for admin to reclaim & resell.
  */
+const expiredListDismissedFilter = {
+  $or: [{ trialExpiredListDismissedAt: { $exists: false } }, { trialExpiredListDismissedAt: null }],
+};
+
 async function listExpiredTrialSlotsAwaitingRelease({ limit = 150 } = {}) {
   const now = new Date();
-  const orders = await Order.find({
-    trialVpsPackageId: { $exists: true, $nin: [null, ''] },
-    trialVpsSlotId: { $exists: true, $nin: [null, ''] },
-    expiryDate: { $ne: null, $lt: now },
-  })
+  // Native collection — hot-reloaded Order model may omit new schema paths (strictQuery / strict).
+  const orders = await Order.collection
+    .find({
+      trialVpsPackageId: { $exists: true, $nin: [null, ''] },
+      trialVpsSlotId: { $exists: true, $nin: [null, ''] },
+      expiryDate: { $ne: null, $lt: now },
+      ...expiredListDismissedFilter,
+    })
     .sort({ expiryDate: 1 })
     .limit(Math.min(500, Math.max(1, limit)))
-    .select(
-      '_id productName expiryDate trialVpsPackageId trialVpsSlotId customerEmail customerName ipAddress username'
-    )
-    .lean();
+    .project({
+      productName: 1,
+      expiryDate: 1,
+      trialVpsPackageId: 1,
+      trialVpsSlotId: 1,
+      customerEmail: 1,
+      customerName: 1,
+      ipAddress: 1,
+      username: 1,
+    })
+    .toArray();
 
   if (!orders.length) return [];
 
@@ -105,7 +120,34 @@ async function releaseTrialSlotForResell({ packageId, slotId, password }) {
   return { ok: true, packageId: String(pkg._id), slotId: String(slot._id) };
 }
 
+/**
+ * Hide expired trial rows from the admin Expired IPs list after copy (does not release slots).
+ */
+async function dismissExpiredTrialListForOrders(orderIds) {
+  const ids = [
+    ...new Set(
+      (orderIds || [])
+        .map((id) => String(id || '').trim())
+        .filter((id) => mongoose.Types.ObjectId.isValid(id))
+        .map((id) => new mongoose.Types.ObjectId(id))
+    ),
+  ];
+  if (!ids.length) return { updated: 0 };
+
+  const now = new Date();
+  const result = await Order.collection.updateMany(
+    { _id: { $in: ids } },
+    { $set: { trialExpiredListDismissedAt: now } }
+  );
+
+  return {
+    updated: result.modifiedCount || 0,
+    matched: result.matchedCount || 0,
+  };
+}
+
 module.exports = {
   listExpiredTrialSlotsAwaitingRelease,
   releaseTrialSlotForResell,
+  dismissExpiredTrialListForOrders,
 };

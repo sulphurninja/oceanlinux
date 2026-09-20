@@ -25,6 +25,8 @@ const orderSchema = new mongoose.Schema({
     trialVpsPlanCategory: { type: String },
     /** Trial with linked company or IP stock — panel start/stop via API. */
     trialVpsPanelManage: { type: Boolean, default: false },
+    /** Admin cleared this row from Trial VPS → Expired IPs list (after copy). */
+    trialExpiredListDismissedAt: { type: Date, default: null },
     trialManageCompanyId: { type: String, default: '' },
     /** Pre-configured company inventory row assigned on payment */
     inventoryItemId: { type: String },

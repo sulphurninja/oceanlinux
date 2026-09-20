@@ -97,6 +97,7 @@ interface TrialSlot {
 }
 
 interface ExpiredTrialRow {
+  orderId?: string;
   ipAddress: string;
   ipLine: string;
   planCategory?: string;
@@ -492,6 +493,7 @@ export default function AdminTrialVpsPage() {
 
   const [expiredItems, setExpiredItems] = useState<ExpiredTrialRow[]>([]);
   const [expiredLoading, setExpiredLoading] = useState(true);
+  const [expiredClearing, setExpiredClearing] = useState(false);
 
   const fetchPackages = async () => {
     setLoading(true);
@@ -606,6 +608,43 @@ export default function AdminTrialVpsPage() {
       toast.success(`${label} list copied`);
     } catch {
       toast.error('Copy failed — select text manually');
+    }
+  };
+
+  const clearExpiredList = async () => {
+    if (expiredTotalCount === 0) return;
+    const ok = await confirm({
+      title: 'Clear expired IP list?',
+      description:
+        `Remove all ${expiredTotalCount} IP(s) from this list after you copied them. Slots stay sold until you release them on the package — tomorrow’s new expiries will not mix with today’s batch.`,
+      confirmLabel: 'Clear list',
+      destructive: true,
+    });
+    if (!ok) return;
+    setExpiredClearing(true);
+    try {
+      const res = await fetch('/api/trial-vps/expired', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ action: 'clear', clearAll: true }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Clear failed');
+      setExpiredItems([]);
+      await fetchExpired();
+      if ((data.matched ?? data.cleared ?? 0) > 0 || (data.requested ?? 0) > 0) {
+        toast.success(
+          `Expired list cleared (${data.cleared ?? data.matched ?? 0} order${(data.cleared ?? 0) === 1 ? '' : 's'} hidden)`
+        );
+        setShowExpiredDialog(false);
+      } else {
+        toast.info('No expired rows to clear — refresh the page if the count looks wrong.');
+      }
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Clear failed');
+    } finally {
+      setExpiredClearing(false);
     }
   };
 
@@ -1029,8 +1068,16 @@ export default function AdminTrialVpsPage() {
               <AlertTriangle className="h-5 w-5 text-amber-600" />
               Expired trial IPs
             </DialogTitle>
-            <DialogDescription>Copy by type and paste into Add lines on a package.</DialogDescription>
+            <DialogDescription>
+              Copy by type, then clear so tomorrow’s new expiries do not mix with today’s batch.
+            </DialogDescription>
           </DialogHeader>
+          <div className="rounded-md border border-amber-200/80 bg-amber-50/80 dark:bg-amber-950/20 px-3 py-2 text-xs text-muted-foreground leading-relaxed">
+            <strong className="text-foreground font-medium">Clear kahan hota hai?</strong> Koi alag file nahi — har
+            refresh par list expired trial <strong>orders</strong> se banti hai. Clear = un orders par database flag{' '}
+            <code className="text-[10px]">trialExpiredListDismissedAt</code> (list se hide). Package ke andar VPS ab bhi{' '}
+            <strong>Sold</strong> rahenge jab tak wahan release / password change na karo.
+          </div>
           {expiredLoading ? (
             <div className="flex justify-center py-10">
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -1059,6 +1106,22 @@ export default function AdminTrialVpsPage() {
                 );
               })}
             </div>
+          )}
+          {!expiredLoading && expiredTotalCount > 0 && (
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button type="button" variant="outline" onClick={() => setShowExpiredDialog(false)}>
+                Close
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                onClick={clearExpiredList}
+                disabled={expiredClearing}
+              >
+                {expiredClearing ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Trash2 className="h-4 w-4 mr-2" />}
+                Clear list
+              </Button>
+            </DialogFooter>
           )}
         </DialogContent>
       </Dialog>
