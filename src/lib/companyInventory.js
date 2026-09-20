@@ -281,6 +281,11 @@ async function syncStockCountFromInventory(stockId) {
   const stock = await IPStock.findById(stockId);
   if (!stock || !usesPreconfiguredInventory(stock)) return stock;
 
+  await sealCompanyInventoryPoolWhenManualSoldOut(stock);
+  const fresh = await IPStock.findById(stockId);
+  if (!fresh) return stock;
+  Object.assign(stock, fresh.toObject?.() || fresh);
+
   let company = null;
   if (stock.company) {
     const Company = require('@/models/companyModel').default;
@@ -574,6 +579,112 @@ async function syncCompanyInventoryAfterOrderUpdate(order, fields = {}, options 
   return { synced: true, itemId: String(item._id), ipAddress: item.ipAddress };
 }
 
+const LIVE_ORDER_STATUSES = new Set(['active', 'confirmed', 'paid', 'completed']);
+
+/**
+ * Mark inventory rows Sold when a live order on the same stock already holds that IP
+ * (common when fulfillment used Hostheaven/Netbay API instead of saved inventory rows).
+ */
+/**
+ * Live-panel sales often never link saved inventory rows to OL orders. When the owner
+ * already set manual units to 0, leftover rows are display-only — not sellable pool.
+ */
+async function sealCompanyInventoryPoolWhenManualSoldOut(stock) {
+  if (!stock?.company || !Array.isArray(stock.inventoryItems) || !stock.inventoryItems.length) {
+    return { sealed: 0 };
+  }
+  if (!usesPreconfiguredInventory(stock)) return { sealed: 0 };
+  if (getCompanyFulfillmentMode(stock) !== 'units') return { sealed: 0 };
+  if (stock.availabilityManual !== true) return { sealed: 0 };
+  const manualUnits = Math.max(0, Number(stock.stockCount) || 0);
+  if (manualUnits > 0) return { sealed: 0 };
+
+  let sealed = 0;
+  const now = new Date();
+  for (const item of stock.inventoryItems) {
+    if (item.allocated) continue;
+    item.allocated = true;
+    if (!item.allocatedAt) item.allocatedAt = now;
+    sealed += 1;
+  }
+
+  if (sealed > 0) {
+    stock.markModified('inventoryItems');
+    await stock.save();
+    await syncStockCountFromInventory(stock._id);
+  }
+
+  return { sealed };
+}
+
+async function sealCompanyInventoryPoolWhenManualSoldOutForStocks(stockDocs) {
+  if (!Array.isArray(stockDocs) || !stockDocs.length) return { sealed: 0 };
+  let sealed = 0;
+  for (const stock of stockDocs) {
+    const res = await sealCompanyInventoryPoolWhenManualSoldOut(stock);
+    sealed += res.sealed || 0;
+  }
+  return { sealed };
+}
+
+async function reconcileCompanyInventoryAllocations(stock, orders = []) {
+  if (!stock?.inventoryItems?.length) return { marked: 0 };
+
+  await pruneCompanyInventoryItems(stock, { save: false });
+
+  const byIp = new Map();
+  for (const order of orders) {
+    if (!LIVE_ORDER_STATUSES.has(String(order.status || '').toLowerCase())) continue;
+    const ip = cleanInventoryIp(order.ipAddress);
+    if (!ip) continue;
+    const prev = byIp.get(ip);
+    if (!prev || order.status === 'active') byIp.set(ip, order);
+  }
+
+  let marked = 0;
+  for (const item of stock.inventoryItems) {
+    const ip = cleanInventoryIp(item.ipAddress);
+    const order = byIp.get(ip);
+    if (!order) continue;
+    const orderIdStr = String(order._id);
+    if (item.allocated && String(item.orderId || '') === orderIdStr) continue;
+    item.allocated = true;
+    item.orderId = order._id;
+    if (!item.allocatedAt) item.allocatedAt = new Date();
+    marked += 1;
+  }
+
+  if (marked > 0) {
+    stock.markModified('inventoryItems');
+    await stock.save();
+    await syncStockCountFromInventory(stock._id);
+  }
+
+  await sealCompanyInventoryPoolWhenManualSoldOut(stock);
+
+  return { marked };
+}
+
+async function reconcileCompanyInventoryAllocationsForStocks(stockDocs, orders = []) {
+  if (!Array.isArray(stockDocs) || !stockDocs.length) return { marked: 0 };
+  const ordersByStock = new Map();
+  for (const order of orders) {
+    const sid = String(order.ipStockId || '');
+    if (!sid) continue;
+    const bucket = ordersByStock.get(sid) || [];
+    bucket.push(order);
+    ordersByStock.set(sid, bucket);
+  }
+
+  let marked = 0;
+  for (const stock of stockDocs) {
+    const sid = String(stock._id);
+    const res = await reconcileCompanyInventoryAllocations(stock, ordersByStock.get(sid) || []);
+    marked += res.marked || 0;
+  }
+  return { marked };
+}
+
 /**
  * Heal inventory rows that still store an old IP while the linked order has a new IP.
  * Runs during sync-all so extend lists stop showing superseded panel IPs.
@@ -752,6 +863,10 @@ module.exports = {
   allocateCompanyInventoryForOrder,
   syncCompanyInventoryAfterOrderUpdate,
   reconcileCompanyInventoryOrderIps,
+  reconcileCompanyInventoryAllocations,
+  reconcileCompanyInventoryAllocationsForStocks,
+  sealCompanyInventoryPoolWhenManualSoldOut,
+  sealCompanyInventoryPoolWhenManualSoldOutForStocks,
   pruneCompanyInventoryItems,
   appendOrMergeInventoryItems,
   cleanInventoryIp,

@@ -17,6 +17,7 @@ import {
   normalizeOsForServerType,
   resolveUsernameForOs,
   reconcileCompanyInventoryOrderIps,
+  reconcileCompanyInventoryAllocationsForStocks,
   pruneCompanyInventoryItems,
   appendOrMergeInventoryItems,
   cleanInventoryIp,
@@ -169,7 +170,18 @@ export async function GET() {
       return NextResponse.json({ error: 'Company not found' }, { status: 404, headers: { 'X-Deploy-Version': COMPANY_FILTER_VERSION } });
     }
 
-    const stocks = await IPStock.find({ company: companyDoc._id }).sort({ name: 1 }).lean();
+    let stocks = await IPStock.find({ company: companyDoc._id }).sort({ name: 1 });
+    const stockIds = stocks.map((s) => s._id);
+    const companyOrders = stockIds.length
+      ? await Order.find({
+          ipStockId: { $in: stockIds },
+          status: { $in: ['active', 'confirmed', 'paid', 'completed'] },
+        })
+          .select('_id ipStockId ipAddress status inventoryItemId')
+          .lean()
+      : [];
+    await reconcileCompanyInventoryAllocationsForStocks(stocks, companyOrders);
+    stocks = await IPStock.find({ company: companyDoc._id }).sort({ name: 1 }).lean();
 
     const resellerCfg = getCompanyResellerApiConfig(companyDoc);
     const hasResellerSync = !!resellerCfg;
@@ -226,6 +238,7 @@ export async function PUT(request) {
           .lean()
       : [];
 
+    const allocationHeal = await reconcileCompanyInventoryAllocationsForStocks(stocks, orders);
     const inventoryIpHeal = await reconcileCompanyInventoryOrderIps(stocks, orders);
 
     const serializedStocks = stocks.map((s) => serializeStock(s.toObject?.() || s, companyDoc));
