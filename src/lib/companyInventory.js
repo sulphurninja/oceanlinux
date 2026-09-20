@@ -711,6 +711,25 @@ async function reconcileCompanyInventoryToManualUnits(stock, { portalFullAccess 
   return { sealed };
 }
 
+/**
+ * After portal add-inventory: Units (store stock) = available saved VPS rows.
+ * Example: add 4 in manage → stockCount 4. Cap reconcile then keeps those rows Available.
+ */
+async function syncManualUnitsAfterInventoryChange(stockId) {
+  const stock = await IPStock.findById(stockId);
+  if (!stock?.company) return stock;
+  const free = countUnallocatedInventory(stock);
+  stock.availabilityManual = true;
+  stock.stockCount = free;
+  stock.available = free > 0;
+  if (free > 0 && stock.autoHiddenFromStore) {
+    stock.hiddenFromStore = false;
+    stock.autoHiddenFromStore = false;
+  }
+  await stock.save();
+  return stock;
+}
+
 async function reconcileCompanyInventoryAllocationsForStocks(
   stockDocs,
   orders = [],
@@ -862,6 +881,12 @@ async function allocateCompanyInventoryForOrder(order) {
     }
 
     try {
+      const stockForUnits = await IPStock.findById(order.ipStockId);
+      if (stockForUnits && usesCompanyUnitFulfillment(stockForUnits)) {
+        stockForUnits.stockCount = Math.max(0, (Number(stockForUnits.stockCount) || 0) - 1);
+        stockForUnits.available = stockForUnits.stockCount > 0;
+        await stockForUnits.save();
+      }
       await syncStockCountFromInventory(order.ipStockId);
     } catch (syncErr) {
       // IP/credentials are already on the order — stock count sync must not fail delivery.
@@ -921,6 +946,7 @@ module.exports = {
   reconcileCompanyInventoryAllocations,
   reconcileCompanyInventoryAllocationsForStocks,
   reconcileCompanyInventoryToManualUnits,
+  syncManualUnitsAfterInventoryChange,
   pruneCompanyInventoryItems,
   appendOrMergeInventoryItems,
   cleanInventoryIp,

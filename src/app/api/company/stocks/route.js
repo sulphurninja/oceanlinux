@@ -19,6 +19,7 @@ import {
   reconcileCompanyInventoryOrderIps,
   reconcileCompanyInventoryAllocationsForStocks,
   reconcileCompanyInventoryToManualUnits,
+  syncManualUnitsAfterInventoryChange,
   pruneCompanyInventoryItems,
   appendOrMergeInventoryItems,
   cleanInventoryIp,
@@ -645,6 +646,9 @@ const ResellerApi = require('@/services/resellerApi');
     if (mergeResult.error) {
       return NextResponse.json({ error: mergeResult.error }, { status: 400 });
     }
+    if (inventoryFullAccess && (mergeResult.added > 0 || mergeResult.updated > 0)) {
+      await syncManualUnitsAfterInventoryChange(stockId);
+    }
     let synced = await syncStockCountFromInventory(stockId);
     if (inventoryFullAccess) {
       const freshStock = await IPStock.findById(stockId);
@@ -678,6 +682,9 @@ const ResellerApi = require('@/services/resellerApi');
       );
     }
     await stock.save();
+    if (inventoryFullAccess) {
+      await syncManualUnitsAfterInventoryChange(stockId);
+    }
     const synced = await syncStockCountFromInventory(stockId);
     return NextResponse.json({ success: true, removed, stock: serializeStock(synced.toObject?.() || synced, companyDoc) });
   }
