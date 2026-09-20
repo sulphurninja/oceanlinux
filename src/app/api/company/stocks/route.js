@@ -18,6 +18,7 @@ import {
   resolveUsernameForOs,
   reconcileCompanyInventoryOrderIps,
   reconcileCompanyInventoryAllocationsForStocks,
+  reconcileCompanyInventoryToManualUnits,
   pruneCompanyInventoryItems,
   appendOrMergeInventoryItems,
   cleanInventoryIp,
@@ -180,7 +181,10 @@ export async function GET() {
           .select('_id ipStockId ipAddress status inventoryItemId')
           .lean()
       : [];
-    await reconcileCompanyInventoryAllocationsForStocks(stocks, companyOrders);
+    const inventoryFullAccess = companyHasPortalInventoryFullAccess(companyDoc);
+    await reconcileCompanyInventoryAllocationsForStocks(stocks, companyOrders, {
+      capFreeToManualUnits: inventoryFullAccess,
+    });
     stocks = await IPStock.find({ company: companyDoc._id }).sort({ name: 1 }).lean();
 
     const resellerCfg = getCompanyResellerApiConfig(companyDoc);
@@ -216,7 +220,9 @@ export async function PUT(request) {
   const { stockId, stockCount, action, items, bulkLines, removeItemId, ipAddress, addToInventory, fulfillmentMode, zoneIds, stockIds, promo, promos } = body;
 
   if (action === 'syncAllResellerExpiries') {
-    const companyDoc = await Company.findById(company.id).select('resellerApi netbayApi name').lean();
+    const companyDoc = await Company.findById(company.id)
+      .select('resellerApi netbayApi name slug portalInventoryFullAccess')
+      .lean();
     if (!hasCompanyResellerApi(companyDoc)) {
       return NextResponse.json(
         { error: 'Hostheaven sync is not enabled. Ask admin to enable Reseller API on your company.' },
@@ -241,7 +247,9 @@ export async function PUT(request) {
     const liveOrders = orders.filter((o) =>
       ['active', 'confirmed', 'paid', 'completed'].includes(String(o.status || '').toLowerCase())
     );
-    await reconcileCompanyInventoryAllocationsForStocks(stocks, liveOrders);
+    await reconcileCompanyInventoryAllocationsForStocks(stocks, liveOrders, {
+      capFreeToManualUnits: companyHasPortalInventoryFullAccess(companyDoc),
+    });
     const inventoryIpHeal = await reconcileCompanyInventoryOrderIps(stocks, orders);
 
     const serializedStocks = stocks.map((s) => serializeStock(s.toObject?.() || s, companyDoc));
@@ -516,6 +524,10 @@ const ResellerApi = require('@/services/resellerApi');
     }
     stock.markModified('defaultConfigurations');
     await stock.save();
+    if (inventoryFullAccess) {
+      const freshUnits = await IPStock.findById(stockId);
+      if (freshUnits) await reconcileCompanyInventoryToManualUnits(freshUnits);
+    }
     const updated = await IPStock.findById(stockId).lean();
     return NextResponse.json({ success: true, stock: serializeStock(updated, companyDoc) });
   }
@@ -631,7 +643,14 @@ const ResellerApi = require('@/services/resellerApi');
     if (mergeResult.error) {
       return NextResponse.json({ error: mergeResult.error }, { status: 400 });
     }
-    const synced = await syncStockCountFromInventory(stockId);
+    let synced = await syncStockCountFromInventory(stockId);
+    if (inventoryFullAccess) {
+      const freshStock = await IPStock.findById(stockId);
+      if (freshStock) {
+        await reconcileCompanyInventoryToManualUnits(freshStock);
+        synced = await IPStock.findById(stockId);
+      }
+    }
     return NextResponse.json({
       success: true,
       added: mergeResult.added,

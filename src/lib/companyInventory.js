@@ -663,8 +663,49 @@ async function reconcileCompanyInventoryAllocations(stock, orders = []) {
   return { marked };
 }
 
-async function reconcileCompanyInventoryAllocationsForStocks(stockDocs, orders = []) {
-  if (!Array.isArray(stockDocs) || !stockDocs.length) return { marked: 0 };
+/**
+ * Manual Units = how many saved inventory rows may stay Available (Siteworx / full-access portals).
+ * Extra unallocated rows are legacy pool — mark Sold oldest-first so ghost Available does not return.
+ */
+async function reconcileCompanyInventoryToManualUnits(stock) {
+  if (!usesCompanyUnitFulfillment(stock)) return { sealed: 0 };
+  if (!Array.isArray(stock.inventoryItems) || !stock.inventoryItems.length) return { sealed: 0 };
+
+  const cap = Math.max(0, Number(stock.stockCount) || 0);
+  const freeItems = stock.inventoryItems.filter((item) => !item.allocated);
+  const excess = freeItems.length - cap;
+  if (excess <= 0) return { sealed: 0 };
+
+  freeItems.sort((a, b) => {
+    const ta = a.addedAt ? new Date(a.addedAt).getTime() : 0;
+    const tb = b.addedAt ? new Date(b.addedAt).getTime() : 0;
+    return ta - tb;
+  });
+
+  const now = new Date();
+  let sealed = 0;
+  for (let i = 0; i < excess; i += 1) {
+    const item = freeItems[i];
+    item.allocated = true;
+    if (!item.allocatedAt) item.allocatedAt = now;
+    sealed += 1;
+  }
+
+  if (sealed > 0) {
+    stock.markModified('inventoryItems');
+    await stock.save();
+    await syncStockCountFromInventory(stock._id);
+  }
+
+  return { sealed };
+}
+
+async function reconcileCompanyInventoryAllocationsForStocks(
+  stockDocs,
+  orders = [],
+  { capFreeToManualUnits = false } = {}
+) {
+  if (!Array.isArray(stockDocs) || !stockDocs.length) return { marked: 0, sealed: 0 };
   const ordersByStock = new Map();
   for (const order of orders) {
     const sid = String(order.ipStockId || '');
@@ -675,12 +716,17 @@ async function reconcileCompanyInventoryAllocationsForStocks(stockDocs, orders =
   }
 
   let marked = 0;
+  let sealed = 0;
   for (const stock of stockDocs) {
     const sid = String(stock._id);
     const res = await reconcileCompanyInventoryAllocations(stock, ordersByStock.get(sid) || []);
     marked += res.marked || 0;
+    if (capFreeToManualUnits) {
+      const capRes = await reconcileCompanyInventoryToManualUnits(stock);
+      sealed += capRes.sealed || 0;
+    }
   }
-  return { marked };
+  return { marked, sealed };
 }
 
 /**
@@ -863,6 +909,7 @@ module.exports = {
   reconcileCompanyInventoryOrderIps,
   reconcileCompanyInventoryAllocations,
   reconcileCompanyInventoryAllocationsForStocks,
+  reconcileCompanyInventoryToManualUnits,
   pruneCompanyInventoryItems,
   appendOrMergeInventoryItems,
   cleanInventoryIp,
