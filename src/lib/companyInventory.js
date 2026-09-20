@@ -633,6 +633,27 @@ async function reconcileCompanyInventoryAllocations(stock, orders = []) {
     marked += 1;
   }
 
+  const Order = require('@/models/orderModel').default;
+  const { ipAddressRegex } = require('@/lib/orderIpOwnership');
+  for (const item of stock.inventoryItems) {
+    if (item.allocated) continue;
+    const ip = cleanInventoryIp(item.ipAddress);
+    if (!ip) continue;
+    const regex = ipAddressRegex(ip);
+    if (!regex) continue;
+    const globalOrder = await Order.findOne({
+      ipAddress: regex,
+      status: { $in: [...LIVE_ORDER_STATUSES] },
+    })
+      .select('_id status')
+      .lean();
+    if (!globalOrder) continue;
+    item.allocated = true;
+    item.orderId = globalOrder._id;
+    if (!item.allocatedAt) item.allocatedAt = new Date();
+    marked += 1;
+  }
+
   if (marked > 0) {
     stock.markModified('inventoryItems');
     await stock.save();
