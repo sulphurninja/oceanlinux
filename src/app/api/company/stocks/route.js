@@ -526,7 +526,9 @@ const ResellerApi = require('@/services/resellerApi');
     await stock.save();
     if (inventoryFullAccess) {
       const freshUnits = await IPStock.findById(stockId);
-      if (freshUnits) await reconcileCompanyInventoryToManualUnits(freshUnits);
+      if (freshUnits) {
+        await reconcileCompanyInventoryToManualUnits(freshUnits, { portalFullAccess: true });
+      }
     }
     const updated = await IPStock.findById(stockId).lean();
     return NextResponse.json({ success: true, stock: serializeStock(updated, companyDoc) });
@@ -647,7 +649,7 @@ const ResellerApi = require('@/services/resellerApi');
     if (inventoryFullAccess) {
       const freshStock = await IPStock.findById(stockId);
       if (freshStock) {
-        await reconcileCompanyInventoryToManualUnits(freshStock);
+        await reconcileCompanyInventoryToManualUnits(freshStock, { portalFullAccess: true });
         synced = await IPStock.findById(stockId);
       }
     }

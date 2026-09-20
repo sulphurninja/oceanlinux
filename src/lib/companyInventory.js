@@ -667,11 +667,18 @@ async function reconcileCompanyInventoryAllocations(stock, orders = []) {
  * Manual Units = how many saved inventory rows may stay Available (Siteworx / full-access portals).
  * Extra unallocated rows are legacy pool — mark Sold oldest-first so ghost Available does not return.
  */
-async function reconcileCompanyInventoryToManualUnits(stock) {
-  if (!usesCompanyUnitFulfillment(stock)) return { sealed: 0 };
+async function reconcileCompanyInventoryToManualUnits(stock, { portalFullAccess = false } = {}) {
   if (!Array.isArray(stock.inventoryItems) || !stock.inventoryItems.length) return { sealed: 0 };
 
-  const cap = Math.max(0, Number(stock.stockCount) || 0);
+  let cap;
+  if (usesCompanyUnitFulfillment(stock)) {
+    cap = Math.max(0, Number(stock.stockCount) || 0);
+  } else if (portalFullAccess && usesPreconfiguredInventory(stock)) {
+    // Siteworx: without saved Units, legacy pool rows must not stay Available.
+    cap = 0;
+  } else {
+    return { sealed: 0 };
+  }
   const freeItems = stock.inventoryItems.filter((item) => !item.allocated);
   const excess = freeItems.length - cap;
   if (excess <= 0) return { sealed: 0 };
@@ -693,6 +700,10 @@ async function reconcileCompanyInventoryToManualUnits(stock) {
 
   if (sealed > 0) {
     stock.markModified('inventoryItems');
+    if (portalFullAccess && !usesCompanyUnitFulfillment(stock)) {
+      stock.stockCount = cap;
+      stock.available = cap > 0;
+    }
     await stock.save();
     await syncStockCountFromInventory(stock._id);
   }
@@ -722,7 +733,7 @@ async function reconcileCompanyInventoryAllocationsForStocks(
     const res = await reconcileCompanyInventoryAllocations(stock, ordersByStock.get(sid) || []);
     marked += res.marked || 0;
     if (capFreeToManualUnits) {
-      const capRes = await reconcileCompanyInventoryToManualUnits(stock);
+      const capRes = await reconcileCompanyInventoryToManualUnits(stock, { portalFullAccess: true });
       sealed += capRes.sealed || 0;
     }
   }
