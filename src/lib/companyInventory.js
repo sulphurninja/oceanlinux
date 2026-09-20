@@ -162,6 +162,9 @@ function shouldAssignCompanyInventoryForOrder(stock, company) {
 /** Store can sell if saved VPS rows exist OR live panel zone/wallet says in stock. */
 function isCompanyStockPurchasable(stock, company, quantity = 1) {
   if (!stock?.company) return false;
+  if (usesCompanyUnitFulfillment(stock)) {
+    return Math.max(0, Number(stock.stockCount) || 0) >= quantity;
+  }
   if (hasUnallocatedCompanyInventory(stock)) {
     return countUnallocatedInventory(stock) >= quantity;
   }
@@ -280,6 +283,32 @@ function parseInventoryBulkLines(text, serverType = 'Linux') {
 async function syncStockCountFromInventory(stockId) {
   const stock = await IPStock.findById(stockId);
   if (!stock || !usesPreconfiguredInventory(stock)) return stock;
+
+  if (usesCompanyUnitFulfillment(stock)) {
+    const manualUnits = Math.max(0, Number(stock.stockCount) || 0);
+    let company = null;
+    if (stock.company) {
+      const Company = require('@/models/companyModel').default;
+      company = await Company.findById(stock.company).select('resellerApi netbayApi kurohostApi').lean();
+    }
+    const {
+      usesResellerLiveStock,
+      usesNetbayLiveStock,
+      usesKurohostLiveStock,
+      stockHasResellerPanelPlans,
+      stockHasNetbayPlans,
+      stockHasKurohostPlans,
+    } = require('@/lib/ipStockAvailability');
+    const hybridLive =
+      (usesResellerLiveStock(stock, company) && stockHasResellerPanelPlans(stock)) ||
+      (usesNetbayLiveStock(stock, company) && stockHasNetbayPlans(stock)) ||
+      (usesKurohostLiveStock(stock, company) && stockHasKurohostPlans(stock));
+    stock.available =
+      manualUnits > 0 ||
+      (hybridLive ? readLivePanelVariantAvailable(stock, company) : false);
+    await stock.save();
+    return stock;
+  }
 
   let company = null;
   if (stock.company) {

@@ -101,6 +101,10 @@ export function usesStockCount(stock, company) {
 
 export function getIpStockRemaining(stock, company) {
   if (!stock) return 0;
+  // Company owner saved manual Units — do not replace with inventory row count or live panel.
+  if (usesCompanyUnitFulfillment(stock)) {
+    return Math.max(0, Number(stock.stockCount) || 0);
+  }
   // Saved VPS rows are the source of truth — never show stale stockCount when inventory is empty.
   if (usesPreconfiguredInventory(stock) && inventoryDrivesStoreAvailability(stock)) {
     return countUnallocatedInventory(stock);
