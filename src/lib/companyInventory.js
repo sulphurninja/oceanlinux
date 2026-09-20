@@ -574,6 +574,65 @@ async function syncCompanyInventoryAfterOrderUpdate(order, fields = {}, options 
   return { synced: true, itemId: String(item._id), ipAddress: item.ipAddress };
 }
 
+const LIVE_ORDER_STATUSES = new Set(['active', 'confirmed', 'paid', 'completed']);
+
+/** Mark saved rows Sold when a live order on this stock already uses that IP. */
+async function reconcileCompanyInventoryAllocations(stock, orders = []) {
+  if (!stock?.inventoryItems?.length) return { marked: 0 };
+
+  await pruneCompanyInventoryItems(stock, { save: false });
+
+  const byIp = new Map();
+  for (const order of orders) {
+    if (!LIVE_ORDER_STATUSES.has(String(order.status || '').toLowerCase())) continue;
+    const ip = cleanInventoryIp(order.ipAddress);
+    if (!ip) continue;
+    const prev = byIp.get(ip);
+    if (!prev || order.status === 'active') byIp.set(ip, order);
+  }
+
+  let marked = 0;
+  for (const item of stock.inventoryItems) {
+    const ip = cleanInventoryIp(item.ipAddress);
+    const order = byIp.get(ip);
+    if (!order) continue;
+    const orderIdStr = String(order._id);
+    if (item.allocated && String(item.orderId || '') === orderIdStr) continue;
+    item.allocated = true;
+    item.orderId = order._id;
+    if (!item.allocatedAt) item.allocatedAt = new Date();
+    marked += 1;
+  }
+
+  if (marked > 0) {
+    stock.markModified('inventoryItems');
+    await stock.save();
+    await syncStockCountFromInventory(stock._id);
+  }
+
+  return { marked };
+}
+
+async function reconcileCompanyInventoryAllocationsForStocks(stockDocs, orders = []) {
+  if (!Array.isArray(stockDocs) || !stockDocs.length) return { marked: 0 };
+  const ordersByStock = new Map();
+  for (const order of orders) {
+    const sid = String(order.ipStockId || '');
+    if (!sid) continue;
+    const bucket = ordersByStock.get(sid) || [];
+    bucket.push(order);
+    ordersByStock.set(sid, bucket);
+  }
+
+  let marked = 0;
+  for (const stock of stockDocs) {
+    const sid = String(stock._id);
+    const res = await reconcileCompanyInventoryAllocations(stock, ordersByStock.get(sid) || []);
+    marked += res.marked || 0;
+  }
+  return { marked };
+}
+
 /**
  * Heal inventory rows that still store an old IP while the linked order has a new IP.
  * Runs during sync-all so extend lists stop showing superseded panel IPs.
@@ -752,6 +811,8 @@ module.exports = {
   allocateCompanyInventoryForOrder,
   syncCompanyInventoryAfterOrderUpdate,
   reconcileCompanyInventoryOrderIps,
+  reconcileCompanyInventoryAllocations,
+  reconcileCompanyInventoryAllocationsForStocks,
   pruneCompanyInventoryItems,
   appendOrMergeInventoryItems,
   cleanInventoryIp,
