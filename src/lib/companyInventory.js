@@ -589,24 +589,15 @@ const LIVE_ORDER_STATUSES = new Set(['active', 'confirmed', 'paid', 'completed']
  * Live-panel sales often never link saved inventory rows to OL orders. When the owner
  * already set manual units to 0, leftover rows are display-only — not sellable pool.
  */
-function shouldSealCompanyInventoryPool(stock) {
-  if (!stock?.company || !usesPreconfiguredInventory(stock)) return false;
-  const units = Math.max(0, Number(stock.stockCount) || 0);
-  if (units > 0) return false;
-  if (countUnallocatedInventory(stock) === 0) return false;
-
-  const mode = getCompanyFulfillmentMode(stock);
-  if (stock.availabilityManual === true && mode === 'units') return true;
-  // Limited stock / live hybrid: counters say out of stock but saved rows still show Available.
-  if (stock.available === false) return true;
-  return mode === 'inventory';
-}
-
 async function sealCompanyInventoryPoolWhenManualSoldOut(stock) {
   if (!stock?.company || !Array.isArray(stock.inventoryItems) || !stock.inventoryItems.length) {
     return { sealed: 0 };
   }
-  if (!shouldSealCompanyInventoryPool(stock)) return { sealed: 0 };
+  if (!usesPreconfiguredInventory(stock)) return { sealed: 0 };
+  if (getCompanyFulfillmentMode(stock) !== 'units') return { sealed: 0 };
+  if (stock.availabilityManual !== true) return { sealed: 0 };
+  const manualUnits = Math.max(0, Number(stock.stockCount) || 0);
+  if (manualUnits > 0) return { sealed: 0 };
 
   let sealed = 0;
   const now = new Date();
