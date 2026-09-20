@@ -15,6 +15,8 @@ import {
   resolveUsernameForOs,
   syncCompanyInventoryAfterOrderUpdate,
 } from '@/lib/companyInventory';
+import Company from '@/models/companyModel';
+const { companyHasPortalInventoryFullAccess } = require('@/lib/companyResellerApi');
 import { toObjectIdString } from '@/lib/queryIds';
 
 export const dynamic = 'force-dynamic';
@@ -120,13 +122,22 @@ export async function PUT(request) {
   updateFields.status = 'active';
   updateFields.provisioningStatus = 'active';
 
+  const companyDoc = await Company.findById(company.id)
+    .select('slug portalInventoryFullAccess')
+    .lean();
+  const inventoryFullAccess = companyHasPortalInventoryFullAccess(companyDoc);
+
   try {
-    await syncCompanyInventoryAfterOrderUpdate(order, {
-      ipAddress: updateFields.ipAddress,
-      username: updateFields.username,
-      password: updateFields.password,
-      os: updateFields.os,
-    });
+    await syncCompanyInventoryAfterOrderUpdate(
+      order,
+      {
+        ipAddress: updateFields.ipAddress,
+        username: updateFields.username,
+        password: updateFields.password,
+        os: updateFields.os,
+      },
+      { inventoryFullAccess }
+    );
   } catch (err) {
     return NextResponse.json(
       { error: err.message || 'Failed to sync inventory with order update' },

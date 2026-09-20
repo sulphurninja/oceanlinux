@@ -30,6 +30,11 @@ import { format } from 'date-fns';
 import { Textarea } from '@/components/ui/textarea';
 import { PaymentDashboard } from '@/components/admin/PaymentDashboard';
 import { getAdminProviderDisplayNameFromOrder } from '@/lib/customerProviderDisplay';
+import {
+    ADMIN_PROVIDER_EDIT_OPTIONS,
+    buildAdminProviderFilterOptions,
+    type AdminProviderOption,
+} from '@/lib/adminProviderOptions';
 
 const ADMIN_ORDER_STATUSES = ['pending', 'confirmed', 'active'] as const;
 
@@ -308,7 +313,13 @@ const ManageOrders = () => {
         failed: 0,
         totalRevenue: 0,
     });
-    
+    const [adminCompanies, setAdminCompanies] = useState<Array<{ _id: string; name?: string; slug?: string }>>([]);
+
+    const providerFilterOptions = useMemo(
+        () => buildAdminProviderFilterOptions(adminCompanies),
+        [adminCompanies]
+    );
+
     // Pagination state
     const [pagination, setPagination] = useState<PaginationState>({
         page: 1,
@@ -320,6 +331,30 @@ const ManageOrders = () => {
         const timer = setTimeout(() => setDebouncedSearch(searchTerm.trim()), 350);
         return () => clearTimeout(timer);
     }, [searchTerm]);
+
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            try {
+                const res = await fetch('/api/admin/companies', { credentials: 'include', cache: 'no-store' });
+                if (!res.ok) return;
+                const data = await res.json();
+                if (cancelled || !Array.isArray(data)) return;
+                setAdminCompanies(
+                    data.map((c: { _id: string; name?: string; slug?: string }) => ({
+                        _id: String(c._id),
+                        name: c.name,
+                        slug: c.slug,
+                    }))
+                );
+            } catch {
+                /* optional — filter still has upstream providers */
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, []);
 
     useEffect(() => {
         const filterKey = JSON.stringify({
@@ -1299,18 +1334,19 @@ const ManageOrders = () => {
                                         <div className="space-y-2">
                                             <Label>Provider</Label>
                                             <Select
-                                                value={filters.provider}
+                                                value={filters.provider || 'All'}
                                                 onValueChange={(value) => setFilters(prev => ({ ...prev, provider: value === 'All' ? '' : value }))}
                                             >
                                                 <SelectTrigger>
                                                     <SelectValue placeholder="All providers" />
                                                 </SelectTrigger>
-                                                <SelectContent>
+                                                <SelectContent className="max-h-[min(420px,70vh)]">
                                                     <SelectItem value="All">All providers</SelectItem>
-                                                    <SelectItem value="hostycare">Hostycare</SelectItem>
-                                                    <SelectItem value="smartvps">SmartVPS</SelectItem>
-                                                    <SelectItem value="advps">ADVPS</SelectItem>
-                                                    <SelectItem value="reseller-api">Hostheaven</SelectItem>
+                                                    {providerFilterOptions.map((opt: AdminProviderOption) => (
+                                                        <SelectItem key={opt.value} value={opt.value}>
+                                                            {opt.group === 'Companies' ? `🏢 ${opt.label}` : opt.label}
+                                                        </SelectItem>
+                                                    ))}
                                                 </SelectContent>
                                             </Select>
                                         </div>
@@ -1644,8 +1680,8 @@ const ManageOrders = () => {
                                                 <TableCell>{getStatusBadge(order.status)}</TableCell>
                                                 <TableCell>{getProvisioningStatusBadge(order)}</TableCell>
                                                 <TableCell>
-                                                    <Badge variant="secondary" className="text-xs capitalize">
-                                                        {order.provider || 'hostycare'}
+                                                    <Badge variant="secondary" className="text-xs">
+                                                        {getAdminProviderDisplayNameFromOrder(order)}
                                                     </Badge>
                                                 </TableCell>
                                                 <TableCell>{renderOrderSelectionTag(order)}</TableCell>
@@ -1987,11 +2023,12 @@ const ManageOrders = () => {
                                             <SelectTrigger>
                                                 <SelectValue />
                                             </SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="hostycare">Hostycare</SelectItem>
-                                                <SelectItem value="smartvps">SmartVPS</SelectItem>
-                                                <SelectItem value="advps">ADVPS</SelectItem>
-                                                <SelectItem value="slotip">Slot IP</SelectItem>
+                                            <SelectContent className="max-h-[min(420px,70vh)]">
+                                                {ADMIN_PROVIDER_EDIT_OPTIONS.map((opt) => (
+                                                    <SelectItem key={opt.value} value={opt.value}>
+                                                        {opt.label}
+                                                    </SelectItem>
+                                                ))}
                                             </SelectContent>
                                         </Select>
                                     </div>

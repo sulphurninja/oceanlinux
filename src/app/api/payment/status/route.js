@@ -386,10 +386,12 @@ export async function POST(request) {
         !order.ipAddress &&
         !order.inventoryItemId &&
         !order.slotIpId &&
+        !order.trialVpsSlotId &&
         order.provisioningStatus !== 'completed' &&
         order.provisioningStatus !== 'in_progress' &&
         order.provisioningStatus !== 'provisioning' &&
-        !order.slotIpPackageId;
+        !order.slotIpPackageId &&
+        !order.trialVpsPackageId;
 
       if (needsProvisioning) {
         console.log(`[PAYMENT-STATUS] Order ${order._id} confirmed but not provisioned, triggering now...`);

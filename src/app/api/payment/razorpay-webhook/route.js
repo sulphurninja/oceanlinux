@@ -125,9 +125,42 @@ export async function POST(request) {
     });
   }
 
+  // Renewal Razorpay orders use receipt RENEWAL_* (not Order.clientTxnId).
+  if (receipt && String(receipt).startsWith('RENEWAL_')) {
+    const { handleRenewalWebhook } = await import('@/app/api/payment/webhook/route.js');
+    const adaptedPayment = {
+      order: { order_id: receipt },
+      payment: {
+        cf_payment_id: paymentId,
+        payment_amount: Number(paymentEntity?.amount ?? orderEntity?.amount ?? 0) / 100,
+        payment_status: 'SUCCESS',
+        payment_method: paymentEntity?.method || 'razorpay',
+      },
+    };
+    return handleRenewalWebhook(receipt, adaptedPayment, Date.now());
+  }
+
   let order =
     (receipt ? await Order.findOne({ clientTxnId: receipt }) : null) ||
     (razorpayOrderId ? await Order.findOne({ gatewayOrderId: razorpayOrderId }) : null);
+
+  if (!order && razorpayOrderId) {
+    const renewalOrder = await Order.findOne({ 'pendingRenewal.gatewayOrderId': razorpayOrderId });
+    const renewalTxnId = renewalOrder?.pendingRenewal?.renewalTxnId;
+    if (renewalTxnId) {
+      const { handleRenewalWebhook } = await import('@/app/api/payment/webhook/route.js');
+      const adaptedPayment = {
+        order: { order_id: renewalTxnId },
+        payment: {
+          cf_payment_id: paymentId,
+          payment_amount: Number(paymentEntity?.amount ?? orderEntity?.amount ?? 0) / 100,
+          payment_status: 'SUCCESS',
+          payment_method: paymentEntity?.method || 'razorpay',
+        },
+      };
+      return handleRenewalWebhook(renewalTxnId, adaptedPayment, Date.now());
+    }
+  }
 
   if (!order) {
     const logger = PaymentOrderLogger.forTxn(receipt || razorpayOrderId, 'webhook');

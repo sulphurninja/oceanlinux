@@ -1,6 +1,5 @@
 const Order = require('@/models/orderModel').default;
-const SlotIPPackage = require('@/models/slotIpPackageModel');
-const IPStock = require('@/models/ipStockModel');
+const { releaseOrderHeldResources } = require('@/lib/orderInventoryRelease');
 
 const DEFAULT_STALE_DAYS = 30;
 
@@ -35,32 +34,6 @@ function buildStaleSlotIpQuery(olderThanDays = DEFAULT_STALE_DAYS) {
       { slotIpPackageId: { $exists: true, $nin: [null, ''] } },
     ],
   };
-}
-
-async function releaseOrderHeldResources(order) {
-  const released = { slotIp: false, inventory: false };
-
-  // Slot IPs must never return to the sell pool — credentials rotate upstream after sale.
-  if (order?.slotIpPackageId && order?.slotIpId) {
-    released.slotIp = false;
-  }
-
-  if (order?.ipStockId && order?.inventoryItemId) {
-    const stock = await IPStock.findById(order.ipStockId);
-    if (stock) {
-      const item = stock.inventoryItems.id(order.inventoryItemId);
-      if (item && item.allocated && String(item.orderId || '') === String(order._id)) {
-        item.allocated = false;
-        item.orderId = null;
-        item.allocatedAt = null;
-        stock.markModified('inventoryItems');
-        await stock.save();
-        released.inventory = true;
-      }
-    }
-  }
-
-  return released;
 }
 
 /**

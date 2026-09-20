@@ -121,6 +121,9 @@ function pickAllowedUpdates(body) {
   if (typeof body?.name === 'string') out.name = body.name;
   if (typeof body?.password === 'string') out.password = body.password;
   if (typeof body?.isActive === 'boolean') out.isActive = body.isActive;
+  if (typeof body?.portalInventoryFullAccess === 'boolean') {
+    out.portalInventoryFullAccess = body.portalInventoryFullAccess;
+  }
 
   if (Array.isArray(body?.virtualizors)) {
     out.virtualizors = body.virtualizors.map(normalizeVirtualizorEntry);

@@ -5,12 +5,18 @@ import {
   Plus,
   Loader2,
   Trash2,
-  Clock,
-  Pencil,
   RefreshCw,
   Package,
   AlertTriangle,
   Copy,
+  ChevronDown,
+  Eye,
+  EyeOff,
+  Edit,
+  CheckCircle,
+  Server,
+  Info,
+  Clock,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -19,7 +25,6 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
-import { Progress } from '@/components/ui/progress';
 import { Separator } from '@/components/ui/separator';
 import {
   Dialog,
@@ -46,15 +51,6 @@ import {
   normalizeTrialVpsPlanCategory,
 } from '@/lib/trialVpsCatalog';
 import { cn } from '@/lib/utils';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-
 const MEMORY_GB_PRESETS = [2, 4, 6, 8, 12, 16, 32];
 
 type ExpiredPlanCategory = 'linux' | 'windows' | 'premium_proxy';
@@ -141,6 +137,7 @@ interface TrialPackage {
   totalCount: number;
   availableCount: number;
   allocatedCount: number;
+  createdAt?: string;
 }
 
 function companyHasPanelApi(c: CompanyAdminOption): boolean {
@@ -213,22 +210,6 @@ function memorySelectOptions(current: string) {
   return base;
 }
 
-function StockBar({ sold, left, total }: { sold: number; left: number; total: number }) {
-  const pct = total > 0 ? Math.round((sold / total) * 100) : 0;
-  return (
-    <div className="space-y-1.5 min-w-[160px] sm:min-w-[200px] flex-1">
-      <p className="text-[11px] text-muted-foreground tabular-nums">
-        Added <strong className="text-foreground">{total}</strong>
-        {' · '}
-        Sold <strong className="text-emerald-600 dark:text-emerald-400">{sold}</strong>
-        {' · '}
-        Free <strong className="text-violet-600 dark:text-violet-400">{left}</strong>
-      </p>
-      <Progress value={pct} className="h-1.5" />
-    </div>
-  );
-}
-
 /** Full bulk line as stored (proxy: ip:port:user:pass · VPS: ip:user:pass). */
 function slotInventoryLine(slot: TrialSlot, planCategory?: string): string {
   const ip = String(slot.ipAddress || '').trim().split(':')[0].trim();
@@ -242,195 +223,6 @@ function slotInventoryLine(slot: TrialSlot, planCategory?: string): string {
   const user = String(slot.username || 'root').trim();
   const pass = String(slot.password || '').trim();
   return `${ip}:${user}:${pass}`;
-}
-
-type InventoryFilter = 'all' | 'sold' | 'free';
-
-function PackageInventoryPanel({
-  slots,
-  planCategory,
-  compact,
-  packageId,
-  onSlotsChange,
-  onConfirmRemove,
-}: {
-  slots: TrialSlot[];
-  planCategory?: string;
-  compact?: boolean;
-  packageId?: string;
-  onSlotsChange?: (slots: TrialSlot[]) => void;
-  onConfirmRemove?: (line: string) => Promise<boolean>;
-}) {
-  const [filter, setFilter] = useState<InventoryFilter>('all');
-  const [removingId, setRemovingId] = useState<string | null>(null);
-  const cat = normalizeTrialVpsPlanCategory(planCategory);
-  const lineLabel = cat === 'premium_proxy' ? 'Proxy' : 'VPS';
-
-  const sold = slots.filter((s) => s.allocated);
-  const free = slots.filter((s) => !s.allocated);
-  const total = slots.length;
-
-  const filtered = useMemo(() => {
-    const sorted = [...slots];
-    if (filter === 'sold') return sorted.filter((s) => s.allocated);
-    if (filter === 'free') return sorted.filter((s) => !s.allocated);
-    return sorted;
-  }, [slots, filter]);
-
-  const copyText = async (text: string, message: string) => {
-    if (!text.trim()) {
-      toast.message('Nothing to copy');
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(text);
-      toast.success(message);
-    } catch {
-      toast.error('Copy failed');
-    }
-  };
-
-  const copyAllFiltered = () => {
-    const lines = filtered.map((s) => slotInventoryLine(s, planCategory));
-    void copyText(lines.join('\n'), `Copied ${lines.length} line(s)`);
-  };
-
-  const removeFreeSlot = async (slot: TrialSlot) => {
-    if (!packageId || slot.allocated) return;
-    const line = slotInventoryLine(slot, planCategory);
-    if (onConfirmRemove) {
-      const ok = await onConfirmRemove(line);
-      if (!ok) return;
-    }
-    setRemovingId(slot._id);
-    try {
-      const res = await fetch(`/api/trial-vps/${packageId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ removeSlotIds: [slot._id] }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Remove failed');
-      const nextSlots = Array.isArray(data.package?.slots) ? data.package.slots : [];
-      onSlotsChange?.(nextSlots);
-      toast.success('Free line removed');
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : 'Remove failed');
-    } finally {
-      setRemovingId(null);
-    }
-  };
-
-  if (total === 0) {
-    return (
-      <p className="text-sm text-muted-foreground py-2">No rows yet — paste bulk lines when creating or editing.</p>
-    );
-  }
-
-  return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap gap-2">
-          <Badge variant="outline" className="tabular-nums">
-            Added {total}
-          </Badge>
-          <Badge variant="secondary" className="tabular-nums bg-emerald-500/10 text-emerald-800 dark:text-emerald-300 border-emerald-500/30">
-            Sold {sold.length}
-          </Badge>
-          <Badge variant="outline" className="tabular-nums border-violet-500/40 text-violet-700 dark:text-violet-300">
-            Free {free.length}
-          </Badge>
-        </div>
-        <div className="flex items-center gap-1">
-          {(['all', 'sold', 'free'] as const).map((key) => (
-            <Button
-              key={key}
-              type="button"
-              variant={filter === key ? 'secondary' : 'ghost'}
-              size="sm"
-              className="h-7 text-xs capitalize"
-              onClick={() => setFilter(key)}
-            >
-              {key === 'all' ? 'All' : key === 'sold' ? 'Sold' : 'Free'}
-            </Button>
-          ))}
-          <Button type="button" variant="outline" size="sm" className="h-7 text-xs gap-1 ml-1" onClick={copyAllFiltered}>
-            <Copy className="h-3 w-3" />
-            Copy list
-          </Button>
-        </div>
-      </div>
-
-      <div className={cn('rounded-md border', compact ? 'max-h-[min(280px,50vh)]' : 'max-h-[min(420px,65vh)]', 'overflow-auto')}>
-        <Table>
-          <TableHeader>
-            <TableRow className="hover:bg-transparent">
-              <TableHead className="w-10 text-xs">#</TableHead>
-              <TableHead className="text-xs">{lineLabel}</TableHead>
-              <TableHead className="w-20 text-xs">Status</TableHead>
-              <TableHead className="w-16 text-xs text-right">Action</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filtered.map((slot, idx) => {
-              const line = slotInventoryLine(slot, planCategory);
-              return (
-                <TableRow key={slot._id}>
-                  <TableCell className="text-xs text-muted-foreground tabular-nums py-2">{idx + 1}</TableCell>
-                  <TableCell className="font-mono text-[11px] sm:text-xs py-2 break-all">{line}</TableCell>
-                  <TableCell className="py-2">
-                    <Badge
-                      variant={slot.allocated ? 'secondary' : 'outline'}
-                      className={cn(
-                        'text-[10px] h-5',
-                        slot.allocated
-                          ? 'bg-emerald-500/10 text-emerald-800 dark:text-emerald-300'
-                          : 'border-violet-500/40 text-violet-700 dark:text-violet-300'
-                      )}
-                    >
-                      {slot.allocated ? 'Sold' : 'Free'}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="py-2 text-right">
-                    <div className="flex items-center justify-end gap-0.5">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 w-7 p-0"
-                        title="Copy line"
-                        onClick={() => void copyText(line, 'Line copied')}
-                      >
-                        <Copy className="h-3.5 w-3.5" />
-                      </Button>
-                      {!slot.allocated && packageId ? (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 w-7 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
-                          title="Delete free line"
-                          disabled={removingId === slot._id}
-                          onClick={() => void removeFreeSlot(slot)}
-                        >
-                          {removingId === slot._id ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          ) : (
-                            <Trash2 className="h-3.5 w-3.5" />
-                          )}
-                        </Button>
-                      ) : null}
-                    </div>
-                  </TableCell>
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
-      </div>
-    </div>
-  );
 }
 
 type PackageFormProps = {
@@ -667,8 +459,13 @@ export default function AdminTrialVpsPage() {
   const { confirm, ConfirmDialog } = useConfirmDialog();
   const [packages, setPackages] = useState<TrialPackage[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showCreate, setShowCreate] = useState(false);
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [showAddVpsDialog, setShowAddVpsDialog] = useState(false);
+  const [showEditDialog, setShowEditDialog] = useState(false);
+  const [showExpiredDialog, setShowExpiredDialog] = useState(false);
+  const [selectedPackage, setSelectedPackage] = useState<TrialPackage | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [addVpsBulk, setAddVpsBulk] = useState('');
 
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -683,7 +480,6 @@ export default function AdminTrialVpsPage() {
   const [allCompanies, setAllCompanies] = useState<CompanyAdminOption[]>([]);
   const [allIpStocks, setAllIpStocks] = useState<IpStockManageOption[]>([]);
 
-  const [showEdit, setShowEdit] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [editDescription, setEditDescription] = useState('');
@@ -692,11 +488,7 @@ export default function AdminTrialVpsPage() {
   const [editPlanCategory, setEditPlanCategory] = useState('linux');
   const [editMemoryGb, setEditMemoryGb] = useState('4');
   const [editAvailable, setEditAvailable] = useState(true);
-  const [editAddVps, setEditAddVps] = useState('');
   const [editManageApiSource, setEditManageApiSource] = useState('');
-  const [editSlots, setEditSlots] = useState<TrialSlot[]>([]);
-  const [inventoryPackage, setInventoryPackage] = useState<TrialPackage | null>(null);
-  const [inventoryLoading, setInventoryLoading] = useState(false);
 
   const [expiredItems, setExpiredItems] = useState<ExpiredTrialRow[]>([]);
   const [expiredLoading, setExpiredLoading] = useState(true);
@@ -732,34 +524,6 @@ export default function AdminTrialVpsPage() {
   const refreshAll = async () => {
     await Promise.all([fetchPackages(), fetchExpired()]);
   };
-
-  const applyPackageSlotsFromApi = (pkgId: string, slots: TrialSlot[]) => {
-    setPackages((prev) =>
-      prev.map((p) =>
-        p._id === pkgId
-          ? {
-              ...p,
-              slots,
-              totalCount: slots.length,
-              availableCount: slots.filter((s) => !s.allocated).length,
-              allocatedCount: slots.filter((s) => s.allocated).length,
-            }
-          : p
-      )
-    );
-    setInventoryPackage((prev) => (prev && prev._id === pkgId ? { ...prev, slots } : prev));
-    if (editingId === pkgId) setEditSlots(slots);
-  };
-
-  const confirmRemoveFreeLine = async (line: string) =>
-    confirm({
-      title: 'Remove free line?',
-      description: (
-        <span className="font-mono text-xs break-all block mt-1">{line}</span>
-      ),
-      confirmLabel: 'Delete',
-      destructive: true,
-    });
 
   useEffect(() => {
     refreshAll();
@@ -859,7 +623,68 @@ export default function AdminTrialVpsPage() {
 
   const openCreateDialog = () => {
     resetCreateForm();
-    setShowCreate(true);
+    setShowCreateDialog(true);
+  };
+
+  const openAddVps = (pkg: TrialPackage) => {
+    setSelectedPackage(pkg);
+    setAddVpsBulk('');
+    setShowAddVpsDialog(true);
+  };
+
+  const handleAddVps = async () => {
+    if (!selectedPackage || !addVpsBulk.trim()) return;
+    setSubmitting(true);
+    try {
+      const res = await fetch(`/api/trial-vps/${selectedPackage._id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ addVps: addVpsBulk }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to add lines');
+      toast.success(`Added ${data.added ?? 0} line(s) to ${selectedPackage.name}`);
+      setShowAddVpsDialog(false);
+      setAddVpsBulk('');
+      fetchPackages();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to add lines');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleDeleteSlot = async (pkg: TrialPackage, slot: TrialSlot) => {
+    if (slot.allocated) return;
+    const line = slotInventoryLine(slot, pkg.planCategory);
+    const ok = await confirm({
+      title: 'Delete line',
+      description: (
+        <>
+          Remove this free line from <strong>{pkg.name}</strong>?
+          <br />
+          <span className="font-mono text-xs break-all">{line}</span>
+        </>
+      ),
+      confirmLabel: 'Delete',
+      destructive: true,
+    });
+    if (!ok) return;
+    try {
+      const res = await fetch(`/api/trial-vps/${pkg._id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ removeSlotIds: [slot._id] }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Delete failed');
+      toast.success('Line removed');
+      fetchPackages();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Delete failed');
+    }
   };
 
   const handleCreate = async () => {
@@ -889,7 +714,7 @@ export default function AdminTrialVpsPage() {
       if (!res.ok) throw new Error(data.error || 'Create failed');
       const savedType = trialVpsPlanCategoryLabel(data.package?.planCategory ?? planCategory);
       toast.success(`Created · ${data.parsed} VPS · ${savedType}`);
-      setShowCreate(false);
+      setShowCreateDialog(false);
       resetCreateForm();
       refreshAll();
     } catch (e: unknown) {
@@ -899,24 +724,8 @@ export default function AdminTrialVpsPage() {
     }
   };
 
-  const openInventory = async (pkg: TrialPackage) => {
-    setInventoryPackage(pkg);
-    if (Array.isArray(pkg.slots) && pkg.slots.length > 0) return;
-    setInventoryLoading(true);
-    try {
-      const res = await fetch(`/api/trial-vps/${pkg._id}`, { credentials: 'include' });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to load inventory');
-      setInventoryPackage({ ...pkg, ...data, slots: data.slots || [] });
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : 'Failed to load inventory');
-      setInventoryPackage(null);
-    } finally {
-      setInventoryLoading(false);
-    }
-  };
-
-  const openEdit = async (pkg: TrialPackage) => {
+  const openEdit = (pkg: TrialPackage) => {
+    setSelectedPackage(pkg);
     setEditingId(pkg._id);
     setEditName(pkg.name);
     setEditDescription(pkg.description || '');
@@ -925,32 +734,9 @@ export default function AdminTrialVpsPage() {
     setEditPlanCategory(pkg.planCategory || 'linux');
     setEditMemoryGb(String(pkg.memoryGb ?? 4));
     setEditAvailable(pkg.available !== false);
-    setEditAddVps('');
     setEditManageApiSource(packManageApiSource(pkg));
-    let slots = Array.isArray(pkg.slots) ? pkg.slots : [];
-    if (!slots.length) {
-      try {
-        const res = await fetch(`/api/trial-vps/${pkg._id}`, { credentials: 'include' });
-        const data = await res.json();
-        if (res.ok && Array.isArray(data.slots)) slots = data.slots;
-      } catch {
-        /* keep empty */
-      }
-    }
-    setEditSlots(slots);
-    setShowEdit(true);
+    setShowEditDialog(true);
   };
-
-  const editStock = useMemo(
-    () =>
-      packageStock({
-        totalCount: editSlots.length,
-        availableCount: editSlots.filter((s) => !s.allocated).length,
-        allocatedCount: editSlots.filter((s) => s.allocated).length,
-        slots: editSlots,
-      }),
-    [editSlots]
-  );
 
   const handleEdit = async () => {
     if (!editingId || !editName.trim()) {
@@ -971,8 +757,6 @@ export default function AdminTrialVpsPage() {
         available: editAvailable,
         ...parseManageApiSource(editManageApiSource),
       };
-      if (editAddVps.trim()) body.addVps = editAddVps;
-
       const res = await fetch(`/api/trial-vps/${editingId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -981,8 +765,8 @@ export default function AdminTrialVpsPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Update failed');
-      toast.success(data.added ? `Saved · +${data.added} VPS` : 'Saved');
-      setShowEdit(false);
+      toast.success('Package updated');
+      setShowEditDialog(false);
       setEditingId(null);
       refreshAll();
     } catch (e: unknown) {
@@ -1010,243 +794,108 @@ export default function AdminTrialVpsPage() {
     refreshAll();
   };
 
-  const expiredPanel = (
-    <Card className="shadow-sm border-amber-500/30 lg:sticky lg:top-4">
-      <CardContent className="p-4 space-y-4">
-        <div className="flex items-start gap-2 min-w-0">
-          <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
-          <div className="min-w-0">
-            <h2 className="text-sm font-semibold leading-tight">Expired trial IPs</h2>
-            <p className="text-[11px] text-muted-foreground mt-1 leading-relaxed">
-              Type ke hisaab se alag list — Linux / Windows VPS / Proxy. Copy karke bulk me dubara add karo.
-            </p>
-          </div>
-        </div>
-        {expiredLoading ? (
-          <div className="flex items-center justify-center py-8 text-muted-foreground gap-2 text-sm">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Loading…
-          </div>
-        ) : expiredTotalCount === 0 ? (
-          <p className="text-xs text-muted-foreground text-center py-6 rounded-md border border-dashed">
-            Abhi koi expired IP nahi.
-          </p>
-        ) : (
-          <div className="space-y-4 max-h-[min(75vh,560px)] overflow-y-auto pr-0.5">
-            {EXPIRED_IP_GROUPS.map((group) => {
-              const text = expiredListsByType[group.key];
-              const count = text ? text.split('\n').filter(Boolean).length : 0;
-              if (!count) return null;
-              return (
-                <div key={group.key} className="space-y-1.5">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-xs font-semibold">
-                      {group.label}
-                      <span className="font-normal text-muted-foreground ml-1.5 tabular-nums">({count})</span>
-                    </p>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 px-2 text-[11px] gap-1 shrink-0"
-                      onClick={() => copyExpiredList(text, group.label)}
-                    >
-                      <Copy className="h-3 w-3" />
-                      Copy
-                    </Button>
-                  </div>
-                  <Textarea
-                    readOnly
-                    value={text}
-                    className="font-mono text-[11px] min-h-[72px] max-h-36 resize-y leading-relaxed"
-                    onFocus={(e) => e.target.select()}
-                  />
-                  {group.key === 'premium_proxy' ? (
-                    <p className="text-[10px] text-muted-foreground">Format: ip:port (proxy bulk upload jaisa)</p>
-                  ) : null}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  );
+  const bulkLineCount = bulkVps.split('\n').filter((l) => l.trim()).length;
+  const addVpsLineCount = addVpsBulk.split('\n').filter((l) => l.trim()).length;
 
   return (
-    <div className="p-3 sm:p-4 md:p-8 max-w-6xl mx-auto w-full min-w-0 overflow-x-hidden">
+    <div className="p-4 sm:p-6 lg:p-8 space-y-6">
       <ConfirmDialog />
 
-      <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_min(340px,100%)] lg:gap-6 lg:items-start space-y-6 lg:space-y-0">
-        <div className="space-y-6 min-w-0">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div className="flex items-start gap-3">
-          <div className="h-11 w-11 rounded-xl bg-violet-500/15 flex items-center justify-center shrink-0">
-            <Clock className="h-5 w-5 text-violet-600 dark:text-violet-400" />
-          </div>
-          <div>
-            <h1 className="text-xl font-semibold tracking-tight">Trial VPS</h1>
-            <p className="text-sm text-muted-foreground mt-0.5 max-w-md">
-              Upload VPS, set trial days. No renew, no panel controls for customer.
-            </p>
-          </div>
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold">Trial VPS Packages</h1>
+          <p className="text-muted-foreground text-sm mt-1">
+            Bulk upload trial VPS / proxy lines — same flow as Slot IP packages.
+          </p>
         </div>
-        <div className="flex gap-2 shrink-0">
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={() => refreshAll()}
-            disabled={loading || expiredLoading}
-            title="Refresh"
-          >
-            <RefreshCw className={cn('h-4 w-4', (loading || expiredLoading) && 'animate-spin')} />
+        <div className="flex gap-2 flex-wrap">
+          <Button variant="outline" size="sm" onClick={() => setShowExpiredDialog(true)} disabled={expiredLoading}>
+            <Clock className="h-4 w-4 mr-2" />
+            Expired IPs{expiredTotalCount > 0 ? ` (${expiredTotalCount})` : ''}
           </Button>
-          <Button onClick={openCreateDialog} className="gap-2 flex-1 sm:flex-none">
-            <Plus className="h-4 w-4" />
-            <span className="truncate">New package</span>
+          <Button variant="outline" size="sm" onClick={() => refreshAll()} disabled={loading || expiredLoading}>
+            <RefreshCw className={cn('h-4 w-4 mr-2', (loading || expiredLoading) && 'animate-spin')} />
+            Refresh
+          </Button>
+          <Button onClick={openCreateDialog}>
+            <Plus className="h-4 w-4 mr-2" />
+            Create Package
           </Button>
         </div>
       </div>
 
-      <div className="lg:hidden">{expiredPanel}</div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <Card>
+          <CardContent className="p-4">
+            <div className="text-2xl font-bold">{packages.length}</div>
+            <p className="text-xs text-muted-foreground">Total Packages</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="text-2xl font-bold text-green-600">{totals.left}</div>
+            <p className="text-xs text-muted-foreground">Available Lines</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="text-2xl font-bold text-blue-600">{totals.sold}</div>
+            <p className="text-xs text-muted-foreground">Sold</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="text-2xl font-bold">{totals.total}</div>
+            <p className="text-xs text-muted-foreground">Total Lines</p>
+          </CardContent>
+        </Card>
+      </div>
 
-      {/* Summary */}
-      {!loading && packages.length > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-          {[
-            { label: 'Packages', value: totals.packages },
-            { label: 'Total VPS', value: totals.total },
-            { label: 'Sold', value: totals.sold, accent: 'text-emerald-600' },
-            { label: 'Remaining', value: totals.left, accent: 'text-violet-600' },
-            {
-              label: 'Expired IPs',
-              value: expiredLoading ? '…' : expiredTotalCount,
-              accent: expiredTotalCount ? 'text-amber-600' : undefined,
-            },
-          ].map((stat) => (
-            <Card key={stat.label} className="shadow-none">
-              <CardContent className="p-4">
-                <p className="text-xs text-muted-foreground">{stat.label}</p>
-                <p className={cn('text-2xl font-semibold tabular-nums mt-0.5', stat.accent)}>{stat.value}</p>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
-
-      {/* List */}
       {loading ? (
-        <div className="flex flex-col items-center justify-center py-16 gap-3 text-muted-foreground">
-          <Loader2 className="h-7 w-7 animate-spin" />
-          <span className="text-sm">Loading…</span>
+        <div className="flex items-center justify-center py-16">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
       ) : packages.length === 0 ? (
-        <Card className="border-dashed shadow-none">
-          <CardContent className="py-14 text-center">
-            <Package className="h-10 w-10 mx-auto text-muted-foreground/50 mb-3" />
-            <p className="font-medium">No trial packages yet</p>
-            <p className="text-sm text-muted-foreground mt-1 mb-4">Create one and paste VPS credentials in bulk.</p>
-            <Button onClick={openCreateDialog} size="sm" className="gap-2">
-              <Plus className="h-4 w-4" />
-              Create first package
+        <Card className="text-center py-16">
+          <CardContent>
+            <Package className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+            <h3 className="text-lg font-semibold mb-2">No Trial VPS Packages</h3>
+            <p className="text-sm text-muted-foreground mb-4">Create your first trial package to get started.</p>
+            <Button onClick={openCreateDialog}>
+              <Plus className="h-4 w-4 mr-2" />
+              Create Package
             </Button>
           </CardContent>
         </Card>
       ) : (
-        <ul className="space-y-3">
-          {packages.map((pkg) => {
-            const stock = packageStock(pkg);
-            return (
-              <li key={pkg._id}>
-                <Card className="shadow-sm overflow-hidden">
-                  <CardContent className="p-0">
-                    <div className="flex flex-col sm:flex-row sm:items-center gap-4 p-4">
-                      <div className="flex-1 min-w-0 space-y-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <h2 className="font-semibold truncate">{pkg.name}</h2>
-                          {!pkg.available && (
-                            <Badge variant="secondary" className="text-[10px] h-5">
-                              Hidden
-                            </Badge>
-                          )}
-                          {(pkg.manageCompanyId || pkg.manageIpStockId) && pkg.planCategory !== 'premium_proxy' && (
-                            <Badge variant="outline" className="text-[10px] h-5 border-emerald-500/40 text-emerald-700 dark:text-emerald-400">
-                              Manage:{' '}
-                              {pkg.manageCompanyId
-                                ? companyLabelById(String(pkg.manageCompanyId), allCompanies) || 'Company'
-                                : isTrialManageAdvpsStock(
-                                      allIpStocks.find((s) => s._id === String(pkg.manageIpStockId)) || {
-                                        _id: '',
-                                        name: '',
-                                      }
-                                    )
-                                  ? `ADVPS · ${ipStockLabelById(String(pkg.manageIpStockId), allIpStocks) || 'plan'}`
-                                  : `SmartVPS · ${ipStockLabelById(String(pkg.manageIpStockId), allIpStocks) || 'plan'}`}
-                            </Badge>
-                          )}
-                        </div>
-                        <p className="text-xs text-muted-foreground">
-                          {trialVpsPlanCategoryLabel(pkg.planCategory)}
-                          {trialVpsPlanUsesMemoryTier(pkg.planCategory)
-                            ? ` · ${formatTrialVpsMemoryGb(pkg.memoryGb ?? 4, pkg.planCategory)}`
-                            : ''}{' '}
-                          ·{' '}
-                          {pkg.trialDays}d trial · ₹{pkg.price}
-                        </p>
-                        {pkg.description ? (
-                          <p className="text-xs text-muted-foreground/80 truncate">{pkg.description}</p>
-                        ) : null}
-                      </div>
-                      <StockBar sold={stock.sold} left={stock.left} total={stock.total} />
-                      <div className="flex sm:flex-col gap-1 shrink-0">
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          className="flex-1 sm:flex-none gap-1.5"
-                          onClick={() => void openInventory(pkg)}
-                        >
-                          <Package className="h-3.5 w-3.5" />
-                          List ({stock.total})
-                        </Button>
-                        <Button variant="outline" size="sm" className="flex-1 sm:flex-none gap-1.5" onClick={() => void openEdit(pkg)}>
-                          <Pencil className="h-3.5 w-3.5" />
-                          Edit
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="flex-1 sm:flex-none text-destructive hover:text-destructive gap-1.5"
-                          onClick={() => handleDelete(pkg)}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                          Delete
-                        </Button>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              </li>
-            );
-          })}
-        </ul>
-      )}
+        <div className="space-y-4">
+          {packages.map((pkg) => (
+            <TrialPackageRow
+              key={pkg._id}
+              pkg={pkg}
+              allCompanies={allCompanies}
+              allIpStocks={allIpStocks}
+              onEdit={openEdit}
+              onDelete={handleDelete}
+              onAddVps={openAddVps}
+              onDeleteSlot={handleDeleteSlot}
+            />
+          ))}
         </div>
+      )}
 
-        <aside className="hidden lg:block min-w-0">{expiredPanel}</aside>
-      </div>
-
-      {/* Create */}
-      <Dialog open={showCreate} onOpenChange={setShowCreate}>
-        {showCreate ? (
+      <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
         <DialogContent
-          className="max-w-md max-h-[90vh] overflow-y-auto sm:max-w-lg"
+          className="max-w-2xl max-h-[90vh] overflow-y-auto"
           onPointerDownOutside={preventDialogDismissForSelectPortal}
           onInteractOutside={preventDialogDismissForSelectPortal}
         >
           <DialogHeader>
-            <DialogTitle>New trial package</DialogTitle>
-            <DialogDescription>Customers get credentials for the trial period only.</DialogDescription>
+            <DialogTitle className="flex items-center gap-2">
+              <Package className="h-5 w-5" />
+              Create Trial VPS Package
+            </DialogTitle>
+            <DialogDescription>Upload bulk lines and set trial days / price.</DialogDescription>
           </DialogHeader>
           <PackageFormFields
             formId="trial-vps-create"
@@ -1273,87 +922,71 @@ export default function AdminTrialVpsPage() {
             setBulkLines={setBulkVps}
             showBulk
           />
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button variant="outline" onClick={() => setShowCreate(false)}>
+          {bulkLineCount > 0 && (
+            <p className="text-xs text-muted-foreground flex items-center gap-1 -mt-2">
+              <Info className="h-3 w-3" />
+              {bulkLineCount} {bulkLineCount === 1 ? 'line' : 'lines'} in bulk paste
+            </p>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowCreateDialog(false)}>
               Cancel
             </Button>
             <Button onClick={handleCreate} disabled={submitting}>
-              {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Create package'}
+              {submitting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              Create Package
             </Button>
           </DialogFooter>
         </DialogContent>
-        ) : null}
       </Dialog>
 
-      {/* Inventory only */}
-      <Dialog
-        open={!!inventoryPackage}
-        onOpenChange={(open) => {
-          if (!open) setInventoryPackage(null);
-        }}
-      >
-        {inventoryPackage ? (
-          <DialogContent className="max-w-3xl max-h-[92vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>{inventoryPackage.name}</DialogTitle>
-              <DialogDescription>
-                {trialVpsPlanCategoryLabel(inventoryPackage.planCategory)} — each row shows the full bulk line; Sold = customer already got it.
-              </DialogDescription>
-            </DialogHeader>
-            {inventoryLoading ? (
-              <div className="flex justify-center py-8">
-                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-              </div>
-            ) : (
-              <PackageInventoryPanel
-                slots={inventoryPackage.slots || []}
-                planCategory={inventoryPackage.planCategory}
-                packageId={inventoryPackage._id}
-                onConfirmRemove={confirmRemoveFreeLine}
-                onSlotsChange={(slots) => applyPackageSlotsFromApi(inventoryPackage._id, slots)}
-              />
-            )}
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setInventoryPackage(null)}>
-                Close
-              </Button>
-              <Button variant="secondary" onClick={() => void openEdit(inventoryPackage)}>
-                Edit package
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        ) : null}
+      <Dialog open={showAddVpsDialog} onOpenChange={setShowAddVpsDialog}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Add lines — {selectedPackage?.name}</DialogTitle>
+            <DialogDescription>Paste one VPS/proxy line per row (same format as create).</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label>Bulk lines</Label>
+              <Badge variant="outline" className="text-xs">
+                {addVpsLineCount} {addVpsLineCount === 1 ? 'line' : 'lines'}
+              </Badge>
+            </div>
+            <Textarea
+              value={addVpsBulk}
+              onChange={(e) => setAddVpsBulk(e.target.value)}
+              rows={10}
+              className="font-mono text-sm"
+              placeholder={
+                normalizeTrialVpsPlanCategory(selectedPackage?.planCategory) === 'premium_proxy'
+                  ? '203.0.113.10:8000:user:pass'
+                  : '162.4.12.207:Administrator:YourPass'
+              }
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowAddVpsDialog(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleAddVps} disabled={submitting || !addVpsBulk.trim()}>
+              {submitting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              Add lines
+            </Button>
+          </DialogFooter>
+        </DialogContent>
       </Dialog>
 
-      {/* Edit */}
-      <Dialog open={showEdit} onOpenChange={setShowEdit}>
-        {showEdit ? (
+      <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
         <DialogContent
-          className="max-w-md max-h-[90vh] overflow-y-auto sm:max-w-3xl"
+          className="max-w-2xl max-h-[90vh] overflow-y-auto"
           onPointerDownOutside={preventDialogDismissForSelectPortal}
           onInteractOutside={preventDialogDismissForSelectPortal}
         >
           <DialogHeader>
             <DialogTitle>Edit package</DialogTitle>
-            <DialogDescription>
-              Added {editStock.total} · Sold {editStock.sold} · Free {editStock.left}
-            </DialogDescription>
+            <DialogDescription>Name, trial days, price, manage API — inventory via Add lines / Show on the row.</DialogDescription>
           </DialogHeader>
-
-          <section className="space-y-2 rounded-lg border bg-muted/20 p-3">
-            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">VPS inventory</p>
-            <PackageInventoryPanel
-              slots={editSlots}
-              planCategory={editPlanCategory}
-              compact
-              packageId={editingId || undefined}
-              onConfirmRemove={confirmRemoveFreeLine}
-              onSlotsChange={(slots) => {
-                if (editingId) applyPackageSlotsFromApi(editingId, slots);
-              }}
-            />
-          </section>
-
           <PackageFormFields
             formId="trial-vps-edit"
             name={editName}
@@ -1375,24 +1008,247 @@ export default function AdminTrialVpsPage() {
             companyOptions={companyOptions}
             smartvpsStockOptions={smartvpsStockOptions}
             advpsStockOptions={advpsStockOptions}
-            bulkLines={editAddVps}
-            setBulkLines={setEditAddVps}
-            bulkLabel="Add more VPS (optional)"
-            showBulk
+            showBulk={false}
           />
-
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button variant="outline" onClick={() => setShowEdit(false)}>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowEditDialog(false)}>
               Cancel
             </Button>
             <Button onClick={handleEdit} disabled={submitting}>
-              {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save'}
+              {submitting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              Save Changes
             </Button>
           </DialogFooter>
         </DialogContent>
-        ) : null}
       </Dialog>
 
+      <Dialog open={showExpiredDialog} onOpenChange={setShowExpiredDialog}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-amber-600" />
+              Expired trial IPs
+            </DialogTitle>
+            <DialogDescription>Copy by type and paste into Add lines on a package.</DialogDescription>
+          </DialogHeader>
+          {expiredLoading ? (
+            <div className="flex justify-center py-10">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : expiredTotalCount === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-8">No expired trial IPs right now.</p>
+          ) : (
+            <div className="space-y-4">
+              {EXPIRED_IP_GROUPS.map((group) => {
+                const text = expiredListsByType[group.key];
+                const count = text ? text.split('\n').filter(Boolean).length : 0;
+                if (!count) return null;
+                return (
+                  <div key={group.key} className="space-y-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-medium">
+                        {group.label} <span className="text-muted-foreground font-normal">({count})</span>
+                      </p>
+                      <Button type="button" variant="outline" size="sm" onClick={() => copyExpiredList(text, group.label)}>
+                        <Copy className="h-3.5 w-3.5 mr-1" />
+                        Copy
+                      </Button>
+                    </div>
+                    <Textarea readOnly value={text} className="font-mono text-xs min-h-[80px]" onFocus={(e) => e.target.select()} />
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
+  );
+}
+
+function TrialPackageRow({
+  pkg,
+  allCompanies,
+  allIpStocks,
+  onEdit,
+  onDelete,
+  onAddVps,
+  onDeleteSlot,
+}: {
+  pkg: TrialPackage;
+  allCompanies: CompanyAdminOption[];
+  allIpStocks: IpStockManageOption[];
+  onEdit: (pkg: TrialPackage) => void;
+  onDelete: (pkg: TrialPackage) => void;
+  onAddVps: (pkg: TrialPackage) => void;
+  onDeleteSlot: (pkg: TrialPackage, slot: TrialSlot) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [showLines, setShowLines] = useState(false);
+  const slots = pkg.slots || [];
+  const lineLabel =
+    normalizeTrialVpsPlanCategory(pkg.planCategory) === 'premium_proxy' ? 'Proxy' : 'VPS';
+
+  return (
+    <Card className="overflow-hidden">
+      <div
+        className="flex items-center gap-4 p-4 cursor-pointer hover:bg-muted/30 transition-colors"
+        onClick={() => setExpanded(!expanded)}
+      >
+        <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+          <Package className="h-5 w-5 text-primary" />
+        </div>
+
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h3 className="font-semibold">{pkg.name}</h3>
+            {pkg.available ? (
+              <Badge className="bg-green-100 text-green-700 border-green-200 text-xs">Active</Badge>
+            ) : (
+              <Badge variant="secondary" className="text-xs">
+                Hidden
+              </Badge>
+            )}
+            <Badge variant="outline" className="text-xs">
+              {trialVpsPlanCategoryLabel(pkg.planCategory)}
+              {trialVpsPlanUsesMemoryTier(pkg.planCategory)
+                ? ` · ${formatTrialVpsMemoryGb(pkg.memoryGb ?? 4, pkg.planCategory)}`
+                : ''}
+            </Badge>
+          </div>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            {pkg.trialDays} day trial · {pkg.description || 'No description'}
+          </p>
+        </div>
+
+        <div className="flex items-center gap-6 flex-shrink-0">
+          <div className="text-right">
+            <p className="font-bold text-lg">₹{pkg.price}</p>
+            <p className="text-[10px] text-muted-foreground">per trial</p>
+          </div>
+
+          <div className="flex gap-4 text-center">
+            <div>
+              <p className="text-lg font-bold text-green-600">{pkg.availableCount ?? 0}</p>
+              <p className="text-[10px] text-muted-foreground">Available</p>
+            </div>
+            <div>
+              <p className="text-lg font-bold text-blue-600">{pkg.allocatedCount ?? 0}</p>
+              <p className="text-[10px] text-muted-foreground">Sold</p>
+            </div>
+            <div>
+              <p className="text-lg font-bold">{pkg.totalCount ?? slots.length}</p>
+              <p className="text-[10px] text-muted-foreground">Total</p>
+            </div>
+          </div>
+
+          <ChevronDown className={cn('h-5 w-5 text-muted-foreground transition-transform', expanded && 'rotate-180')} />
+        </div>
+      </div>
+
+      {expanded && (
+        <div className="border-t border-border p-4 bg-muted/10 space-y-4">
+          {(pkg.manageCompanyId || pkg.manageIpStockId) && pkg.planCategory !== 'premium_proxy' && (
+            <p className="text-xs text-muted-foreground">
+              Manage API:{' '}
+              {pkg.manageCompanyId
+                ? companyLabelById(String(pkg.manageCompanyId), allCompanies) || 'Company'
+                : isTrialManageAdvpsStock(
+                      allIpStocks.find((s) => s._id === String(pkg.manageIpStockId)) || { _id: '', name: '' }
+                    )
+                  ? `ADVPS · ${ipStockLabelById(String(pkg.manageIpStockId), allIpStocks) || 'plan'}`
+                  : `SmartVPS · ${ipStockLabelById(String(pkg.manageIpStockId), allIpStocks) || 'plan'}`}
+            </p>
+          )}
+
+          <div className="flex gap-2 flex-wrap">
+            <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); onAddVps(pkg); }}>
+              <Plus className="h-4 w-4 mr-1" />
+              Add lines
+            </Button>
+            <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); onEdit(pkg); }}>
+              <Edit className="h-4 w-4 mr-1" />
+              Edit
+            </Button>
+            <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); setShowLines(!showLines); }}>
+              {showLines ? <EyeOff className="h-4 w-4 mr-1" /> : <Eye className="h-4 w-4 mr-1" />}
+              {showLines ? 'Hide' : 'Show'} {lineLabel}s
+            </Button>
+            <Button variant="destructive" size="sm" onClick={(e) => { e.stopPropagation(); onDelete(pkg); }}>
+              <Trash2 className="h-4 w-4 mr-1" />
+              Delete
+            </Button>
+          </div>
+
+          {showLines && (
+            <div className="max-h-64 overflow-y-auto rounded-lg border border-border">
+              {slots.length === 0 ? (
+                <p className="text-sm text-muted-foreground p-4 text-center">No lines yet — use Add lines.</p>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/50 sticky top-0">
+                    <tr>
+                      <th className="text-left p-2 font-medium">#</th>
+                      <th className="text-left p-2 font-medium">{lineLabel}</th>
+                      <th className="text-left p-2 font-medium">Status</th>
+                      <th className="text-right p-2 font-medium w-16">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {slots.map((slot, i) => (
+                      <tr key={slot._id} className="border-t border-border">
+                        <td className="p-2 text-muted-foreground">{i + 1}</td>
+                        <td className="p-2 font-mono text-xs break-all">{slotInventoryLine(slot, pkg.planCategory)}</td>
+                        <td className="p-2">
+                          {slot.allocated ? (
+                            <Badge variant="secondary" className="text-xs gap-1">
+                              <CheckCircle className="h-3 w-3" />
+                              Sold
+                            </Badge>
+                          ) : (
+                            <Badge className="bg-green-100 text-green-700 border-green-200 text-xs gap-1">
+                              <Server className="h-3 w-3" />
+                              Available
+                            </Badge>
+                          )}
+                        </td>
+                        <td className="p-2 text-right">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+                            disabled={slot.allocated}
+                            title={slot.allocated ? 'Cannot delete sold line' : 'Delete line'}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onDeleteSlot(pkg, slot);
+                            }}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
+
+          {pkg.createdAt && (
+            <div className="text-xs text-muted-foreground">
+              Created:{' '}
+              {new Date(pkg.createdAt).toLocaleDateString('en-US', {
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+              })}
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
   );
 }

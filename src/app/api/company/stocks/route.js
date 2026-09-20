@@ -17,6 +17,9 @@ import {
   normalizeOsForServerType,
   resolveUsernameForOs,
   reconcileCompanyInventoryOrderIps,
+  pruneCompanyInventoryItems,
+  appendOrMergeInventoryItems,
+  cleanInventoryIp,
   looksLikeIpv4,
 } from '@/lib/companyInventory';
 import Order from '@/models/orderModel';
@@ -25,7 +28,13 @@ import { buildCompanyValidityMismatchReport } from '@/lib/companyValidityMismatc
 
 export const maxDuration = 120;
 
-const { hasCompanyResellerApi, getCompanyResellerApiConfig, companyUsesResellerLiveStock, companyHasPortalBulkPromos } = require('@/lib/companyResellerApi');
+const {
+  hasCompanyResellerApi,
+  getCompanyResellerApiConfig,
+  companyUsesResellerLiveStock,
+  companyHasPortalBulkPromos,
+  companyHasPortalInventoryFullAccess,
+} = require('@/lib/companyResellerApi');
 const {
   applyResellerZonesToStockDocument,
   serializeResellerZonesForClient,
@@ -154,7 +163,7 @@ export async function GET() {
   try {
     await connectDB();
     const companyDoc = await Company.findOne({ slug: company.slug, isActive: true })
-      .select('resellerApi netbayApi name slug')
+      .select('resellerApi netbayApi name slug portalInventoryFullAccess')
       .lean();
     if (!companyDoc) {
       return NextResponse.json({ error: 'Company not found' }, { status: 404, headers: { 'X-Deploy-Version': COMPANY_FILTER_VERSION } });
@@ -172,6 +181,7 @@ export async function GET() {
       hasResellerSync,
       hasPortalBulkPromos,
       hasLiveStockSync,
+      hasInventoryFullAccess: companyHasPortalInventoryFullAccess(companyDoc),
       resellerLabel: resellerCfg?.label || 'Hostheaven',
     }, {
       headers: { 'X-Deploy-Version': COMPANY_FILTER_VERSION },
@@ -383,7 +393,10 @@ const ResellerApi = require('@/services/resellerApi');
   const stock = await IPStock.findOne({ _id: stockId, company: company.id });
   if (!stock) return NextResponse.json({ error: 'Stock not found or not yours' }, { status: 404 });
 
-  const companyDoc = await Company.findById(company.id).select('netbayApi resellerApi name').lean();
+  const companyDoc = await Company.findById(company.id)
+    .select('netbayApi resellerApi name slug portalInventoryFullAccess')
+    .lean();
+  const inventoryFullAccess = companyHasPortalInventoryFullAccess(companyDoc);
 
   if (action === 'setResellerZones') {
     if (!hasCompanyResellerApi(companyDoc)) {
@@ -507,35 +520,31 @@ const ResellerApi = require('@/services/resellerApi');
     }
 
     if (addToInventory) {
-      const duplicate = (stock.inventoryItems || []).some(
-        (item) => String(item.ipAddress).split(':')[0].trim() === credentials.ipAddress
+      const mergeResult = await appendOrMergeInventoryItems(
+        stock,
+        [
+          {
+            ipAddress: credentials.ipAddress,
+            username: credentials.username,
+            password: credentials.password,
+            os: credentials.os,
+            expiryDate: credentials.expiryDate || null,
+            addedAt: new Date(),
+            allocated: false,
+            orderId: null,
+            allocatedAt: null,
+          },
+        ],
+        { mergeDuplicateIp: inventoryFullAccess }
       );
-      if (duplicate) {
-        return NextResponse.json(
-          { error: `IP ${credentials.ipAddress} is already in this stock` },
-          { status: 400 }
-        );
+      if (mergeResult.error) {
+        return NextResponse.json({ error: mergeResult.error }, { status: 400 });
       }
-
-      stock.inventoryItems = [
-        ...(stock.inventoryItems || []),
-        {
-          ipAddress: credentials.ipAddress,
-          username: credentials.username,
-          password: credentials.password,
-          os: credentials.os,
-          expiryDate: credentials.expiryDate || null,
-          addedAt: new Date(),
-          allocated: false,
-          orderId: null,
-          allocatedAt: null,
-        },
-      ];
-      await stock.save();
       const synced = await syncStockCountFromInventory(stockId);
       return NextResponse.json({
         success: true,
-        added: true,
+        added: mergeResult.added > 0,
+        merged: mergeResult.updated > 0,
         credentials: {
           ipAddress: credentials.ipAddress,
           username: credentials.username,
@@ -600,12 +609,17 @@ const ResellerApi = require('@/services/resellerApi');
       return NextResponse.json({ error: 'Provide items[] or bulkLines' }, { status: 400 });
     }
 
-    stock.inventoryItems = [...(stock.inventoryItems || []), ...newItems];
-    await stock.save();
+    const mergeResult = await appendOrMergeInventoryItems(stock, newItems, {
+      mergeDuplicateIp: inventoryFullAccess,
+    });
+    if (mergeResult.error) {
+      return NextResponse.json({ error: mergeResult.error }, { status: 400 });
+    }
     const synced = await syncStockCountFromInventory(stockId);
     return NextResponse.json({
       success: true,
-      added: newItems.length,
+      added: mergeResult.added,
+      merged: mergeResult.updated,
       stock: serializeStock(synced.toObject?.() || synced, companyDoc),
     });
   }
@@ -615,12 +629,16 @@ const ResellerApi = require('@/services/resellerApi');
       return NextResponse.json({ error: 'removeItemId is required' }, { status: 400 });
     }
     const before = stock.inventoryItems?.length || 0;
-    stock.inventoryItems = (stock.inventoryItems || []).filter(
-      (item) => String(item._id) !== String(removeItemId) || item.allocated
-    );
+    stock.inventoryItems = (stock.inventoryItems || []).filter((item) => {
+      if (String(item._id) !== String(removeItemId)) return true;
+      return !inventoryFullAccess && item.allocated;
+    });
     const removed = before - (stock.inventoryItems?.length || 0);
     if (removed === 0) {
-      return NextResponse.json({ error: 'Item not found or already sold' }, { status: 400 });
+      return NextResponse.json(
+        { error: inventoryFullAccess ? 'Item not found' : 'Item not found or already sold' },
+        { status: 400 }
+      );
     }
     await stock.save();
     const synced = await syncStockCountFromInventory(stockId);

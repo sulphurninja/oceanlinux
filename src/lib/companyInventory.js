@@ -334,11 +334,155 @@ function looksLikeIpv4(value) {
   });
 }
 
+async function loadOrdersForInventoryItems(stock) {
+  const ids = [];
+  for (const item of stock.inventoryItems || []) {
+    if (item.orderId) ids.push(item.orderId);
+  }
+  if (!ids.length) return new Map();
+  const rows = await Order.find({ _id: { $in: ids } })
+    .select('_id status inventoryItemId ipAddress')
+    .lean();
+  return new Map(rows.map((o) => [String(o._id), o]));
+}
+
+function scoreInventoryRow(item, order, { preferOrderId } = {}) {
+  if (!order) {
+    const allocMs = item.allocatedAt ? new Date(item.allocatedAt).getTime() : 0;
+    return -1000 + (Number.isFinite(allocMs) ? allocMs / 1e15 : 0);
+  }
+  let score = 0;
+  const orderIdStr = String(order._id);
+  if (preferOrderId && orderIdStr === String(preferOrderId)) score += 1000;
+  if (order.inventoryItemId && String(order.inventoryItemId) === String(item._id)) score += 500;
+  if (order.status === 'active') score += 100;
+  if (item.allocated) score += 10;
+  const allocMs = item.allocatedAt ? new Date(item.allocatedAt).getTime() : 0;
+  if (Number.isFinite(allocMs)) score += allocMs / 1e15;
+  return score;
+}
+
+/**
+ * Drop orphan rows (deleted orders) and duplicate IPs — keeps the row tied to the live order.
+ */
+async function pruneCompanyInventoryItems(stock, { preferOrderId, save = true } = {}) {
+  if (!stock || !Array.isArray(stock.inventoryItems) || stock.inventoryItems.length === 0) {
+    return { removed: 0, released: 0, saved: false };
+  }
+
+  const ordersById = await loadOrdersForInventoryItems(stock);
+  const byIp = new Map();
+  stock.inventoryItems.forEach((item, idx) => {
+    const ip = cleanInventoryIp(item.ipAddress);
+    if (!ip) return;
+    const bucket = byIp.get(ip) || [];
+    bucket.push({ idx, item });
+    byIp.set(ip, bucket);
+  });
+
+  const removeIdx = new Set();
+  let released = 0;
+
+  for (const group of byIp.values()) {
+    if (group.length === 1) {
+      const { item } = group[0];
+      if (!item.orderId) continue;
+      if (!ordersById.has(String(item.orderId))) {
+        item.allocated = false;
+        item.orderId = null;
+        item.allocatedAt = null;
+        released += 1;
+      }
+      continue;
+    }
+
+    const scored = group.map(({ idx, item }) => {
+      const order = item.orderId ? ordersById.get(String(item.orderId)) : null;
+      return {
+        idx,
+        item,
+        order,
+        score: scoreInventoryRow(item, order, { preferOrderId }),
+      };
+    });
+    scored.sort((a, b) => b.score - a.score);
+
+    const keep = scored[0];
+    if (keep.item.orderId && !keep.order) {
+      keep.item.allocated = false;
+      keep.item.orderId = null;
+      keep.item.allocatedAt = null;
+      released += 1;
+    }
+
+    for (const row of scored.slice(1)) {
+      removeIdx.add(row.idx);
+    }
+  }
+
+  if (removeIdx.size === 0 && released === 0) {
+    return { removed: 0, released: 0, saved: false };
+  }
+
+  if (removeIdx.size > 0) {
+    stock.inventoryItems = stock.inventoryItems.filter((_, idx) => !removeIdx.has(idx));
+  }
+  stock.markModified('inventoryItems');
+  if (save) {
+    await stock.save();
+  }
+  return { removed: removeIdx.size, released, saved: save };
+}
+
 /**
  * Keep pre-configured inventory in sync when company edits order credentials/IP.
  * Finds the linked row via inventoryItemId, orderId, or the order's previous IP.
  */
-async function syncCompanyInventoryAfterOrderUpdate(order, fields = {}) {
+async function appendOrMergeInventoryItems(stock, newItems, { mergeDuplicateIp = false } = {}) {
+  if (!stock || !Array.isArray(newItems) || newItems.length === 0) {
+    return { added: 0, updated: 0, error: null };
+  }
+
+  await pruneCompanyInventoryItems(stock, { save: false });
+
+  const toAppend = [];
+  let updated = 0;
+
+  for (const row of newItems) {
+    const ip = cleanInventoryIp(row.ipAddress);
+    if (!ip) continue;
+    const idx = stock.inventoryItems.findIndex(
+      (item) => cleanInventoryIp(item.ipAddress) === ip
+    );
+    if (idx >= 0) {
+      if (!mergeDuplicateIp) {
+        return { added: 0, updated: 0, error: `IP ${ip} is already in this stock inventory` };
+      }
+      const existing = stock.inventoryItems[idx];
+      if (row.username) existing.username = row.username;
+      if (row.password) existing.password = row.password;
+      if (row.os) existing.os = row.os;
+      if (row.expiryDate !== undefined) existing.expiryDate = row.expiryDate;
+      if (row.addedAt) existing.addedAt = row.addedAt;
+      updated += 1;
+      continue;
+    }
+    toAppend.push(row);
+  }
+
+  if (toAppend.length) {
+    stock.inventoryItems = [...(stock.inventoryItems || []), ...toAppend];
+  }
+  if (toAppend.length || updated) {
+    stock.markModified('inventoryItems');
+    await stock.save();
+  }
+
+  return { added: toAppend.length, updated, error: null };
+}
+
+async function syncCompanyInventoryAfterOrderUpdate(order, fields = {}, options = {}) {
+  const inventoryFullAccess = options.inventoryFullAccess === true;
   if (!order?.ipStockId) {
     return { synced: false, reason: 'no_stock' };
   }
@@ -347,6 +491,8 @@ async function syncCompanyInventoryAfterOrderUpdate(order, fields = {}) {
   if (!stock || !Array.isArray(stock.inventoryItems) || stock.inventoryItems.length === 0) {
     return { synced: false, reason: 'no_inventory' };
   }
+
+  await pruneCompanyInventoryItems(stock, { preferOrderId: order._id, save: true });
 
   const orderIdStr = String(order._id);
   let itemIndex = -1;
@@ -374,16 +520,35 @@ async function syncCompanyInventoryAfterOrderUpdate(order, fields = {}) {
     return { synced: false, reason: 'no_linked_item' };
   }
 
-  const item = stock.inventoryItems[itemIndex];
+  let item = stock.inventoryItems[itemIndex];
   const nextIp =
     fields.ipAddress !== undefined ? cleanInventoryIp(fields.ipAddress) : cleanInventoryIp(item.ipAddress);
 
   if (fields.ipAddress !== undefined && nextIp) {
-    const duplicate = stock.inventoryItems.some(
+    const dupIdx = stock.inventoryItems.findIndex(
       (row, idx) => idx !== itemIndex && cleanInventoryIp(row.ipAddress) === nextIp
     );
-    if (duplicate) {
-      throw new Error(`IP ${nextIp} is already in this stock inventory`);
+    if (dupIdx >= 0) {
+      const ordersById = await loadOrdersForInventoryItems(stock);
+      const dupRow = stock.inventoryItems[dupIdx];
+      const dupOrder = dupRow.orderId ? ordersById.get(String(dupRow.orderId)) : null;
+      const thisOrderLive = ordersById.get(orderIdStr) || order;
+      if (
+        !inventoryFullAccess &&
+        dupOrder &&
+        dupOrder.status === 'active' &&
+        thisOrderLive?.status === 'active'
+      ) {
+        throw new Error(`IP ${nextIp} is already in this stock inventory`);
+      }
+      await pruneCompanyInventoryItems(stock, { preferOrderId: order._id, save: true });
+      itemIndex = stock.inventoryItems.findIndex(
+        (row) => row._id && item._id && String(row._id) === String(item._id)
+      );
+      if (itemIndex < 0) {
+        throw new Error(`IP ${nextIp} inventory row could not be resolved after cleanup`);
+      }
+      item = stock.inventoryItems[itemIndex];
     }
     item.ipAddress = nextIp;
   }
@@ -429,6 +594,8 @@ async function reconcileCompanyInventoryOrderIps(stockDocs, orders = []) {
 
   for (const stock of stockDocs) {
     if (!Array.isArray(stock.inventoryItems) || stock.inventoryItems.length === 0) continue;
+
+    await pruneCompanyInventoryItems(stock, { save: true });
 
     let dirty = false;
     for (const item of stock.inventoryItems) {
@@ -538,6 +705,18 @@ async function allocateCompanyInventoryForOrder(order) {
       );
     }
 
+    try {
+      const stockDoc = await IPStock.findById(order.ipStockId);
+      if (stockDoc) {
+        await pruneCompanyInventoryItems(stockDoc, { preferOrderId: order._id, save: true });
+      }
+    } catch (pruneErr) {
+      console.error(
+        `[companyInventory] pruneCompanyInventoryItems failed for order ${order._id}:`,
+        pruneErr.message
+      );
+    }
+
     return { allocated: true, ipAddress: item.ipAddress };
   } catch (err) {
     order.provisioningStatus = 'failed';
@@ -573,6 +752,8 @@ module.exports = {
   allocateCompanyInventoryForOrder,
   syncCompanyInventoryAfterOrderUpdate,
   reconcileCompanyInventoryOrderIps,
+  pruneCompanyInventoryItems,
+  appendOrMergeInventoryItems,
   cleanInventoryIp,
   looksLikeIpv4,
 };

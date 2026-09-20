@@ -1,4 +1,5 @@
 const Order = require('@/models/orderModel').default;
+const { releaseOrderHeldResources } = require('@/lib/orderInventoryRelease');
 
 const EXPIRED_GRACE_DAYS = 3;
 
@@ -21,7 +22,9 @@ function buildExpiredOrdersQuery(graceDays = EXPIRED_GRACE_DAYS) {
 /** Delete dashboard orders expired for graceDays+ (default 3). */
 async function deleteExpiredOrders({ graceDays = EXPIRED_GRACE_DAYS, dryRun = false } = {}) {
   const expiredOrders = await Order.find(buildExpiredOrdersQuery(graceDays))
-    .select('_id productName expiryDate status provisioningStatus transactionId customerEmail ipAddress')
+    .select(
+      '_id productName expiryDate status provisioningStatus transactionId customerEmail ipAddress ipStockId inventoryItemId slotIpPackageId slotIpId'
+    )
     .lean();
 
   if (dryRun || !expiredOrders.length) {
@@ -38,6 +41,14 @@ async function deleteExpiredOrders({ graceDays = EXPIRED_GRACE_DAYS, dryRun = fa
         daysExpired: Math.floor((Date.now() - new Date(o.expiryDate).getTime()) / 86400000),
       })),
     };
+  }
+
+  for (const order of expiredOrders) {
+    try {
+      await releaseOrderHeldResources(order);
+    } catch (err) {
+      console.warn(`[CLEANUP-EXPIRED] Resource release failed for ${order._id}:`, err.message);
+    }
   }
 
   const deleteResult = await Order.deleteMany({

@@ -3,7 +3,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 import User from '@/models/userModel';
+import IPStock from '@/models/ipStockModel';
 import { requireAdmin } from '@/lib/adminAuth';
+import { companyIdFromProviderFilter, isCompanyProviderFilter } from '@/lib/adminProviderOptions';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -168,6 +170,86 @@ async function buildSearchClause(search: string) {
   return { $or: or };
 }
 
+async function buildProviderFilterClause(provider: string) {
+  if (isCompanyProviderFilter(provider)) {
+    const companyId = companyIdFromProviderFilter(provider);
+    const stocks = await IPStock.find({ company: companyId }).select('_id').lean();
+    const stockIds = stocks.map((s) => String(s._id));
+    if (!stockIds.length) return { _id: { $in: [] } };
+    return { ipStockId: { $in: stockIds } };
+  }
+
+  if (provider === 'hostycare') {
+    return {
+      $or: [
+        { provider: { $in: [null, '', 'hostycare'] } },
+        { provider: { $exists: false } },
+        { hostycareServiceId: { $exists: true, $nin: [null, ''] } },
+      ],
+    };
+  }
+
+  if (provider === 'smartvps') {
+    return {
+      $or: [{ provider: 'smartvps' }, { smartvpsServiceId: { $exists: true, $nin: [null, ''] } }],
+    };
+  }
+
+  if (provider === 'advps') {
+    return {
+      $or: [{ provider: 'advps' }, { advpsServiceId: { $exists: true, $nin: [null, ''] } }],
+    };
+  }
+
+  if (provider === 'netbay') {
+    return {
+      $or: [{ provider: 'netbay' }, { netbayServiceId: { $exists: true, $nin: [null, ''] } }],
+    };
+  }
+
+  if (provider === 'reseller-api') {
+    return {
+      $or: [
+        { provider: 'reseller-api' },
+        { resellerVmId: { $exists: true, $nin: [null, ''] } },
+        { resellerOrderId: { $exists: true, $nin: [null, ''] } },
+      ],
+    };
+  }
+
+  if (provider === 'slotip') {
+    return {
+      $or: [
+        { provider: 'slotip' },
+        { slotIpPackageId: { $exists: true, $nin: [null, ''] } },
+      ],
+    };
+  }
+
+  if (provider === 'trialvps') {
+    return {
+      $or: [
+        { provider: 'trialvps' },
+        { trialVpsPackageId: { $exists: true, $nin: [null, ''] } },
+      ],
+    };
+  }
+
+  if (provider === 'kurohost') {
+    return {
+      $or: [{ provider: 'kurohost' }, { kurohostInstanceId: { $exists: true, $nin: [null, ''] } }],
+    };
+  }
+
+  if (provider === 'hostdzire') {
+    return {
+      $or: [{ provider: 'hostdzire' }, { hostdzireOrderId: { $exists: true, $nin: [null, ''] } }],
+    };
+  }
+
+  return { provider };
+}
+
 async function buildFilter(searchParams: URLSearchParams) {
   const and: Record<string, unknown>[] = [];
 
@@ -176,16 +258,8 @@ async function buildFilter(searchParams: URLSearchParams) {
 
   const provider = searchParams.get('provider');
   if (provider) {
-    if (provider === 'hostycare') {
-      and.push({
-        $or: [
-          { provider: { $in: [null, '', 'hostycare'] } },
-          { provider: { $exists: false } },
-        ],
-      });
-    } else {
-      and.push({ provider });
-    }
+    const providerClause = await buildProviderFilterClause(provider);
+    if (providerClause) and.push(providerClause);
   }
 
   const os = searchParams.get('os');

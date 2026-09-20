@@ -21,6 +21,14 @@ export function getCustomerProviderDisplayName(provider) {
       return 'KuroHost';
     case 'joy':
       return 'Joy';
+    case 'hostdzire':
+      return 'HostDzire';
+    case 'virtualizor':
+      return 'Virtualizor';
+    case 'trialvps':
+      return 'Trial VPS';
+    case 'oceanlinux':
+      return 'OceanLinux';
     default:
       return provider.charAt(0).toUpperCase() + provider.slice(1);
   }

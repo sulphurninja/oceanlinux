@@ -69,6 +69,16 @@ function hasCompanyResellerApi(company) {
 /** Company portal slugs that must not see bulk promo management (e.g. SiteWorx). */
 const PORTAL_BULK_PROMO_BLOCKED_SLUGS = new Set(['siteworx']);
 
+/** Merge duplicate inventory IPs on add/save instead of hard errors (Siteworx). */
+const PORTAL_INVENTORY_FULL_ACCESS_SLUGS = new Set(['siteworx']);
+
+function companyHasPortalInventoryFullAccess(company) {
+  if (!company) return false;
+  if (company.portalInventoryFullAccess === true) return true;
+  const slug = String(company.slug || '').trim().toLowerCase();
+  return !!(slug && PORTAL_INVENTORY_FULL_ACCESS_SLUGS.has(slug));
+}
+
 function companyHasPortalBulkPromos(company) {
   if (!company) return false;
   const slug = String(company.slug || '').trim().toLowerCase();
@@ -87,5 +97,6 @@ module.exports = {
   getCompanyResellerApiConfig,
   hasCompanyResellerApi,
   companyHasPortalBulkPromos,
+  companyHasPortalInventoryFullAccess,
   companyUsesResellerLiveStock,
 };

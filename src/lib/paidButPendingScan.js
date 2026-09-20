@@ -6,6 +6,7 @@ import {
   recoverPendingCheckoutSession,
   recoverPendingWalletRecharge,
 } from '@/lib/paymentDispatch';
+import { recoverPaidRenewalsInScan } from '@/lib/recoverPaidRenewalScan';
 
 function isNormalUnpaidRecovery(reason) {
   const r = String(reason || '').toLowerCase();
@@ -236,16 +237,30 @@ export async function runPaidButPendingScan(opts = {}) {
     }
   }
 
+  let renewalsRecovered = [];
+  let renewalsAnomalies = [];
+  let renewalsScanned = 0;
+  let renewalScanErrors;
+
+  if (autoRecover) {
+    const renewalScan = await recoverPaidRenewalsInScan({ since, limit, logSource });
+    renewalsScanned = renewalScan.scanned;
+    renewalsRecovered = renewalScan.recovered;
+    renewalsAnomalies = renewalScan.anomalies;
+    renewalScanErrors = renewalScan.errors;
+  }
+
   const totalRecovered =
-    recovered.length + cartsRecovered.length + rechargesRecovered.length;
+    recovered.length + cartsRecovered.length + rechargesRecovered.length + renewalsRecovered.length;
   const totalAnomalies =
-    anomalies.length + cartsAnomalies.length + rechargesAnomalies.length;
+    anomalies.length + cartsAnomalies.length + rechargesAnomalies.length + renewalsAnomalies.length;
 
   return {
     success: true,
     scanned: pendingOrders.length,
     scannedCarts: pendingSessions.length,
     scannedRecharges: pendingRecharges.length,
+    scannedRenewals: renewalsScanned,
     hours,
     limit,
     autoRecover,
@@ -254,11 +269,16 @@ export async function runPaidButPendingScan(opts = {}) {
     recovered,
     cartsRecovered,
     rechargesRecovered,
+    renewalsRecovered,
+    renewalsAnomalies,
     anomalyCount: totalAnomalies,
     orderAnomalyCount: anomalies.length,
     anomalies,
     cartsAnomalies,
     rechargesAnomalies,
-    errors: scanErrors.length ? scanErrors : undefined,
+    errors:
+      scanErrors.length || renewalScanErrors?.length
+        ? [...scanErrors, ...(renewalScanErrors || [])]
+        : undefined,
   };
 }

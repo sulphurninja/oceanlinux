@@ -39,6 +39,15 @@ function shouldSkipAutoRetry(order) {
     if (order.provisioningStatus === 'active' && order.ipAddress) {
         return { skip: true, reason: 'already_active' };
     }
+    if (order.trialVpsPackageId) {
+        if (order.trialVpsSlotId && order.ipAddress) {
+            return { skip: true, reason: 'trial_vps_fulfilled' };
+        }
+        return { skip: true, reason: 'trial_vps_inventory_order' };
+    }
+    if (order.slotIpPackageId && order.slotIpId && order.ipAddress) {
+        return { skip: true, reason: 'slot_ip_fulfilled' };
+    }
     const last = order.lastProvisionAttempt ? new Date(order.lastProvisionAttempt).getTime() : 0;
     if (last && Date.now() - last < 4 * 60 * 1000) {
         return { skip: true, reason: 'cooldown_4min' };
@@ -58,6 +67,13 @@ async function validateOrderConfiguration(order) {
             return {
                 valid: false,
                 reason: 'Slot IP order — assign from package inventory, not VPS auto-provision',
+            };
+        }
+
+        if (order.trialVpsPackageId) {
+            return {
+                valid: false,
+                reason: 'Trial VPS order — assign from trial package inventory, not VPS auto-provision',
             };
         }
 
@@ -314,6 +330,13 @@ async function acquireDatabaseLock() {
                 },
                 {
                     $or: [
+                        { trialVpsPackageId: { $exists: false } },
+                        { trialVpsPackageId: null },
+                        { trialVpsPackageId: '' },
+                    ],
+                },
+                {
+                    $or: [
                         { autoProvisioned: { $ne: true } },
                         { autoProvisioned: { $exists: false } },
                         {
@@ -371,12 +394,24 @@ async function acquireDatabaseLock() {
                     console.log(`[LOCK] ⏭️ Not marking SmartVPS order as CONFIG-failed — will retry next run`);
                     continue;
                 }
+                if (candidate.trialVpsPackageId || candidate.slotIpPackageId) {
+                    console.log(`[LOCK] ⏭️ Package-inventory order — not marking CONFIG-failed`);
+                    continue;
+                }
                 
-                await Order.findByIdAndUpdate(candidate._id, {
-                    provisioningStatus: 'failed',
-                    provisioningError: `CONFIG: ${validation.reason}`,
-                    autoProvisioned: true
-                });
+                await Order.findOneAndUpdate(
+                    {
+                        _id: candidate._id,
+                        ipAddress: { $in: [null, ''] },
+                        trialVpsSlotId: { $in: [null, ''] },
+                        slotIpId: { $in: [null, ''] },
+                    },
+                    {
+                        provisioningStatus: 'failed',
+                        provisioningError: `CONFIG: ${validation.reason}`,
+                        autoProvisioned: true,
+                    }
+                );
                 
                 console.log(`[LOCK] 🚫 Order ${candidate._id} marked as permanently failed due to config issues`);
                 continue;

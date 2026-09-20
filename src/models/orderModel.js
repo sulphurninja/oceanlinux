@@ -58,7 +58,20 @@ const orderSchema = new mongoose.Schema({
     // Provider identification
     provider: {
         type: String,
-        enum: ['hostycare', 'smartvps', 'slotip', 'trialvps', 'advps', 'netbay', 'kurohost', 'reseller-api'],
+        enum: [
+            'hostycare',
+            'smartvps',
+            'slotip',
+            'trialvps',
+            'advps',
+            'netbay',
+            'kurohost',
+            'reseller-api',
+            'joy',
+            'hostdzire',
+            'virtualizor',
+            'oceanlinux',
+        ],
         default: 'hostycare'
     },
 

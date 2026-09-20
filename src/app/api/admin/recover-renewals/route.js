@@ -12,6 +12,7 @@ const HostycareAPI = require('@/services/hostycareApi');
 const SmartVPSAPI = require('@/services/smartvpsApi');
 const { getAdvpsRebuildResetFields, isAdvpsOrder } = require('@/lib/advpsRebuildLimit');
 const { notifyRenewalCompleted } = require('@/lib/renewalNotifications');
+const RenewalLogger = require('@/services/renewalLogger');
 
 // Initialize payment gateways
 Cashfree.XClientId = process.env.CASHFREE_APP_ID;
@@ -132,6 +133,22 @@ async function processRenewal(order, paymentInfo) {
 
   const resolvedRenewalAmount = await resolveOrderRenewalPrice(order);
 
+  const logger = new RenewalLogger(order, pendingRenewal.renewalTxnId, 'manual');
+  logger.setPaymentInfo(
+    paymentInfo.method || pendingRenewal.paymentMethod || 'razorpay',
+    paymentInfo.paymentId,
+    pendingRenewal.amount || resolvedRenewalAmount,
+    pendingRenewal.gatewayOrderId || null
+  );
+  if (provider === 'hostycare' || provider === 'smartvps') {
+    logger.setProviderApiResult(
+      provider,
+      providerRenewalSuccess,
+      providerRenewalResult,
+      providerRenewalSuccess ? null : new Error(String(providerRenewalResult?.error || 'provider renew failed'))
+    );
+  }
+
   // Create renewal record
   const renewalPayment = {
     paymentId: paymentInfo.paymentId,
@@ -162,6 +179,8 @@ async function processRenewal(order, paymentInfo) {
   notifyRenewalCompleted(order._id, newExpiryDate, pendingRenewal.renewalTxnId).catch((err) =>
     console.error('[RECOVER] renewal notification failed:', err.message),
   );
+
+  await logger.finalize(true, newExpiryDate);
 
   return {
     orderId: order._id,

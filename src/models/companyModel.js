@@ -141,6 +141,8 @@ const companySchema = new mongoose.Schema({
   kurohostApi: { type: companyKurohostApiSchema, default: null },
   joyApi: { type: companyJoyApiSchema, default: null },
   hostdzireApi: { type: companyHostdzireApiSchema, default: null },
+  /** Company portal: merge duplicate inventory IPs instead of blocking; can remove sold rows. */
+  portalInventoryFullAccess: { type: Boolean, default: false },
 }, { timestamps: true });
 
 companySchema.index({ slug: 1 });
