@@ -14,8 +14,9 @@ import { storeAutoUnhideUpdate } from '@/lib/ipStockAvailability';
 import { enforceCronOrLoggedInUser } from '@/lib/apiSecurity';
 const {
   buildSmartVpsBlockFromPackage,
-  buildSmartVpsMemorySync,
+  toPlainMemoryOptions,
 } = require('@/lib/smartvpsPackageRam');
+const { toPlainConfigurations } = require('@/lib/advpsLiveStock');
 
 const SmartVpsAPI = require('@/services/smartvpsApi');
 
@@ -31,17 +32,6 @@ function normalizeSmartVpsResponse(payload: any) {
   } catch {
     return payload;
   }
-}
-
-function toPlainMap(maybeMap: any): Record<string, any> {
-  if (!maybeMap) return {};
-  if (typeof maybeMap.toObject === 'function') {
-    return maybeMap.toObject({ minimize: true }) as Record<string, any>;
-  }
-  if (maybeMap instanceof Map) {
-    return Object.fromEntries(maybeMap as Map<string, any>);
-  }
-  return { ...maybeMap };
 }
 
 async function runSync(req: Request) {
@@ -108,9 +98,9 @@ async function runSync(req: Request) {
       name: { $regex: new RegExp(`^🌊 ${escapedName}(\\s|$)`, 'i') }
     });
 
-    const existingDefaults = existing ? toPlainMap(existing.defaultConfigurations) : {};
+    const existingDefaults = existing ? toPlainConfigurations(existing.defaultConfigurations) : {};
     const existingSmartvps = existingDefaults?.smartvps || {};
-    const existingMemory = existing ? toPlainMap(existing.memoryOptions) : {};
+    const existingMemory = existing ? toPlainMemoryOptions(existing.memoryOptions) : {};
 
     const { memoryOptions, smartvpsBlock } = buildSmartVpsBlockFromPackage(
       pkg,
@@ -149,12 +139,14 @@ async function runSync(req: Request) {
       });
     } else {
       // CREATE new IPStock — only tiers SmartVPS allows (On4GB / On8GB / …)
-      const { memoryOptions: newMemoryOptions } = buildSmartVpsMemorySync(pkg, {
+      const seedMemory = {
         '4GB': { price: defaultPricing['4GB'], hostycareProductId: null, hostycareProductName: null },
         '8GB': { price: defaultPricing['8GB'], hostycareProductId: null, hostycareProductName: null },
         '16GB': { price: defaultPricing['16GB'], hostycareProductId: null, hostycareProductName: null },
         '32GB': { price: defaultPricing['32GB'], hostycareProductId: null, hostycareProductName: null },
-      });
+      };
+      const { memoryOptions: newMemoryOptions, smartvpsBlock: newSmartvpsBlock } =
+        buildSmartVpsBlockFromPackage(pkg, {}, seedMemory);
 
       const defaultPromoCodes = [
         { code: 'OCEAN50', discount: 50, discountType: 'fixed', isActive: true, createdAt: new Date() },
@@ -171,11 +163,11 @@ async function runSync(req: Request) {
         tags: ['ocean linux'],
         memoryOptions: newMemoryOptions,
         promoCodes: defaultPromoCodes,
-        defaultConfigurations: { smartvps: smartvpsBlock },
+        defaultConfigurations: { smartvps: newSmartvpsBlock },
       });
 
       created++;
-      console.log(`[SVPS-SYNC] Created: ${namePrefix} RAM: ${smartvpsBlock.allowedRams?.join(',') || 'none'}GB`);
+      console.log(`[SVPS-SYNC] Created: ${namePrefix} RAM: ${newSmartvpsBlock.allowedRams?.join(',') || 'none'}GB`);
       results.push({
         action: 'created',
         id: newDoc._id.toString(),
@@ -183,7 +175,7 @@ async function runSync(req: Request) {
         packageName: name,
         qty,
         available: isAvailable,
-        allowedRams: smartvpsBlock.allowedRams,
+        allowedRams: newSmartvpsBlock.allowedRams,
       });
     }
   }

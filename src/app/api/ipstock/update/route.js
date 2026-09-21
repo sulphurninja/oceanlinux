@@ -12,6 +12,7 @@ const {
   toPlainConfigurations,
   mergeDefaultConfigurationsPlain,
 } = require('@/lib/advpsLiveStock');
+const { applySmartVpsAdminLockedPricesOnSave } = require('@/lib/smartvpsPackageRam');
 const { syncResellerIpStockRow } = require('@/lib/resellerLiveStock');
 
 export async function PUT(req, res) {
@@ -32,7 +33,12 @@ export async function PUT(req, res) {
     const mergedName = name !== undefined ? name : existing.name;
     const plainExisting = toPlainConfigurations(existing.defaultConfigurations);
     const plainIncoming = defaultConfigurations !== undefined ? toPlainConfigurations(defaultConfigurations) : {};
-    const mergedDefaults = mergeDefaultConfigurationsPlain(plainExisting, plainIncoming);
+    let mergedDefaults = mergeDefaultConfigurationsPlain(plainExisting, plainIncoming);
+    mergedDefaults = applySmartVpsAdminLockedPricesOnSave(
+      mergedDefaults,
+      memoryOptions,
+      existing.memoryOptions
+    );
 
     const resolvedCompany = company !== undefined
       ? (company && company !== 'none' ? company : null)

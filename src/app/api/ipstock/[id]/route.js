@@ -10,6 +10,7 @@ const {
   toPlainConfigurations,
   mergeDefaultConfigurationsPlain,
 } = require('@/lib/advpsLiveStock');
+const { applySmartVpsAdminLockedPricesOnSave } = require('@/lib/smartvpsPackageRam');
 const { getCompanyVirtualizorAccounts } = require('@/lib/companyVirtualizor');
 const { getCompanyResellerApiConfig } = require('@/lib/companyResellerApi');
 const { getCompanyNetbayApiConfig } = require('@/lib/companyNetbayApi');
@@ -206,7 +207,12 @@ export async function PUT(request, { params }) {
         const plainIncoming = updateData.defaultConfigurations !== undefined
           ? toPlainConfigurations(updateData.defaultConfigurations)
           : {};
-        const mergedDefaults = mergeDefaultConfigurationsPlain(plainExisting, plainIncoming);
+        let mergedDefaults = mergeDefaultConfigurationsPlain(plainExisting, plainIncoming);
+        mergedDefaults = applySmartVpsAdminLockedPricesOnSave(
+          mergedDefaults,
+          updateData.memoryOptions,
+          existing.memoryOptions
+        );
 
         const mergedUpdate = {
           ...updateData,
