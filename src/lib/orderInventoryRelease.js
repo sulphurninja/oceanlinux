@@ -1,7 +1,8 @@
-const IPStock = require('@/models/ipStockModel');
-
 /**
- * Free company inventory rows (and similar held resources) when an order is removed.
+ * Release slot/trial resources when an order is removed.
+ *
+ * Company saved VPS (inventoryItemId) is NEVER auto-released — not on expiry,
+ * order delete, refund cleanup, or cron. Owner must use "Return to pool" in company portal.
  */
 async function releaseOrderHeldResources(order) {
   const released = { slotIp: false, inventory: false };
@@ -11,19 +12,9 @@ async function releaseOrderHeldResources(order) {
     released.slotIp = false;
   }
 
+  // Saved VPS inventory: intentional no-op (manual release only).
   if (order?.ipStockId && order?.inventoryItemId) {
-    const stock = await IPStock.findById(order.ipStockId);
-    if (stock) {
-      const item = stock.inventoryItems.id(order.inventoryItemId);
-      if (item && item.allocated && String(item.orderId || '') === String(order._id)) {
-        item.allocated = false;
-        item.orderId = null;
-        item.allocatedAt = null;
-        stock.markModified('inventoryItems');
-        await stock.save();
-        released.inventory = true;
-      }
-    }
+    return released;
   }
 
   return released;

@@ -21,6 +21,7 @@ import {
   reconcileCompanyInventoryToManualUnits,
   syncManualUnitsAfterInventoryChange,
   pruneCompanyInventoryItems,
+  manualReleaseCompanyInventoryItem,
   appendOrMergeInventoryItems,
   cleanInventoryIp,
   looksLikeIpv4,
@@ -663,6 +664,22 @@ const ResellerApi = require('@/services/resellerApi');
       merged: mergeResult.updated,
       stock: serializeStock(synced.toObject?.() || synced, companyDoc),
     });
+  }
+
+  if (action === 'releaseInventoryAllocation') {
+    if (!removeItemId) {
+      return NextResponse.json({ error: 'removeItemId (inventory row id) is required' }, { status: 400 });
+    }
+    try {
+      const { released, stock: fresh } = await manualReleaseCompanyInventoryItem(stockId, removeItemId);
+      return NextResponse.json({
+        success: true,
+        released,
+        stock: serializeStock(fresh.toObject?.() || fresh, companyDoc),
+      });
+    } catch (err) {
+      return NextResponse.json({ error: err.message || 'Failed to release inventory row' }, { status: 400 });
+    }
   }
 
   if (action === 'removeInventory') {

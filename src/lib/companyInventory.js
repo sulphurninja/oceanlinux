@@ -392,9 +392,13 @@ function scoreInventoryRow(item, order, { preferOrderId } = {}) {
 }
 
 /**
- * Drop orphan rows (deleted orders) and duplicate IPs — keeps the row tied to the live order.
+ * Drop duplicate IPs — keeps the row tied to the live order.
+ * Orphan orderIds are NOT auto-released unless autoReleaseOrphans=true (manual release only by default).
  */
-async function pruneCompanyInventoryItems(stock, { preferOrderId, save = true } = {}) {
+async function pruneCompanyInventoryItems(
+  stock,
+  { preferOrderId, save = true, autoReleaseOrphans = false } = {}
+) {
   if (!stock || !Array.isArray(stock.inventoryItems) || stock.inventoryItems.length === 0) {
     return { removed: 0, released: 0, saved: false };
   }
@@ -416,7 +420,7 @@ async function pruneCompanyInventoryItems(stock, { preferOrderId, save = true } 
     if (group.length === 1) {
       const { item } = group[0];
       if (!item.orderId) continue;
-      if (!ordersById.has(String(item.orderId))) {
+      if (autoReleaseOrphans && !ordersById.has(String(item.orderId))) {
         item.allocated = false;
         item.orderId = null;
         item.allocatedAt = null;
@@ -437,7 +441,7 @@ async function pruneCompanyInventoryItems(stock, { preferOrderId, save = true } 
     scored.sort((a, b) => b.score - a.score);
 
     const keep = scored[0];
-    if (keep.item.orderId && !keep.order) {
+    if (autoReleaseOrphans && keep.item.orderId && !keep.order) {
       keep.item.allocated = false;
       keep.item.orderId = null;
       keep.item.allocatedAt = null;
@@ -715,6 +719,25 @@ async function reconcileCompanyInventoryToManualUnits(stock, { portalFullAccess 
  * After portal add-inventory: Units (store stock) = available saved VPS rows.
  * Example: add 4 in manage → stockCount 4. Cap reconcile then keeps those rows Available.
  */
+/** Company portal: explicitly return a sold saved VPS row to Available (never automatic). */
+async function manualReleaseCompanyInventoryItem(stockId, itemId) {
+  const stock = await IPStock.findById(stockId);
+  if (!stock) throw new Error('Stock not found');
+  const item = (stock.inventoryItems || []).find((row) => String(row._id) === String(itemId));
+  if (!item) throw new Error('Inventory row not found');
+  if (!item.allocated) {
+    return { released: false, alreadyFree: true, stock };
+  }
+  item.allocated = false;
+  item.orderId = null;
+  item.allocatedAt = null;
+  stock.markModified('inventoryItems');
+  await stock.save();
+  await syncStockCountFromInventory(stockId);
+  const fresh = await IPStock.findById(stockId);
+  return { released: true, alreadyFree: false, stock: fresh };
+}
+
 async function syncManualUnitsAfterInventoryChange(stockId) {
   const stock = await IPStock.findById(stockId);
   if (!stock?.company) return stock;
@@ -853,8 +876,14 @@ async function allocateCompanyInventoryForOrder(order) {
     order.username = item.username;
     order.password = item.password;
     order.os = item.os || order.os;
-    // Customer expiry stays from payment (buy date + 30 days).
-    // item.expiryDate is the original Hostheaven panel expiry for company tracking only.
+    // Customer expiry from this payment — never reuse stale inventory/prior-order dates.
+    const paidAt = order.createdAt ? new Date(order.createdAt) : new Date();
+    const paidMs = paidAt.getTime();
+    const expiryMs = order.expiryDate ? new Date(order.expiryDate).getTime() : NaN;
+    if (!Number.isFinite(expiryMs) || expiryMs < paidMs) {
+      const { calculateCompanyExpiryDate } = require('@/lib/expiryHelper');
+      order.expiryDate = calculateCompanyExpiryDate(paidAt);
+    }
     order.provisioningStatus = 'active';
     order.status = 'active';
     order.autoProvisioned = true;
@@ -948,6 +977,7 @@ module.exports = {
   reconcileCompanyInventoryToManualUnits,
   syncManualUnitsAfterInventoryChange,
   pruneCompanyInventoryItems,
+  manualReleaseCompanyInventoryItem,
   appendOrMergeInventoryItems,
   cleanInventoryIp,
   looksLikeIpv4,

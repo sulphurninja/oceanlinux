@@ -182,9 +182,20 @@ export function latestPaidRenewalExpiry(order) {
  * @returns {Date|null} expiry to write, or null when unchanged
  */
 export function resolvePanelSyncExpiryDate(order, panelExpiry, { panelIsAuthoritative = false } = {}) {
-  if (isExpiredServiceForCustomer(order)) return null;
-
   const panelMs = expiryTimeMs(panelExpiry);
+  if (isExpiredServiceForCustomer(order)) {
+    // Panel billing is truth for reseller/Hostheaven — still accept a later expiresAt
+    // so a wrong DB expiry (resold IP / stale inventory) can be corrected.
+    if (panelIsAuthoritative && panelMs != null) {
+      const currentMs = expiryTimeMs(order?.expiryDate);
+      const paidMs = expiryTimeMs(order?.createdAt);
+      if (panelMs > (currentMs || 0) && (paidMs == null || panelMs >= paidMs - 86400000)) {
+        return panelExpiry;
+      }
+    }
+    return null;
+  }
+
   const currentMs = expiryTimeMs(order?.expiryDate);
 
   if (panelMs == null) {

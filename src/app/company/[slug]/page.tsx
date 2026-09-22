@@ -777,6 +777,30 @@ export default function CompanyDashboard() {
     }
   };
 
+  const releaseInventoryAllocation = async (stockId: string, removeItemId: string) => {
+    if (!confirm('Return this sold IP to Available pool? Only do this if the customer order is closed.')) return;
+    setSavingStockId(stockId);
+    try {
+      const res = await fetch('/api/company/stocks', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stockId, action: 'releaseInventoryAllocation', removeItemId }),
+      });
+      const data = await res.json();
+      if (res.ok && data.stock) {
+        setStocks(prev => prev.map(s => s._id === stockId ? data.stock : s));
+        setStockCountDrafts(prev => ({ ...prev, [stockId]: String(data.stock.stockCount) }));
+        toast.success(data.released ? 'IP returned to Available pool' : 'Already available');
+      } else {
+        toast.error(friendlyCompanyError(data.error));
+      }
+    } catch {
+      toast.error('Failed to release IP');
+    } finally {
+      setSavingStockId(null);
+    }
+  };
+
   const removeInventoryItem = async (stockId: string, removeItemId: string) => {
     setSavingStockId(stockId);
     try {
@@ -1585,8 +1609,18 @@ export default function CompanyDashboard() {
                                       <Badge className="text-[10px] bg-emerald-500/10 text-emerald-700">Available</Badge>
                                     )}
                                   </td>
-                                  <td className="p-2 text-right">
-                                    {!item.allocated && (
+                                  <td className="p-2 text-right space-x-1">
+                                    {item.allocated ? (
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-7"
+                                        disabled={savingStockId === stock._id}
+                                        onClick={() => releaseInventoryAllocation(stock._id, item._id)}
+                                      >
+                                        Return to pool
+                                      </Button>
+                                    ) : (
                                       <Button
                                         variant="ghost"
                                         size="sm"
