@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -94,6 +94,7 @@ function GetStartedPage({ className, ...props }: React.ComponentPropsWithoutRef<
   const [error, setError] = useState('');
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<keyof SignupFormData, string>>>({});
   const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [passwordFocused, setPasswordFocused] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
@@ -203,11 +204,6 @@ function GetStartedPage({ className, ...props }: React.ComponentPropsWithoutRef<
     >
       <PremiumAuthBackground parallaxX={offset.x} parallaxY={offset.y} />
 
-      <Link href="/" className="premium-auth-back">
-        <ArrowLeft className="w-3.5 h-3.5 shrink-0" />
-        Back to home
-      </Link>
-
       <div
         className={cn(
           "premium-auth-inner premium-auth-inner--signup",
@@ -217,6 +213,10 @@ function GetStartedPage({ className, ...props }: React.ComponentPropsWithoutRef<
         <Tilt3DCard interactive={false} glow={false} glareTone="none" innerClassName="overflow-visible" className="w-full max-w-full">
           <Card className="premium-auth-card premium-auth-card--signup border-0 shadow-none w-full">
             <CardHeader className="text-center space-y-2 px-5 sm:px-6 pt-5 sm:pt-6 pb-0">
+              <Link href="/" className="premium-auth-back premium-auth-back--in-card">
+                <ArrowLeft className="w-3.5 h-3.5 shrink-0" />
+                Back to home
+              </Link>
               <Link href="/" className="inline-block mx-auto group">
                 <img
                   src="/ol.png"
@@ -225,9 +225,9 @@ function GetStartedPage({ className, ...props }: React.ComponentPropsWithoutRef<
                 />
               </Link>
               <div className="space-y-0.5">
-                <CardTitle className="text-lg sm:text-xl font-semibold tracking-tight">
+                <h1 className="text-lg font-semibold leading-none tracking-tight sm:text-xl">
                   Create your account
-                </CardTitle>
+                </h1>
                 <CardDescription className="text-sm text-white/50">
                   Start your Linux VPS journey in minutes
                 </CardDescription>
@@ -245,7 +245,7 @@ function GetStartedPage({ className, ...props }: React.ComponentPropsWithoutRef<
               )}
             </CardHeader>
 
-            <CardContent className="px-5 sm:px-6 pb-5 pt-4">
+            <CardContent className="px-5 sm:px-6 pb-6 pt-4">
               {error && (
                 <div className="p-3 rounded-xl border border-red-500/30 bg-red-500/10 mb-3">
                   <p className="text-red-300 text-sm leading-relaxed">{error}</p>
@@ -345,7 +345,7 @@ function GetStartedPage({ className, ...props }: React.ComponentPropsWithoutRef<
                       className="absolute right-0 top-0 h-10 w-10 px-0 text-white/45 hover:text-white hover:bg-transparent touch-manipulation"
                       onClick={() => setShowPassword(!showPassword)}
                       disabled={isLoading || isGoogleLoading}
-                      aria-label={showPassword ? "Hide passwords" : "Show passwords"}
+                      aria-label={showPassword ? "Hide password" : "Show password"}
                     >
                       {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </Button>
@@ -386,13 +386,13 @@ function GetStartedPage({ className, ...props }: React.ComponentPropsWithoutRef<
                   <div className="relative">
                     <Input
                       id="confirmPassword"
-                      type={showPassword ? "text" : "password"}
+                      type={showConfirmPassword ? "text" : "password"}
                       required
                       placeholder="Re-enter your password"
                       value={formData.confirmPassword}
                       onChange={(e) => updateField('confirmPassword', e.target.value)}
                       className={cn(
-                        "h-10 pr-10 w-full text-sm",
+                        "h-10 pr-16 w-full text-sm",
                         fieldErrors.confirmPassword && "border-red-400/60 focus-visible:ring-red-400/40",
                         passwordsMatch && "border-emerald-400/50 focus-visible:ring-emerald-400/30"
                       )}
@@ -401,8 +401,19 @@ function GetStartedPage({ className, ...props }: React.ComponentPropsWithoutRef<
                       aria-invalid={Boolean(fieldErrors.confirmPassword)}
                     />
                     {passwordsMatch && (
-                      <Check className="absolute right-10 top-1/2 -translate-y-1/2 w-4 h-4 text-emerald-400 pointer-events-none" />
+                      <Check className="absolute right-11 top-1/2 -translate-y-1/2 w-4 h-4 text-emerald-400 pointer-events-none" aria-hidden />
                     )}
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="absolute right-0 top-0 h-10 w-10 px-0 text-white/45 hover:text-white hover:bg-transparent touch-manipulation"
+                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                      disabled={isLoading || isGoogleLoading}
+                      aria-label={showConfirmPassword ? "Hide confirm password" : "Show confirm password"}
+                    >
+                      {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </Button>
                   </div>
                   {fieldErrors.confirmPassword && (
                     <p className="text-xs text-red-300">{fieldErrors.confirmPassword}</p>
@@ -441,7 +452,7 @@ function GetStartedPage({ className, ...props }: React.ComponentPropsWithoutRef<
                 </Link>
               </p>
 
-              <p className="mt-2 text-center text-[11px] text-white/35 leading-snug">
+              <p className="mt-2 text-center text-xs text-white/45 leading-snug">
                 By signing up you agree to our{" "}
                 <Link href="/terms-and-conditions" className="text-emerald-400/90 hover:text-emerald-300">
                   Terms
@@ -452,7 +463,7 @@ function GetStartedPage({ className, ...props }: React.ComponentPropsWithoutRef<
                 </Link>
               </p>
 
-              <div className="premium-auth-trust premium-auth-trust--inline mt-4 pt-4 border-t border-white/[0.06]">
+              <div className="premium-auth-trust premium-auth-trust--inline mt-5 pt-5 border-t border-white/[0.06]">
                 {trustItems.map((item) => (
                   <div key={item.label} className="premium-auth-trust-item">
                     <item.icon />

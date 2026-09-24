@@ -1,6 +1,5 @@
 "use client";
 
-import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { Check, Shield, Globe, IndianRupee, Star } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -27,7 +26,7 @@ const FEATURES = [
   "Instant Setup & Deployment",
 ];
 
-const PLAN_PRICE_COLORS = ["text-emerald-400", "text-emerald-300", "text-emerald-400"] as const;
+const PLAN_PRICE_COLOR = "text-emerald-300";
 
 export default function Hero() {
   const [popularPlans, setPopularPlans] = useState<PopularPlan[]>([]);
@@ -59,9 +58,10 @@ export default function Hero() {
   const { ref: heroRef, offset } = useHeroParallax(22);
 
   return (
+    <>
     <section
       ref={heroRef}
-      className="section-padding hero-premium-bg relative overflow-hidden min-w-0 w-full lg:min-h-0"
+      className="hero-premium-bg relative overflow-hidden min-w-0 w-full pt-8 pb-10 sm:pt-12 sm:pb-14 lg:pt-16 lg:pb-20"
     >
       <Hero3DScene parallaxX={offset.x} parallaxY={offset.y} />
 
@@ -86,12 +86,11 @@ export default function Hero() {
       />
 
       <div className="container mx-auto container-padding relative z-10 min-w-0">
-        <div className="grid lg:grid-cols-2 gap-8 lg:gap-12 items-center min-w-0">
-          {/* Left — copy & features */}
-          <div className="text-white min-w-0">
+        <div className="grid gap-8 md:grid-cols-2 md:gap-10 lg:gap-14 xl:gap-16 md:items-center">
+          <div className="text-white min-w-0 text-center md:text-left md:col-start-1 md:row-start-1">
             <div
               className={cn(
-                "hero-premium-badge mb-6 w-full max-w-full sm:w-fit text-white/90",
+                "hero-premium-badge mb-5 sm:mb-6 w-fit max-w-full mx-auto md:mx-0 text-white",
                 mounted && "animate-slide-up opacity-0 stagger-1 [animation-fill-mode:forwards]"
               )}
             >
@@ -100,7 +99,7 @@ export default function Hero() {
               <span className="leading-snug text-balance">
                 <span className="sm:hidden">Most Affordable Linux VPS</span>
                 <span className="hidden sm:inline">Most Affordable Linux VPS · Premium Quality</span>
-                <span className="sm:hidden block text-white/75">Premium Quality</span>
+                <span className="sm:hidden block text-white/70">Premium Quality</span>
               </span>
             </div>
 
@@ -127,7 +126,7 @@ export default function Hero() {
 
             <div
               className={cn(
-                "hero-premium-divider",
+                "hero-premium-divider mx-auto md:mx-0",
                 mounted && "animate-slide-up opacity-0 stagger-2 [animation-fill-mode:forwards]"
               )}
               aria-hidden
@@ -137,7 +136,7 @@ export default function Hero() {
 
             <p
               className={cn(
-                "hero-premium-lead mb-8 mt-4",
+                "hero-premium-lead mb-6 sm:mb-8 mt-4 mx-auto md:mx-0",
                 mounted && "animate-slide-up opacity-0 stagger-3 [animation-fill-mode:forwards]"
               )}
             >
@@ -148,36 +147,132 @@ export default function Hero() {
 
             <div
               className={cn(
-                "grid sm:grid-cols-2 gap-3 sm:gap-4 mb-8",
-                mounted && "animate-slide-up opacity-0 stagger-3 [animation-fill-mode:forwards]"
+                "flex flex-col sm:flex-row gap-3 sm:gap-4 mb-6 justify-center md:justify-start",
+                mounted && "animate-slide-up opacity-0 stagger-4 [animation-fill-mode:forwards]"
               )}
             >
-              {FEATURES.map((feature, i) => (
-                <div
-                  key={feature}
-                  className="hero-feature-item hero-feature-3d"
-                  style={{ animationDelay: `${i * 0.05}s` }}
-                >
-                  <Check className="w-5 h-5 text-green-400 mr-3 flex-shrink-0" />
+              <Link href="/get-started" className="w-full sm:w-auto">
+                <button type="button" className="premium-btn-primary w-full sm:w-auto px-8">
+                  Get Started
+                </button>
+              </Link>
+              <Link href="/live-chat" className="w-full sm:w-auto">
+                <button type="button" className="premium-btn-outline w-full sm:w-auto px-8">
+                  Chat for Best Price
+                </button>
+              </Link>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-center md:justify-start gap-x-4 gap-y-2 text-white/70 text-sm">
+              <div className="flex items-center gap-2">
+                <IndianRupee className="w-4 h-4 text-emerald-300" />
+                <span>Best Value Pricing</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Shield className="w-4 h-4 text-emerald-300" />
+                <span>Enterprise Security</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Globe className="w-4 h-4 text-emerald-300" />
+                <span>Managed VPS Service</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Star className="w-4 h-4 text-emerald-300" />
+                <span>4.9/5 Rating</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="min-w-0 w-full md:col-start-2 md:row-start-1 md:row-span-2">
+            <Tilt3DCard
+              maxTilt={4}
+              scale={1.01}
+              className="relative z-10 w-full min-w-0"
+              innerClassName="rounded-2xl p-px bg-gradient-to-br from-white/20 via-emerald-300/25 to-white/5 w-full min-w-0"
+            >
+              <div className="rounded-2xl bg-[rgba(8,20,14,0.92)] p-4 sm:p-6 min-w-0">
+                <h2 id="affordable-plans-heading" className="text-lg sm:text-xl font-semibold text-white leading-tight">
+                  Most Affordable Plans
+                </h2>
+                <p className="text-sm text-white/70 mt-1">
+                  Premium quality, budget-friendly prices
+                </p>
+
+                <div className="space-y-3 mt-5 w-full min-w-0">
+                  {loading ? (
+                    <div className="text-center py-8">
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-300 mx-auto" />
+                      <p className="text-sm text-white/70 mt-2">Loading popular plans...</p>
+                    </div>
+                  ) : popularPlans.length > 0 ? (
+                    popularPlans.slice(0, 3).map((plan) => (
+                      <Link key={plan.name} href="/get-started" className="block min-w-0 w-full">
+                        <div className="hero-plan-row group">
+                          <div className="min-w-0 flex-1 w-full">
+                            <span className="hero-plan-row-name" title={plan.name}>
+                              {stripEmojis(plan.name)}
+                            </span>
+                            <div className="hero-plan-row-meta">
+                              {plan.orderCount} orders
+                            </div>
+                          </div>
+                          <div className="hero-plan-row-price">
+                            <span className={cn("hero-plan-row-amount", PLAN_PRICE_COLOR)}>
+                              ₹{plan.avgPrice}/mo
+                            </span>
+                            <div className="hero-plan-row-price-label">Avg. price</div>
+                          </div>
+                        </div>
+                      </Link>
+                    ))
+                  ) : (
+                    <p className="text-sm text-white/70 text-center py-8">
+                      Browse our affordable Linux VPS plans below
+                    </p>
+                  )}
+                </div>
+
+                <div className="hero-pricing-stats">
+                  <div className="hero-pricing-stat">
+                    <div className="hero-pricing-stat-value text-emerald-300">40%</div>
+                    <div className="hero-pricing-stat-label">Cost Savings</div>
+                  </div>
+                  <div className="hero-pricing-stat">
+                    <div className="hero-pricing-stat-value text-emerald-300">99.99%</div>
+                    <div className="hero-pricing-stat-label">Uptime</div>
+                  </div>
+                  <div className="hero-pricing-stat">
+                    <div className="hero-pricing-stat-value text-emerald-300">24/7</div>
+                    <div className="hero-pricing-stat-label">Support</div>
+                  </div>
+                </div>
+              </div>
+            </Tilt3DCard>
+          </div>
+
+          <div className="min-w-0 md:col-start-1 md:row-start-2 space-y-6">
+            <div className="grid sm:grid-cols-2 gap-3 text-left">
+              {FEATURES.map((feature) => (
+                <div key={feature} className="hero-feature-item">
+                  <Check className="w-4 h-4 text-emerald-300 flex-shrink-0" />
                   <span>{feature}</span>
                 </div>
               ))}
             </div>
 
-            {/* Most Popular — horizontal ticker on mobile/desktop */}
             <div
               className={cn(
-                "hero-premium-glass backdrop-blur-md rounded-2xl p-4 sm:p-5 mb-8",
-                mounted && "animate-slide-up opacity-0 stagger-4 [animation-fill-mode:forwards]"
+                "hero-premium-glass backdrop-blur-md rounded-2xl p-4 sm:p-5 text-left",
+                mounted && "animate-slide-up opacity-0 stagger-5 [animation-fill-mode:forwards]"
               )}
             >
-              <h3 className="text-sm sm:text-base font-semibold mb-3 text-white/95 flex items-center gap-2 tracking-wide">
-                <span className="text-emerald-300">◆</span>
-                {popularPlans.length > 0 ? "Most Popular This Week" : "Popular Linux Series"}:
-              </h3>
+              <h2 className="text-base font-semibold mb-3 text-white flex items-center justify-center md:justify-start gap-2">
+                <span className="text-emerald-300" aria-hidden="true">◆</span>
+                {popularPlans.length > 0 ? "Most Popular This Week" : "Popular Linux Series"}
+              </h2>
               {loading ? (
-                <div className="text-center text-white/60 py-4">
-                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-white/60 mx-auto" />
+                <div className="text-center text-white/70 py-4">
+                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-white/70 mx-auto" />
                   <p className="text-sm mt-2">Loading popular plans...</p>
                 </div>
               ) : popularPlans.length > 0 ? (
@@ -193,199 +288,43 @@ export default function Hero() {
                     {(popularPlans.length > 2 ? marqueePlans : popularPlans).map((plan, index) => (
                       <div
                         key={`${plan.name}-${index}`}
-                        className="flex items-center gap-2 px-3 sm:px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-white/85 text-xs sm:text-sm shrink-0 max-w-[280px] sm:max-w-xs hover:bg-white/10 hover:border-primary/40 transition-all duration-300"
+                        className="flex items-center gap-2 px-3 sm:px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-white/70 text-sm shrink-0 max-w-[16rem] sm:max-w-xs hover:bg-white/10 transition-all duration-300"
                       >
-                        <span className="line-clamp-1">{stripEmojis(plan.name)}</span>
+                        <span className="truncate" title={plan.name}>{stripEmojis(plan.name)}</span>
                       </div>
                     ))}
                   </div>
                 </div>
               ) : (
-                <p className="text-white/60 text-sm text-center py-2">
+                <p className="text-white/70 text-sm text-center py-2">
                   Check out our premium Linux VPS plans in the pricing section below
                 </p>
               )}
             </div>
-
-            {/* CTAs */}
-            <div
-              className={cn(
-                "flex flex-col sm:flex-row gap-4 mb-10",
-                mounted && "animate-slide-up opacity-0 stagger-5 [animation-fill-mode:forwards]"
-              )}
-            >
-              <Link href="/get-started" className="w-full sm:w-auto">
-                <Button
-                  size="lg"
-                  className="btn-primary w-full sm:w-auto px-8 py-4 text-sm md:text-lg font-semibold hover:scale-[1.03] active:scale-[0.98] transition-transform"
-                >
-                  Get Started
-                </Button>
-              </Link>
-              <Link href="/live-chat" className="w-full sm:w-auto">
-                <Button
-                  size="lg"
-                  variant="outline"
-                  className="border-white/30 text-white hover:bg-white/10 backdrop-blur-sm px-8 py-4 text-base lg:text-lg font-semibold w-full sm:w-auto hover:scale-[1.03] active:scale-[0.98] transition-transform"
-                >
-                  Chat for Best Price
-                </Button>
-              </Link>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-4 sm:gap-6 text-white/50 text-sm">
-              <div className="flex items-center gap-2">
-                <IndianRupee className="w-4 h-4 text-emerald-400" />
-                <span>Best Value Pricing</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <Shield className="w-4 h-4 text-emerald-400" />
-                <span>Enterprise Security</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <Globe className="w-4 h-4 text-emerald-400" />
-                <span>Managed VPS Service</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <Star className="w-4 h-4 text-emerald-400" />
-                <span>4.9/5 Rating</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Right — pricing card (3D tilt) */}
-          <div
-            className={cn(
-              "hero-pricing-card-wrap relative w-full min-w-0 max-w-full mx-auto lg:max-w-none lg:mx-0 overflow-hidden",
-              mounted && "animate-fade-in opacity-0 stagger-4 [animation-fill-mode:forwards]"
-            )}
-          >
-            <Tilt3DCard
-              maxTilt={8}
-              scale={1.01}
-              float
-              className="relative z-10 w-full min-w-0 max-w-full"
-              innerClassName="rounded-2xl p-[1px] bg-gradient-to-br from-white/25 via-emerald-400/20 to-white/5 w-full min-w-0 max-w-full overflow-hidden"
-            >
-              <div className="glass rounded-2xl p-3 sm:p-5 border-0 bg-[rgba(8,20,14,0.85)] min-w-0 w-full overflow-hidden">
-              <div className="bg-gradient-to-br from-[rgba(255,255,255,0.06)] to-transparent rounded-xl p-3 sm:p-5 border border-white/10 min-w-0 w-full overflow-hidden">
-                <div className="flex items-start justify-between gap-2 mb-4 sm:mb-6">
-                  <div className="min-w-0 flex-1">
-                    <h3 className="text-sm sm:text-lg font-semibold text-white leading-tight">Most Affordable Plans</h3>
-                    <p className="text-[11px] sm:text-sm text-white/55 mt-0.5 leading-snug">
-                      Premium quality, budget-friendly prices
-                    </p>
-                  </div>
-                  <div className="flex space-x-1.5 flex-shrink-0 pt-0.5">
-                    <div className="w-2.5 h-2.5 sm:w-3 sm:h-3 bg-red-500 rounded-full" />
-                    <div className="w-2.5 h-2.5 sm:w-3 sm:h-3 bg-yellow-500 rounded-full" />
-                    <div className="w-2.5 h-2.5 sm:w-3 sm:h-3 bg-green-500 rounded-full animate-pulse" />
-                  </div>
-                </div>
-
-                <div className="space-y-2 sm:space-y-3 w-full min-w-0">
-                  {loading ? (
-                    <div className="text-center py-8">
-                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto" />
-                      <p className="text-sm text-muted-foreground mt-2">Loading popular plans...</p>
-                    </div>
-                  ) : popularPlans.length > 0 ? (
-                    popularPlans.slice(0, 3).map((plan, index) => (
-                      <Link key={plan.name} href="/get-started" className="block min-w-0 w-full">
-                        <div className="hero-plan-row group">
-                          <div className="min-w-0 flex-1 w-full">
-                            <span
-                              className="hero-plan-row-name"
-                              title={plan.name}
-                            >
-                              {stripEmojis(plan.name)}
-                            </span>
-                            <div className="hero-plan-row-meta sm:block">
-                              {plan.orderCount} orders
-                            </div>
-                          </div>
-                          <div className="hero-plan-row-price">
-                            <span className="text-[10px] sm:hidden text-muted-foreground">Avg. price</span>
-                            <div className="text-right">
-                              <span
-                                className={cn(
-                                  "hero-plan-row-amount",
-                                  PLAN_PRICE_COLORS[index % PLAN_PRICE_COLORS.length]
-                                )}
-                              >
-                                ₹{plan.avgPrice}/mo
-                              </span>
-                              <div className="hero-plan-row-price-label hidden sm:block">
-                                Avg. price
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      </Link>
-                    ))
-                  ) : (
-                    <div className="text-center py-8">
-                      <p className="text-sm text-muted-foreground">
-                        Browse our affordable Linux VPS plans below
-                      </p>
-                    </div>
-                  )}
-                </div>
-
-                <div className="hero-pricing-stats">
-                  <div className="hero-pricing-stat hover:bg-white/5 transition-colors">
-                    <div className="hero-pricing-stat-value text-emerald-300">40%</div>
-                    <div className="hero-pricing-stat-label">Cost Savings</div>
-                  </div>
-                  <div className="hero-pricing-stat hover:bg-white/5 transition-colors">
-                    <div className="hero-pricing-stat-value text-emerald-300/90">99.99%</div>
-                    <div className="hero-pricing-stat-label">Uptime</div>
-                  </div>
-                  <div className="hero-pricing-stat hover:bg-white/5 transition-colors">
-                    <div className="hero-pricing-stat-value text-emerald-300/80">24/7</div>
-                    <div className="hero-pricing-stat-label">Support</div>
-                  </div>
-                </div>
-              </div>
-              </div>
-            </Tilt3DCard>
-
-            <div
-              className="absolute -top-6 -right-6 w-24 h-24 bg-primary/25 rounded-full blur-xl animate-hero-glow pointer-events-none transition-transform duration-300 hidden sm:block"
-              style={{ transform: `translate3d(${offset.x * 2}px, ${offset.y * 2}px, 0)` }}
-            />
-            <div
-              className="absolute -bottom-6 -left-6 w-32 h-32 bg-secondary/20 rounded-full blur-xl pointer-events-none transition-transform duration-300 hidden sm:block"
-              style={{ transform: `translate3d(${offset.x * -1.5}px, ${offset.y * -1.5}px, 0)` }}
-            />
           </div>
         </div>
 
         {/* Bottom trust bar */}
-        <div className="mt-12 lg:mt-16 pt-8 lg:pt-12 border-t border-white/10 animate-fade-in">
-          <div className="text-center text-white/80 mb-6 px-2">
-            <p className="text-base sm:text-lg font-medium">
-              Join thousands of satisfied customers who chose affordability without compromise
-            </p>
-          </div>
-          <div className="grid grid-cols-2 sm:flex sm:flex-wrap justify-center items-center gap-6 sm:gap-8 text-white/60">
+        <div className="mt-10 lg:mt-14">
+          <p className="text-center text-sm sm:text-base text-white/70 mb-4">
+            Join thousands of customers who chose affordability without compromise
+          </p>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             {[
               { value: "5000+", label: "Happy Customers" },
               { value: "99.9%", label: "Uptime Guaranteed" },
               { value: "24/7", label: "Expert Support" },
               { value: "40%", label: "Lower Costs" },
             ].map((stat) => (
-              <div
-                key={stat.label}
-                className="flex flex-col sm:flex-row items-center text-center sm:text-left hero-stat-3d p-3 rounded-xl"
-              >
-                <span className="text-xl sm:text-2xl font-bold sm:mr-2">{stat.value}</span>
-                <span className="text-xs sm:text-sm">{stat.label}</span>
+              <div key={stat.label} className="hero-trust-stat">
+                <span className="text-xl sm:text-2xl font-bold text-white">{stat.value}</span>
+                <span className="text-sm text-white/70">{stat.label}</span>
               </div>
             ))}
           </div>
         </div>
       </div>
     </section>
+    </>
   );
 }

@@ -67,7 +67,7 @@ export default function EcoFriendly() {
             <div key={index} className="premium-stat-card">
               <div className="premium-icon-box mx-auto mb-3 w-10 h-10">{stat.icon}</div>
               <div className="premium-stat-value text-2xl sm:text-3xl">{stat.value}</div>
-              <div className="text-xs text-white/40 mt-1">{stat.label}</div>
+              <div className="text-sm text-white/70 mt-1">{stat.label}</div>
             </div>
           ))}
         </div>
@@ -78,7 +78,7 @@ export default function EcoFriendly() {
           <Server />
         </div>
         <h3 className="text-xl font-semibold text-white mb-3">Honest Hosting, Real Service</h3>
-        <p className="text-sm text-white/45 mb-6 max-w-lg mx-auto leading-relaxed">
+        <p className="text-sm text-white/70 mb-6 max-w-lg mx-auto leading-relaxed">
           OceanLinux makes VPS hosting simple and affordable for India — sourced from proven providers,
           managed and supported by our team.
         </p>

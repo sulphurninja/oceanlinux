@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -161,9 +161,9 @@ function LoginPage({ className, ...props }: React.ComponentPropsWithoutRef<"div"
                 />
               </Link>
               <div className="space-y-0.5">
-                <CardTitle className="text-lg sm:text-xl font-semibold tracking-tight">
+                <h1 className="text-lg font-semibold leading-none tracking-tight sm:text-xl">
                   Welcome back
-                </CardTitle>
+                </h1>
                 <CardDescription className="text-sm text-white/50">
                   Sign in to your OceanLinux dashboard
                 </CardDescription>
@@ -250,7 +250,7 @@ function LoginPage({ className, ...props }: React.ComponentPropsWithoutRef<"div"
 
                 <Button
                   type="submit"
-                  className="premium-btn-primary w-full h-11 text-sm sm:text-base mt-1 touch-manipulation"
+                  className="premium-btn-primary mb-6 w-full h-11 text-sm sm:text-base mt-1 touch-manipulation"
                   disabled={isLoading || isGoogleLoading}
                   >
                   {isLoading ? (

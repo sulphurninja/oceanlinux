@@ -74,6 +74,7 @@ import {
   CheckCircle2,
   XCircle,
   Clock,
+  ArrowUp,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { z } from "zod";
@@ -371,9 +372,7 @@ function OceanPlanTypeBadge({ memory }: { memory: string }) {
     <span
       className={cn(
         'text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded border shrink-0',
-        type === 'Linux'
-          ? 'text-emerald-300 border-emerald-400/40 bg-emerald-500/15'
-          : 'text-sky-300 border-sky-400/40 bg-sky-500/15',
+        type === 'Linux' ? premiumBadge.success : premiumBadge.info,
       )}
     >
       {type}
@@ -381,11 +380,146 @@ function OceanPlanTypeBadge({ memory }: { memory: string }) {
   );
 }
 
-function formatTagGroupTitle(tag: string) {
-  const t = normalizePlanTag(tag);
-  if (t === 'ocean linux' || t === 'oceanlinux') return 'Ocean Linux';
-  return tag;
+function stripTagDisplayPrefix(tag: string) {
+  return String(tag || '')
+    .trim()
+    .replace(/^\d+\.\s*/, '')
+    .replace(/\s+plans?\s*$/i, '');
 }
+
+function formatTagGroupTitle(tag: string) {
+  const cleaned = stripTagDisplayPrefix(tag);
+  const t = normalizePlanTag(cleaned);
+  if (t === 'ocean linux' || t === 'oceanlinux') return 'Ocean Linux';
+  return cleaned;
+}
+
+/** Section heading without duplicate "Plans" or stale "1." prefixes from admin tags. */
+function toTitleCaseLabel(value: string) {
+  return String(value || '')
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(' ');
+}
+
+function tagGroupSectionHeading(tag: string) {
+  const base = formatTagGroupTitle(tag);
+  const withPlans = /\bplans?\b/i.test(base) ? base : `${base} plans`;
+  return toTitleCaseLabel(withPlans);
+}
+
+function tagSlugForAnchor(tag: string) {
+  return normalizePlanTag(stripTagDisplayPrefix(tag)).replace(/[^a-z0-9]+/g, '-');
+}
+
+function jumpShortLabel(label: string) {
+  const parts = label.split(/\s+[—–-]\s+/);
+  const head = (parts[0] || label).replace(/\s+plans?\b/gi, '').trim();
+  const tail = (parts[1] || '').replace(/\(.*\)/, '').replace(/\s+plans?\b/gi, '').trim();
+  if (tail) return `${head} ${tail}`.replace(/\s+/g, ' ');
+  return head || label;
+}
+
+function tagSectionDisambiguator(tag: string, stocks: IPStock[]) {
+  const parts: string[] = [];
+  const linux = stocks.filter((s) => s.serverType === 'Linux').length;
+  const vps = stocks.filter((s) => s.serverType === 'VPS').length;
+  if (linux) parts.push(`${linux} Linux`);
+  if (vps) parts.push(`${vps} Windows`);
+  const raw = stripTagDisplayPrefix(tag);
+  if (parts.length === 0) return raw !== formatTagGroupTitle(tag) ? raw : `${stocks.length} items`;
+  return parts.join(' · ');
+}
+
+function buildTagSectionTitles(grouped: Record<string, IPStock[]>) {
+  const titles = new Map<string, string>();
+  const normKeys = new Map<string, string[]>();
+
+  for (const tag of Object.keys(grouped)) {
+    const norm = normalizePlanTag(stripTagDisplayPrefix(tag));
+    if (!normKeys.has(norm)) normKeys.set(norm, []);
+    normKeys.get(norm)!.push(tag);
+  }
+
+  for (const tag of Object.keys(grouped)) {
+    const stocks = grouped[tag];
+    const linux = stocks.filter((s) => s.serverType === 'Linux').length;
+    const vps = stocks.filter((s) => s.serverType === 'VPS').length;
+    const tierCore = toTitleCaseLabel(
+      formatTagGroupTitle(tag).replace(/\s+plans?\s*$/i, '')
+    );
+    let heading: string;
+    if (linux && !vps) {
+      heading = `${tierCore} Plans — Linux`;
+    } else if (vps && !linux) {
+      heading = `${tierCore} Plans — Windows`;
+    } else if (linux && vps) {
+      heading = `${tierCore} Plans — Linux & Windows`;
+    } else {
+      heading = tagGroupSectionHeading(tag);
+    }
+
+    const norm = normalizePlanTag(stripTagDisplayPrefix(tag));
+    const siblings = normKeys.get(norm) || [];
+    if (siblings.length > 1) {
+      const rawHint = stripTagDisplayPrefix(tag);
+      if (rawHint && normalizePlanTag(rawHint) !== norm) {
+        heading = `${heading} (${toTitleCaseLabel(rawHint)})`;
+      } else {
+        heading = `${heading} (${tagSectionDisambiguator(tag, stocks)})`;
+      }
+    } else {
+      const names = stocks.map((s) => s.name).join(' ');
+      const mixedTiers = /basic/i.test(names) && /advance|premium|starter/i.test(names);
+      if (mixedTiers && /advance/i.test(heading)) {
+        heading = `Mixed Tier Plans (${tagSectionDisambiguator(tag, stocks)})`;
+      }
+    }
+    titles.set(tag, heading);
+  }
+  return titles;
+}
+
+function pricedMemoryEntriesForStock(stock: IPStock, categoryTab: string) {
+  return sortMemoryOptionEntries(
+    Object.entries(stock.memoryOptions || {}).filter(([memory]) => {
+      if (!memory || String(memory).startsWith('$')) return false;
+      if (!memoryMatchesCategoryTab(memory, categoryTab, stock)) return false;
+      const allowed = stock.defaultConfigurations?.smartvps?.allowedRams;
+      if (Array.isArray(allowed) && allowed.length > 0) {
+        const gb = String(memory).match(/(\d+)/)?.[1];
+        return gb ? allowed.includes(Number(gb)) : true;
+      }
+      return true;
+    })
+  ).filter(([, details]) => details.price != null && Number(details.price) > 0);
+}
+
+function isServerPlanRowVisible(stock: IPStock, categoryTab: string) {
+  if (
+    categoryTab !== 'all' &&
+    categoryTab !== 'SlotIP' &&
+    isOceanSmartVpsPlan(stock) &&
+    pricedMemoryEntriesForStock(stock, categoryTab).length === 0
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/** Put plan name before masked IP for consistent scanning (Windows rows). */
+function formatPlanDisplayName(name: string) {
+  const trimmed = String(name || '').trim();
+  const m = trimmed.match(/^([🖥️🌊]\s*)?([\d.*xX]+(?:\.[\d*xX]+)*)\s*\|\s*(.+)$/);
+  if (!m) return trimmed;
+  const emoji = m[1] || '';
+  const ipPart = m[2];
+  const rest = m[3].trim();
+  return `${emoji}${rest} · ${ipPart}`;
+}
+
+const PLAN_ROW_ACTION = 'h-10 px-3 shrink-0';
 
 /** HTTP proxy IPStock (Netbay Applications) — show with Slot IP under Premium IP Proxies. */
 function isPremiumProxyPlan(stock: IPStock) {
@@ -905,19 +1039,32 @@ function IPStockContent() {
     [serverIpStocks]
   );
 
+  const tagSectionTitles = useMemo(
+    () => buildTagSectionTitles(tagGroupedStocks.grouped),
+    [tagGroupedStocks.grouped]
+  );
+
   const visibleStocks = useMemo(
     () => ipStocks.filter((stock) => !stock.hiddenFromStore),
     [ipStocks]
   );
 
   const counts = useMemo(() => {
-    const linux = visibleStocks.filter((stock) => matchesCategoryTab(stock, 'Linux')).length;
-    const vps = visibleStocks.filter((stock) => matchesCategoryTab(stock, 'VPS')).length;
+    const linux = visibleStocks.filter(
+      (stock) => matchesCategoryTab(stock, 'Linux') && isServerPlanRowVisible(stock, 'Linux')
+    ).length;
+    const vps = visibleStocks.filter(
+      (stock) => matchesCategoryTab(stock, 'VPS') && isServerPlanRowVisible(stock, 'VPS')
+    ).length;
     const proxyPlans = visibleStocks.filter((stock) => isPremiumProxyPlan(stock)).length;
     const slot = slotPackages.length + proxyPlans;
     const trial = trialPackages.length;
+    const listableServerAll = visibleStocks.filter(
+      (stock) => !isPremiumProxyPlan(stock) && isServerPlanRowVisible(stock, 'all')
+    ).length;
+    const all = listableServerAll + proxyPlans + slotPackages.length + trial;
     return {
-      all: visibleStocks.length + slotPackages.length + trialPackages.length,
+      all,
       linux,
       vps,
       slot,
@@ -925,14 +1072,83 @@ function IPStockContent() {
     };
   }, [visibleStocks, slotPackages, trialPackages]);
 
+  const categoryTabTotal = useMemo(() => {
+    switch (activeTab) {
+      case 'Linux':
+        return counts.linux;
+      case 'VPS':
+        return counts.vps;
+      case 'SlotIP':
+        return counts.slot;
+      case 'Trial':
+        return counts.trial;
+      default:
+        return counts.all;
+    }
+  }, [activeTab, counts]);
+
   const listedPlanCount = useMemo(() => {
+    const visibleServerRows = serverIpStocks.filter((s) =>
+      isServerPlanRowVisible(s, activeTab === 'all' ? 'all' : activeTab)
+    ).length;
     if (activeTab === 'Trial') return trialPackages.length;
     if (activeTab === 'SlotIP') return slotPackages.length + proxyIpStocks.length;
     if (activeTab === 'all') {
-      return serverIpStocks.length + slotPackages.length + proxyIpStocks.length + trialPackages.length;
+      return visibleServerRows + slotPackages.length + proxyIpStocks.length + trialPackages.length;
     }
-    return serverIpStocks.length;
-  }, [activeTab, serverIpStocks.length, proxyIpStocks.length, slotPackages.length, trialPackages.length]);
+    return visibleServerRows;
+  }, [activeTab, serverIpStocks, proxyIpStocks.length, slotPackages.length, trialPackages.length]);
+
+  const sectionJumpLinks = useMemo(() => {
+    if (activeTab === 'Trial' || activeTab === 'SlotIP') return [];
+    const links: { id: string; label: string; short: string }[] = [];
+    if (activeTab === 'all' && (slotPackages.length > 0 || proxyIpStocks.length > 0)) {
+      links.push({ id: 'ipstock-section-premium', label: 'Premium Proxies', short: 'Proxies' });
+    }
+    if (activeTab === 'all' && trialPackages.length > 0) {
+      links.push({ id: 'ipstock-section-trial', label: 'Trial VPS', short: 'Trial' });
+    }
+    for (const tag of Object.keys(tagGroupedStocks.grouped).sort()) {
+      const label = tagSectionTitles.get(tag) || tagGroupSectionHeading(tag);
+      links.push({
+        id: `ipstock-section-${tagSlugForAnchor(tag)}`,
+        label,
+        short: jumpShortLabel(label),
+      });
+    }
+    if (tagGroupedStocks.untagged.length > 0) {
+      links.push({ id: 'ipstock-section-other', label: 'Other Plans', short: 'Other' });
+    }
+    return links;
+  }, [activeTab, slotPackages.length, proxyIpStocks.length, trialPackages.length, tagGroupedStocks, tagSectionTitles]);
+
+  const [showBackToTop, setShowBackToTop] = useState(false);
+  const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (sectionJumpLinks.length < 2) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((e) => e.isIntersecting)
+          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+        if (visible[0]) setActiveSectionId(visible[0].target.id);
+      },
+      { rootMargin: '-120px 0px -60% 0px' }
+    );
+    for (const link of sectionJumpLinks) {
+      const el = document.getElementById(link.id);
+      if (el) observer.observe(el);
+    }
+    return () => observer.disconnect();
+  }, [sectionJumpLinks]);
+
+  useEffect(() => {
+    const onScroll = () => setShowBackToTop(window.scrollY > 480);
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
 
   // Group stocks by tags — computed in tagGroupedStocks useMemo above.
 
@@ -1508,20 +1724,12 @@ function IPStockContent() {
   };
 
   const categoryCards = [
-    { id: 'all', Icon: Grid3X3, label: 'All Plans', shortLabel: 'All', count: counts.all + counts.slot, activeClass: 'border-emerald-400/50 bg-emerald-500/15 shadow-[0_0_20px_rgba(52,211,153,0.12)]' },
-    { id: 'Linux', Icon: Server, label: 'Linux Servers', shortLabel: 'Linux', count: counts.linux, activeClass: 'border-emerald-400/50 bg-emerald-500/15 shadow-[0_0_20px_rgba(52,211,153,0.12)]' },
-    { id: 'VPS', Icon: Cloud, label: 'Windows VPS', shortLabel: 'Windows', count: counts.vps, activeClass: 'border-sky-400/50 bg-sky-500/15 shadow-[0_0_20px_rgba(56,189,248,0.12)]' },
-    { id: 'SlotIP', Icon: Zap, label: 'Premium IP Proxies', shortLabel: 'Proxies', count: counts.slot, activeClass: 'border-orange-400/50 bg-orange-500/15 shadow-[0_0_20px_rgba(251,146,60,0.12)]' },
-    { id: 'Trial', Icon: Clock, label: 'Trial VPS', shortLabel: 'Trial', count: counts.trial, activeClass: 'border-violet-400/50 bg-violet-500/15 shadow-[0_0_20px_rgba(167,139,250,0.12)]' },
+    { id: 'all', Icon: Grid3X3, label: 'All Plans', shortLabel: 'All', count: counts.all },
+    { id: 'Linux', Icon: Server, label: 'Linux Servers', shortLabel: 'Linux', count: counts.linux },
+    { id: 'VPS', Icon: Cloud, label: 'Windows VPS', shortLabel: 'Windows', count: counts.vps },
+    { id: 'SlotIP', Icon: Zap, label: 'Premium IP Proxies', shortLabel: 'Proxies', count: counts.slot },
+    { id: 'Trial', Icon: Clock, label: 'Trial VPS', shortLabel: 'Trial', count: counts.trial },
   ];
-
-  const iconActiveClass: Record<string, string> = {
-    all: 'bg-emerald-500 text-emerald-950',
-    Linux: 'bg-emerald-500 text-emerald-950',
-    VPS: 'bg-sky-400 text-sky-950',
-    SlotIP: 'bg-orange-400 text-orange-950',
-    Trial: 'bg-violet-400 text-violet-950',
-  };
 
   if (isReseller) {
     return (
@@ -1532,7 +1740,7 @@ function IPStockContent() {
               <WalletIcon className="h-7 w-7 text-emerald-300" />
             </div>
             <CardTitle className="text-xl text-white">Panel purchasing is disabled</CardTitle>
-            <CardDescription className="text-white/55 leading-relaxed">
+            <CardDescription className="premium-dashboard-subtitle leading-relaxed">
               Purchases are disabled for reseller accounts in the panel. Please place orders
               via the Reseller API — your API rates apply automatically.
             </CardDescription>
@@ -1553,53 +1761,57 @@ function IPStockContent() {
   const showServerPlanList = activeTab !== 'SlotIP' && activeTab !== 'Trial';
 
   return (
-    <div className="premium-dashboard-page w-full min-w-0 max-w-[100vw] overflow-x-hidden pb-[max(1rem,env(safe-area-inset-bottom))]">
+    <div className="premium-dashboard-page premium-ipstock-page w-full min-w-0 max-w-full pb-[max(5.5rem,env(safe-area-inset-bottom))]">
       {/* Promo — compact, polished */}
-      <div className="relative overflow-hidden border-b mt-6 md:mt-0 premium-promo-strip">
+      <div className="relative overflow-hidden border-b premium-promo-strip">
         <div className="absolute inset-0 bg-gradient-to-r from-emerald-500/10 via-transparent to-emerald-500/5" />
         <div className="absolute bottom-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-emerald-400/30 to-transparent" />
-        <div className="relative w-full max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-2 sm:py-2.5 min-w-0 box-border">
-          <div className="flex items-center justify-center gap-2.5 sm:gap-4 flex-wrap">
-            <div className="flex items-center gap-2 text-xs sm:text-sm">
-              <Badge variant="outline" className={cn(premiumBadge.success, "h-5 px-1.5 gap-1 font-medium shadow-sm")}>
+        <div className="relative w-full max-w-[96rem] mx-auto px-3 sm:px-6 lg:px-8 py-1.5 sm:py-3 min-w-0 box-border">
+          <div className="flex items-center justify-center gap-1.5 sm:gap-4 flex-nowrap">
+            <div className="flex min-w-0 items-center gap-1.5 text-[11px] sm:gap-2 sm:text-sm">
+              <Badge variant="outline" className={cn(premiumBadge.success, "h-4 shrink-0 px-1 text-[10px] gap-1 font-medium shadow-sm sm:h-5 sm:px-1.5 sm:text-xs")}>
                 <span className="relative flex h-1.5 w-1.5">
                   <span className="ocean-soft-pulse absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
                   <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-400" />
                 </span>
                 Live
               </Badge>
-              <span className="text-white/45 hidden min-[380px]:inline">Limited offer</span>
-              <span className="font-semibold text-white">Save on every plan</span>
-              <Sparkles className="h-3.5 w-3.5 text-emerald-300 shrink-0 animate-pulse" />
+              <span className="premium-dashboard-subtitle hidden sm:inline">Limited offer</span>
+              <span className="min-w-0 truncate font-semibold premium-dashboard-title">Save on every plan</span>
+              <Sparkles className="hidden h-3.5 w-3.5 shrink-0 premium-dashboard-subtitle animate-pulse sm:block" aria-hidden />
             </div>
             <div className="h-3.5 w-px bg-white/15 hidden sm:block" />
-            <button
+            <Button
               type="button"
+              variant="outline"
+              size="sm"
               onClick={() => {
                 navigator.clipboard.writeText('OCEAN50');
                 toast.success('Promo code OCEAN50 copied!');
               }}
-              className="group flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-full border border-emerald-400/40 bg-emerald-500/15 hover:bg-emerald-500/25 hover:border-emerald-300/50 transition-all duration-200 active:scale-[0.98]"
+              className="premium-ipstock-promo-btn h-7 shrink-0 px-2 text-[11px] active:scale-[0.98] sm:h-10 sm:px-4 sm:text-sm"
+              aria-label="Copy promo code OCEAN50"
             >
-              <Percent className="h-3 w-3 text-emerald-200 group-hover:text-emerald-100 shrink-0" />
-              <code className="text-[11px] sm:text-xs font-semibold tracking-[0.12em] text-emerald-100">OCEAN50</code>
-              <Copy className="h-3 w-3 text-emerald-300/70 group-hover:text-emerald-200 transition-colors shrink-0" />
-            </button>
+              <Percent className="h-3 w-3 shrink-0 sm:h-4 sm:w-4" aria-hidden />
+              <span className="premium-ipstock-promo-hint hidden text-xs font-medium opacity-80 sm:inline">Use code</span>
+              <code className="text-[11px] font-bold tracking-[0.08em] sm:text-sm sm:tracking-[0.14em]">OCEAN50</code>
+              <Copy className="h-3 w-3 shrink-0 sm:ml-1 sm:h-4 sm:w-4" aria-hidden />
+            </Button>
           </div>
         </div>
       </div>
 
-      <div className="w-full max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-3 sm:py-4 min-w-0 box-border">
+      <div className="w-full max-w-[96rem] mx-auto px-3 sm:px-6 lg:px-8 py-3 sm:py-4 min-w-0 box-border">
         {isLoading ? (
           <div className="flex flex-col items-center justify-center py-16">
             <Loader2 className="h-8 w-8 animate-spin text-emerald-400 mb-4" />
-            <p className="text-white/50">Loading server plans...</p>
+            <p className="premium-dashboard-subtitle">Loading server plans...</p>
           </div>
         ) : (
           <div>
             {/* Category tabs — scroll on phone, grid on large screens */}
-            <div className="mb-3 sm:mb-4 -mx-1 px-1 overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-              <div className="flex gap-1.5 sm:gap-2 w-max min-w-full lg:grid lg:grid-cols-5 lg:w-full">
+            <div className="mb-3 -mx-1 px-1 overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              <div role="group" aria-label="Plan categories" className="flex gap-1.5 w-max">
               {categoryCards.map((cat) => {
                 const isActive = activeTab === cat.id;
                 const CatIcon = cat.Icon;
@@ -1607,32 +1819,24 @@ function IPStockContent() {
                   <button
                     key={cat.id}
                     type="button"
+                    aria-pressed={isActive}
                     onClick={() => handleTabChange(cat.id)}
                     className={cn(
-                      "flex items-center gap-2 px-2.5 sm:px-3 py-2 rounded-xl border text-left transition-all duration-200 min-w-0",
-                      "flex-[1_1_calc(50%-0.375rem)] min-[480px]:flex-[1_1_auto] min-[480px]:min-w-[7.25rem] lg:flex-none lg:min-w-0",
-                      isActive
-                        ? cn("text-white ring-1 ring-emerald-400/20", cat.activeClass)
-                        : "border-white/12 bg-white/[0.03] text-white/55 hover:border-white/20 hover:bg-white/[0.06] hover:text-white/90"
+                      "premium-ipstock-category-tab shrink-0",
+                      isActive && "premium-ipstock-category-tab--active"
                     )}
                   >
-                    <span className={cn(
-                      "h-7 w-7 rounded-lg flex items-center justify-center shrink-0 transition-all duration-200",
-                      isActive ? iconActiveClass[cat.id] : "bg-white/10 text-emerald-300 border border-white/10"
-                    )}>
-                      <CatIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                    </span>
-                    <span className="font-medium text-xs sm:text-sm truncate flex-1 min-w-0">
+                    <CatIcon className={cn("h-3.5 w-3.5 shrink-0", isActive ? "premium-price-accent" : "premium-dashboard-subtitle")} aria-hidden />
+                    <span className="font-medium text-xs sm:text-sm whitespace-nowrap">
                       <span className="sm:hidden">{cat.shortLabel}</span>
                       <span className="hidden sm:inline">{cat.label}</span>
                     </span>
                     <Badge
-                      variant="secondary"
+                      variant="outline"
                       className={cn(
-                        "text-[10px] h-4 min-w-[1.25rem] px-1 justify-center shrink-0 tabular-nums border-0",
-                        isActive
-                          ? "bg-emerald-500/25 text-emerald-100 font-semibold"
-                          : "bg-white/10 text-white/60"
+                        premiumBadge.neutral,
+                        "text-[10px] h-4 min-w-[1.25rem] px-1.5 ml-1 justify-center shrink-0 tabular-nums",
+                        isActive && premiumBadge.success
                       )}
                     >
                       {cat.count}
@@ -1645,15 +1849,16 @@ function IPStockContent() {
 
             {/* Search & filters — compact toolbar */}
             <div className="premium-dashboard-card rounded-xl p-2 sm:p-2.5 mb-4 sm:mb-5">
-              <div className="flex flex-col sm:flex-row gap-2">
+              <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
                 <DashboardSearchInput
                   value={searchTerm}
                   onChange={setSearchTerm}
                   placeholder="Search servers..."
+                  className="sm:min-h-10"
                 />
-                <div className="flex gap-1.5 sm:gap-2 flex-wrap sm:flex-nowrap sm:items-center">
+                <div className="flex gap-1.5 sm:gap-2 flex-wrap sm:flex-nowrap sm:items-center premium-ipstock-toolbar-actions">
                   <Select value={priceFilter} onValueChange={setPriceFilter}>
-                    <SelectTrigger className="premium-dashboard-select flex-1 sm:flex-none sm:w-[7.5rem]">
+                    <SelectTrigger className="premium-dashboard-select h-10 flex-1 sm:flex-none sm:w-[7.5rem]">
                       <SelectValue placeholder="Price" />
                     </SelectTrigger>
                     <SelectContent>
@@ -1665,7 +1870,7 @@ function IPStockContent() {
                     </SelectContent>
                   </Select>
                   <Select value={sortBy} onValueChange={setSortBy}>
-                    <SelectTrigger className="premium-dashboard-select flex-1 sm:flex-none sm:w-[6.5rem]">
+                    <SelectTrigger className="premium-dashboard-select h-10 flex-1 sm:flex-none sm:w-[6.5rem]">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -1678,7 +1883,7 @@ function IPStockContent() {
                     type="button"
                     variant="outline"
                     size="sm"
-                    className="h-9 shrink-0 border-white/15 bg-white/[0.04] text-white/70 hover:text-white hover:bg-white/[0.08]"
+                    className="h-10 shrink-0 gap-1.5 px-3"
                     disabled={isManualRefreshing}
                     onClick={() => void handleManualRefresh()}
                     title="Refresh plans and live stock"
@@ -1689,48 +1894,97 @@ function IPStockContent() {
                         (isManualRefreshing || isRefreshingStock) && "animate-spin"
                       )}
                     />
-                    <span className="sr-only">Refresh stock</span>
+                    <span className="hidden sm:inline text-xs font-medium">Refresh</span>
+                    <span className="sr-only sm:hidden">Refresh stock</span>
                   </Button>
                   {(searchTerm || priceFilter !== 'all' || sortBy !== 'name') && (
                     <Button
                       variant="ghost"
                       size="sm"
                       onClick={() => { setSearchTerm(""); setPriceFilter("all"); setSortBy("name"); }}
-                      className="h-9 px-2.5 text-xs text-white/50 hover:text-white hover:bg-white/[0.06]"
+                      className="h-10 px-2.5 text-xs"
                     >
                       Clear
                     </Button>
                   )}
                   <Button
                     asChild
+                    variant="outline"
                     size="sm"
-                    className="premium-btn-primary h-9 gap-1.5 px-3 border-0 shadow-none sm:ml-auto"
+                    className="h-10 gap-1.5 px-3 sm:ml-auto"
                   >
                     <Link href="/dashboard/cart">
-                      <ShoppingCart className="h-3.5 w-3.5" />
-                      <span className="text-xs font-medium">Cart</span>
+                      <ShoppingCart className="h-3.5 w-3.5" aria-hidden />
+                      <span className="premium-ipstock-cart-label text-xs font-medium">View cart</span>
                     </Link>
                   </Button>
                 </div>
               </div>
             </div>
 
-            <p className="text-xs text-white/45 mb-3 px-0.5">
-              Showing {listedPlanCount} plan{listedPlanCount === 1 ? '' : 's'}
-              {activeTab === 'Linux' ? ' · Linux category' : activeTab === 'VPS' ? ' · Windows VPS' : activeTab === 'SlotIP' ? ' · Premium proxies' : activeTab === 'Trial' ? ' · Trial VPS' : ''}
-              {(searchTerm || priceFilter !== 'all') ? ' (filtered)' : ''}
-              {(isManualRefreshing || isRefreshingStock) && !isLoading ? ' · refreshing…' : ''}
+            <p className="premium-ipstock-plan-count mb-3">
+              <span
+                className={cn(
+                  'premium-ipstock-plan-count-dot',
+                  (isManualRefreshing || isRefreshingStock) && !isLoading && 'is-live'
+                )}
+                aria-hidden
+              />
+              <span>
+                Showing{' '}
+                <span className="premium-ipstock-plan-count-num">{listedPlanCount}</span>
+                {listedPlanCount === categoryTabTotal
+                  ? ` plan${listedPlanCount === 1 ? '' : 's'}`
+                  : ` of ${categoryTabTotal} plans`}
+                {activeTab === 'Linux' ? ' · Linux' : activeTab === 'VPS' ? ' · Windows VPS' : activeTab === 'SlotIP' ? ' · Proxies' : activeTab === 'Trial' ? ' · Trial' : ''}
+                {(searchTerm || priceFilter !== 'all') ? ' · filtered' : ''}
+              </span>
+              {(isManualRefreshing || isRefreshingStock) && !isLoading ? (
+                <span className="premium-ipstock-plan-count-live">Refreshing</span>
+              ) : null}
             </p>
+
+            {sectionJumpLinks.length > 1 && (
+              <nav
+                aria-label="Plan sections"
+                className="sticky top-[6.5rem] z-30 mb-4 hidden max-w-full premium-ipstock-section-jump lg:flex"
+              >
+                <span className="premium-ipstock-jump-label">Jump to</span>
+                <div className="premium-ipstock-jump-track">
+                  {sectionJumpLinks.map((link, index) => (
+                    <a
+                      key={link.id}
+                      href={`#${link.id}`}
+                      title={link.label}
+                      aria-current={activeSectionId === link.id ? 'true' : undefined}
+                      className="premium-ipstock-section-jump-link"
+                      style={{ animationDelay: `${index * 45}ms` }}
+                    >
+                      {link.short}
+                    </a>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  className="premium-ipstock-jump-top"
+                  onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+                  title="Back to filters"
+                >
+                  <ArrowUp className="h-3.5 w-3.5" aria-hidden />
+                  Top
+                </button>
+              </nav>
+            )}
 
             {/* Plan listings */}
             <div>
               {/* Slot IP Section */}
               {(activeTab === 'all' || activeTab === 'SlotIP') && (slotPackages.length > 0 || proxyIpStocks.length > 0) && (
-                <div className="space-y-2 mb-6">
+                <div id="ipstock-section-premium" className="space-y-2 mb-6 scroll-mt-44">
                   <div className="flex items-center gap-2 px-1">
                     <div className="w-1 h-6 bg-orange-500 rounded-full"></div>
-                    <h2 className="text-base font-semibold text-white">Premium IP Proxies</h2>
-                    <Badge variant="outline" className="text-[10px] border-orange-400/40 bg-orange-500/15 text-orange-200 h-5 px-2">
+                    <h2 className="text-base sm:text-lg font-semibold leading-snug premium-dashboard-title">Premium IP Proxies</h2>
+                    <Badge variant="outline" className="text-[10px] premium-badge premium-badge--warning h-5 px-2">
                       {slotPackages.length + proxyIpStocks.length} {(slotPackages.length + proxyIpStocks.length) === 1 ? 'package' : 'packages'}
                     </Badge>
                   </div>
@@ -1742,62 +1996,66 @@ function IPStockContent() {
                                pkg.description?.toLowerCase().includes(searchTerm.toLowerCase());
                       })
                       .map((pkg) => (
-                      <div key={pkg._id} className="premium-dashboard-card rounded-lg hover:border-emerald-400/20 transition-colors overflow-hidden">
-                        <div className="p-3 flex flex-col gap-2.5 sm:flex-row sm:items-center sm:gap-3">
-                          <div className="flex items-start gap-2.5 min-w-0 flex-1">
-                            <div className="w-8 h-8 rounded-lg bg-orange-500/20 flex items-center justify-center border border-orange-400/35 flex-shrink-0">
+                      <div key={pkg._id} className="premium-dashboard-card rounded-lg border-l-4 border-l-orange-400 hover:border-orange-400/40 transition-colors overflow-hidden">
+                        <div className="p-3 grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_auto] gap-2.5 sm:gap-3 sm:items-center">
+                          <div className="flex items-start gap-2.5 min-w-0">
+                            <div className="w-9 h-9 rounded-lg bg-orange-500/20 flex items-center justify-center border border-orange-400/35 flex-shrink-0">
                               <Zap className="h-4 w-4 text-orange-300" />
                             </div>
                             <div className="flex-1 min-w-0">
-                              <h3 className="font-semibold text-sm md:text-base text-white break-words">{pkg.name}</h3>
+                              <div className="flex items-start gap-2">
+                                <h3 className="font-semibold text-sm md:text-base text-white break-words min-w-0 flex-1">{pkg.name}</h3>
+                                <ChevronDown className="h-4 w-4 mt-0.5 shrink-0 premium-dashboard-subtitle sm:hidden" aria-hidden />
+                              </div>
                               <div className="flex items-center gap-1.5 flex-wrap mt-1">
-                                <Badge variant="outline" className="text-[10px] border-orange-400/35 bg-orange-500/15 text-orange-200 px-1.5 py-0 h-5">
+                                <Badge variant="outline" className="text-[10px] premium-badge premium-badge--warning px-1.5 py-0 h-5">
                                   Premium IP
                                 </Badge>
                                 {pkg.resellerPriced && (
-                                  <Badge variant="outline" className="text-[10px] border-emerald-400/35 bg-emerald-500/15 text-emerald-200 px-1.5 py-0 h-5">
+                                  <Badge variant="outline" className="text-[10px] premium-badge premium-badge--success px-1.5 py-0 h-5">
                                     Your rate
                                   </Badge>
                                 )}
                                 {pkg.promoCodes && pkg.promoCodes.length > 0 && (
-                                  <Badge variant="outline" className="text-[10px] gap-1 bg-amber-500/15 text-amber-200 border-amber-400/35 px-1.5 py-0 h-5">
+                                  <Badge variant="outline" className="text-[10px] gap-1 premium-badge premium-badge--warning px-1.5 py-0 h-5">
                                     <Tag className="h-2.5 w-2.5" />
                                     Promo
                                   </Badge>
                                 )}
-                                <Badge variant="secondary" className="text-[10px] h-5 px-1.5 gap-1 bg-white/10 text-white/70 border-0">
+                                <Badge variant="secondary" className="text-[10px] h-5 px-1.5 gap-1 premium-badge premium-badge--neutral">
                                   <Package className="h-3 w-3" />
                                   {pkg.availableCount} available
                                 </Badge>
                               </div>
                               {pkg.description && (
-                                <p className="text-xs text-white/45 mt-1 break-words">{pkg.description}</p>
+                                <p className="text-xs premium-dashboard-subtitle mt-1 break-words">{pkg.description}</p>
                               )}
                             </div>
                           </div>
-                          <div className="flex items-center justify-between gap-2 border-t border-white/10 pt-2.5 sm:border-0 sm:pt-0 sm:justify-end sm:flex-shrink-0">
-                            <div className="flex items-baseline gap-1.5 sm:flex-col sm:items-end sm:gap-0">
+                          <div className="flex flex-wrap items-center gap-2 border-t border-white/10 pt-2.5 sm:border-0 sm:pt-0 sm:justify-end">
+                            <div className="flex items-baseline gap-1.5 sm:flex-col sm:items-end sm:gap-0 min-w-0">
                               {pkg.resellerPriced && Number(pkg.listPrice) > Number(pkg.price) && (
-                                <p className="text-[10px] text-white/40 line-through order-2 sm:order-none">₹{pkg.listPrice}</p>
+                                <p className="text-xs premium-dashboard-subtitle line-through">₹{pkg.listPrice}</p>
                               )}
-                              <p className="font-bold text-base md:text-lg text-white order-1 sm:order-none">₹{pkg.price}</p>
-                              <p className="text-[10px] text-white/45 order-3 sm:order-none">per IP</p>
+                              <p className="font-bold text-base md:text-lg premium-price-accent">₹{pkg.price}</p>
+                              <p className="text-xs premium-dashboard-subtitle">per IP</p>
                             </div>
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-1 sm:flex-none justify-end">
                               {pkg.availableCount > 0 && (
                                 <AddToCartButton
                                   kind="slotip"
                                   slotIpPackageId={pkg._id}
                                   size="sm"
                                   variant="outline"
-                                  className="h-8 px-2.5"
-                                  label="Cart"
+                                  iconOnly
+                                  className={cn(PLAN_ROW_ACTION, 'w-10 px-0')}
+                                  label="Add to cart"
                                 />
                               )}
                               <Button
                                 size="sm"
                                 onClick={() => handleBuyNow(pkg.name, 'Premium IP Proxies', pkg.price, '', pkg._id)}
-                                className="h-8 px-3 gap-1.5 premium-btn-primary border-0"
+                                className={cn(PLAN_ROW_ACTION, 'gap-1.5 premium-btn-primary border-0')}
                                 disabled={pkg.availableCount === 0 || verifyingPurchaseKey === pkg._id}
                               >
                                 {verifyingPurchaseKey === pkg._id ? (
@@ -1807,6 +2065,7 @@ function IPStockContent() {
                                 )}
                                 {verifyingPurchaseKey === pkg._id ? 'Checking…' : 'Buy Now'}
                               </Button>
+                              <ChevronDown className="h-4 w-4 shrink-0 premium-dashboard-subtitle hidden sm:block" aria-hidden />
                             </div>
                           </div>
                         </div>
@@ -1832,7 +2091,7 @@ function IPStockContent() {
                       <Zap className="h-8 w-8 text-orange-300" />
                     </div>
                     <h3 className="text-lg font-semibold mb-2 text-white">No Premium IP Proxies Available</h3>
-                    <p className="text-sm text-white/45 max-w-md mx-auto">
+                    <p className="text-sm premium-dashboard-subtitle max-w-md mx-auto">
                       Premium IP proxy packages are currently unavailable. Check back soon!
                     </p>
                   </CardContent>
@@ -1840,7 +2099,7 @@ function IPStockContent() {
               )}
 
               {(activeTab === 'all' || activeTab === 'Trial') && trialPackages.length > 0 && (
-                <div className="space-y-2 mb-6 min-w-0">
+                <div id="ipstock-section-trial" className="space-y-2 mb-6 min-w-0 scroll-mt-44">
                   <div className="flex items-center gap-2 px-1">
                     <div className="w-1 h-6 bg-violet-500 rounded-full shrink-0" />
                     <div
@@ -1849,8 +2108,8 @@ function IPStockContent() {
                     >
                       <span className="text-base leading-none">⏱️</span>
                     </div>
-                    <h2 className="text-base font-semibold text-white">Trial VPS</h2>
-                    <Badge variant="outline" className="text-[10px] border-violet-400/40 bg-violet-500/15 text-violet-200 h-5 px-2">
+                    <h2 className="text-base sm:text-lg font-semibold leading-snug premium-dashboard-title">Trial VPS</h2>
+                    <Badge variant="outline" className="text-[10px] premium-badge premium-badge--pending h-5 px-2">
                       {trialPackages.length} {trialPackages.length === 1 ? 'package' : 'packages'}
                     </Badge>
                   </div>
@@ -1882,7 +2141,7 @@ function IPStockContent() {
                       ⏱️
                     </div>
                     <h3 className="text-lg font-semibold mb-2 text-white">No Trial VPS Available</h3>
-                    <p className="text-sm text-white/45 max-w-md mx-auto">
+                    <p className="text-sm premium-dashboard-subtitle max-w-md mx-auto">
                       Trial packages are currently unavailable. Check back soon!
                     </p>
                   </CardContent>
@@ -1895,10 +2154,10 @@ function IPStockContent() {
                   <Card className="text-center py-12 premium-dashboard-card border-0">
                     <CardContent>
                       <div className="w-16 h-16 bg-white/5 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-white/10">
-                        <AlertCircle className="h-8 w-8 text-white/40" />
+                        <AlertCircle className="h-8 w-8 premium-dashboard-subtitle" />
                       </div>
                       <h3 className="text-lg font-semibold mb-2 text-white">No Plans Available</h3>
-                      <p className="text-sm text-white/45 max-w-md mx-auto px-2">
+                      <p className="text-sm premium-dashboard-subtitle max-w-md mx-auto px-2">
                         {searchTerm
                           ? `No servers match your search "${searchTerm}".`
                           : activeTab === 'all'
@@ -1924,17 +2183,26 @@ function IPStockContent() {
 
                     return (
                       <div className="space-y-6 min-w-0">
-                        {tagKeys.map(tag => (
-                          <div key={tag} className="space-y-2 min-w-0">
+                        {tagKeys.map((tag) => {
+                          const sectionStocks = grouped[tag];
+
+                          return (
+                          <div
+                            key={tag}
+                            id={`ipstock-section-${tagSlugForAnchor(tag)}`}
+                            className="space-y-2 min-w-0 premium-ipstock-tag-section scroll-mt-44"
+                          >
                             <div className="flex flex-wrap items-center gap-2 px-1 min-w-0">
                               <div className="w-1 h-6 bg-emerald-400 rounded-full shrink-0"></div>
-                              <h2 className="text-sm sm:text-base font-semibold capitalize text-white min-w-0">{formatTagGroupTitle(tag)} Plans</h2>
-                              <Badge variant="outline" className="text-[10px] border-white/15 bg-white/5 text-white/70 h-5 px-2 shrink-0">
-                                {grouped[tag].length}
+                              <h2 className="text-base sm:text-lg font-semibold leading-snug premium-dashboard-title min-w-0">
+                                {tagSectionTitles.get(tag) || tagGroupSectionHeading(tag)}
+                              </h2>
+                              <Badge variant="outline" className={cn(premiumBadge.neutral, "text-[10px] h-5 px-2 shrink-0")}>
+                                {sectionStocks.length}
                               </Badge>
                             </div>
                             <div className="space-y-2">
-                              {grouped[tag].map((stock) => (
+                              {sectionStocks.map((stock) => (
                                 <CompactServerPlanRow
                                   key={stock._id}
                                   stock={stock}
@@ -1945,15 +2213,16 @@ function IPStockContent() {
                               ))}
                             </div>
                           </div>
-                        ))}
+                          );
+                        })}
 
                         {untagged.length > 0 && (
-                          <div className="space-y-2 min-w-0">
+                          <div id="ipstock-section-other" className="space-y-2 min-w-0 premium-ipstock-tag-section scroll-mt-44">
                             {tagKeys.length > 0 && (
                               <div className="flex flex-wrap items-center gap-2 px-1">
                                 <div className="w-1 h-6 bg-white/25 rounded-full shrink-0"></div>
-                                <h2 className="text-sm sm:text-base font-semibold text-white">Other Plans</h2>
-                                <Badge variant="outline" className="text-[10px] border-white/15 bg-white/5 text-white/70 h-5 px-2">
+                                <h2 className="text-base sm:text-lg font-semibold leading-snug premium-dashboard-title">Other Plans</h2>
+                                <Badge variant="outline" className="text-[10px] premium-badge premium-badge--neutral h-5 px-2">
                                   {untagged.length}
                                 </Badge>
                               </div>
@@ -2055,7 +2324,7 @@ function IPStockContent() {
               )}
             </div>
             {promoMessage && (
-              <p className={cn('text-[11px] -mt-1', promoApplied ? 'text-primary' : 'text-destructive')}>
+              <p className={cn('text-xs -mt-1', promoApplied ? 'text-primary' : 'text-destructive')}>
                 {promoMessage}
               </p>
             )}
@@ -2079,7 +2348,7 @@ function IPStockContent() {
 
             {paymentTotals.gatewayCharge > 0 && (
               <div className="space-y-1.5">
-                <p className="text-[11px] text-muted-foreground">Pay via</p>
+                <p className="text-xs text-muted-foreground">Pay via</p>
                 <div className="flex flex-wrap gap-1.5">
                   {sortGatewaysByPrimary(paymentConfig.primaryGateway).map((method) => (
                     <button
@@ -2210,6 +2479,19 @@ function IPStockContent() {
         }}
         onCancel={() => setPaymentInitiating(false)}
       />
+
+      {showBackToTop && (
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          className="premium-ipstock-back-to-top fixed bottom-6 left-4 z-40 h-10 w-10 rounded-full shadow-lg"
+          onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+          aria-label="Back to top"
+        >
+          <ArrowUp className="h-4 w-4" />
+        </Button>
+      )}
     </div>
   );
 }
@@ -2233,9 +2515,9 @@ function TrialVpsProductIcon({ inStock }: { inStock: boolean }) {
 
 function trialPlanCategoryBadgeClass(planCategory?: string) {
   const cat = String(planCategory || 'linux').toLowerCase();
-  if (cat === 'windows') return 'border-sky-400/35 bg-sky-500/15 text-sky-200';
-  if (cat === 'premium_proxy') return 'border-orange-400/35 bg-orange-500/15 text-orange-200';
-  return 'border-emerald-400/35 bg-emerald-500/15 text-emerald-200';
+  if (cat === 'windows') return premiumBadge.info;
+  if (cat === 'premium_proxy') return premiumBadge.warning;
+  return premiumBadge.success;
 }
 
 const TrialVpsPlanRow = memo(function TrialVpsPlanRow({
@@ -2271,7 +2553,7 @@ const TrialVpsPlanRow = memo(function TrialVpsPlanRow({
         'premium-dashboard-card rounded-lg transition-all overflow-hidden border-l-4',
         inStock
           ? 'border-l-violet-400 hover:border-violet-400/40'
-          : 'border-l-red-500 opacity-75'
+          : 'border-l-red-500 premium-ipstock-row-sold-out'
       )}
     >
       <div
@@ -2298,14 +2580,14 @@ const TrialVpsPlanRow = memo(function TrialVpsPlanRow({
               <h3
                 className={cn(
                   'font-semibold text-sm md:text-base min-w-0 flex-1 break-words sm:truncate',
-                  inStock ? 'text-white' : 'text-white/45 line-through decoration-white/25'
+                  inStock ? 'text-white' : 'premium-dashboard-subtitle line-through decoration-white/25'
                 )}
               >
                 {pkg.name}
               </h3>
               <ChevronDown
                 className={cn(
-                  'h-4 w-4 mt-0.5 shrink-0 text-white/40 transition-transform sm:hidden',
+                  'h-4 w-4 mt-0.5 shrink-0 premium-dashboard-subtitle transition-transform sm:hidden',
                   isExpanded && 'rotate-180'
                 )}
               />
@@ -2313,7 +2595,7 @@ const TrialVpsPlanRow = memo(function TrialVpsPlanRow({
             <div className="flex items-center gap-1.5 flex-wrap mt-1">
               <Badge
                 variant="outline"
-                className="text-[10px] border-violet-400/35 bg-violet-500/15 text-violet-200 px-1.5 py-0 h-5"
+                className="text-[10px] premium-badge premium-badge--pending px-1.5 py-0 h-5"
               >
                 Trial VPS
               </Badge>
@@ -2326,7 +2608,7 @@ const TrialVpsPlanRow = memo(function TrialVpsPlanRow({
               {pkg.resellerPriced && (
                 <Badge
                   variant="outline"
-                  className="text-[10px] border-emerald-400/35 bg-emerald-500/15 text-emerald-200 px-1.5 py-0 h-5"
+                  className="text-[10px] premium-badge premium-badge--success px-1.5 py-0 h-5"
                 >
                   Your rate
                 </Badge>
@@ -2342,7 +2624,7 @@ const TrialVpsPlanRow = memo(function TrialVpsPlanRow({
               ) : (
                 <Badge
                   variant="outline"
-                  className="text-[10px] gap-1 px-2 py-0 h-5 font-semibold bg-red-500/20 text-red-300 border-red-400/40"
+                  className="text-[10px] gap-1 px-2 py-0 h-5 font-semibold premium-badge premium-badge--error"
                 >
                   <XCircle className="h-3 w-3" />
                   Out of stock
@@ -2355,7 +2637,7 @@ const TrialVpsPlanRow = memo(function TrialVpsPlanRow({
                 </Badge>
               )}
             </div>
-            <p className="text-xs text-white/45 mt-1">
+            <p className="text-xs premium-dashboard-subtitle mt-1">
               {!inStock
                 ? 'Currently unavailable — check back later'
                 : usesMemory
@@ -2363,7 +2645,7 @@ const TrialVpsPlanRow = memo(function TrialVpsPlanRow({
                   : `${pkg.trialDays}-day trial · HTTP proxy · one-time · no renewal`}
             </p>
             {pkg.description ? (
-              <p className="text-xs text-white/40 mt-1 break-words line-clamp-2">{pkg.description}</p>
+              <p className="text-xs premium-dashboard-subtitle mt-1 break-words line-clamp-2">{pkg.description}</p>
             ) : null}
           </div>
         </div>
@@ -2372,9 +2654,7 @@ const TrialVpsPlanRow = memo(function TrialVpsPlanRow({
           <div
             className={cn(
               'flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide shrink-0',
-              inStock
-                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/30'
-                : 'bg-red-500/20 text-red-300 border border-red-400/35'
+              inStock ? premiumBadge.success : premiumBadge.error
             )}
           >
             {inStock ? (
@@ -2390,11 +2670,11 @@ const TrialVpsPlanRow = memo(function TrialVpsPlanRow({
             )}
           </div>
           <div className="flex items-baseline gap-1.5 min-w-0 flex-1 sm:flex-col sm:items-end sm:flex-none sm:gap-0">
-            <p className="text-xs text-white/45 shrink-0">{pkg.resellerPriced ? 'Your rate' : 'Price'}</p>
+            <p className="text-xs premium-dashboard-subtitle shrink-0">{pkg.resellerPriced ? 'Your rate' : 'Price'}</p>
             <p
               className={cn(
                 'font-bold text-base md:text-lg truncate',
-                inStock && pkg.price > 0 ? 'text-emerald-300' : 'text-white/35'
+                inStock && pkg.price > 0 ? 'premium-price-accent' : 'premium-dashboard-subtitle'
               )}
             >
               {pkg.price > 0 ? `₹${pkg.price}` : '—'}
@@ -2402,7 +2682,7 @@ const TrialVpsPlanRow = memo(function TrialVpsPlanRow({
           </div>
           <ChevronDown
             className={cn(
-              'h-4 w-4 shrink-0 text-white/40 transition-transform hidden sm:block',
+              'h-4 w-4 shrink-0 premium-dashboard-subtitle transition-transform hidden sm:block',
               isExpanded && 'rotate-180'
             )}
           />
@@ -2412,7 +2692,7 @@ const TrialVpsPlanRow = memo(function TrialVpsPlanRow({
       {isExpanded && inStock && (
         <div className="border-t border-white/10 bg-white/[0.02]">
           <div className="p-3 space-y-2">
-            <p className="text-xs font-medium text-white/45 uppercase tracking-wide mb-3">
+            <p className="text-xs font-medium premium-dashboard-subtitle uppercase tracking-wide mb-3">
               Select Configuration
             </p>
             <div
@@ -2422,13 +2702,13 @@ const TrialVpsPlanRow = memo(function TrialVpsPlanRow({
               )}
             >
               <div className="flex items-center justify-between gap-2 min-w-0 sm:flex-1">
-                <span className="text-sm font-medium font-mono tracking-wide truncate text-white/90">
+                <span className="text-sm font-medium font-mono tracking-wide truncate premium-dashboard-title">
                   {usesMemory ? `${memoryLabel} · ${categoryLabel}` : categoryLabel}
                 </span>
-                <span className="font-bold text-base shrink-0 sm:hidden text-emerald-300">₹{pkg.price}</span>
+                <span className="font-bold text-base shrink-0 sm:hidden premium-price-accent">₹{pkg.price}</span>
               </div>
               <div className="flex items-center gap-2 w-full sm:w-auto sm:shrink-0">
-                <span className="hidden sm:inline font-bold text-base text-emerald-300">₹{pkg.price}</span>
+                <span className="hidden sm:inline font-bold text-base premium-price-accent">₹{pkg.price}</span>
                 <Button
                   size="sm"
                   onClick={(e) => {
@@ -2445,7 +2725,7 @@ const TrialVpsPlanRow = memo(function TrialVpsPlanRow({
                     );
                   }}
                   disabled={verifyingPurchaseKey === verifyKey}
-                  className="h-8 flex-1 sm:flex-none px-3 gap-1.5 premium-btn-primary border-0"
+                  className={cn(PLAN_ROW_ACTION, 'flex-1 sm:flex-none gap-1.5 premium-btn-primary border-0')}
                 >
                   {verifyingPurchaseKey === verifyKey ? (
                     <Loader2 className="h-3 w-3 animate-spin" />
@@ -2545,37 +2825,46 @@ const CompactServerPlanRow = memo(function CompactServerPlanRow({
     ? Math.min(...pricedMemoryOptions.map(([, details]) => details.price || 0))
     : 0;
 
+  const primaryRow = configRows.find((row) => {
+    const hasPrice = row.details.price != null && Number(row.details.price) > 0;
+    return hasPrice && isStockPurchasable(stock, row.memory);
+  });
+  const primaryVerifyKey = primaryRow
+    ? `${stock._id}:${primaryRow.memory}:${primaryRow.tag || ''}`
+    : null;
+
   return (
     <div className={cn(
       "premium-dashboard-card rounded-lg transition-all overflow-hidden border-l-4",
       inStock
         ? "border-l-emerald-400 hover:border-emerald-400/40"
-        : "border-l-red-500 opacity-75"
+        : "border-l-red-500 premium-ipstock-row-sold-out"
     )}>
       {/* Main Row - Always Visible */}
       <div 
         className={cn(
-          "p-3 flex flex-col gap-2.5 cursor-pointer sm:flex-row sm:items-center sm:gap-3",
-          !inStock && "cursor-default"
+          "p-3 grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_auto] gap-2.5 sm:gap-3 sm:items-center",
+          inStock ? "cursor-pointer" : "cursor-default"
         )}
-        onClick={() => setIsExpanded(!isExpanded)}
+        onClick={() => inStock && setIsExpanded(!isExpanded)}
       >
         <div className="flex items-start gap-2.5 min-w-0 flex-1 sm:gap-3">
           {/* Icon */}
-          <div className={cn(
-            "w-9 h-9 rounded-lg flex items-center justify-center border flex-shrink-0",
-            inStock
-              ? "bg-emerald-500/25 border-emerald-400/45"
-              : "bg-red-500/15 border-red-400/35"
-          )}>
+          <div
+            className={cn(
+              'premium-ipstock-plan-icon flex-shrink-0',
+              !inStock && 'premium-ipstock-plan-icon--muted'
+            )}
+            data-server-type={stock.serverType}
+          >
             {!inStock ? (
-              <XCircle className="h-4 w-4 text-red-400" />
+              <XCircle className="h-4 w-4" aria-hidden />
             ) : stock.serverType === 'VPS' ? (
-              <Cloud className="h-4 w-4 text-sky-300" />
+              <Cloud className="h-4 w-4" aria-hidden />
             ) : stock.serverType === 'Proxy' || isProxyProduct ? (
-              <Zap className="h-4 w-4 text-orange-300" />
+              <Zap className="h-4 w-4" aria-hidden />
             ) : (
-              <Server className="h-4 w-4 text-emerald-300" />
+              <Server className="h-4 w-4" aria-hidden />
             )}
           </div>
 
@@ -2584,89 +2873,117 @@ const CompactServerPlanRow = memo(function CompactServerPlanRow({
             <div className="flex items-start gap-2">
               <h3 className={cn(
                 "font-semibold text-sm md:text-base min-w-0 flex-1 break-words sm:truncate",
-                inStock ? "text-white" : "text-white/45 line-through decoration-white/25"
+                inStock ? "premium-dashboard-title" : "premium-dashboard-subtitle line-through decoration-white/25"
               )}>
-                {stock.name}
+                {formatPlanDisplayName(stock.name)}
               </h3>
-              <ChevronDown
-                className={cn(
-                  "h-4 w-4 mt-0.5 shrink-0 text-white/40 transition-transform sm:hidden",
-                  isExpanded && "rotate-180"
-                )}
-              />
             </div>
-            <div className="flex items-center gap-1.5 flex-wrap mt-1">
-              <Badge variant="outline" className={cn(premiumBadge.neutral, "text-[10px] px-1.5 py-0 h-5")}>
-                {stock.serverType}
-              </Badge>
-              {stock.resellerPriced && (
-                <Badge variant="outline" className="text-[10px] border-emerald-400/35 bg-emerald-500/15 text-emerald-200 px-1.5 py-0 h-5">
-                  Your rate
-                </Badge>
-              )}
+            <div className="flex items-center gap-2 flex-wrap mt-1">
               {inStock ? (
                 <Badge variant="outline" className={cn(premiumBadge.success, "text-[10px] gap-1 px-2 py-0 h-5 font-semibold")}>
-                  <CheckCircle2 className="h-3 w-3" />
-                  {showUnits ? `${unitsLeft} in stock` : isNetbay || isReseller ? 'In stock' : 'Available'}
+                  <CheckCircle2 className="h-3 w-3" aria-hidden />
+                  {showUnits ? `${unitsLeft} in stock` : 'Available'}
                 </Badge>
               ) : (
-                <Badge variant="outline" className="text-[10px] gap-1 px-2 py-0 h-5 font-semibold bg-red-500/20 text-red-300 border-red-400/40">
-                  <XCircle className="h-3 w-3" />
+                <Badge variant="outline" className={cn(premiumBadge.error, "text-[10px] gap-1 px-2 py-0 h-5 font-semibold")}>
+                  <XCircle className="h-3 w-3" aria-hidden />
                   Out of stock
                 </Badge>
               )}
-              {inStock && hasPromoCodes && (
-                <Badge variant="outline" className={cn(premiumBadge.warning, "text-[10px] gap-1 px-1.5 py-0 h-5")}>
-                  <Tag className="h-2.5 w-2.5" />
-                  Promo
-                </Badge>
+              {stock.resellerPriced && (
+                <span className="text-[10px] premium-dashboard-subtitle">Your rate</span>
               )}
             </div>
-            <p className="text-xs text-white/45 mt-1">
-              {!inStock
-                ? 'Currently unavailable — check back later'
-                : showUnits
-                ? `${unitsLeft} unit${unitsLeft === 1 ? '' : 's'} left · ${pricedMemoryOptions.length} configuration${pricedMemoryOptions.length !== 1 ? 's' : ''}`
-                : `${configRows.length} configuration${configRows.length !== 1 ? 's' : ''} available`}
-            </p>
           </div>
         </div>
 
-        {/* Status + Price */}
-        <div className="flex flex-wrap items-center gap-2 border-t border-white/10 pt-2.5 sm:border-0 sm:pt-0 sm:gap-3 sm:justify-end sm:flex-shrink-0 min-w-0">
-          <div className={cn(
-            "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide shrink-0",
-            inStock
-              ? "bg-emerald-500/20 text-emerald-300 border border-emerald-400/30"
-              : "bg-red-500/20 text-red-300 border border-red-400/35"
-          )}>
-            {inStock ? (
+        {/* Price + quick actions */}
+        <div className="flex flex-wrap items-center gap-3 border-t border-white/10 pt-2.5 sm:border-0 sm:pt-0 sm:justify-end min-w-0">
+          <p className="flex items-baseline gap-1.5 min-w-0 leading-none">
+            <span className="text-xs premium-dashboard-subtitle shrink-0">{stock.resellerPriced ? 'Your rate from' : 'From'}</span>
+            <span className={cn(
+              "font-bold text-lg truncate premium-price-accent",
+              !inStock && "opacity-60"
+            )}>
+              {startingPrice > 0 ? `₹${startingPrice}` : '—'}
+            </span>
+          </p>
+          <div
+            className="flex items-center gap-2 flex-1 sm:flex-none justify-end"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {inStock && primaryRow ? (
               <>
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                In stock
+                <AddToCartButton
+                  kind="ipstock"
+                  ipStockId={stock._id}
+                  memory={primaryRow.memory}
+                  netbayGroupTag={primaryRow.tag || undefined}
+                  size="sm"
+                  variant="outline"
+                  iconOnly
+                  className={cn(PLAN_ROW_ACTION, 'w-10 px-0')}
+                  label="Add to cart"
+                />
+                <Button
+                  size="sm"
+                  className={cn(PLAN_ROW_ACTION, 'w-[7.25rem] gap-1.5 premium-btn-primary border-0')}
+                  disabled={verifyingPurchaseKey === primaryVerifyKey}
+                  onClick={() =>
+                    onBuyNow(
+                      stock.name,
+                      primaryRow.memory,
+                      primaryRow.details.price!,
+                      stock._id,
+                      undefined,
+                      true,
+                      primaryRow.tag || undefined
+                    )
+                  }
+                >
+                  {verifyingPurchaseKey === primaryVerifyKey ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <Zap className="h-3 w-3" aria-hidden />
+                  )}
+                  Buy Now
+                </Button>
               </>
             ) : (
               <>
-                <span className="h-1.5 w-1.5 rounded-full bg-red-400" />
-                Sold out
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled
+                  aria-label="Add to cart, sold out"
+                  className={cn(PLAN_ROW_ACTION, 'w-10 px-0')}
+                >
+                  <ShoppingCart className="h-3.5 w-3.5" aria-hidden />
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled
+                  className={cn(PLAN_ROW_ACTION, 'w-[7.25rem]')}
+                >
+                  Sold out
+                </Button>
               </>
             )}
+            <span className="h-6 w-px bg-white/10 mx-0.5 hidden sm:block" aria-hidden />
+            <button
+              type="button"
+              onClick={() => inStock && setIsExpanded(!isExpanded)}
+              disabled={!inStock}
+              aria-expanded={inStock ? isExpanded : undefined}
+              aria-label={inStock ? (isExpanded ? 'Hide configurations' : 'Show configurations') : 'Configurations unavailable'}
+              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md premium-dashboard-subtitle hover:bg-white/[0.06] disabled:opacity-40 disabled:pointer-events-none"
+            >
+              <ChevronDown className={cn("h-4 w-4 transition-transform", isExpanded && "rotate-180")} aria-hidden />
+            </button>
           </div>
-          <div className="flex items-baseline gap-1.5 min-w-0 flex-1 sm:flex-col sm:items-end sm:flex-none sm:gap-0">
-            <p className="text-xs text-white/45 shrink-0">{stock.resellerPriced ? 'Your rate from' : 'From'}</p>
-            <p className={cn(
-              "font-bold text-base md:text-lg truncate",
-              inStock && startingPrice > 0 ? "text-emerald-300" : "text-white/35"
-            )}>
-              {startingPrice > 0 ? `₹${startingPrice}` : '—'}
-            </p>
-          </div>
-          <ChevronDown 
-            className={cn(
-              "h-4 w-4 shrink-0 text-white/40 transition-transform hidden sm:block",
-              isExpanded && "rotate-180"
-            )}
-          />
         </div>
       </div>
 
@@ -2674,9 +2991,23 @@ const CompactServerPlanRow = memo(function CompactServerPlanRow({
       {isExpanded && (
         <div className="border-t border-white/10 bg-white/[0.02]">
           <div className="p-3 space-y-2">
+            <div className="flex flex-wrap items-center gap-2 pb-2">
+              <Badge variant="outline" className={cn(premiumBadge.neutral, 'text-[10px] px-1.5 py-0 h-5')}>
+                {stock.serverType}
+              </Badge>
+              {hasPromoCodes && (
+                <Badge variant="outline" className={cn(premiumBadge.warning, 'text-[10px] gap-1 px-1.5 py-0 h-5')}>
+                  <Tag className="h-2.5 w-2.5" aria-hidden />
+                  Promo codes
+                </Badge>
+              )}
+              <span className="text-xs premium-dashboard-subtitle">
+                {configRows.length} configuration{configRows.length !== 1 ? 's' : ''}
+              </span>
+            </div>
             {configRows.length > 0 ? (
               <>
-                <p className="text-xs font-medium text-white/45 uppercase tracking-wide mb-3">
+                <p className="text-xs font-medium premium-dashboard-subtitle uppercase tracking-wide mb-3">
                   {isProxyProduct || netbayGroupTags.length > 1 ? 'IP ranges' : 'Select Configuration'}
                 </p>
                 <div className="space-y-2">
@@ -2700,7 +3031,7 @@ const CompactServerPlanRow = memo(function CompactServerPlanRow({
                           <span className="inline-flex items-center gap-2 min-w-0">
                             <span className={cn(
                               "text-sm font-medium font-mono tracking-wide truncate",
-                              memoryInStock ? "text-white/90" : "text-white/45"
+                              memoryInStock ? "premium-dashboard-title" : "premium-dashboard-subtitle"
                             )}>
                               {formatOceanMemoryDisplay(memory)}
                             </span>
@@ -2709,14 +3040,14 @@ const CompactServerPlanRow = memo(function CompactServerPlanRow({
                         ) : (
                           <span className={cn(
                             "text-sm font-medium font-mono tracking-wide truncate",
-                            memoryInStock ? "text-white/90" : "text-white/45"
+                            memoryInStock ? "premium-dashboard-title" : "premium-dashboard-subtitle"
                           )}>
                             {label}
                           </span>
                         )}
                         <span className={cn(
                           "font-bold text-base shrink-0 sm:hidden",
-                          memoryInStock ? "text-emerald-300" : "text-white/35"
+                          memoryInStock ? "premium-price-accent" : "premium-dashboard-subtitle"
                         )}>
                           {hasPrice ? `₹${details.price}` : '—'}
                         </span>
@@ -2724,50 +3055,46 @@ const CompactServerPlanRow = memo(function CompactServerPlanRow({
                       <div className="flex items-center gap-2 w-full sm:w-auto sm:shrink-0">
                         <span className={cn(
                           "hidden sm:inline font-bold text-base",
-                          memoryInStock ? "text-emerald-300" : "text-white/35"
+                          memoryInStock ? "premium-price-accent" : "premium-dashboard-subtitle"
                         )}>
                           {hasPrice ? `₹${details.price}` : 'Price N/A'}
                         </span>
-                        <AddToCartButton
-                          kind="ipstock"
-                          ipStockId={stock._id}
-                          memory={memory}
-                          netbayGroupTag={tag || undefined}
-                          size="sm"
-                          variant="outline"
-                          className="h-8 flex-1 sm:flex-none px-2.5"
-                          label="Cart"
-                          disabled={!memoryInStock}
-                        />
-                        <Button
-                          size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onBuyNow(stock.name, memory, details.price!, stock._id, undefined, memoryInStock, tag || undefined);
-                          }}
-                          disabled={!memoryInStock || !hasPrice || verifyingPurchaseKey === verifyKey}
-                          className={cn(
-                            "h-8 flex-1 sm:flex-none px-3 gap-1.5 border-0",
-                            memoryInStock && hasPrice
-                              ? "premium-btn-primary"
-                              : "bg-red-500/15 text-red-300 hover:bg-red-500/20 cursor-not-allowed"
-                          )}
-                        >
-                          {verifyingPurchaseKey === verifyKey ? (
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                          ) : memoryInStock && hasPrice ? (
-                            <Zap className="h-3 w-3" />
-                          ) : (
-                            <XCircle className="h-3 w-3" />
-                          )}
-                          {verifyingPurchaseKey === verifyKey
-                            ? 'Checking…'
-                            : memoryInStock && hasPrice
-                              ? 'Buy Now'
-                              : hasPrice
-                                ? 'Sold out'
-                                : 'No price'}
-                        </Button>
+                        {memoryInStock && hasPrice ? (
+                          <>
+                            <AddToCartButton
+                              kind="ipstock"
+                              ipStockId={stock._id}
+                              memory={memory}
+                              netbayGroupTag={tag || undefined}
+                              size="sm"
+                              variant="outline"
+                              iconOnly
+                              className={cn(PLAN_ROW_ACTION, 'w-10 px-0')}
+                              label="Add to cart"
+                            />
+                            <Button
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onBuyNow(stock.name, memory, details.price!, stock._id, undefined, memoryInStock, tag || undefined);
+                              }}
+                              disabled={verifyingPurchaseKey === verifyKey}
+                              className={cn(PLAN_ROW_ACTION, 'flex-1 sm:flex-none gap-1.5 premium-btn-primary border-0')}
+                            >
+                              {verifyingPurchaseKey === verifyKey ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : (
+                                <Zap className="h-3 w-3" />
+                              )}
+                              {verifyingPurchaseKey === verifyKey ? 'Checking…' : 'Buy Now'}
+                            </Button>
+                          </>
+                        ) : (
+                          <span className="premium-ipstock-status-label">
+                            <XCircle className="h-3.5 w-3.5" aria-hidden />
+                            {hasPrice ? 'Sold out' : 'No price'}
+                          </span>
+                        )}
                       </div>
                     </div>
                     );
@@ -2775,7 +3102,7 @@ const CompactServerPlanRow = memo(function CompactServerPlanRow({
                 </div>
                 {hasPromoCodes && (
                   <div className="mt-3 p-2 rounded-md bg-emerald-500/10 border border-emerald-400/25">
-                    <p className="text-xs text-emerald-200 flex items-center gap-1.5">
+                    <p className="text-xs premium-price-accent flex items-center gap-1.5">
                       <Tag className="h-3 w-3" />
                       Promo codes available for additional discounts!
                     </p>

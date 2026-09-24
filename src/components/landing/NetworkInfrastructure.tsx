@@ -83,8 +83,8 @@ export default function NetworkInfrastructure() {
             <div key={index} className="premium-glass-card p-6 flex gap-4">
               <div className="premium-icon-box shrink-0 w-10 h-10">{pillar.icon}</div>
               <div>
-                <h4 className="font-medium text-white mb-1.5">{pillar.title}</h4>
-                <p className="text-sm text-white/45 leading-relaxed">{pillar.description}</p>
+                <h3 className="text-base font-medium text-white mb-1.5">{pillar.title}</h3>
+                <p className="text-sm text-white/70 leading-relaxed">{pillar.description}</p>
               </div>
             </div>
           ))}
@@ -96,18 +96,18 @@ export default function NetworkInfrastructure() {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 max-w-2xl mx-auto mb-6">
           <div className="premium-stat-card">
             <div className="premium-stat-value premium-stat-value--blue text-2xl sm:text-3xl">99.9%</div>
-            <div className="text-xs text-white/40 mt-1">Uptime Target</div>
+            <div className="text-sm text-white/70 mt-1">Uptime Target</div>
           </div>
           <div className="premium-stat-card">
             <div className="premium-stat-value text-2xl sm:text-3xl">24/7</div>
-            <div className="text-xs text-white/40 mt-1">OceanLinux Support</div>
+            <div className="text-sm text-white/70 mt-1">OceanLinux Support</div>
           </div>
           <div className="premium-stat-card">
             <div className="premium-stat-value premium-stat-value--violet text-2xl sm:text-3xl">₹599+</div>
-            <div className="text-xs text-white/40 mt-1">Starting Price</div>
+            <div className="text-sm text-white/70 mt-1">Starting Price</div>
           </div>
         </div>
-        <p className="text-sm text-white/45 max-w-lg mx-auto">
+        <p className="text-sm text-white/70 max-w-lg mx-auto">
           Quality VPS from proven providers, delivered with OceanLinux care — honest service, no inflated claims.
         </p>
       </div>

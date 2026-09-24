@@ -23,14 +23,14 @@ export default function CTA() {
           fully managed and supported by our team.
         </p>
 
-        <div className="flex flex-wrap justify-center gap-x-8 gap-y-3 mb-10 text-sm text-white/50">
+        <div className="flex flex-wrap justify-center gap-x-8 gap-y-3 mb-10 text-sm text-white/70">
           {[
             { icon: Zap, text: "Instant setup" },
             { icon: Shield, text: "Enterprise security" },
             { icon: Clock, text: "No hidden costs" },
           ].map(({ icon: Icon, text }) => (
             <span key={text} className="inline-flex items-center gap-2">
-              <Icon className="w-4 h-4 text-emerald-400" />
+              <Icon className="w-4 h-4 text-emerald-300" />
               {text}
             </span>
           ))}
@@ -50,7 +50,7 @@ export default function CTA() {
         </div>
 
         <Tilt3DCard maxTilt={4} scale={1.005} innerClassName="premium-glass-card p-7 sm:p-8 mb-10">
-          <p className="text-[10px] font-medium uppercase tracking-widest text-white/35 mb-5">
+          <p className="text-sm font-medium text-white/70 mb-5">
             Included with every plan
           </p>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
@@ -62,15 +62,15 @@ export default function CTA() {
             ].map((item) => (
               <div key={item.label} className="text-center py-3 rounded-xl bg-white/[0.03] border border-white/[0.06]">
                 <div className="premium-stat-value text-xl sm:text-2xl">{item.value}</div>
-                <div className="text-[10px] text-white/35 mt-1 uppercase tracking-wider">{item.label}</div>
+                <div className="text-sm text-white/70 mt-1">{item.label}</div>
               </div>
             ))}
           </div>
         </Tilt3DCard>
 
-        <div className="flex flex-wrap justify-center items-center gap-6 text-xs text-white/35">
+        <div className="flex flex-wrap justify-center items-center gap-6 text-sm text-white/70">
           <span className="inline-flex items-center gap-1.5">
-            <Star className="w-3.5 h-3.5 text-emerald-400" />
+            <Star className="w-3.5 h-3.5 text-emerald-300" />
             4.9/5 Rating
           </span>
           <span>Enterprise Security</span>

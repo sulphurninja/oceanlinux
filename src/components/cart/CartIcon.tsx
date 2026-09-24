@@ -56,9 +56,9 @@ export default function CartIcon({
         size={showLabel ? 'sm' : 'icon'}
         className={cn(
           'premium-dashboard-icon-btn',
-          count > 0 && 'premium-dashboard-icon-btn--active',
           showLabel && 'gap-2 px-3 w-auto h-8'
         )}
+        aria-label={count > 0 ? `Cart, ${count} items` : 'Cart'}
       >
         <ShoppingCart className="h-4 w-4" />
         {showLabel && <span className="text-sm text-foreground/80">Cart</span>}

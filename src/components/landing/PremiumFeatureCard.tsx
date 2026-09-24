@@ -33,7 +33,7 @@ export default function PremiumFeatureCard({
         <h3 className="text-base sm:text-lg font-semibold text-white tracking-tight">{title}</h3>
         {tag && <span className="premium-tag shrink-0 self-start">{tag}</span>}
       </div>
-      <p className="text-sm leading-relaxed text-white/55">{description}</p>
+      <p className="text-sm leading-relaxed text-white/70">{description}</p>
       {children && <div className="mt-5 pt-5 border-t border-white/[0.06]">{children}</div>}
     </Tilt3DCard>
   );

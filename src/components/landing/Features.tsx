@@ -87,9 +87,9 @@ export default function Features() {
           {serverSeries.map((series, index) => (
             <Tilt3DCard key={index} maxTilt={5} scale={1.01} innerClassName="premium-glass-card p-6 h-full text-center">
               <div className="premium-icon-box mx-auto mb-4">{series.icon}</div>
-              <h4 className="text-base font-semibold text-white mb-1.5">{series.title}</h4>
-              <p className="text-sm text-white/45 mb-4">{series.description}</p>
-              <code className="text-[11px] font-mono text-emerald-400/80 bg-emerald-500/10 px-2.5 py-1 rounded-md border border-emerald-500/15">
+              <h3 className="text-base font-semibold text-white mb-1.5">{series.title}</h3>
+              <p className="text-sm text-white/70 mb-4">{series.description}</p>
+              <code className="text-sm font-mono text-emerald-300 bg-emerald-500/10 px-2.5 py-1 rounded-md border border-emerald-500/15">
                 {series.ipRange}
               </code>
             </Tilt3DCard>
@@ -99,21 +99,21 @@ export default function Features() {
 
       <div className="premium-highlight-box">
         <h3 className="text-xl sm:text-2xl font-semibold text-white mb-3 tracking-tight">Get More, Pay Less</h3>
-        <p className="text-sm sm:text-base text-white/45 mb-8 max-w-xl mx-auto">
+        <p className="text-sm sm:text-base text-white/70 mb-8 max-w-xl mx-auto">
           Enterprise-grade hosting at prices that make sense. No inflated reseller markup — just honest value.
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 max-w-2xl mx-auto">
           <div className="premium-stat-card">
             <div className="premium-stat-value">40%</div>
-            <div className="text-xs text-white/40 uppercase tracking-wider">Lower Costs</div>
+            <div className="text-sm text-white/70">Lower Costs</div>
           </div>
           <div className="premium-stat-card">
             <div className="premium-stat-value premium-stat-value--blue">99.9%</div>
-            <div className="text-xs text-white/40 uppercase tracking-wider">Uptime SLA</div>
+            <div className="text-sm text-white/70">Uptime SLA</div>
           </div>
           <div className="premium-stat-card">
             <div className="premium-stat-value premium-stat-value--violet">24/7</div>
-            <div className="text-xs text-white/40 uppercase tracking-wider">Expert Support</div>
+            <div className="text-sm text-white/70">Expert Support</div>
           </div>
         </div>
       </div>

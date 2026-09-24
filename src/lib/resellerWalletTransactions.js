@@ -11,6 +11,7 @@ export function paymentSourceLabel(txn, order) {
         if (order.paymentMethod === 'wallet') return 'Customer Wallet';
         return String(order.paymentMethod);
     }
+    if (txn?.metadata?.source === 'admin_panel' && txn?.metadata?.manual) return 'Admin Panel (manual deduction)';
     if (txn?.metadata?.source === 'admin_panel') return 'Admin Panel (manual recharge)';
     if (txn?.type === 'recharge') return 'Wallet Recharge';
     if (txn?.type === 'deduction') return 'Reseller Wallet';

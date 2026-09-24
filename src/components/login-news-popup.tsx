@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { premiumBadge } from "@/lib/premium-badges";
 
 type AnnouncementType = "promotion" | "update" | "maintenance" | "feature" | "security";
 
@@ -138,6 +139,20 @@ function WhatsAppLogo({ size = 28 }: { size?: number }) {
   );
 }
 
+const KEEP_UPPER = new Set(["vps", "ip", "os", "ssd", "cpu", "ram", "gb", "api"]);
+
+/** Long all-caps announcements are slow to read. Short labels stay as written. */
+function softenAllCaps(line: string) {
+  const letters = line.replace(/[^A-Za-z]/g, "");
+  if (letters.length < 24) return line;
+  const upper = letters.replace(/[^A-Z]/g, "").length;
+  if (upper / letters.length < 0.7) return line;
+  const lowered = line.toLowerCase().replace(/\b[a-z]+\b/g, (word) =>
+    KEEP_UPPER.has(word) ? word.toUpperCase() : word
+  );
+  return lowered.replace(/[a-z]/, (ch) => ch.toUpperCase());
+}
+
 function NewsContent({ text, dotClass }: { text: string; dotClass: string }) {
   const blocks = text
     .split(/\n+/)
@@ -156,11 +171,8 @@ function NewsContent({ text, dotClass }: { text: string; dotClass: string }) {
           return (
             <div key={index} className="flex gap-3 pl-0.5">
               <span className={cn("mt-[0.5rem] h-1.5 w-1.5 shrink-0 rounded-full", dotClass)} />
-              <p
-                className="text-sm leading-relaxed sm:text-[15px]"
-                style={{ color: "hsl(var(--pd-fg-muted))" }}
-              >
-                {cleanLine}
+              <p className="text-sm leading-relaxed sm:text-[15px] premium-dashboard-subtitle">
+                {softenAllCaps(cleanLine)}
               </p>
             </div>
           );
@@ -171,11 +183,12 @@ function NewsContent({ text, dotClass }: { text: string; dotClass: string }) {
             key={index}
             className={cn(
               "whitespace-pre-wrap leading-relaxed",
-              index === 0 ? "text-[0.9375rem] font-medium sm:text-base" : "text-sm sm:text-[15px]"
+              index === 0
+                ? "text-[0.9375rem] font-medium sm:text-base premium-dashboard-title"
+                : "text-sm sm:text-[15px] premium-dashboard-subtitle"
             )}
-            style={{ color: index === 0 ? "var(--pd-title)" : "hsl(var(--pd-fg-muted))" }}
           >
-            {cleanLine}
+            {softenAllCaps(cleanLine)}
           </p>
         );
       })}
@@ -317,7 +330,13 @@ export default function LoginNewsPopup() {
               <span
                 className={cn(
                   "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider",
-                  meta.badge
+                  popup.type === "promotion" || popup.type === "maintenance"
+                    ? premiumBadge.warning
+                    : popup.type === "feature"
+                      ? premiumBadge.pending
+                      : popup.type === "security"
+                        ? premiumBadge.info
+                        : premiumBadge.success
                 )}
               >
                 {meta.label}
@@ -362,7 +381,7 @@ export default function LoginNewsPopup() {
                     >
                       Join WhatsApp Community
                     </p>
-                    <p className="mt-0.5 text-xs" style={{ color: "hsl(var(--pd-fg-muted))" }}>
+                    <p className="mt-0.5 text-xs premium-dashboard-subtitle">
                       Get updates, support and offers
                     </p>
                   </div>
@@ -400,10 +419,7 @@ export default function LoginNewsPopup() {
               <Button
                 asChild
                 size="sm"
-                className={cn(
-                  "h-10 w-full gap-2 rounded-xl border-0 bg-gradient-to-r text-sm font-semibold shadow-none transition-[filter,transform] hover:brightness-110 active:scale-[0.99] sm:h-9 sm:w-auto sm:min-w-[10rem]",
-                  meta.cta
-                )}
+                className="premium-btn-primary h-10 w-full gap-2 border-0 text-sm shadow-none sm:w-auto sm:min-w-[10rem]"
               >
                 <a
                   href={popup.actionUrl}
@@ -419,10 +435,7 @@ export default function LoginNewsPopup() {
               <Button
                 size="sm"
                 onClick={() => handleOpenChange(false)}
-                className={cn(
-                  "h-10 w-full rounded-xl border-0 bg-gradient-to-r text-sm font-semibold shadow-none transition-[filter,transform] hover:brightness-110 active:scale-[0.99] sm:h-9 sm:w-auto sm:min-w-[8rem]",
-                  meta.cta
-                )}
+                className="premium-btn-primary h-10 w-full border-0 text-sm shadow-none sm:w-auto sm:min-w-[8rem]"
               >
                 Got it
               </Button>

@@ -3,11 +3,8 @@ import EcoFriendly from "@/components/landing/EcoFriendly";
 import Features from "@/components/landing/Features";
 import Hero from "@/components/landing/Hero";
 import NetworkInfrastructure from "@/components/landing/NetworkInfrastructure";
-import Performance from "@/components/landing/Performance";
 import PricingSection from "@/components/landing/pricing";
 import Scalability from "@/components/landing/Scalability";
-import Security from "@/components/landing/Security";
-import SupportAndReliability from "@/components/landing/SupportAndReliability";
 import PublicPageLayout from "@/components/landing/PublicPageLayout";
 import type { Metadata } from 'next';
 
@@ -192,11 +189,8 @@ export default function LandingPage() {
       <Hero />
       <PricingSection />
       <Features />
-      <Performance />
-      <Security />
       <Scalability />
       <NetworkInfrastructure />
-      <SupportAndReliability />
       <EcoFriendly />
       <CTA />
     </PublicPageLayout>

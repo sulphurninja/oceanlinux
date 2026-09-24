@@ -3,16 +3,15 @@
 import React, { useEffect, useState, useMemo } from 'react'
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import {
   ServerIcon,
   CalendarIcon,
   Package,
-  Eye,
   Download,
   Settings,
   ArrowRight,
   ChevronRight,
-  LifeBuoy,
   TrendingUp,
   TrendingDown,
   Minus,
@@ -26,7 +25,6 @@ import {
   Card,
   CardContent,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -146,7 +144,6 @@ export default function Dashboard() {
   };
 
   const handleBrowsePlans = () => router.push('/dashboard/ipStock');
-  const handleViewAllOrders = () => router.push('/dashboard/viewLinux');
   const handleDownloadInvoice = () => setShowInvoiceDialog(true);
   const handleAccountSettings = () => setShowSettingsDialog(true);
 
@@ -263,14 +260,21 @@ export default function Dashboard() {
   }, [stats?.monthlySpending]);
 
   const orderDistributionData = useMemo(() => {
-    if (!stats?.orderStatusBreakdown) return [];
-    const { completed, pending, failed } = stats.orderStatusBreakdown;
+    const total = stats?.totalOrders || 0;
+    if (!total) return [];
+    const completed = stats?.orderStatusBreakdown?.completed || 0;
+    const pending = stats?.orderStatusBreakdown?.pending ?? stats?.pendingOrders ?? 0;
+    const failed = stats?.orderStatusBreakdown?.failed || 0;
+    // Orders whose status is active, confirmed, provisioning, etc. still count
+    // toward totalOrders. Fold them in so the chart matches the header.
+    const other = Math.max(0, total - completed - pending - failed);
     return [
-      { name: 'Completed', value: completed || 0, color: '#10b981' },
-      { name: 'Pending', value: (pending ?? stats.pendingOrders) || 0, color: '#f59e0b' },
-      { name: 'Failed', value: failed || 0, color: '#ef4444' },
+      { name: 'Completed', value: completed, color: '#10b981' },
+      { name: 'Pending', value: pending, color: '#f59e0b' },
+      { name: 'Other', value: other, color: '#64748b' },
+      { name: 'Failed', value: failed, color: '#ef4444' },
     ].filter(d => d.value > 0);
-  }, [stats?.orderStatusBreakdown, stats?.pendingOrders]);
+  }, [stats?.orderStatusBreakdown, stats?.pendingOrders, stats?.totalOrders]);
 
   const spendingTrend = useMemo(() => {
     if (!stats?.monthlySpending || stats.monthlySpending.length < 2) return 0;
@@ -299,8 +303,7 @@ export default function Dashboard() {
         <div className="pointer-events-none fixed inset-0 overflow-hidden -z-10">
           <div className="absolute -top-32 right-0 w-[420px] h-[420px] bg-gradient-to-bl from-emerald-500/8 via-emerald-500/4 to-transparent rounded-full blur-3xl" />
         </div>
-        <div className="lg:hidden h-16" />
-        <div className="w-full max-w-7xl mx-auto px-3 sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-5 -mt-12 md:mt-0">
+        <div className="premium-dashboard-home w-full min-w-0 px-3 sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-5">
           <div className="premium-dashboard-card p-4 sm:p-6">
             <div className="flex items-start gap-3">
               <div className="h-11 w-11 rounded-xl bg-white/5 animate-pulse shrink-0" />
@@ -311,7 +314,7 @@ export default function Dashboard() {
               </div>
             </div>
           </div>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
+          <div className="grid grid-cols-2 xl:grid-cols-4 gap-2.5 sm:gap-3">
             {[...Array(4)].map((_, i) => (
               <div key={i} className="premium-dashboard-card p-3.5 sm:p-4">
                 <div className="flex items-center gap-2 mb-3">
@@ -323,7 +326,7 @@ export default function Dashboard() {
               </div>
             ))}
           </div>
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 sm:gap-4">
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-3 sm:gap-4">
             <div className="lg:col-span-2 premium-dashboard-card p-4 sm:p-5">
               <div className="h-4 w-36 bg-white/5 rounded animate-pulse mb-4" />
               <div className="h-[200px] sm:h-[220px] bg-white/[0.03] rounded-xl animate-pulse" />
@@ -362,9 +365,7 @@ export default function Dashboard() {
         <div className="absolute bottom-0 -left-24 w-80 h-80 bg-gradient-to-tr from-emerald-600/5 to-transparent rounded-full blur-3xl" />
       </div>
 
-      <div className="lg:hidden h-16" />
-
-      <div className="w-full max-w-7xl mx-auto px-3 sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-5 -mt-12 md:mt-0">
+      <div className="premium-dashboard-home w-full min-w-0 px-3 sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-5">
 
         {/* ════════════════════════════════════════════════════════════════
             WELCOME BANNER
@@ -375,7 +376,7 @@ export default function Dashboard() {
           </div>
 
           <div className="relative p-4 sm:p-6">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
               <div className="flex items-start gap-3 sm:gap-4 min-w-0 flex-1">
                 <div className="h-11 w-11 sm:h-12 sm:w-12 rounded-xl bg-gradient-to-br from-emerald-700 via-emerald-600 to-emerald-500 text-white text-sm font-bold flex items-center justify-center shadow-md shadow-emerald-500/25 ring-2 ring-emerald-400/15 shrink-0">
                   {userInitials}
@@ -384,9 +385,9 @@ export default function Dashboard() {
                   <p className="text-[10px] sm:text-[11px] premium-greeting-label tracking-widest uppercase mb-0.5">
                     {greeting}
                   </p>
-                  <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold tracking-tight premium-dashboard-title">
+                  <p className="text-xl sm:text-2xl lg:text-3xl font-bold tracking-tight premium-dashboard-title">
                     {firstName}
-                  </h1>
+                  </p>
                   <p className="premium-dashboard-subtitle mt-1 text-xs sm:text-sm">
                     {stats?.activeServices ? (
                       <>
@@ -397,7 +398,7 @@ export default function Dashboard() {
                       </>
                     ) : 'Deploy your first server in minutes'}
                   </p>
-                  <div className="flex items-center gap-1.5 mt-2 text-[10px] sm:text-[11px] premium-dashboard-subtitle">
+                  <div className="flex items-center gap-1.5 mt-2 text-xs premium-dashboard-subtitle">
                     <CalendarIcon className="h-3 w-3 shrink-0" />
                     <span className="truncate">
                       {new Date().toLocaleDateString('en-IN', {
@@ -409,17 +410,17 @@ export default function Dashboard() {
               </div>
 
               <div className="premium-dashboard-actions">
-                <Button size="sm" className="premium-btn-primary h-8 sm:h-9 px-3 sm:px-4 text-xs sm:text-sm flex-1 sm:flex-initial gap-1.5 border-0 shadow-none" onClick={handleBrowsePlans}>
+                <Button className="premium-btn-primary flex-1 sm:flex-initial gap-1.5" onClick={handleBrowsePlans}>
                   <Zap className="h-3.5 w-3.5" />
                   New Order
                 </Button>
-                <Button variant="outline" size="sm" className="premium-btn-outline h-8 sm:h-9 px-3 sm:px-4 text-xs sm:text-sm flex-1 sm:flex-initial gap-1.5 py-0" onClick={handleDownloadInvoice}>
+                <Button variant="outline" className="premium-btn-outline flex-1 sm:flex-initial gap-1.5" onClick={handleDownloadInvoice}>
                   <Download className="h-3.5 w-3.5" />
-                  <span className="sm:hidden">PDF</span>
-                  <span className="hidden sm:inline">Invoice</span>
+                  Invoice
                 </Button>
-                <Button variant="outline" size="sm" className="premium-btn-outline h-8 sm:h-9 px-2.5 text-xs sm:text-sm py-0 hidden sm:flex" onClick={handleAccountSettings}>
+                <Button variant="outline" className="premium-btn-outline flex-1 sm:flex-initial gap-1.5" onClick={handleAccountSettings}>
                   <Settings className="h-3.5 w-3.5" />
+                  Settings
                 </Button>
               </div>
             </div>
@@ -431,7 +432,7 @@ export default function Dashboard() {
         ════════════════════════════════════════════════════════════════ */}
         <div className={cn(
           "grid gap-2.5 sm:gap-3",
-          stats?.resellerWallet ? "grid-cols-2 lg:grid-cols-5" : "grid-cols-2 lg:grid-cols-4"
+          stats?.resellerWallet ? "grid-cols-2 xl:grid-cols-5" : "grid-cols-2 xl:grid-cols-4"
         )}>
           {stats?.resellerWallet && (
             <Card className={cn("relative overflow-hidden group", softCard)}>
@@ -443,12 +444,12 @@ export default function Dashboard() {
                   <p className="premium-dashboard-stat-label">Wallet</p>
                 </div>
                 <p className="premium-dashboard-stat-value">{formatCurrency(stats.resellerWallet.balance)}</p>
-                <button
-                  onClick={() => router.push('/dashboard/reseller-wallet')}
-                  className="text-[10px] sm:text-[11px] text-emerald-700 dark:text-emerald-400 font-medium hover:underline mt-1 inline-flex items-center gap-1 group-hover:gap-1.5 transition-all"
+                <Link
+                  href="/dashboard/reseller-wallet"
+                  className="text-xs text-emerald-700 dark:text-emerald-400 font-medium hover:underline mt-1 inline-flex items-center gap-1 group-hover:gap-1.5 transition-all"
                 >
                   Add Funds <ArrowRight className="h-3 w-3" />
-                </button>
+                </Link>
               </CardContent>
             </Card>
           )}
@@ -537,16 +538,16 @@ export default function Dashboard() {
         {/* ════════════════════════════════════════════════════════════════
             CHARTS ROW
         ════════════════════════════════════════════════════════════════ */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 sm:gap-4">
+        <div className="grid min-w-0 grid-cols-1 xl:grid-cols-3 gap-3 sm:gap-4">
           {/* Spending Trend Area Chart */}
-          <Card className={cn("lg:col-span-2 rounded-2xl", softCard)}>
+          <Card className={cn("min-w-0 overflow-hidden lg:col-span-2 rounded-2xl", softCard)}>
             <CardHeader className="pb-1 flex flex-row items-center justify-between px-4 sm:px-5 pt-4 sm:pt-5">
               <div className="flex items-center gap-2">
                 <div className={cn(statIconBox, "bg-emerald-500/20 border-emerald-400/30")}>
                   <TrendingUp className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-300" />
                 </div>
                 <div>
-                  <CardTitle className="text-sm font-semibold premium-dashboard-title">Spending Trend</CardTitle>
+                  <h2 className="text-sm font-semibold tracking-tight premium-dashboard-title">Spending Trend</h2>
                   <p className="text-[10px] premium-dashboard-subtitle mt-0.5">Last 6 months</p>
                 </div>
               </div>
@@ -606,14 +607,14 @@ export default function Dashboard() {
           </Card>
 
           {/* Order Distribution Donut */}
-          <Card className={cn("rounded-2xl", softCard)}>
+          <Card className={cn("min-w-0 overflow-hidden rounded-2xl", softCard)}>
             <CardHeader className="pb-1 px-4 sm:px-5 pt-4 sm:pt-5">
               <div className="flex items-center gap-2">
                 <div className={cn(statIconBox, "bg-amber-500/20 border-amber-400/30")}>
                   <Package className="h-3.5 w-3.5 text-amber-600 dark:text-amber-300" />
                 </div>
                 <div>
-                  <CardTitle className="text-sm font-semibold premium-dashboard-title">Distribution</CardTitle>
+                  <h2 className="text-sm font-semibold tracking-tight premium-dashboard-title">Distribution</h2>
                   <p className="text-[10px] premium-dashboard-subtitle mt-0.5">{stats?.totalOrders || 0} orders</p>
                 </div>
               </div>
@@ -657,7 +658,7 @@ export default function Dashboard() {
                       <p className="text-[10px] premium-dashboard-subtitle">Orders</p>
                     </div>
                   </div>
-                  <div className="flex gap-4 mt-2">
+                  <div className="flex flex-wrap gap-x-4 gap-y-1.5 mt-2">
                     {orderDistributionData.map((entry) => (
                       <div key={entry.name} className="flex items-center gap-1.5">
                         <span className="h-2 w-2 rounded-full flex-shrink-0" style={{ backgroundColor: entry.color }} />
@@ -680,35 +681,30 @@ export default function Dashboard() {
         {/* ════════════════════════════════════════════════════════════════
             MAIN CONTENT: Two-column layout
         ════════════════════════════════════════════════════════════════ */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 sm:gap-4">
+        <div className="grid min-w-0 grid-cols-1 xl:grid-cols-3 gap-3 sm:gap-4">
 
           {/* ── Left: Recent Orders ─────────────────────────────────── */}
-          <div className="lg:col-span-2">
-            <Card className={cn("rounded-2xl", softCard)}>
-              <CardHeader className="pb-2 flex flex-row items-center justify-between px-4 sm:px-5 pt-4 sm:pt-5">
-                <div className="flex items-center gap-2">
+          <div className="min-w-0 lg:col-span-2">
+            <Card className={cn("min-w-0 overflow-hidden rounded-2xl", softCard)}>
+              <CardHeader className="pb-2 flex flex-row flex-wrap items-center justify-between gap-2 px-4 sm:px-5 pt-4 sm:pt-5">
+                <div className="flex items-center gap-2 min-w-0">
                   <div className={cn(statIconBox, "bg-emerald-500/20 border-emerald-400/30")}>
                     <ServerIcon className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-300" />
                   </div>
-                  <CardTitle className="text-sm font-semibold premium-dashboard-title">Recent Orders</CardTitle>
+                  <h2 className="text-sm font-semibold tracking-tight premium-dashboard-title">Recent Orders</h2>
                 </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-[10px] sm:text-xs premium-dashboard-subtitle hover:text-emerald-700 dark:hover:text-emerald-300 gap-1 h-7 px-2 rounded-lg hover:bg-emerald-500/10"
-                  onClick={handleViewAllOrders}
-                >
+                <Link href="/dashboard/viewLinux" className="premium-btn-outline premium-dashboard-inline-link gap-1.5 shrink-0">
                   View all
-                  <ChevronRight className="h-3 w-3" />
-                </Button>
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </Link>
               </CardHeader>
               <CardContent className="pt-0 px-3 sm:px-4 pb-3 sm:pb-4">
                 {stats?.recentOrders?.length ? (
                   <div className="space-y-1">
                     {stats.recentOrders.slice(0, 6).map((order) => (
-                      <button
+                      <Link
                         key={order._id}
-                        onClick={() => router.push(`/dashboard/order/${order._id}`)}
+                        href={`/dashboard/order/${order._id}`}
                         className="flex items-center gap-2.5 sm:gap-3 py-2.5 sm:py-3 w-full text-left px-2.5 sm:px-3 rounded-xl transition-all duration-200 group border border-transparent premium-dashboard-order-row"
                       >
                         <div className={cn(
@@ -728,7 +724,7 @@ export default function Dashboard() {
                                 : "text-muted-foreground"
                           )} />
                         </div>
-                        <div className="min-w-0 flex-1">
+                        <div className="min-w-0 max-w-xl flex-1 lg:flex-none">
                           <p className="text-xs sm:text-sm font-medium text-foreground line-clamp-1 group-hover:text-emerald-700 dark:group-hover:text-emerald-300 transition-colors">
                             {order.productName}
                           </p>
@@ -751,7 +747,7 @@ export default function Dashboard() {
                           </div>
                           <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/40 group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors" />
                         </div>
-                      </button>
+                      </Link>
                     ))}
                   </div>
                 ) : (
@@ -761,7 +757,7 @@ export default function Dashboard() {
                     </div>
                     <p className="text-sm premium-dashboard-subtitle mb-1">No orders yet</p>
                     <p className="text-xs premium-dashboard-subtitle mb-4 opacity-80">Deploy your first server in minutes</p>
-                    <Button size="sm" onClick={handleBrowsePlans} className="premium-btn-primary gap-2 h-8 text-xs border-0">
+                    <Button onClick={handleBrowsePlans} className="premium-btn-primary gap-2">
                       <Zap className="h-3.5 w-3.5" />
                       Browse Plans
                     </Button>
@@ -771,76 +767,46 @@ export default function Dashboard() {
             </Card>
           </div>
 
-          {/* ── Right: Account + Quick Actions ──────────────────────── */}
-          <div className="space-y-3 sm:space-y-4">
+          {/* ── Right: Account ──────────────────────────────────────── */}
+          <div className="h-full">
             {/* Account Card */}
-            <Card className={cn("rounded-2xl overflow-hidden", softCard)}>
+            <Card className={cn("flex h-full flex-col rounded-2xl overflow-hidden", softCard)}>
               <div className="h-1 bg-gradient-to-r from-emerald-600 via-primary to-emerald-500/60" />
               <CardHeader className="pb-2 px-4 sm:px-5 pt-4">
-                <CardTitle className="text-sm font-semibold flex items-center gap-2 premium-dashboard-title">
-                  <div className="h-7 w-7 rounded-lg bg-gradient-to-br from-emerald-700 via-emerald-600 to-primary text-white text-[10px] font-bold flex items-center justify-center shadow-sm">
+                <div className="flex items-center gap-2">
+                  <div className="h-7 w-7 rounded-lg bg-gradient-to-br from-emerald-700 via-emerald-600 to-primary text-white text-[10px] font-bold flex items-center justify-center shadow-sm" aria-hidden>
                     {userInitials}
                   </div>
-                  Account
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="pt-0 px-4 sm:px-5 pb-4 space-y-2">
-                {[
-                  { label: 'Name', value: user?.name },
-                  { label: 'Email', value: user?.email },
-                  {
-                    label: 'Member since',
-                    value: user?.createdAt
-                      ? new Date(user.createdAt).toLocaleDateString('en-IN', { year: 'numeric', month: 'short' })
-                      : 'N/A',
-                  },
-                ].map((row, i) => (
-                  <div key={row.label}>
-                    <div className="flex justify-between items-center gap-3 py-1.5">
-                      <span className="premium-dashboard-stat-label">{row.label}</span>
-                      <span className="text-xs sm:text-sm font-medium text-foreground truncate max-w-[58%] text-right">{row.value}</span>
-                    </div>
-                    {i < 2 && <Separator className="bg-white/10" />}
-                  </div>
-                ))}
-                <Separator className="bg-white/10" />
-                <div className="flex justify-between items-center gap-3 py-1">
-                  <span className="premium-dashboard-stat-label">Status</span>
-                  <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-200 bg-emerald-500/20 px-2 py-0.5 rounded-full border border-emerald-400/35">
-                    <ShieldCheck className="h-3 w-3" />
-                    Active
-                  </span>
+                  <h2 className="text-sm font-semibold tracking-tight premium-dashboard-title">Account</h2>
                 </div>
-              </CardContent>
-            </Card>
-
-            {/* Quick Actions */}
-            <Card className={cn("rounded-2xl", softCard)}>
-              <CardHeader className="pb-1 px-4 sm:px-5 pt-4">
-                <CardTitle className="text-sm font-semibold premium-dashboard-title">Quick Actions</CardTitle>
               </CardHeader>
-              <CardContent className="pt-1 px-2 sm:px-3 pb-3 grid gap-0.5">
-                {[
-                  { icon: Zap, label: 'Browse Plans', action: handleBrowsePlans, accent: true },
-                  { icon: Eye, label: 'View All Orders', action: handleViewAllOrders },
-                  { icon: Download, label: 'Download Invoice', action: handleDownloadInvoice },
-                  { icon: Settings, label: 'Account Settings', action: handleAccountSettings },
-                  { icon: LifeBuoy, label: 'Raise Ticket', action: () => router.push('/dashboard/support/tickets') },
-                ].map(({ icon: Icon, label, action, accent }) => (
-                  <Button
-                    key={label}
-                    variant="ghost"
-                    className={cn(
-                      "justify-start h-8 sm:h-9 text-xs sm:text-sm font-normal px-3 rounded-xl hover:bg-emerald-500/10 group w-full text-foreground/80 hover:text-foreground",
-                      accent && "text-emerald-200 font-medium bg-emerald-500/10 hover:bg-emerald-500/15 border border-emerald-400/20"
-                    )}
-                    onClick={action}
-                  >
-                    <Icon className={cn("h-3.5 w-3.5 mr-2", accent ? "text-emerald-600 dark:text-emerald-300" : "text-muted-foreground")} />
-                    {label}
-                    <ChevronRight className="h-3 w-3 ml-auto text-muted-foreground/40 group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors" />
-                  </Button>
-                ))}
+              <CardContent className="pt-0 px-4 sm:px-5 pb-4">
+                <dl className="premium-account-facts">
+                  {[
+                    { label: 'Name', value: user?.name },
+                    { label: 'Email', value: user?.email },
+                    {
+                      label: 'Member since',
+                      value: user?.createdAt
+                        ? new Date(user.createdAt).toLocaleDateString('en-IN', { year: 'numeric', month: 'short' })
+                        : 'N/A',
+                    },
+                  ].map((row) => (
+                    <div key={row.label} className="premium-account-fact">
+                      <dt className="premium-dashboard-stat-label">{row.label}</dt>
+                      <dd className="text-xs sm:text-sm font-medium text-foreground truncate">{row.value}</dd>
+                    </div>
+                  ))}
+                  <div className="premium-account-fact">
+                    <dt className="premium-dashboard-stat-label">Status</dt>
+                    <dd>
+                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-200 bg-emerald-500/20 px-2 py-0.5 rounded-full border border-emerald-400/35">
+                        <ShieldCheck className="h-3 w-3" />
+                        Active
+                      </span>
+                    </dd>
+                  </div>
+                </dl>
               </CardContent>
             </Card>
           </div>
@@ -898,10 +864,10 @@ export default function Dashboard() {
             )}
           </div>
           <DialogFooter className="gap-2 flex-col-reverse sm:flex-row">
-            <Button variant="outline" onClick={() => { setShowInvoiceDialog(false); setSelectedOrderForInvoice(''); }} disabled={isDownloadingInvoice} className="w-full h-9 text-xs sm:text-sm premium-btn-outline">
+            <Button variant="outline" onClick={() => { setShowInvoiceDialog(false); setSelectedOrderForInvoice(''); }} disabled={isDownloadingInvoice} className="w-full premium-btn-outline">
               Cancel
             </Button>
-            <Button onClick={downloadInvoiceForOrder} disabled={!selectedOrderForInvoice || isDownloadingInvoice} className="flex items-center gap-2 w-full h-9 text-xs sm:text-sm premium-btn-primary border-0">
+            <Button onClick={downloadInvoiceForOrder} disabled={!selectedOrderForInvoice || isDownloadingInvoice} className="flex items-center gap-2 w-full premium-btn-primary">
               {isDownloadingInvoice ? (
                 <><div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white" /><span>Loading...</span></>
               ) : (
@@ -967,10 +933,10 @@ export default function Dashboard() {
             </div>
           </div>
           <DialogFooter className="gap-2 flex-col-reverse sm:flex-row pt-4">
-            <Button variant="outline" onClick={() => { setShowSettingsDialog(false); setSettingsData(prev => ({ ...prev, currentPassword: '', newPassword: '', confirmPassword: '' })); }} disabled={isUpdatingSettings} className="w-full h-9 text-xs sm:text-sm premium-btn-outline">
+            <Button variant="outline" onClick={() => { setShowSettingsDialog(false); setSettingsData(prev => ({ ...prev, currentPassword: '', newPassword: '', confirmPassword: '' })); }} disabled={isUpdatingSettings} className="w-full premium-btn-outline">
               Cancel
             </Button>
-            <Button onClick={updateAccountSettings} disabled={isUpdatingSettings} className="flex items-center gap-2 w-full h-9 text-xs sm:text-sm premium-btn-primary border-0">
+            <Button onClick={updateAccountSettings} disabled={isUpdatingSettings} className="flex items-center gap-2 w-full premium-btn-primary">
               {isUpdatingSettings ? (
                 <><div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white" /><span>Saving...</span></>
               ) : (

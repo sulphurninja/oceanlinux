@@ -25,7 +25,7 @@ const RESOURCE_LINKS = [
 ];
 
 const navLinkClass =
-  "relative text-sm text-white/60 hover:text-white transition-colors font-medium group py-1";
+  "relative text-sm text-white/70 hover:text-white transition-colors font-medium group py-1";
 
 export default function Header() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -62,26 +62,26 @@ export default function Header() {
         {/* Utility row — hides on scroll for compact sticky bar */}
         <div
           className={cn(
-            "hidden lg:flex justify-between items-center text-xs border-b border-white/[0.05] overflow-hidden transition-all duration-300",
+            "hidden lg:flex justify-between items-center text-sm border-b border-white/[0.05] overflow-hidden transition-all duration-300",
             scrolled ? "max-h-0 py-0 opacity-0 border-transparent" : "max-h-10 py-2 opacity-100"
           )}
         >
           <a
             href="mailto:hello@oceanlinux.com"
-            className="inline-flex items-center gap-1.5 text-white/40 hover:text-emerald-300 transition-colors"
+            className="inline-flex items-center gap-1.5 text-white/70 hover:text-emerald-300 transition-colors"
           >
-            <Mail className="w-3 h-3 text-emerald-400/70" />
+            <Mail className="w-3 h-3 text-emerald-300" />
             hello@oceanlinux.com
           </a>
           <div className="flex items-center gap-5">
-            <span className="inline-flex items-center gap-2 text-white/40">
+            <span className="inline-flex items-center gap-2 text-white/70">
               <img src="/backtick.png" alt="" className="w-3.5 h-3.5 opacity-80" />
               A product of{" "}
-              <Link href="https://backticklabs.io" className="text-emerald-400/90 hover:text-emerald-300 font-medium">
+              <Link href="https://backticklabs.io" className="text-emerald-300 hover:text-white font-medium">
                 Backtick Labs
               </Link>
             </span>
-            <Link href="/contact-us" className="text-white/40 hover:text-emerald-300 transition-colors">
+            <Link href="/contact-us" className="text-white/70 hover:text-emerald-300 transition-colors">
               Contact
             </Link>
           </div>
@@ -104,7 +104,7 @@ export default function Header() {
               <span className="text-lg sm:text-xl font-bold text-white tracking-tight block truncate">
                 OceanLinux
               </span>
-              <span className="text-[10px] sm:text-[11px] text-white/35 -mt-0.5 block truncate tracking-wide">
+              <span className="hidden min-[380px]:block text-sm text-white/70 -mt-0.5 truncate">
                 The Ocean of Linux
               </span>
             </div>
@@ -150,7 +150,7 @@ export default function Header() {
             <Link href="/login">
               <button
                 type="button"
-                className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white/60 hover:text-white transition-colors rounded-lg hover:bg-white/5"
+                className="premium-btn-outline inline-flex items-center gap-1.5 px-4 py-2 w-auto text-sm"
               >
                 <LogIn className="w-4 h-4" />
                 Log In
@@ -207,7 +207,7 @@ export default function Header() {
                     <Link
                       key={item.href}
                       href={item.href}
-                      className="block text-white/50 hover:text-emerald-300 text-sm py-2"
+                      className="block text-white/70 hover:text-emerald-300 text-sm py-2"
                       onClick={() => setIsMenuOpen(false)}
                     >
                       {item.label}
@@ -246,7 +246,7 @@ export default function Header() {
               </Link>
             </div>
 
-            <p className="text-[11px] text-white/30 text-center pt-4">
+            <p className="text-sm text-white/70 text-center pt-4">
               hello@oceanlinux.com
             </p>
           </nav>

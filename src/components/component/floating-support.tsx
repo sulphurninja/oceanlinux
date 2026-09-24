@@ -2,59 +2,47 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Ticket } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { LifeBuoy, Ticket, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import WhatsAppWidget from './whatsapp-widget';
-import { floatingActionTooltip } from './floatingActionTooltip';
 
 const FloatingSupport = () => {
   const router = useRouter();
-  const [isHovered, setIsHovered] = useState(false);
-
-  const handleClick = () => {
-    router.push('/dashboard/support/tickets');
-  };
+  const [open, setOpen] = useState(false);
 
   return (
-    <div className="fixed bottom-6 right-6 z-50 flex flex-col items-center gap-3">
-      {/* WhatsApp Widget - Above Support Button */}
-      <WhatsAppWidget />
-
-      {/* Support Button */}
-      <div className="relative">
-        <Button
-          onClick={handleClick}
-          onMouseEnter={() => setIsHovered(true)}
-          onMouseLeave={() => setIsHovered(false)}
-          className={cn(
-            "h-14 w-14 rounded-full shadow-lg transition-all duration-300 ease-in-out",
-            "bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800",
-            "hover:shadow-xl hover:shadow-blue-500/25 hover:scale-110 active:scale-95",
-            "border-2 border-blue-200 dark:border-blue-400/30",
-            isHovered && "h-16 w-16"
-          )}
-          size="icon"
-          aria-label="Raise Ticket"
+    <div className="fixed bottom-6 right-4 sm:right-6 z-50 flex flex-col items-end gap-3 max-[480px]:bottom-20">
+      <div
+        id="site-help-menu"
+        role="group"
+        aria-label="Help options"
+        hidden={!open}
+        className={cn(
+          "premium-glass-card p-3 flex-col gap-2 min-w-[14rem]",
+          open ? "flex" : "hidden"
+        )}
+      >
+        <WhatsAppWidget variant="menu" />
+        <button
+          type="button"
+          onClick={() => router.push('/dashboard/support/tickets')}
+          className="premium-btn-primary w-full inline-flex items-center justify-center gap-2"
         >
-          <div className="relative">
-            <Ticket
-              className={cn(
-                "h-6 w-6 text-white transition-all duration-300",
-                isHovered && "h-7 w-7"
-              )}
-            />
-
-            {/* Pulse animation ring */}
-            <div className="absolute inset-0 rounded-full bg-blue-400/30 ocean-soft-pulse" />
-          </div>
-        </Button>
-
-        {/* Tooltip */}
-        <div className={floatingActionTooltip(isHovered)}>
+          <Ticket className="h-4 w-4" aria-hidden="true" />
           Raise Ticket
-        </div>
+        </button>
       </div>
+
+      <button
+        type="button"
+        className="premium-btn-primary inline-flex items-center gap-2 rounded-full px-5 min-h-14"
+        aria-expanded={open}
+        aria-controls="site-help-menu"
+        onClick={() => setOpen((value) => !value)}
+      >
+        {open ? <X className="h-5 w-5" aria-hidden="true" /> : <LifeBuoy className="h-5 w-5" aria-hidden="true" />}
+        {open ? 'Close' : 'Help'}
+      </button>
     </div>
   );
 };

@@ -24,7 +24,7 @@ export default function PremiumSectionHeader({
   return (
     <div
       className={cn(
-        "mb-10 sm:mb-14 lg:mb-20",
+        "mb-8 sm:mb-12 lg:mb-14",
         centered ? "text-center mx-auto max-w-3xl" : "text-left max-w-2xl",
         className
       )}

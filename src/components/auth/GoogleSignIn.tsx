@@ -3,6 +3,7 @@
 import { ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { GoogleLogin, GoogleOAuthProvider, CredentialResponse } from '@react-oauth/google';
+import { cn } from '@/lib/utils';
 import {
   JUST_LOGGED_IN_KEY,
   LOGIN_POPUP_SHOWN_KEY,
@@ -128,12 +129,15 @@ export function GoogleSignInButton({
   return (
     <div
       ref={containerRef}
-      className="google-signin-light w-full flex justify-center [&>div]:!w-full [&>div]:!max-w-full"
+      className={cn(
+        "w-full flex justify-center [&>div]:!w-full [&>div]:!max-w-full",
+        mode === 'signup' ? "google-signin-muted" : "google-signin-light"
+      )}
     >
       <GoogleLogin
         onSuccess={handleSuccess}
         onError={() => { onError?.('Google Sign-In was cancelled or failed.'); }}
-        theme="outline"
+        theme={mode === 'signup' ? 'filled_black' : 'outline'}
         size="large"
         shape="rectangular"
         text={mode === 'signup' ? 'signup_with' : 'continue_with'}
@@ -146,7 +150,7 @@ export function GoogleSignInButton({
 
 export function AuthDivider({ label = 'or' }: { label?: string }) {
   return (
-    <div className="relative my-4">
+    <div className="relative my-5">
       <div className="absolute inset-0 flex items-center">
         <span className="w-full border-t border-white/[0.08]" />
       </div>

@@ -48,7 +48,6 @@ import { useState, useEffect, Suspense, useCallback } from 'react';
 import { toast } from 'sonner';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { SessionAlertProvider } from '@/components/session-alert';
-import FloatingSupport from '@/components/component/floating-support';
 import LoginNewsPopup from '@/components/login-news-popup';
 import OrderNewsPopup from '@/components/order-news-popup';
 import PremiumPostLoginSplash from '@/components/landing/PremiumPostLoginSplash';
@@ -121,6 +120,7 @@ export default function DashboardLayout({
     const [addressForm, setAddressForm] = useState({ line: '', city: '', state: '', pincode: '' });
     const [isSavingAddress, setIsSavingAddress] = useState(false);
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+    const [navPending, setNavPending] = useState(false);
 
     useEffect(() => {
         const cached = readDashboardCache(DASHBOARD_CACHE_KEYS.currentUser) as UserData | null;
@@ -149,6 +149,46 @@ export default function DashboardLayout({
         window.addEventListener('sidebar-collapse', onCollapse);
         return () => window.removeEventListener('sidebar-collapse', onCollapse);
     }, []);
+
+    useEffect(() => {
+        setNavPending(false);
+    }, [pathname]);
+
+    useEffect(() => {
+        const onClick = (event: MouseEvent) => {
+            if (
+                event.defaultPrevented ||
+                event.button !== 0 ||
+                event.metaKey ||
+                event.ctrlKey ||
+                event.shiftKey ||
+                event.altKey
+            ) {
+                return;
+            }
+            const anchor = (event.target as Element | null)?.closest?.('a');
+            if (!anchor || anchor.getAttribute('target') === '_blank') return;
+            const href = anchor.getAttribute('href');
+            if (!href || href.startsWith('#')) return;
+            let url: URL;
+            try {
+                url = new URL(href, window.location.href);
+            } catch {
+                return;
+            }
+            if (url.origin !== window.location.origin) return;
+            if (url.pathname === window.location.pathname && url.search === window.location.search) return;
+            setNavPending(true);
+        };
+        document.addEventListener('click', onClick, true);
+        return () => document.removeEventListener('click', onClick, true);
+    }, []);
+
+    useEffect(() => {
+        if (!navPending) return;
+        const timer = window.setTimeout(() => setNavPending(false), 8000);
+        return () => window.clearTimeout(timer);
+    }, [navPending]);
 
     /* Portals (dialogs, selects) render on document.body — mark dashboard for portal theme vars */
     useEffect(() => {
@@ -447,6 +487,7 @@ export default function DashboardLayout({
         <SessionAlertProvider>
             <AuthProvider>
                 <div className="premium-dashboard min-h-screen">
+                    {navPending ? <div className="premium-nav-progress" aria-hidden="true" /> : null}
                     <PremiumPostLoginSplash autoFromSession />
                     <LoginNewsPopup />
                     {orderNewsOrderId ? (
@@ -459,18 +500,18 @@ export default function DashboardLayout({
 
                     {/* Main Content Area */}
                     <div className={cn(
-                        "premium-dashboard-content-wrap min-w-0 overflow-x-hidden",
-                        sidebarCollapsed ? "lg:pl-16" : "lg:pl-64"
+                        "premium-dashboard-content-wrap min-w-0",
+                        sidebarCollapsed ? "lg:pl-16" : "lg:pl-[19rem]"
                     )}>
                         {/* Top Navigation Bar */}
                         <div className="sticky top-0 z-40 premium-dashboard-topbar lg:top-0">
-                            <div className="flex h-12 sm:h-14 items-center justify-between gap-2 px-3 sm:px-4 lg:px-6">
+                            <div className="premium-dashboard-topbar-row flex min-h-16 w-full items-center justify-between gap-2 px-3 py-3 sm:min-h-[4.75rem] sm:px-6 sm:py-4">
                                 {/* Page Info */}
-                                <div className="flex items-center gap-2 sm:gap-2.5 min-w-0 flex-1">
-                                    <div className="premium-dashboard-topbar-icon">
+                                <div className="flex items-center gap-2 sm:gap-2.5 min-w-0 flex-1 self-center">
+                                    <div className="premium-dashboard-topbar-icon shrink-0 self-center">
                                         <currentPage.icon className="h-4 w-4" />
                                     </div>
-                                    <div className="min-w-0">
+                                    <div className="premium-dashboard-topbar-copy min-w-0 flex flex-col justify-center gap-0.5 py-0.5">
                                         {currentPage.breadcrumb && currentPage.breadcrumb.length > 0 ? (
                                             <div className="flex items-center gap-1 text-sm">
                                                 {currentPage.breadcrumb.map((crumb) => (
@@ -485,11 +526,11 @@ export default function DashboardLayout({
                                             </div>
                                         ) : (
                                             <>
-                                                <h1 className="text-sm sm:text-base font-semibold truncate leading-tight tracking-tight premium-dashboard-title">
+                                                <h1 className="text-lg sm:text-xl font-bold truncate leading-none tracking-tight premium-dashboard-title">
                                                     {currentPage.title}
                                                 </h1>
                                                 {currentPage.description && (
-                                                    <p className="text-[10px] sm:text-xs premium-dashboard-subtitle truncate hidden min-[420px]:block">
+                                                    <p className="text-[10px] sm:text-xs premium-dashboard-subtitle truncate hidden min-[480px]:block leading-tight">
                                                         {currentPage.description}
                                                     </p>
                                                 )}
@@ -499,23 +540,24 @@ export default function DashboardLayout({
                                 </div>
 
                                 {/* Right Side Actions */}
-                                <div className="premium-dashboard-topbar-actions">
+                                <div className="premium-dashboard-topbar-actions self-center shrink-0">
+                                    <WalletBadge hidden={user?.userType === 'reseller'} />
+                                    <CartIcon hidden={user?.userType === 'reseller'} className="hidden lg:inline-flex" />
+                                    <NotificationBell />
+
+                                    <div className="w-px h-5 hidden lg:block" style={{ background: 'var(--pd-border)' }} aria-hidden />
+
                                     <ThemeToggle
                                         variant="ghost"
                                         size="icon"
-                                        className="premium-dashboard-icon-btn h-8 w-8 shrink-0"
+                                        className="premium-dashboard-icon-btn hidden h-9 w-9 shrink-0 lg:inline-flex"
                                     />
-                                    <WalletBadge hidden={user?.userType === 'reseller'} />
-                                    <CartIcon hidden={user?.userType === 'reseller'} />
-                                    <NotificationBell />
-
-                                    <div className="w-px h-5 hidden sm:block" style={{ background: 'var(--pd-border)' }} />
 
                                     <DropdownMenu>
                                         <DropdownMenuTrigger asChild>
                                             <Button
                                                 variant="ghost"
-                                                className="relative h-9 w-9 rounded-full p-0 hover:opacity-90 ring-2 ring-emerald-400/20 ring-offset-2 ring-offset-background hover:ring-emerald-400/40 transition-all duration-200"
+                                                className="premium-dashboard-icon-btn h-9 w-9 shrink-0 p-0"
                                             >
                                                 <Avatar className="h-8 w-8 shadow-md shadow-emerald-500/20">
                                                     <AvatarImage src={user?.avatar} alt={user?.name || 'User'} className="object-cover" />
@@ -523,7 +565,7 @@ export default function DashboardLayout({
                                                         {user?.name ? getUserInitials(user.name) : 'U'}
                                                     </AvatarFallback>
                                                 </Avatar>
-                                                <span className="absolute bottom-0.5 right-0.5 h-2.5 w-2.5 rounded-full bg-emerald-400 border-2 border-background shadow-sm" title="Online" />
+                                                <span className="premium-dashboard-status-dot absolute bottom-0.5 right-0.5 h-2.5 w-2.5 rounded-full bg-emerald-400 border-2 border-background shadow-sm" title="Online" />
                                             </Button>
                                         </DropdownMenuTrigger>
                                         <DropdownMenuContent className="w-72 premium-dashboard-dropdown" align="end" forceMount>
@@ -620,10 +662,9 @@ export default function DashboardLayout({
                         </div>
 
                         {/* Page Content */}
-                        <main className="min-w-0 overflow-x-hidden">
+                        <main className="min-w-0">
                             {children}
                         </main>
-                        <FloatingSupport />
                     </div>
 
                     {/* Billing Address Prompt Dialog (compulsory — needed for GST invoices) */}

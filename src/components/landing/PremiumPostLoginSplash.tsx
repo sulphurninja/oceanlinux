@@ -85,7 +85,7 @@ export default function PremiumPostLoginSplash({
       window.setTimeout(() => {
         setVisible(false);
         finishSplash(onCompleteRef.current);
-      }, 280);
+      }, 160);
     }, duration);
 
     return () => {

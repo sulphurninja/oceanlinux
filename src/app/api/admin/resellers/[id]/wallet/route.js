@@ -28,7 +28,7 @@ export async function POST(request, { params }) {
             const result = await ResellerWalletService.recharge(
                 id,
                 parsedAmount,
-                description || 'Manual recharge by admin',
+                description?.trim() || 'Manual recharge by admin',
                 { source: 'admin_panel' }
             );
 
@@ -36,6 +36,29 @@ export async function POST(request, { params }) {
                 success: true,
                 newBalance: result.newBalance,
                 message: 'Wallet recharged successfully'
+            });
+        }
+
+        if (type === 'deduct') {
+            const reason = String(description || '').trim();
+            if (reason.length < 3) {
+                return NextResponse.json(
+                    { success: false, message: 'Please enter a reason for this deduction (at least 3 characters)' },
+                    { status: 400 }
+                );
+            }
+
+            const result = await ResellerWalletService.adminManualDeduct(
+                id,
+                parsedAmount,
+                reason,
+                { source: 'admin_panel' }
+            );
+
+            return NextResponse.json({
+                success: true,
+                newBalance: result.newBalance,
+                message: 'Amount deducted from wallet successfully',
             });
         }
 

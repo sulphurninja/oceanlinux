@@ -53,7 +53,7 @@ import { toast } from 'sonner';
 import { dashboardFetch } from '@/lib/dashboardFetch';
 import { cn } from '@/lib/utils';
 import { OsIcon, isWindowsOsName, isUbuntuOsName, isCentosOsName } from '@/components/os/OsIcon';
-import { premiumBtnOutline, premiumBadge } from '@/lib/premium-badges';
+import { premiumBadge } from '@/lib/premium-badges';
 import { ADVPS_REBUILD_LIMIT, getAdvpsRebuildUsage } from '@/lib/advpsRebuildLimit';
 import { isWithinRenewalWindow, getDaysUntilExpiryIST, isExpiredServiceForCustomer } from '@/lib/expiryHelper';
 import { getOrderRenewalPrice, getOrderRenewalPriceNote, getCurrentListPriceFromStock } from '@/lib/orderRenewalPricing';
@@ -2590,6 +2590,17 @@ const OrderDetails = () => {
   const suspendMessage =
     order.adminSuspendMessage?.trim() || 'This service has been suspended. Please contact support.';
 
+  const handleRefreshOrderDetails = () => {
+    if (order && getProviderFromOrder(order, ipStock) === 'advps' && order.advpsServiceId) {
+      loadServiceDetails();
+    } else if (order && (usesLivePowerUi || (provider === 'kurohost' && order.kurohostInstanceId))) {
+      void fetchServerPowerState({ force: true });
+      void fetchOrder({ silent: true });
+    } else {
+      fetchOrder({ silent: true });
+    }
+  };
+
   const handleExpiredContactSupport = async () => {
     setSupportContactLoading(true);
     try {
@@ -2677,56 +2688,44 @@ const OrderDetails = () => {
       >
       {/* Order sub-header — matches dashboard topbar in light & dark */}
       <div className='premium-order-detail-header sticky top-0 z-30 lg:top-0'>
-          <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 p-3 sm:p-4 lg:px-6 lg:py-4 max-w-7xl mx-auto'>
-            <div className='flex items-start sm:items-center gap-2.5 sm:gap-3 min-w-0 flex-1'>
+          <div className='flex flex-col gap-2 p-3 sm:p-4 lg:px-6 lg:py-4 max-w-7xl mx-auto'>
+            <div className='flex items-center gap-2.5 sm:gap-3 min-w-0'>
               <Button
                 variant="ghost"
                 size="icon"
                 onClick={goBack}
+                aria-label="Back"
                 className="premium-dashboard-icon-btn rounded-lg flex-shrink-0 h-10 w-10"
               >
                 <ArrowLeft className="h-5 w-5" />
               </Button>
-              <OsIcon os={order.os} productName={order.productName} className="h-10 w-10 sm:h-12 sm:w-12 flex-shrink-0" />
-              <div className="min-w-0 flex-1">
-                <h1 className='text-base sm:text-lg font-semibold break-words mb-1.5 premium-dashboard-title'>
-                  {styleText(order.productName)}
-                </h1>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant="secondary" className="text-xs h-5">
-                    {getProviderDisplayName(provider)}
-                  </Badge>
-                  {isOrderCompanyAutomated(order, ipStock) && (
-                    <Badge variant="outline" className={cn(premiumBadge.success, "text-xs h-5 gap-1")}>
-                      Auto-managed
-                    </Badge>
-                  )}
-                  {getStatusBadge(order.status, order.provisioningStatus, order.lastAction, order)}
-                </div>
-              </div>
-            </div>
-            <div className="flex items-center gap-2 flex-shrink-0 sm:ml-auto">
+              <OsIcon os={order.os} productName={order.productName} className="h-10 w-10 flex-shrink-0" />
+              <h2 className='min-w-0 flex-1 text-base sm:text-lg font-semibold break-words leading-tight premium-dashboard-title'>
+                {styleText(order.productName)}
+              </h2>
               {!isUnpaid(order) && !isExpired(order) && (
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => {
-                  if (order && getProviderFromOrder(order, ipStock) === 'advps' && order.advpsServiceId) {
-                    loadServiceDetails();
-                  } else if (order && (usesLivePowerUi || (provider === 'kurohost' && order.kurohostInstanceId))) {
-                    void fetchServerPowerState({ force: true });
-                    void fetchOrder({ silent: true });
-                  } else {
-                    fetchOrder({ silent: true });
-                  }
-                }}
+                onClick={handleRefreshOrderDetails}
                 disabled={loading || serviceLoading}
-                className={cn("h-9 gap-2", premiumBtnOutline)}
+                className="h-10 shrink-0 gap-2"
               >
                 <RefreshCw className={`h-4 w-4 ${(loading || serviceLoading) ? 'animate-spin' : ''}`} />
-                <span className="hidden sm:inline">Sync</span>
+                <span className="hidden sm:inline">Sync server</span>
               </Button>
               )}
+            </div>
+            <div className="flex flex-wrap items-center gap-2 pl-[4.75rem]">
+              <Badge variant="secondary" className="text-xs h-5">
+                {getProviderDisplayName(provider)}
+              </Badge>
+              {isOrderCompanyAutomated(order, ipStock) && (
+                <Badge variant="outline" className={cn(premiumBadge.success, "text-xs h-5 gap-1")}>
+                  Auto-managed
+                </Badge>
+              )}
+              {getStatusBadge(order.status, order.provisioningStatus, order.lastAction, order)}
             </div>
           </div>
         </div>
@@ -3066,7 +3065,7 @@ const OrderDetails = () => {
                             <Terminal className="h-5 w-5 text-" />
                           </div>
                           <div className="min-w-0 flex-1">
-                            <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Operating System</p>
+                            <p className="text-xs font-medium text-muted-foreground">Operating System</p>
                             <p className="font-semibold text-foreground text-sm break-words mt-0.5">{order.os}</p>
                           </div>
                         </div>
@@ -3078,7 +3077,7 @@ const OrderDetails = () => {
                             <MemoryStick className="h-5 w-5 text-" />
                           </div>
                           <div className="min-w-0 flex-1">
-                            <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Memory</p>
+                            <p className="text-xs font-medium text-muted-foreground">Memory</p>
                             <p className="font-semibold text-foreground text-sm break-words mt-0.5">{order.memory}</p>
                           </div>
                         </div>
@@ -3107,7 +3106,7 @@ const OrderDetails = () => {
                             )} />
                           </div>
                           <div className="min-w-0 flex-1">
-                            <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
+                            <p className="text-xs font-medium text-muted-foreground">
                               {usesLivePowerUi ? 'Power Status' : 'Status'}
                             </p>
                             <div className="mt-1">
@@ -3125,7 +3124,7 @@ const OrderDetails = () => {
                             <Database className="h-5 w-5 text-" />
                           </div>
                           <div className="min-w-0 flex-1">
-                            <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Provider</p>
+                            <p className="text-xs font-medium text-muted-foreground">Provider</p>
                             <p className="font-semibold text-foreground text-sm capitalize mt-0.5">
                               {getProviderDisplayName(provider)}
                             </p>
@@ -3178,15 +3177,17 @@ const OrderDetails = () => {
                                 <Input
                                   readOnly
                                   value={slotIpConnection.ip}
-                                  className="font-mono bg-background/50 border-border text-sm sm:text-sm min-w-0 h-9"
+                                  className="font-mono premium-order-readonly text-sm min-w-0 h-9"
                                 />
                                 <Button
+                                  type="button"
                                   variant="outline"
-                                  size="icon"
                                   onClick={() => copyToClipboard(slotIpConnection.ip, 'IP Address')}
-                                  className="shrink-0 h-9 w-9 hover:bg-primary/10 hover:border-primary/30"
+                                  className="premium-order-copy-btn"
+                                  aria-label="Copy IP address"
                                 >
-                                  {copied === 'IP Address' ? <Check className="h-4 w-4 text-primary" /> : <Copy className="h-4 w-4" />}
+                                  {copied === 'IP Address' ? <Check className="h-4 w-4" aria-hidden /> : <Copy className="h-4 w-4" aria-hidden />}
+                                  {copied === 'IP Address' ? 'Copied' : 'Copy'}
                                 </Button>
                               </div>
                             </div>
@@ -3206,15 +3207,17 @@ const OrderDetails = () => {
                                   <Input
                                     readOnly
                                     value={slotIpConnection.port}
-                                    className="font-mono bg-background/50 border-border text-sm min-w-0 h-9"
+                                    className="font-mono premium-order-readonly text-sm min-w-0 h-9"
                                   />
                                   <Button
+                                    type="button"
                                     variant="outline"
-                                    size="icon"
                                     onClick={() => copyToClipboard(slotIpConnection.port, 'Port')}
-                                    className="shrink-0 h-9 w-9 hover:bg-primary/10 hover:border-primary/30"
+                                    className="premium-order-copy-btn"
+                                    aria-label="Copy port"
                                   >
-                                    {copied === 'Port' ? <Check className="h-4 w-4 text-primary" /> : <Copy className="h-4 w-4" />}
+                                    {copied === 'Port' ? <Check className="h-4 w-4" aria-hidden /> : <Copy className="h-4 w-4" aria-hidden />}
+                                    {copied === 'Port' ? 'Copied' : 'Copy'}
                                   </Button>
                                 </div>
                               </div>
@@ -3234,15 +3237,17 @@ const OrderDetails = () => {
                                 <Input
                                   readOnly
                                   value={slotIpConnection.username}
-                                  className="font-mono bg-background/50 border-border text-sm min-w-0 h-9"
+                                  className="font-mono premium-order-readonly text-sm min-w-0 h-9"
                                 />
                                 <Button
+                                  type="button"
                                   variant="outline"
-                                  size="icon"
                                   onClick={() => copyToClipboard(slotIpConnection.username, 'Username')}
-                                  className="shrink-0 h-9 w-9 hover:bg-primary/10 hover:border-primary/30"
+                                  className="premium-order-copy-btn"
+                                  aria-label="Copy username"
                                 >
-                                  {copied === 'Username' ? <Check className="h-4 w-4 text-primary" /> : <Copy className="h-4 w-4" />}
+                                  {copied === 'Username' ? <Check className="h-4 w-4" aria-hidden /> : <Copy className="h-4 w-4" aria-hidden />}
+                                  {copied === 'Username' ? 'Copied' : 'Copy'}
                                 </Button>
                               </div>
                             </div>
@@ -3257,28 +3262,32 @@ const OrderDetails = () => {
                                 </div>
                                 <span className="text-muted-foreground">Password</span>
                               </Label>
-                              <div className="premium-connection-copy-row premium-connection-copy-row--multi">
-                                <Input
-                                  readOnly
-                                  type={showPassword ? 'text' : 'password'}
-                                  value={slotIpConnection.password}
-                                  className="font-mono bg-background/50 border-border text-sm min-w-0 h-9"
-                                />
+                              <div className="premium-connection-copy-row">
+                                <div className="relative min-w-0 flex-1">
+                                  <Input
+                                    readOnly
+                                    type={showPassword ? 'text' : 'password'}
+                                    value={slotIpConnection.password}
+                                    className="font-mono premium-order-readonly text-sm min-w-0 h-9 pr-10"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => setShowPassword(!showPassword)}
+                                    className="absolute right-1 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md premium-dashboard-subtitle hover:bg-white/[0.06]"
+                                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                                  >
+                                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                                  </button>
+                                </div>
                                 <Button
+                                  type="button"
                                   variant="outline"
-                                  size="icon"
-                                  onClick={() => setShowPassword(!showPassword)}
-                                  className="shrink-0 h-9 w-9 hover:bg-primary/10 hover:border-primary/30"
-                                >
-                                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                                </Button>
-                                <Button
-                                  variant="outline"
-                                  size="icon"
                                   onClick={() => copyToClipboard(slotIpConnection.password, 'Password')}
-                                  className="shrink-0 h-9 w-9 hover:bg-primary/10 hover:border-primary/30"
+                                  className="premium-order-copy-btn"
+                                  aria-label="Copy password"
                                 >
-                                  {copied === 'Password' ? <Check className="h-4 w-4 text-primary" /> : <Copy className="h-4 w-4" />}
+                                  {copied === 'Password' ? <Check className="h-4 w-4" aria-hidden /> : <Copy className="h-4 w-4" aria-hidden />}
+                                  {copied === 'Password' ? 'Copied' : 'Copy'}
                                 </Button>
                               </div>
                             </div>
@@ -3312,24 +3321,26 @@ const OrderDetails = () => {
                             <Input
                               readOnly
                               value={trialVpsOrder ? trialDisplayIp : order.ipAddress}
-                              className="font-mono bg-background/50 border-border text-sm min-w-0 h-9"
+                              className="font-mono premium-order-readonly text-sm min-w-0 h-9"
                             />
                             <Button
+                              type="button"
                               variant="outline"
-                              size="icon"
                               onClick={() =>
                                 copyToClipboard(
                                   trialVpsOrder ? trialDisplayIp : order.ipAddress!,
                                   'IP Address'
                                 )
                               }
-                              className="shrink-0 h-9 w-9 hover:bg-primary/10 hover:border-primary/30"
+                              className="premium-order-copy-btn"
+                              aria-label="Copy IP address"
                             >
                               {copied === 'IP Address' ? (
-                                <Check className="h-4 w-4 text-primary" />
+                                <Check className="h-4 w-4" aria-hidden />
                               ) : (
-                                <Copy className="h-4 w-4" />
+                                <Copy className="h-4 w-4" aria-hidden />
                               )}
+                              {copied === 'IP Address' ? 'Copied' : 'Copy'}
                             </Button>
                           </div>
                         </div>
@@ -3348,19 +3359,21 @@ const OrderDetails = () => {
                             <Input
                               readOnly
                               value={order.username}
-                              className="font-mono bg-background/50 border-border text-sm min-w-0 h-9"
+                              className="font-mono premium-order-readonly text-sm min-w-0 h-9"
                             />
                             <Button
+                              type="button"
                               variant="outline"
-                              size="icon"
                               onClick={() => copyToClipboard(order.username!, 'Username')}
-                              className="shrink-0 h-9 w-9 hover:bg-primary/10 hover:border-primary/30"
+                              className="premium-order-copy-btn"
+                              aria-label="Copy username"
                             >
                               {copied === 'Username' ? (
-                                <Check className="h-4 w-4 text-primary" />
+                                <Check className="h-4 w-4" aria-hidden />
                               ) : (
-                                <Copy className="h-4 w-4" />
+                                <Copy className="h-4 w-4" aria-hidden />
                               )}
+                              {copied === 'Username' ? 'Copied' : 'Copy'}
                             </Button>
                           </div>
                         </div>
@@ -3375,68 +3388,73 @@ const OrderDetails = () => {
                             </div>
                             <span className="text-muted-foreground">Password</span>
                           </Label>
-                          <div className="premium-connection-copy-row premium-connection-copy-row--multi">
-                            <Input
-                              readOnly
-                              type={showPassword ? "text" : "password"}
-                              value={order.password || ''}
-                              className="font-mono bg-background/50 border-border text-sm min-w-0 h-9"
-                            />
+                          <div className="premium-connection-copy-row">
+                            <div className="relative min-w-0 flex-1">
+                              <Input
+                                readOnly
+                                type={showPassword ? "text" : "password"}
+                                value={order.password || ''}
+                                className="font-mono premium-order-readonly text-sm min-w-0 h-9 pr-10"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setShowPassword(!showPassword)}
+                                className="absolute right-1 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md premium-dashboard-subtitle hover:bg-white/[0.06]"
+                                aria-label={showPassword ? 'Hide password' : 'Show password'}
+                              >
+                                {showPassword ? (
+                                  <EyeOff className="h-4 w-4" />
+                                ) : (
+                                  <Eye className="h-4 w-4" />
+                                )}
+                              </button>
+                            </div>
                             <Button
+                              type="button"
                               variant="outline"
-                              size="icon"
-                              onClick={() => setShowPassword(!showPassword)}
-                              className="shrink-0 h-9 w-9 hover:bg-primary/10 hover:border-primary/30"
-                            >
-                              {showPassword ? (
-                                <EyeOff className="h-4 w-4" />
-                              ) : (
-                                <Eye className="h-4 w-4" />
-                              )}
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="icon"
                               onClick={() => copyToClipboard(order.password || '', 'Password')}
-                              className="shrink-0 h-9 w-9 hover:bg-primary/10 hover:border-primary/30"
+                              className="premium-order-copy-btn"
+                              aria-label="Copy password"
                             >
                               {copied === 'Password' ? (
-                                <Check className="h-4 w-4 text-primary" />
+                                <Check className="h-4 w-4" aria-hidden />
                               ) : (
-                                <Copy className="h-4 w-4" />
+                                <Copy className="h-4 w-4" aria-hidden />
                               )}
+                              {copied === 'Password' ? 'Copied' : 'Copy'}
                             </Button>
                           </div>
+                          {provider === 'advps' && order.advpsServiceId && (
+                            <div className="mt-5 space-y-2">
+                              {advpsPasswordIssue && (
+                                <Alert className="bg-amber-500/10 border-amber-500/25">
+                                  <AlertTriangle className="h-4 w-4" />
+                                  <AlertDescription className="text-xs">
+                                    The password here may not match your server. Use the button below to pull the current password automatically.
+                                  </AlertDescription>
+                                </Alert>
+                              )}
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={handleAdvpsGeneratePassword}
+                                disabled={!!actionBusy || order.provisioningStatus === 'provisioning'}
+                                className="premium-order-generate-btn h-9 w-full gap-2 text-sm"
+                              >
+                                {actionBusy === 'generatepassword' ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <KeyRound className="h-4 w-4" />
+                                )}
+                                Generate New Password
+                              </Button>
+                              <p className="text-xs text-muted-foreground">
+                                Password not working? This updates your login here automatically — no admin needed. If a password was already generated, use Format Server instead.
+                              </p>
+                            </div>
+                          )}
                         </div>
-                        {provider === 'advps' && order.advpsServiceId && (
-                          <div className="space-y-2">
-                            {advpsPasswordIssue && (
-                              <Alert className="bg-amber-500/10 border-amber-500/25">
-                                <AlertTriangle className="h-4 w-4" />
-                                <AlertDescription className="text-xs">
-                                  The password here may not match your server. Use the button below to pull the current password automatically.
-                                </AlertDescription>
-                              </Alert>
-                            )}
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={handleAdvpsGeneratePassword}
-                              disabled={!!actionBusy || order.provisioningStatus === 'provisioning'}
-                              className="w-full h-9 gap-2 text-sm"
-                            >
-                              {actionBusy === 'generatepassword' ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                              ) : (
-                                <KeyRound className="h-4 w-4" />
-                              )}
-                              Generate New Password
-                            </Button>
-                            <p className="text-[11px] text-muted-foreground px-0.5">
-                              Password not working? This updates your login here automatically — no admin needed. If a password was already generated, use Format Server instead.
-                            </p>
-                          </div>
-                        )}
                       </div>
 
                       {trialServerOrder && order.os && (
@@ -3475,8 +3493,8 @@ const OrderDetails = () => {
                                   </span>
                                 </div>
                                 <Button
-                                  size="sm"
-                                  variant="ghost"
+                                  type="button"
+                                  variant="outline"
                                   onClick={() => {
                                     if (order.os.toLowerCase().includes('windows')) {
                                       copyToClipboard(order.ipAddress!, 'RDP Address');
@@ -3484,13 +3502,15 @@ const OrderDetails = () => {
                                       copyToClipboard(`ssh ${order.username}@${order.ipAddress}`, 'SSH Command');
                                     }
                                   }}
-                                  className="text-green-400 hover:bg-green-400/20 h-6 px-2"
+                                  className="premium-order-copy-btn"
+                                  aria-label={order.os.toLowerCase().includes('windows') ? 'Copy RDP address' : 'Copy SSH command'}
                                 >
                                   {copied === 'SSH Command' || copied === 'RDP Address' ? (
-                                    <Check className="h-3 w-3" />
+                                    <Check className="h-4 w-4" aria-hidden />
                                   ) : (
-                                    <Copy className="h-3 w-3" />
+                                    <Copy className="h-4 w-4" aria-hidden />
                                   )}
+                                  {copied === 'SSH Command' || copied === 'RDP Address' ? 'Copied' : 'Copy'}
                                 </Button>
                               </div>
                               <div className="overflow-x-auto">
@@ -3922,7 +3942,7 @@ const OrderDetails = () => {
                           : 'Manage your server\'s power state and configuration'}
                       </CardDescription>
                     </CardHeader>
-                    <CardContent className="space-y-3">
+                    <CardContent className="space-y-4">
                       {netbayProxyOrder ? (
                         <div className="space-y-3">
                           <div className="p-3 rounded-lg border bg-muted/40 text-xs text-muted-foreground">
@@ -4003,84 +4023,75 @@ const OrderDetails = () => {
                                 </p>
                               </div>
                               <Button
-                                variant="ghost"
+                                type="button"
+                                variant="outline"
                                 size="sm"
                                 onClick={() => fetchServerPowerState({ force: true })}
                                 disabled={powerStateLoading}
-                                className="h-8 w-8 p-0 hover:bg-muted"
-                                title="Refresh status"
+                                className="h-9 shrink-0 gap-1.5 px-2.5"
+                                aria-label="Refresh server status"
                               >
                                 <RefreshCw className={cn(
-                                  "h-4 w-4 text-muted-foreground",
+                                  "h-4 w-4",
                                   powerStateLoading && "animate-spin"
                                 )} />
+                                Refresh
                               </Button>
                             </>
                           )}
                         </div>
                       )}
 
-                      {/* Power Controls */}
+                      {/* Power Controls — Start, Stop, and Restart stay available in every state */}
                       <div className="grid grid-cols-1 gap-2">
                         <Button
-                          variant="default"
+                          type="button"
                           onClick={() => runServiceAction('start')}
-                          disabled={!!actionBusy || serverPowerState === 'running'}
-                          className={cn(
-                            "h-10 gap-2 text-sm",
-                            serverPowerState === 'running'
-                              ? "bg-muted text-muted-foreground cursor-not-allowed"
-                              : "bg-primary hover:bg-primary/90"
-                          )}
+                          disabled={!!actionBusy}
+                          className="premium-btn-primary premium-order-power-btn border-0"
                         >
                           {actionBusy === 'start' ? (
                             <Loader2 className="h-4 w-4 animate-spin" />
                           ) : (
                             <Play className="h-4 w-4" />
                           )}
-                          {serverPowerState === 'running' ? 'Server Already Online' : 'Start Server'}
+                          Start Server
                         </Button>
-
                         <Button
+                          type="button"
                           variant="outline"
                           onClick={() => runServiceAction('stop')}
-                          disabled={!!actionBusy || serverPowerState === 'stopped'}
-                          className={cn(
-                            "h-10 gap-2 text-sm",
-                            serverPowerState === 'stopped' && "opacity-50 cursor-not-allowed"
-                          )}
+                          disabled={!!actionBusy}
+                          className="premium-order-power-btn"
                         >
                           {actionBusy === 'stop' ? (
                             <Loader2 className="h-4 w-4 animate-spin" />
                           ) : (
                             <Square className="h-4 w-4" />
                           )}
-                          {serverPowerState === 'stopped' ? 'Server Already Offline' : 'Stop Server'}
+                          Stop Server
                         </Button>
-
                         <Button
-                          variant="secondary"
+                          type="button"
+                          variant="outline"
                           onClick={() => runServiceAction('restart')}
-                          disabled={!!actionBusy || serverPowerState === 'stopped'}
-                          className={cn(
-                            "h-10 gap-2 text-sm",
-                            serverPowerState === 'stopped' && "opacity-50 cursor-not-allowed"
-                          )}
+                          disabled={!!actionBusy}
+                          className="premium-order-power-btn"
                         >
                           {actionBusy === 'restart' ? (
                             <Loader2 className="h-4 w-4 animate-spin" />
                           ) : (
                             <RotateCcw className="h-4 w-4" />
                           )}
-                          {serverPowerState === 'stopped' ? 'Cannot Restart (Offline)' : 'Restart Server'}
+                          Restart Server
                         </Button>
                       </div>
 
-                      <Separator className="my-3" />
+                      <Separator className="my-4" />
 
                       {/* Advanced Actions */}
                       <div className="space-y-2">
-                        <h4 className="font-medium text-xs text-muted-foreground uppercase tracking-wide">Advanced Actions</h4>
+                        <h4 className="font-medium text-sm text-muted-foreground">Advanced actions</h4>
 
                         {(() => {
                           const isAdvps = provider === 'advps';
@@ -4098,20 +4109,15 @@ const OrderDetails = () => {
                           return (
                             <>
                               {isAdvps && (
-                                <div className={cn(
-                                  "flex items-center justify-between text-xs px-2.5 py-1.5 rounded-md",
-                                  rebuildLimitReached
-                                    ? "bg-destructive/10 text-destructive border border-destructive/20"
-                                    : "bg-muted/60 text-muted-foreground"
+                                <p className={cn(
+                                  "flex items-center justify-between gap-3 px-1 text-xs",
+                                  rebuildLimitReached ? "text-destructive" : "text-muted-foreground"
                                 )}>
-                                  <span className="flex items-center gap-1.5">
-                                    <HardDriveIcon className="h-3 w-3" />
-                                    Rebuilds this month
-                                  </span>
-                                  <span className={cn("font-semibold tabular-nums", rebuildLimitReached && "text-destructive")}>
+                                  <span>Rebuilds this month</span>
+                                  <span className="font-semibold tabular-nums">
                                     {rebuildCount}/{ADVPS_REBUILD_LIMIT}
                                   </span>
-                                </div>
+                                </p>
                               )}
 
                               {rebuildLimitReached && (
@@ -4141,7 +4147,7 @@ const OrderDetails = () => {
                                 </>
                               )}
 
-                              {isCompanyResellerApi && (
+                              {isCompanyResellerApi && !isAdvps && (
                                 <>
                                   <Button
                                     variant="outline"
@@ -4168,10 +4174,11 @@ const OrderDetails = () => {
                                 </p>
                               ) : (
                                 <Button
+                                  type="button"
                                   variant="destructive"
                                   onClick={() => promptReinstallAction((provider === 'smartvps' || provider === 'advps') ? 'format' : 'reinstall')}
                                   disabled={!!actionBusy || rebuildLimitReached}
-                                  className="w-full h-10 gap-2 text-sm"
+                                  className="premium-order-power-btn premium-order-reinstall-btn border-0"
                                 >
                                   {(actionBusy === 'reinstall' || actionBusy === 'format') ? (
                                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -4187,19 +4194,20 @@ const OrderDetails = () => {
                       </div>
 
                       {/* Service Status */}
-                      <Separator className="my-3" />
-                      <div className="space-y-2">
+                      <Separator className="my-4" />
+                      <div className="space-y-3">
                         <div className="flex items-center justify-between">
-                          <h4 className="font-medium text-xs text-muted-foreground uppercase tracking-wide">Service Status</h4>
+                          <h4 className="font-medium text-sm text-muted-foreground">Service status</h4>
                           <Button
-                            variant="ghost"
+                            type="button"
+                            variant="outline"
                             size="sm"
                             onClick={() => void loadServiceDetails()}
                             disabled={serviceLoading}
-                            className="gap-1.5 h-7 px-2 text-xs"
+                            className="h-9 shrink-0 gap-1.5 px-2.5"
                           >
-                            <RefreshCw className={`h-3 w-3 ${serviceLoading ? 'animate-spin' : ''}`} />
-                            {serviceLoading ? 'Syncing...' : 'Sync'}
+                            <RefreshCw className={`h-3.5 w-3.5 ${serviceLoading ? 'animate-spin' : ''}`} />
+                            {serviceLoading ? 'Syncing...' : 'Sync details'}
                           </Button>
                         </div>
 
@@ -4218,8 +4226,8 @@ const OrderDetails = () => {
                             </div>
                           </div>
                         ) : (
-                          <p className="text-muted-foreground text-xs p-2.5 bg-muted/50 rounded-lg">
-                            Click Sync to refresh server status
+                          <p className="text-muted-foreground text-xs px-1">
+                            Not synced yet.
                           </p>
                         )}
                       </div>
@@ -4383,7 +4391,7 @@ const OrderDetails = () => {
                           <div className="mb-4">
                             <Progress
                               value={Math.max(0, 100 - (getDaysUntilExpiry(order.expiryDate) / 30) * 100)}
-                              className="h-2"
+                              className="h-3"
                             />
                           </div>
                         )}
@@ -4549,7 +4557,7 @@ const OrderDetails = () => {
                       {/* Renewal History */}
                       {order.renewalPayments && order.renewalPayments.length > 0 && (
                         <div className="mt-4 pt-4 border-t border-border">
-                          <h4 className="font-medium text-xs text-muted-foreground uppercase tracking-wide mb-3">Renewal History</h4>
+                          <h4 className="font-medium text-sm text-muted-foreground mb-3">Renewal history</h4>
                           <div className="space-y-2 max-h-40 overflow-y-auto">
                             {order.renewalPayments.map((renewal, index) => (
                               <div key={index} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs p-3 bg-primary/5 rounded-lg border border-primary/20">
@@ -4569,11 +4577,12 @@ const OrderDetails = () => {
                       {/* Download Invoice */}
                       <div className="mt-4 pt-4 border-t border-border">
                         <Button
+                          type="button"
                           variant="outline"
                           size="sm"
                           onClick={handleDownloadInvoice}
                           disabled={downloadingInvoice}
-                          className="w-full gap-2 h-9 text-sm"
+                          className="premium-order-power-btn"
                         >
                           {downloadingInvoice ? (
                             <Loader2 className="h-4 w-4 animate-spin" />
@@ -4590,10 +4599,11 @@ const OrderDetails = () => {
                 {/* Download Invoice (standalone, shows when billing card is hidden) */}
                 {(!order.expiryDate || provider === 'oceanlinux') && (
                   <Button
+                    type="button"
                     variant="outline"
                     onClick={handleDownloadInvoice}
                     disabled={downloadingInvoice}
-                    className="w-full gap-2 h-10 text-sm"
+                    className="premium-order-power-btn"
                   >
                     {downloadingInvoice ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
@@ -4615,47 +4625,47 @@ const OrderDetails = () => {
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="space-y-2 text-sm">
-                      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1 sm:gap-2 py-2 border-b border-border">
+                    <div className="space-y-2 pl-10 text-sm">
+                      <div className="flex flex-col items-start gap-1 py-2 border-b border-border">
                         <span className="text-xs text-muted-foreground">Service ID</span>
                         <span className="font-mono text-xs bg-muted/50 px-2 py-0.5 rounded break-all">{order._id}</span>
                       </div>
-                      <div className="flex justify-between items-center py-2 border-b border-border">
+                      <div className="flex flex-col items-start gap-1 py-2 border-b border-border">
                         <span className="text-xs text-muted-foreground">Price</span>
                         <span className="font-semibold text-sm">₹{order.price}</span>
                       </div>
                       {order.ipStockId && (
-                        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1 sm:gap-2 py-2 border-b border-border">
+                        <div className="flex flex-col items-start gap-1 py-2 border-b border-border">
                           <span className="text-xs text-muted-foreground">IP Stock ID</span>
                           <span className="font-mono text-xs bg-muted/50 px-2 py-0.5 rounded break-all">{order.ipStockId}</span>
                         </div>
                       )}
                       {order.lastSyncTime && (
-                        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1 sm:gap-2 py-2 border-b border-border">
+                        <div className="flex flex-col items-start gap-1 py-2 border-b border-border">
                           <span className="text-xs text-muted-foreground">Last Sync</span>
                           <span className="text-xs">{formatDate(order.lastSyncTime)}</span>
                         </div>
                       )}
                       {provider === 'hostycare' && order.hostycareServiceId && (
-                        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1 sm:gap-2 py-2">
+                        <div className="flex flex-col items-start gap-1 py-2">
                           <span className="text-xs text-muted-foreground">Hostycare ID</span>
                           <span className="font-mono text-xs bg-muted/50 px-2 py-0.5 rounded break-all">{order.hostycareServiceId}</span>
                         </div>
                       )}
                       {provider === 'smartvps' && order.smartvpsServiceId && (
-                        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1 sm:gap-2 py-2">
+                        <div className="flex flex-col items-start gap-1 py-2">
                           <span className="text-xs text-muted-foreground">SmartVPS ID</span>
                           <span className="font-mono text-xs bg-muted/50 px-2 py-0.5 rounded break-all">{order.smartvpsServiceId}</span>
                         </div>
                       )}
                       {provider === 'advps' && order.advpsServiceId && (
-                        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1 sm:gap-2 py-2">
+                        <div className="flex flex-col items-start gap-1 py-2">
                           <span className="text-xs text-muted-foreground">ADVPS Service ID</span>
                           <span className="font-mono text-xs bg-muted/50 px-2 py-0.5 rounded break-all">{order.advpsServiceId}</span>
                         </div>
                       )}
                       {provider === 'advps' && order.advpsOrderId && (
-                        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1 sm:gap-2 py-2">
+                        <div className="flex flex-col items-start gap-1 py-2">
                           <span className="text-xs text-muted-foreground">ADVPS Order ID</span>
                           <span className="font-mono text-xs bg-muted/50 px-2 py-0.5 rounded break-all">{order.advpsOrderId}</span>
                         </div>

@@ -1,19 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   ExternalLink,
   Gift,
   RefreshCw,
-  Server,
   Shield,
   Sparkles,
   Wrench,
   X,
 } from "lucide-react";
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import {
   JUST_LOGGED_IN_KEY,
@@ -95,6 +92,28 @@ function waitForLoginPopupComplete(): Promise<void> {
   });
 }
 
+function isWhatsAppLink(url: string) {
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, "");
+    return host === "wa.me" || host === "whatsapp.com" || host.endsWith(".whatsapp.com");
+  } catch {
+    return false;
+  }
+}
+
+function channelLabel(text?: string) {
+  const label = (text || "").replace(/\s+/g, " ").trim();
+  return label || "Join channel";
+}
+
+function WhatsAppMark() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4 shrink-0" fill="currentColor" aria-hidden="true">
+      <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
+    </svg>
+  );
+}
+
 function NewsContent({ text }: { text: string }) {
   const blocks = text
     .split(/\n+/)
@@ -113,7 +132,7 @@ function NewsContent({ text }: { text: string }) {
           return (
             <div key={index} className="flex gap-3 pl-0.5">
               <span className="mt-2.5 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400/80" />
-              <p className="text-sm leading-relaxed text-white/60 sm:text-[15px]">{cleanLine}</p>
+              <p className="text-sm leading-relaxed premium-dashboard-subtitle">{cleanLine}</p>
             </div>
           );
         }
@@ -124,8 +143,8 @@ function NewsContent({ text }: { text: string }) {
             className={cn(
               "whitespace-pre-wrap leading-relaxed",
               index === 0
-                ? "text-sm font-medium text-white/90 sm:text-base"
-                : "text-sm text-white/60 sm:text-[15px]"
+                ? "text-sm font-medium premium-dashboard-title"
+                : "text-sm premium-dashboard-subtitle"
             )}
           >
             {cleanLine}
@@ -143,6 +162,20 @@ export default function OrderNewsPopup({ orderId }: { orderId: string }) {
   const dismissPopup = useCallback(() => {
     setOpen(false);
   }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") dismissPopup();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open, dismissPopup]);
 
   useEffect(() => {
     if (!orderId) return;
@@ -190,117 +223,75 @@ export default function OrderNewsPopup({ orderId }: { orderId: string }) {
     };
   }, [orderId]);
 
-  const handleOpenChange = (value: boolean) => {
-    setOpen(value);
-  };
-
-  if (!popup) return null;
+  if (!popup || !open || typeof document === "undefined") return null;
 
   const meta = typeMeta[popup.type || "update"] || typeMeta.update;
   const TypeIcon = meta.icon;
 
-  return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent
-        className={cn(
-          "premium-login-news-dialog premium-order-news-dialog premium-news-dialog premium-dialog-mobile-sheet",
-          "border-0 shadow-2xl rounded-2xl",
-          "max-sm:data-[state=open]:slide-in-from-bottom-8 max-sm:data-[state=closed]:slide-out-to-bottom-8",
-          "sm:data-[state=open]:zoom-in-95"
-        )}
+  return createPortal(
+    <div className="premium-order-news-overlay" role="presentation">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="order-news-title"
+        className="premium-order-news-card"
       >
-        <div className="h-0.5 w-full shrink-0 bg-gradient-to-r from-emerald-600/80 via-emerald-400 to-emerald-500/60" />
-
         <div
-          className="absolute left-1/2 top-2.5 z-30 h-1 w-10 -translate-x-1/2 rounded-full bg-white/20 sm:hidden"
-          aria-hidden="true"
-        />
-
-        <div
-          className="premium-news-dialog-header relative shrink-0 border-b px-4 pb-3 pt-4 sm:px-5 sm:pb-4 sm:pt-5"
+          className="premium-news-dialog-header relative shrink-0 border-b px-4 pb-3.5 pt-4 sm:px-6 sm:pb-4 sm:pt-5"
           style={{ borderColor: "var(--pd-border)" }}
         >
           <button
             type="button"
             onClick={dismissPopup}
-            aria-label="Close announcement"
-            className="absolute right-3 top-4 z-20 flex h-8 w-8 items-center justify-center rounded-full border border-white/12 bg-white/5 text-white/55 transition-colors hover:bg-white/10 hover:text-white sm:right-5 sm:top-5"
+            aria-label="Dismiss announcement"
+            className="premium-news-close absolute right-3 top-3.5 z-20 flex h-8 w-8 items-center justify-center rounded-full border transition-colors sm:right-5 sm:top-5"
           >
             <X className="h-4 w-4" />
           </button>
-
-          <div className="relative z-10 pr-10">
-            <div className="mb-3 flex flex-wrap items-center gap-2.5 sm:mb-4 sm:gap-3">
-              <div
-                className={cn(
-                  "flex h-10 w-10 items-center justify-center rounded-xl border bg-gradient-to-br shadow-sm sm:h-11 sm:w-11",
-                  meta.tone
-                )}
-              >
-                <TypeIcon className="h-5 w-5" />
-              </div>
-              <span
-                className={cn(
-                  "inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-semibold",
-                  meta.badge
-                )}
-              >
-                {meta.label}
-              </span>
-              {popup.targetLabel && (
-                <Badge variant="outline" className="gap-1 text-[11px] border-white/15 text-white/70">
-                  <Server className="h-3 w-3" />
-                  {popup.targetLabel}
-                </Badge>
-              )}
+          <div className="relative z-10 flex items-start gap-3 pr-10">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-emerald-400/30 bg-emerald-500/15">
+              <TypeIcon className="h-5 w-5 premium-price-accent" />
             </div>
-
-            <DialogTitle
-              className="premium-news-dialog-title premium-order-news-title font-bold tracking-tight"
-              style={{ color: "var(--pd-title)" }}
-            >
-              {popup.title}
-            </DialogTitle>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-semibold uppercase tracking-wide premium-dashboard-subtitle">
+                {meta.label}
+                {popup.targetLabel ? ` · ${popup.targetLabel}` : ""}
+              </p>
+              <h2 id="order-news-title" className="premium-news-dialog-title mt-1 text-lg font-bold premium-dashboard-title">
+                {popup.title}
+              </h2>
+            </div>
           </div>
         </div>
-
-        <div className="premium-news-dialog-scroll px-4 py-3 sm:px-5 sm:py-4">
+        <div className="premium-news-dialog-scroll px-4 py-4 sm:px-6">
+          <p className="sr-only">Service update for this order</p>
+          <NewsContent text={popup.content} />
+        </div>
+        {popup.actionUrl ? (
           <div
-            className="premium-login-news-content rounded-xl border px-3.5 py-3.5 sm:px-4 sm:py-4"
-            style={{ borderColor: "var(--pd-border)", background: "var(--pd-surface-soft)" }}
+            className="shrink-0 border-t px-4 py-3 sm:px-6"
+            style={{ borderColor: "var(--pd-border)", background: "var(--pd-dialog-bg)" }}
           >
-            <NewsContent text={popup.content} />
-          </div>
-        </div>
-
-        <div
-          className="shrink-0 border-t px-4 py-3 sm:px-5 sm:py-3.5 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
-          style={{ borderColor: "var(--pd-border)", background: "var(--pd-dialog-bg)" }}
-        >
-          <div className="flex flex-col-reverse gap-2.5 sm:flex-row sm:items-center sm:justify-end sm:gap-3">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={dismissPopup}
-              className="premium-btn-outline h-10 w-full sm:h-9 sm:w-auto sm:min-w-[7rem]"
+            <a
+              href={popup.actionUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={cn(
+                "premium-order-news-channel-btn",
+                !isWhatsAppLink(popup.actionUrl) && "premium-order-news-channel-btn--default"
+              )}
             >
-              Dismiss
-            </Button>
-            {popup.actionUrl && (
-              <Button
-                asChild
-                size="sm"
-                className="h-10 w-full gap-2 rounded-xl border-0 text-sm font-semibold shadow-none sm:h-9 sm:w-auto sm:min-w-[10rem] bg-gradient-to-r from-emerald-400 to-emerald-500 text-[hsl(160_40%_8%)] hover:brightness-110"
-              >
-                <a href={popup.actionUrl} target="_blank" rel="noopener noreferrer">
-                  {popup.actionText || "Learn more"}
-                  <ExternalLink className="h-4 w-4 shrink-0" />
-                </a>
-              </Button>
-            )}
+              {isWhatsAppLink(popup.actionUrl) ? (
+                <WhatsAppMark />
+              ) : (
+                <ExternalLink className="h-4 w-4 shrink-0" aria-hidden />
+              )}
+              <span>{channelLabel(popup.actionText)}</span>
+            </a>
           </div>
-        </div>
-      </DialogContent>
-    </Dialog>
+        ) : null}
+      </div>
+    </div>,
+    document.body
   );
 }

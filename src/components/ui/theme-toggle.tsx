@@ -43,7 +43,10 @@ export function ThemeToggle({
       size={size}
       onClick={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}
       className={cn(
-        'relative overflow-hidden transition-all duration-300 hover:scale-105 active:scale-95',
+        'relative overflow-hidden',
+        className?.includes('premium-dashboard-icon-btn')
+          ? 'transition-colors'
+          : 'transition-all duration-300 hover:scale-105 active:scale-95',
         className
       )}
     >

@@ -69,11 +69,11 @@ export default function Footer() {
                 />
                 <div>
                   <h2 className="text-xl font-bold text-white tracking-tight">OceanLinux</h2>
-                  <p className="text-[11px] text-white/35 tracking-wide">The Ocean of Linux</p>
+                  <p className="text-sm text-white/70 tracking-wide">The Ocean of Linux</p>
                 </div>
               </Link>
 
-              <p className="text-white/45 leading-relaxed mb-6 text-sm max-w-sm">
+              <p className="text-white/70 leading-relaxed mb-6 text-sm max-w-sm">
                 Affordable premium Linux VPS hosting — transparent pricing, reliable performance,
                 and expert support managed by OceanLinux.
               </p>
@@ -81,10 +81,10 @@ export default function Footer() {
               <div className="premium-glass-card p-4 mb-6 inline-flex items-center gap-3 max-w-xs">
                 <img src="/backtick.png" alt="Backtick Labs" className="w-7 h-7 opacity-90" />
                 <div>
-                  <p className="text-[11px] text-white/35 uppercase tracking-wider">A product of</p>
+                  <p className="text-sm text-white/70">A product of</p>
                   <Link
                     href="https://backticklabs.io"
-                    className="text-sm font-semibold text-emerald-400 hover:text-emerald-300 transition-colors"
+                    className="text-sm font-semibold text-emerald-300 hover:text-white transition-colors"
                   >
                     Backtick Labs
                   </Link>
@@ -94,20 +94,20 @@ export default function Footer() {
               <div className="space-y-2.5 text-sm">
                 <a
                   href="mailto:hello@oceanlinux.com"
-                  className="flex items-center gap-2.5 text-white/45 hover:text-emerald-300 transition-colors"
+                  className="flex items-center gap-2.5 text-white/70 hover:text-emerald-300 transition-colors"
                 >
-                  <Mail className="w-4 h-4 text-emerald-400/80" />
+                  <Mail className="w-4 h-4 text-emerald-300" />
                   hello@oceanlinux.com
                 </a>
-                <div className="flex items-center gap-2.5 text-white/45">
-                  <Globe className="w-4 h-4 text-emerald-400/80" />
+                <div className="flex items-center gap-2.5 text-white/70">
+                  <Globe className="w-4 h-4 text-emerald-300" />
                   Managed VPS Service · 99.9% Uptime SLA
                 </div>
               </div>
 
               <div className="flex flex-wrap gap-2 mt-6">
                 {trustBadges.map(({ icon: Icon, label }) => (
-                  <span key={label} className="premium-chip text-[10px] gap-1.5">
+                  <span key={label} className="premium-chip gap-1.5">
                     <Icon className="w-3 h-3" />
                     {label}
                   </span>
@@ -119,9 +119,9 @@ export default function Footer() {
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-8">
                 {Object.entries(footerSections).map(([key, section]) => (
                   <div key={key}>
-                    <h4 className="text-[11px] font-semibold text-white/70 mb-4 uppercase tracking-[0.18em]">
+                    <h3 className="text-sm font-semibold text-white mb-4">
                       {section.title}
-                    </h4>
+                    </h3>
                     <ul className="space-y-2.5">
                       {section.links.map((link, index) => {
                         if (link.name === "Email Support") {
@@ -135,7 +135,7 @@ export default function Footer() {
                           <li key={index}>
                             <Link
                               href={link.href}
-                              className="text-sm text-white/40 hover:text-emerald-300 transition-colors"
+                              className="text-sm text-white/70 hover:text-emerald-300 transition-colors"
                             >
                               {link.name}
                             </Link>
@@ -154,7 +154,7 @@ export default function Footer() {
       <div className="border-t border-white/[0.06] relative z-10">
         <div className="container mx-auto container-padding">
           <div className="py-5 flex flex-col sm:flex-row justify-between items-center gap-4">
-            <div className="text-xs text-white/35 text-center sm:text-left leading-relaxed">
+            <div className="text-sm text-white/70 text-center sm:text-left leading-relaxed">
               <p>© 2024 OceanLinux. All rights reserved · Backtick Labs</p>
             </div>
             <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2">
@@ -167,7 +167,7 @@ export default function Footer() {
                 <Link
                   key={item.href}
                   href={item.href}
-                  className="text-xs text-white/35 hover:text-emerald-300 transition-colors"
+                  className="text-sm text-white/70 hover:text-emerald-300 transition-colors"
                 >
                   {item.label}
                 </Link>

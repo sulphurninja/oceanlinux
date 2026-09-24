@@ -54,9 +54,8 @@ import { toast } from 'sonner';
 import { dashboardFetch } from '@/lib/dashboardFetch';
 import { readDashboardCache, writeDashboardCache, DASHBOARD_CACHE_KEYS } from '@/lib/dashboardCache';
 import { useSessionAlert } from '@/components/session-alert';
-import { premiumBadge, premiumBtnCredentials, premiumBtnOutline, premiumSelectContent } from '@/lib/premium-badges';
+import { premiumBadge, premiumSelectContent } from '@/lib/premium-badges';
 import { getCustomerProviderDisplayNameFromOrder } from '@/lib/customerProviderDisplay';
-import { cn } from '@/lib/utils';
 import {
     hasDeliveredCredentials,
     getDaysUntilExpiry,
@@ -546,30 +545,30 @@ const ViewLinux = () => {
                 {/* Search and Filters Section - Enhanced */}
                 {!loading && orders.filter(isServerListOrder).length > 0 && (
                     <div className="premium-dashboard-toolbar mb-4 sm:mb-6 space-y-3 sm:space-y-4">
-                        <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 items-stretch sm:items-center">
+                        <div className="flex flex-row items-center gap-2">
                             <DashboardSearchInput
                                 value={searchQuery}
                                 onChange={setSearchQuery}
                                 onClear={clearSearch}
                                 placeholder="Search servers..."
+                                className="min-w-0 flex-1"
                             />
 
-                            <div className="flex gap-2 shrink-0">
+                            <div className="flex shrink-0 items-center gap-2">
                                 <Button
                                     variant="outline"
-                                    size="sm"
-                                    className="gap-1 sm:gap-2 h-9 sm:h-10 px-2 sm:px-3 premium-btn-outline"
+                                    className="gap-1.5 premium-btn-outline shrink-0 px-2.5 sm:gap-2 sm:px-4"
                                     onClick={() => fetchOrders(true)}
                                     disabled={loading || refreshing}
                                 >
-                                    <RefreshCw className={`h-3 w-3 sm:h-4 sm:w-4 ${loading || refreshing ? 'animate-spin' : ''}`} />
-                                    <span className="hidden sm:inline text-xs sm:text-sm">Refresh</span>
+                                    <RefreshCw className={`h-4 w-4 shrink-0 ${loading || refreshing ? 'animate-spin' : ''}`} />
+                                    <span>Refresh</span>
                                 </Button>
 
                             {/* Status Filter */}
-                            <div className="flex gap-2">
+                            <div className="flex min-w-0 shrink-0 gap-2">
                                 <Select value={statusFilter} onValueChange={setStatusFilter}>
-                                    <SelectTrigger className="premium-dashboard-select w-32 sm:w-36">
+                                    <SelectTrigger className="premium-dashboard-select w-[7.25rem] sm:w-40">
                                         <Filter className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
                                         <SelectValue placeholder="Status" />
                                     </SelectTrigger>
@@ -586,7 +585,7 @@ const ViewLinux = () => {
                                         variant="outline"
                                         size="sm"
                                         onClick={clearFilters}
-                                        className="h-9 sm:h-10 px-2 sm:px-3 text-xs sm:text-sm flex-shrink-0 premium-btn-outline"
+                                        className="premium-btn-outline shrink-0"
                                     >
                                         Clear
                                     </Button>
@@ -621,17 +620,17 @@ const ViewLinux = () => {
                         <div className="w-16 h-16 sm:w-20 sm:h-20 mx-auto mb-4 sm:mb-6 bg-muted rounded-full flex items-center justify-center">
                             <Server className="h-8 w-8 sm:h-10 sm:w-10 text-muted-foreground" />
                         </div>
-                        <h3 className="text-lg sm:text-xl font-semibold mb-2">No active servers yet</h3>
+                        <h2 className="text-lg sm:text-xl font-semibold mb-2">No active servers yet</h2>
                         <p className="text-muted-foreground mb-4 sm:mb-6 max-w-md mx-auto text-sm sm:text-base">
                             Paid servers appear here right away — even while provisioning. Active servers show IP and credentials once ready.
                         </p>
                         <div className="flex flex-col sm:flex-row gap-2 justify-center">
-                        <Button onClick={() => router.push('/dashboard/ipStock')} className="gap-2 mx-auto premium-btn-primary border-0" size="sm">
+                        <Button onClick={() => router.push('/dashboard/ipStock')} className="gap-2 mx-auto premium-btn-primary border-0">
                             <Server className="h-4 w-4" />
                             Browse Plans
                         </Button>
                         {orders.length > 0 && (
-                            <Button variant="outline" onClick={() => router.push('/dashboard/orders')} className="gap-2 mx-auto premium-btn-outline" size="sm">
+                            <Button variant="outline" onClick={() => router.push('/dashboard/orders')} className="gap-2 mx-auto premium-btn-outline">
                                 <Clock className="h-4 w-4" />
                                 View Pending Orders
                             </Button>
@@ -641,26 +640,26 @@ const ViewLinux = () => {
                 ) : (
                     <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4 sm:space-y-6 premium-dashboard-tabs">
                         {/* Enhanced Tab Navigation with Counts */}
-                        <div className="flex justify-center overflow-x-auto scrollbar-hide">
-                            <TabsList className="grid grid-cols-3 h-fit w-fit min-w-0">
-                                <TabsTrigger value="all" className="flex items-center gap-1 px-2 sm:px-3 py-2 text-xs sm:text-sm whitespace-nowrap">
+                        <div className="w-full min-w-0">
+                            <TabsList className="premium-dashboard-tablist grid h-auto w-full grid-cols-3 gap-1.5 sm:gap-2">
+                                <TabsTrigger value="all" className="flex w-full min-w-0 items-center justify-center gap-1 px-2 sm:px-3 py-2 text-xs sm:text-sm">
                                     <Server className="h-3 w-3 sm:h-4 sm:w-4" />
                                     <span>All</span>
-                                    <Badge variant="secondary" className="ml-0.5 text-xs h-4 px-1">
+                                    <Badge variant="secondary" className="premium-tab-count ml-0.5 text-xs h-4 px-1">
                                         {counts.all}
                                     </Badge>
                                 </TabsTrigger>
-                                <TabsTrigger value="active" className="flex items-center gap-1 px-2 sm:px-3 py-2 text-xs sm:text-sm whitespace-nowrap">
+                                <TabsTrigger value="active" className="flex w-full min-w-0 items-center justify-center gap-1 px-2 sm:px-3 py-2 text-xs sm:text-sm">
                                     <CheckCircle className="h-3 w-3 sm:h-4 sm:w-4" />
                                     <span>Active</span>
-                                    <Badge variant="secondary" className="ml-0.5 text-xs h-4 px-1">
+                                    <Badge variant="secondary" className="premium-tab-count ml-0.5 text-xs h-4 px-1">
                                         {counts.active}
                                     </Badge>
                                 </TabsTrigger>
-                                <TabsTrigger value="expired" className="flex items-center gap-1 px-2 sm:px-3 py-2 text-xs sm:text-sm whitespace-nowrap">
+                                <TabsTrigger value="expired" className="flex w-full min-w-0 items-center justify-center gap-1 px-2 sm:px-3 py-2 text-xs sm:text-sm">
                                     <Calendar className="h-3 w-3 sm:h-4 sm:w-4" />
                                     <span>Expired</span>
-                                    <Badge variant="secondary" className="ml-0.5 text-xs h-4 px-1">
+                                    <Badge variant="secondary" className="premium-tab-count ml-0.5 text-xs h-4 px-1">
                                         {counts.expired}
                                     </Badge>
                                 </TabsTrigger>
@@ -679,12 +678,12 @@ const ViewLinux = () => {
                                             <Search className="h-8 w-8 sm:h-10 sm:w-10 text-muted-foreground" />
                                         )}
                                     </div>
-                                    <h3 className="text-lg sm:text-xl font-semibold mb-2">
+                                    <h2 className="text-lg sm:text-xl font-semibold mb-2">
                                         {searchQuery || statusFilter !== 'all'
                                             ? "No servers match your criteria"
                                             : `No ${activeTab === 'all' ? 'servers' : activeTab + ' servers'} found`
                                         }
-                                    </h3>
+                                    </h2>
                                     <p className="text-muted-foreground mb-4 sm:mb-6 max-w-md mx-auto text-sm sm:text-base">
                                         {searchQuery || statusFilter !== 'all'
                                             ? "Try adjusting your search terms or filters."
@@ -697,13 +696,13 @@ const ViewLinux = () => {
                                     </p>
                                     <div className="flex gap-2 justify-center">
                                         {(searchQuery || statusFilter !== 'all' || activeTab !== 'all') && (
-                                            <Button variant="outline" onClick={clearFilters} className="gap-2" size="sm">
+                                            <Button variant="outline" onClick={clearFilters} className="gap-2 premium-btn-outline">
                                                 <XIcon className="h-4 w-4" />
                                                 Clear Filters
                                             </Button>
                                         )}
                                         {activeTab === 'active' && (
-                                            <Button onClick={() => router.push('/dashboard/ipStock')} className="gap-2" size="sm">
+                                            <Button onClick={() => router.push('/dashboard/ipStock')} className="gap-2 premium-btn-primary border-0">
                                                 <Server className="h-4 w-4" />
                                                 Browse Plans
                                             </Button>
@@ -726,9 +725,9 @@ const ViewLinux = () => {
                                                         <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
                                                             <OsIcon os={order.os} productName={order.productName} className="h-8 w-8 sm:h-10 sm:w-10 flex-shrink-0" />
                                                             <div className="flex-1 min-w-0">
-                                                                <h3 className="font-semibold text-sm sm:text-base leading-snug break-words premium-dashboard-title">
+                                                                <h2 className="font-semibold text-sm sm:text-base break-words premium-dashboard-title" title={order.productName}>
                                                                     {styleText(order.productName)}
-                                                                </h3>
+                                                                </h2>
                                                                 <div className="flex items-center gap-1 sm:gap-2 mt-1 flex-wrap">
                                                                     <Badge variant="secondary" className="text-xs px-1.5 py-0.5">
                                                                         {getProviderDisplayName(order)}
@@ -787,50 +786,46 @@ const ViewLinux = () => {
                                                     <div className="border-t border-border pt-2">
                                                         <div className="premium-mobile-order-actions">
                                                             <Button
-                                                                variant="outline"
-                                                                size="sm"
                                                                 onClick={(e) => {
                                                                     e.stopPropagation();
                                                                     router.push(`/dashboard/order/${order._id}`);
                                                                 }}
-                                                                className={cn("gap-1 sm:gap-2", premiumBtnOutline)}
+                                                                className="premium-btn-primary gap-2 border-0"
                                                             >
-                                                                <Settings className="h-3 w-3 shrink-0" />
-                                                                <span className="text-xs truncate">Manage</span>
+                                                                <Settings className="h-4 w-4 shrink-0" />
+                                                                <span className="truncate">Manage</span>
                                                             </Button>
 
                                                             <Button
                                                                 variant="outline"
-                                                                size="sm"
                                                                 onClick={(e) => downloadInvoice(e, order._id)}
-                                                                className={cn("gap-1 sm:gap-2", premiumBtnOutline)}
+                                                                className="premium-btn-outline gap-2"
                                                             >
-                                                                <Download className="h-3 w-3 shrink-0" />
-                                                                <span className="text-xs truncate">Invoice</span>
+                                                                <Download className="h-4 w-4 shrink-0" />
+                                                                <span className="truncate">Invoice</span>
                                                             </Button>
 
                                                             {order.panelUsername && (
                                                                 <Button
                                                                     variant="outline"
-                                                                    size="sm"
                                                                     onClick={(e) => copyHosthellCreds(e, order)}
-                                                                    className={cn("premium-mobile-order-action--wide gap-1 sm:gap-2", premiumBtnCredentials)}
+                                                                    title="Copy the login your client uses to control this server"
+                                                                    aria-label="Copy client login panel"
+                                                                    className="premium-mobile-order-action--wide premium-btn-credentials w-full min-h-11 gap-2"
                                                                 >
-                                                                    <Copy className="h-3 w-3 shrink-0" />
-                                                                    <span className="text-xs truncate sm:hidden">Copy Panel Creds</span>
-                                                                    <span className="text-xs truncate hidden sm:inline">Copy Panel Credentials</span>
+                                                                    <Copy className="h-4 w-4 shrink-0" />
+                                                                    <span className="truncate">Copy client login panel</span>
                                                                 </Button>
                                                             )}
 
                                                             {getServerStatus(order) === 'failed' && (
                                                                 <Button
-                                                                    variant="destructive"
-                                                                    size="sm"
+                                                                    variant="outline"
                                                                     onClick={(e) => {
                                                                         e.stopPropagation();
                                                                         router.push('/support/tickets');
                                                                     }}
-                                                                    className={cn("premium-mobile-order-action--wide gap-1 sm:gap-2", premiumBtnOutline)}
+                                                                    className="premium-mobile-order-action--wide premium-btn-outline gap-2"
                                                                 >
                                                                     <LifeBuoy className="h-3 w-3 shrink-0" />
                                                                     <span className="text-xs truncate">Support</span>
@@ -841,13 +836,13 @@ const ViewLinux = () => {
                                                 </div>
 
                                                 {/* Desktop Layout - Responsive improvements */}
-                                                <div className="hidden lg:flex items-center justify-between">
+                                                <div className="hidden lg:flex flex-wrap items-center justify-between gap-4 min-w-0">
                                                     <div className="flex items-center gap-4 flex-1 min-w-0">
                                                         <OsIcon os={order.os} productName={order.productName} className="h-12 w-12 xl:h-14 xl:w-14 flex-shrink-0" />
                                                         <div className="flex-1 min-w-0">
-                                                            <h3 className="font-semibold text-lg xl:text-xl break-words">
+                                                            <h2 className="font-semibold text-lg xl:text-xl break-words premium-dashboard-title" title={order.productName}>
                                                                 {styleText(order.productName)}
-                                                            </h3>
+                                                            </h2>
                                                             <div className="flex items-center gap-4 xl:gap-6 mt-1 text-sm xl:text-base text-muted-foreground flex-wrap">
                                                                 <span className="flex items-center gap-1">
                                                                     <Terminal className="h-3 w-3 xl:h-4 xl:w-4" />
@@ -897,41 +892,39 @@ const ViewLinux = () => {
                                                         </div>
                                                     </div>
 
-                                                    <div className="flex items-center gap-2 xl:gap-3 ml-4 flex-shrink-0">
+                                                    <div className="flex flex-wrap items-center justify-end gap-2 xl:gap-3 ml-auto min-w-0">
                                                         {getStatusBadge(order.status, order.provisioningStatus, order.lastAction, order)}
                                                         <div className="flex gap-2">
-                                                            {order.panelUsername && (
-                                                                <Button
-                                                                    variant="outline"
-                                                                    size="sm"
-                                                                    onClick={(e) => copyHosthellCreds(e, order)}
-                                                                    className={cn("gap-2 h-9 xl:h-10 px-3 xl:px-4", premiumBtnCredentials)}
-                                                                >
-                                                                    <Copy className="h-4 w-4" />
-                                                                    Copy Panel Credentials
-                                                                </Button>
-                                                            )}
                                                             <Button
-                                                                variant="outline"
-                                                                size="sm"
-                                                                onClick={(e) => downloadInvoice(e, order._id)}
-                                                                className={cn("gap-2 h-9 xl:h-10 px-3 xl:px-4", premiumBtnOutline)}
-                                                            >
-                                                                <Download className="h-4 w-4" />
-                                                                Invoice
-                                                            </Button>
-                                                            <Button
-                                                                variant="outline"
-                                                                size="sm"
                                                                 onClick={(e) => {
                                                                     e.stopPropagation();
                                                                     router.push(`/dashboard/order/${order._id}`);
                                                                 }}
-                                                                className={cn("gap-2 h-9 xl:h-10 px-3 xl:px-4", premiumBtnOutline)}
+                                                                className="premium-btn-primary gap-2 border-0"
                                                             >
                                                                 <Settings className="h-4 w-4" />
                                                                 Manage
                                                             </Button>
+                                                            <Button
+                                                                variant="outline"
+                                                                onClick={(e) => downloadInvoice(e, order._id)}
+                                                                className="premium-btn-outline gap-2"
+                                                            >
+                                                                <Download className="h-4 w-4" />
+                                                                Invoice
+                                                            </Button>
+                                                            {order.panelUsername && (
+                                                                <Button
+                                                                    variant="outline"
+                                                                    onClick={(e) => copyHosthellCreds(e, order)}
+                                                                    title="Copy the login your client uses to control this server"
+                                                                    aria-label="Copy client login panel"
+                                                                    className="premium-btn-credentials gap-2"
+                                                                >
+                                                                    <Copy className="h-4 w-4 shrink-0" />
+                                                                    Copy client login panel
+                                                                </Button>
+                                                            )}
                                                         </div>
                                                     </div>
                                                 </div>

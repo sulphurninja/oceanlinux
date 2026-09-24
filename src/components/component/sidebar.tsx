@@ -6,6 +6,7 @@ import { performLogoutWithCelebration } from "@/lib/logoutWithCelebration";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetTrigger, SheetContent } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
+import { premiumBadge } from '@/lib/premium-badges';
 import {
   LayoutDashboardIcon,
   LogOutIcon,
@@ -13,7 +14,6 @@ import {
   Terminal,
   ReceiptIndianRupee,
   Store,
-  ShoppingBag,
   Settings,
   Lock,
   PanelLeftClose,
@@ -30,7 +30,6 @@ import {
 } from 'lucide-react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { cn } from "@/lib/utils";
-import { Separator } from "@/components/ui/separator";
 import { toast } from 'sonner';
 import { ThemeToggle } from '@/components/ui/theme-toggle';
 import { Wallet } from 'lucide-react';
@@ -42,6 +41,12 @@ interface NavItem {
   icon: React.ComponentType<{ className?: string }>;
   badge?: string;
   children?: NavItem[];
+}
+
+interface NavSection {
+  id: string;
+  label: string;
+  items: NavItem[];
 }
 
 const getUserInitials = (name: string) =>
@@ -156,124 +161,101 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
     });
   };
 
-  const navItems: NavItem[] = [
-    {
-      href: '/dashboard',
-      label: 'Dashboard',
-      icon: LayoutDashboardIcon,
-    },
-    // Plan/store items — hidden for resellers (panel buying is disabled;
-    // resellers order via the Reseller API instead).
-    ...((!user || user?.userType !== 'reseller') ? [
-      {
-        href: '/dashboard/ipStock',
-        label: 'All Plans',
-        icon: Store,
-        badge: 'Buy Now'
-      },
-      {
-        href: '/dashboard/ipStock?category=Linux',
-        label: 'Linux Servers',
-        icon: Server,
-      },
-      {
-        href: '/dashboard/ipStock?category=VPS',
-        label: 'Windows VPS',
-        icon: Cloud,
-      },
-      {
-        href: '/dashboard/ipStock?category=SlotIP',
-        label: 'Premium IP Proxies',
-        icon: Zap,
-      },
-      {
-        href: '/dashboard/ipStock?category=Trial',
-        label: 'Trial VPS',
-        icon: Sparkles,
-      },
-    ] : []),
-    // Reseller rate card lives on its own page — linked above Manage Orders.
-    ...(user?.userType === 'reseller' ? [
-      {
-        href: '/dashboard/api-rates',
-        label: 'API Rates',
-        icon: Tag,
-      },
-    ] : []),
-    {
-      href: '/dashboard/viewLinux',
-      label: 'Manage Orders',
-      icon: ShoppingBag,
-    },
-    {
-      href: '/dashboard/orders',
-      label: 'Order History',
-      icon: ReceiptIndianRupee,
-    },
-    {
-      href: '/dashboard/scripts',
-      label: 'PuTTY / SSH',
-      icon: Terminal,
-    },
-    {
-      href: '/dashboard/proxy-checker',
-      label: 'Proxy IP Checker',
-      icon: Globe,
-      badge: 'Free',
-    },
-    // Customer wallet + cart entries (hidden for resellers — they have
-    // their own reseller wallet flow below).
-    ...((!user || user?.userType !== 'reseller') ? [
-      {
-        href: '/dashboard/wallet',
-        label: 'My Wallet',
-        icon: Wallet,
-      },
-      {
-        href: '/dashboard/cart',
-        label: 'Cart',
-        icon: ShoppingCart,
-        badge: cartCount > 0 ? String(cartCount > 99 ? '99+' : cartCount) : undefined,
-      },
-    ] : []),
-    {
-      href: '/dashboard/support/tickets',
-      label: 'Raise Ticket',
-      icon: Ticket,
-      badge:
-        ticketUnreadCount > 0
-          ? ticketUnreadCount === 1
-            ? 'New reply'
-            : `${ticketUnreadCount > 99 ? '99+' : ticketUnreadCount} replies`
-          : undefined,
-    },
-    // Conditionally add Reseller Wallet
-    ...(user?.userType === 'reseller' ? [
-      {
-        href: '/dashboard/reseller-wallet',
-        label: 'Reseller Console',
-        icon: Wallet,
-        badge: 'Wallet'
-      },
-      {
-        href: '/dashboard/reseller-api-docs',
-        label: 'Reseller API Docs',
-        icon: FileCode,
-      }
-    ] : [])
-  ];
+  const isCustomer = !user || user?.userType !== 'reseller';
+  const isReseller = user?.userType === 'reseller';
 
-  const accountItems: NavItem[] = [
+  const sidebarNavBadgeClass = (item: NavItem, active: boolean) => {
+    if (item.href === '/dashboard/support/tickets' && ticketUnreadCount > 0) {
+      return cn(premiumBadge.warning, 'text-[10px] px-2 py-0 h-5 font-medium shrink-0');
+    }
+    if (item.badge && /^(\d+|99\+)$/.test(item.badge)) {
+      return cn(premiumBadge.neutral, 'text-[10px] px-2 py-0 h-5 font-medium tabular-nums shrink-0');
+    }
+    return cn(
+      premiumBadge.neutral,
+      'text-[10px] px-2 py-0 h-5 font-medium shrink-0',
+      active && 'opacity-90'
+    );
+  };
+
+  const navSections: NavSection[] = [
     {
-      href: '/dashboard/my-account',
-      label: 'Profile Settings',
-      icon: Settings,
+      id: 'overview',
+      label: 'Overview',
+      items: [
+        { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboardIcon },
+      ],
+    },
+    ...(isCustomer
+      ? [{
+          id: 'products',
+          label: 'Buy plans',
+          items: [
+            { href: '/dashboard/ipStock', label: 'All Plans', icon: Store, badge: 'Shop' },
+            { href: '/dashboard/ipStock?category=Linux', label: 'Linux Servers', icon: Server },
+            { href: '/dashboard/ipStock?category=VPS', label: 'Windows VPS', icon: Cloud },
+            { href: '/dashboard/ipStock?category=SlotIP', label: 'Premium IP Proxies', icon: Zap },
+            { href: '/dashboard/ipStock?category=Trial', label: 'Trial VPS', icon: Sparkles },
+          ],
+        }]
+      : []),
+    ...(isReseller
+      ? [{
+          id: 'reseller',
+          label: 'Reseller',
+          items: [
+            { href: '/dashboard/api-rates', label: 'API Rates', icon: Tag },
+            { href: '/dashboard/reseller-wallet', label: 'Reseller Console', icon: Wallet, badge: 'Wallet' },
+            { href: '/dashboard/reseller-api-docs', label: 'Reseller API Docs', icon: FileCode },
+          ],
+        }]
+      : []),
+    {
+      id: 'manage',
+      label: 'Manage',
+      items: [
+        { href: '/dashboard/viewLinux', label: 'Manage Orders', icon: Server },
+        { href: '/dashboard/orders', label: 'Order History', icon: ReceiptIndianRupee },
+        { href: '/dashboard/scripts', label: 'PuTTY / SSH', icon: Terminal },
+        { href: '/dashboard/proxy-checker', label: 'Proxy Checker', icon: Globe, badge: 'Free' },
+      ],
     },
     {
-      href: '/dashboard/changePassword',
-      label: 'Security',
-      icon: Lock,
-    }
+      id: 'support',
+      label: 'Support & billing',
+      items: [
+        ...(isCustomer
+          ? [
+              { href: '/dashboard/wallet', label: 'My Wallet', icon: Wallet },
+              {
+                href: '/dashboard/cart',
+                label: 'Cart',
+                icon: ShoppingCart,
+                badge: cartCount > 0 ? String(cartCount > 99 ? '99+' : cartCount) : undefined,
+              },
+            ]
+          : []),
+        {
+          href: '/dashboard/support/tickets',
+          label: 'Raise Ticket',
+          icon: Ticket,
+          badge:
+            ticketUnreadCount > 0
+              ? ticketUnreadCount === 1
+                ? 'New reply'
+                : `${ticketUnreadCount > 99 ? '99+' : ticketUnreadCount} replies`
+              : undefined,
+        },
+      ],
+    },
+    {
+      id: 'account',
+      label: 'Account',
+      items: [
+        { href: '/dashboard/my-account', label: 'Profile Settings', icon: Settings },
+        { href: '/dashboard/changePassword', label: 'Security', icon: Lock },
+      ],
+    },
   ];
 
   const currentSearchParams = useSearchParams();
@@ -291,143 +273,126 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
     if (hrefPath === '/dashboard/support/tickets') {
       return pathname === hrefPath || pathname.startsWith('/dashboard/support/tickets/');
     }
+    if (pathname.startsWith('/dashboard/order/')) {
+      return hrefPath === '/dashboard/viewLinux';
+    }
     return pathname === hrefPath;
   };
 
   const SidebarContent = ({ isMobile = false, isCollapsed = false }: { isMobile?: boolean; isCollapsed?: boolean }) => (
     <div className={cn(
       "flex flex-col h-full premium-dashboard-sidebar border-r transition-all duration-300",
-      isCollapsed && !isMobile ? "w-16" : "w-64"
+      isCollapsed && !isMobile ? "w-16" : "w-[19rem]"
     )}>
       {/* Header */}
       <div className={cn(
         "border-b border-white/[0.06]",
-        isCollapsed && !isMobile ? "p-4" : "p-5"
+        isCollapsed && !isMobile ? "px-3 pt-6 pb-3" : "px-3 pt-6 pb-3"
       )}>
-        <div className={cn(
-          "flex items-center gap-3",
-          isCollapsed && !isMobile ? "justify-center" : "justify-center"
-        )}>
-          <img
-            src='/ol.png'
-            data-ocean-brand-logo
-            className={cn(
-              "transition-all duration-200 hover:scale-105",
-              isCollapsed && !isMobile ? "h-20 w-auto" : "h-12 w-auto"
-            )}
-            alt="OceanLinux"
-          />
-          {(!isCollapsed || isMobile) && (
-            <h1 className="text-2xl font-bold premium-sidebar-brand tracking-tight whitespace-nowrap">
-              OceanLinux
-            </h1>
-          )}
-        </div>
-
-        {/* Backtick Labs Attribution */}
-        {(!isCollapsed || isMobile) && (
-          <div className='flex flex-col items-center gap-1.5 mt-3'>
-            <div className="h-px w-12 bg-gradient-to-r from-transparent via-emerald-500/20 to-transparent premium-sidebar-divider" />
-            <div className='flex items-center gap-2 opacity-90 hover:opacity-100 transition-all duration-200 group'>
-              <span className="text-[9px] premium-sidebar-muted font-medium uppercase tracking-wider">A Product of</span>
-              <img src='/backtick.png' className='h-3.5 w-auto opacity-90 transition-transform group-hover:scale-110' alt="Backtick" />
-              <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">Backtick Labs</span>
+        {isCollapsed && !isMobile ? (
+          <div className="flex justify-center">
+            <img
+              src='/ol.png'
+              data-ocean-brand-logo
+              className="h-9 w-9 object-contain"
+              alt="OceanLinux"
+            />
+          </div>
+        ) : (
+          <div className="premium-sidebar-brand-card">
+            <span className="premium-sidebar-brand-orbit" aria-hidden="true" />
+            <div className="premium-sidebar-brand-mark">
+              <img
+                src='/ol.png'
+                data-ocean-brand-logo
+                className="h-9 w-9 object-contain"
+                alt=""
+              />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[1.2rem] font-bold leading-none premium-sidebar-brand tracking-tight whitespace-nowrap m-0">
+                OceanLinux
+              </p>
+              <a
+                href="https://backticklabs.io"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="premium-sidebar-brand-credit"
+              >
+                <span>A product of</span>
+                <img src="/backtick.png" className="h-3 w-auto shrink-0" alt="" aria-hidden />
+                <span className="premium-sidebar-brand-credit-name">Backtick Labs</span>
+              </a>
             </div>
           </div>
         )}
       </div>
 
       {/* Navigation */}
-      <div className="flex-1 overflow-y-auto scrollbar-thin p-3">
-        <nav className="space-y-1">
-          {/* Main Navigation */}
-          {navItems.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              onClick={() => isMobile && setOpen(false)}
-              className={cn(
-                "group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-all duration-200",
-                isActive(item.href)
-                  ? "premium-dashboard-nav-active"
-                  : "premium-dashboard-nav-item",
-                isCollapsed && !isMobile ? "justify-center px-2" : ""
-              )}
-              title={isCollapsed && !isMobile ? item.label : undefined}
-            >
-              <span className="relative shrink-0">
-                <item.icon className={cn(
-                  "flex-shrink-0 transition-transform group-hover:scale-110",
-                  isCollapsed && !isMobile ? "h-5 w-5" : "h-[18px] w-[18px]"
-                )} />
-                {item.href === '/dashboard/support/tickets' && ticketUnreadCount > 0 && isCollapsed && !isMobile && (
-                  <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-amber-400 ring-2 ring-[hsl(158_40%_8%)]" />
-                )}
-              </span>
+      <div className="premium-sidebar-nav-scroll flex-1 min-h-0 overflow-y-auto scrollbar-thin px-4 pt-8 pb-6">
+        <nav className="space-y-7" aria-label="Dashboard">
+          {navSections.map((section) => (
+            <div key={section.id} className="space-y-1">
               {(!isCollapsed || isMobile) && (
-                <>
-                  <span className="flex-1">{item.label}</span>
-                  {item.badge && (
-                    <Badge
-                      className={cn(
-                        "text-[10px] px-2 py-0 h-5 font-semibold border-0",
-                        item.href === '/dashboard/support/tickets'
-                          ? isActive(item.href)
-                            ? "bg-amber-400/25 text-amber-100"
-                            : "bg-amber-500/20 text-amber-200"
-                          : isActive(item.href)
-                            ? "bg-emerald-400/20 text-emerald-200"
-                            : "bg-emerald-500/15 text-emerald-300"
-                      )}
-                    >
-                      {item.badge}
-                    </Badge>
+                <p className="premium-sidebar-nav-heading px-3 pb-1">
+                  {section.label}
+                </p>
+              )}
+              {section.items.map((item) => (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  aria-current={isActive(item.href) ? 'page' : undefined}
+                  onClick={() => isMobile && setOpen(false)}
+                  className={cn(
+                    "group flex h-11 items-center gap-3 rounded-lg px-4 text-sm transition-all duration-200",
+                    isActive(item.href)
+                      ? "premium-dashboard-nav-active"
+                      : "premium-dashboard-nav-item",
+                    isCollapsed && !isMobile ? "justify-center px-2 py-2.5" : ""
                   )}
-                </>
-              )}
-            </Link>
+                  title={isCollapsed && !isMobile ? item.label : undefined}
+                >
+                  <span className="relative shrink-0">
+                    <item.icon className={cn(
+                      "flex-shrink-0 transition-transform group-hover:scale-110",
+                      isCollapsed && !isMobile ? "h-5 w-5" : "h-[18px] w-[18px]"
+                    )} />
+                    {item.href === '/dashboard/support/tickets' && ticketUnreadCount > 0 && isCollapsed && !isMobile && (
+                      <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-amber-400 ring-2 ring-[hsl(158_40%_8%)]" />
+                    )}
+                  </span>
+                  {(!isCollapsed || isMobile) && (
+                    <>
+                      <span className="inline-flex min-w-0 items-center gap-1.5">
+                        <span className="leading-none whitespace-nowrap">{item.label}</span>
+                        {item.badge && (
+                          <Badge variant="outline" className={sidebarNavBadgeClass(item, isActive(item.href))}>
+                            {item.badge}
+                          </Badge>
+                        )}
+                      </span>
+                    </>
+                  )}
+                </Link>
+              ))}
+            </div>
           ))}
 
-          <Separator className="my-3 premium-sidebar-divider" />
-
-          {/* Account Items */}
-          {accountItems.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              onClick={() => isMobile && setOpen(false)}
-              className={cn(
-                "group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-all duration-200",
-                isActive(item.href)
-                  ? "premium-dashboard-nav-active"
-                  : "premium-dashboard-nav-item",
-                isCollapsed && !isMobile ? "justify-center px-2" : ""
-              )}
-              title={isCollapsed && !isMobile ? item.label : undefined}
-            >
-              <item.icon className={cn(
-                "flex-shrink-0 transition-transform group-hover:scale-110",
-                isCollapsed && !isMobile ? "h-5 w-5" : "h-[18px] w-[18px]"
-              )} />
-              {(!isCollapsed || isMobile) && (
-                <span className="flex-1">{item.label}</span>
-              )}
-            </Link>
-          ))}
         </nav>
       </div>
 
-      {/* Footer — account card + sign out */}
+      {/* Footer — signed-in name, then sign out */}
       <div className={cn(
-        "shrink-0 p-3",
-        isCollapsed && !isMobile ? "px-2" : "px-3"
+        "premium-sidebar-footer mt-auto shrink-0 border-t border-white/[0.06] px-4 pt-4 pb-8 space-y-3",
+        isCollapsed && !isMobile ? "px-2" : "px-4"
       )}>
         <div className={cn(
           "premium-sidebar-account-card rounded-xl",
           isCollapsed && !isMobile ? "p-2" : "p-3"
         )}>
           {(!isCollapsed || isMobile) ? (
-            <div className="flex items-center gap-2.5 mb-3 min-w-0">
+            <div className="flex items-center gap-2.5 min-w-0">
               <div className="premium-sidebar-account-avatar">
                 {user?.name ? getUserInitials(user.name) : 'U'}
               </div>
@@ -435,39 +400,42 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
                 <p className="text-sm font-semibold truncate premium-sidebar-brand leading-tight">
                   {user?.name || 'My Account'}
                 </p>
-                <p className="text-[11px] premium-sidebar-muted truncate mt-0.5">
+                <p
+                  className="premium-sidebar-muted mt-0.5 line-clamp-2 break-all leading-snug"
+                  title={user?.email || undefined}
+                >
                   {user?.email || 'Signed in'}
                 </p>
               </div>
             </div>
           ) : (
-            <div className="flex justify-center mb-2">
+            <div className="flex justify-center">
               <div className="premium-sidebar-account-avatar">
                 {user?.name ? getUserInitials(user.name) : 'U'}
               </div>
             </div>
           )}
 
-          <button
-            type="button"
-            onClick={handleLogout}
-            disabled={isLoggingOut}
-            title={isCollapsed && !isMobile ? 'Sign Out' : undefined}
-            className={cn(
-              "premium-sidebar-signout-btn",
-              isCollapsed && !isMobile && "px-2"
-            )}
-          >
-            {isLoggingOut ? (
-              <div className="h-4 w-4 animate-spin rounded-full border-2 border-red-400/80 border-t-transparent shrink-0" />
-            ) : (
-              <LogOutIcon className="h-4 w-4 shrink-0" />
-            )}
-            {(!isCollapsed || isMobile) && (
-              <span>{isLoggingOut ? 'Signing out...' : 'Sign Out'}</span>
-            )}
-          </button>
         </div>
+        <button
+          type="button"
+          onClick={handleLogout}
+          disabled={isLoggingOut}
+          title={isCollapsed && !isMobile ? 'Sign Out' : undefined}
+          className={cn(
+            "premium-sidebar-signout-btn mt-2",
+            isCollapsed && !isMobile && "justify-center px-0"
+          )}
+        >
+          {isLoggingOut ? (
+            <div className="h-[18px] w-[18px] animate-spin rounded-full border-2 border-red-400/80 border-t-transparent shrink-0" />
+          ) : (
+            <LogOutIcon className="h-[18px] w-[18px] shrink-0" />
+          )}
+          {(!isCollapsed || isMobile) && (
+            <span>{isLoggingOut ? 'Signing out...' : 'Sign Out'}</span>
+          )}
+        </button>
       </div>
     </div>
   );
@@ -476,31 +444,31 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
     <>
       {/* Mobile Header with Menu Button */}
       <div className="lg:hidden fixed top-0 left-0 right-0 z-50 premium-dashboard-mobile-header">
-        <div className="flex items-center justify-between p-4">
+        <div className="relative flex items-center justify-between p-4">
           <Sheet open={open} onOpenChange={setOpen}>
             <SheetTrigger asChild>
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-9 w-9 premium-dashboard-icon-btn"
+                className="premium-dashboard-icon-btn"
               >
                 <Menu className="h-5 w-5" />
                 <span className="sr-only">Open sidebar</span>
               </Button>
             </SheetTrigger>
-            <SheetContent side="left" className="w-64 p-0 border-r border-white/[0.06] bg-transparent">
+            <SheetContent side="left" className="w-[min(19rem,calc(100vw-2.75rem))] max-w-[19rem] p-0 border-r border-white/[0.06] bg-transparent">
               <SidebarContent isMobile />
             </SheetContent>
           </Sheet>
 
-          <div className="flex justify-center items-center space-x-2">
-            <img src='/ol.png' data-ocean-brand-logo className='h-10 sm:h-12 w-auto object-contain' alt="OceanLinux" />
+          <div className="premium-mobile-brand-slot pointer-events-none" aria-hidden="true">
+            <img src='/ol.png' data-ocean-brand-logo className='premium-mobile-brand-logo h-10 sm:h-12 w-auto object-contain' alt="" />
           </div>
 
           <div className="flex items-center gap-1">
             {(!user || user?.userType !== 'reseller') && (
               <Link href="/dashboard/cart" className="relative">
-                <Button variant="ghost" size="icon" className="h-9 w-9 text-white/70 hover:text-white hover:bg-white/[0.05] relative">
+                <Button variant="ghost" size="icon" className="premium-dashboard-icon-btn relative">
                   <ShoppingCart className="h-4 w-4" />
                   {cartCount > 0 && (
                     <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-[16px] flex items-center justify-center rounded-full bg-emerald-500 text-emerald-950 text-[9px] font-bold px-1 border-2 border-[hsl(158_40%_8%)]">
@@ -514,7 +482,7 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-9 w-9 text-white/70 hover:text-white hover:bg-white/[0.05] relative"
+                className="premium-dashboard-icon-btn relative"
                 title="Raise Ticket"
               >
                 <Ticket className="h-4 w-4" />
@@ -533,7 +501,7 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
       {/* Desktop Sidebar */}
       <div className={cn(
         "hidden lg:flex lg:flex-col lg:h-screen lg:fixed lg:inset-y-0 lg:z-10 transition-all duration-300",
-        collapsed ? "lg:w-16" : "lg:w-64"
+        collapsed ? "lg:w-16" : "lg:w-[19rem]"
       )}>
         <SidebarContent isCollapsed={collapsed} />
       </div>

@@ -200,6 +200,49 @@ class ResellerWalletService {
     }
 
     /**
+     * Admin manual wallet debit (no order linked). Reason shows in transaction history.
+     */
+    async adminManualDeduct(resellerId, amount, description, metadata = {}) {
+        try {
+            const reseller = await Reseller.findById(resellerId);
+            if (!reseller) throw new Error('Reseller not found');
+
+            if (reseller.status !== 'active') {
+                throw new Error('Reseller account is not active');
+            }
+
+            const availableBalance = reseller.wallet.balance + (reseller.wallet.creditLimit || 0);
+            if (availableBalance < amount) {
+                throw new Error(`Insufficient wallet balance. Available: ₹${availableBalance}, Required: ₹${amount}`);
+            }
+
+            const previousBalance = reseller.wallet.balance;
+            reseller.wallet.balance -= amount;
+
+            reseller.wallet.transactions.push({
+                type: 'deduction',
+                amount: -amount,
+                previousBalance,
+                newBalance: reseller.wallet.balance,
+                description,
+                metadata: { ...metadata, source: 'admin_panel', manual: true },
+                createdAt: new Date(),
+            });
+
+            reseller.stats.totalSpent += amount;
+            await reseller.save();
+
+            return {
+                success: true,
+                newBalance: reseller.wallet.balance,
+            };
+        } catch (error) {
+            console.error('Admin manual wallet deduct failed:', error);
+            throw error;
+        }
+    }
+
+    /**
      * Deduct for renewal (does not increment totalOrders)
      */
     async deductForRenewal(resellerId, amount, orderId, description = 'Order renewal') {

@@ -4,6 +4,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
@@ -132,6 +133,10 @@ export default function ResellerDetailsPage() {
     const [reseller, setReseller] = useState<ResellerData | null>(null);
     const [loading, setLoading] = useState(true);
     const [rechargeAmount, setRechargeAmount] = useState('');
+    const [rechargeNote, setRechargeNote] = useState('');
+    const [deductAmount, setDeductAmount] = useState('');
+    const [deductNote, setDeductNote] = useState('');
+    const [deductLoading, setDeductLoading] = useState(false);
 
     // Pricing state
     const [pricing, setPricing] = useState({
@@ -273,7 +278,7 @@ export default function ResellerDetailsPage() {
                 body: JSON.stringify({
                     type: 'recharge',
                     amount: rechargeAmount,
-                    description: 'Manual recharge by admin'
+                    description: rechargeNote.trim() || 'Manual recharge by admin',
                 })
             });
 
@@ -281,12 +286,56 @@ export default function ResellerDetailsPage() {
             if (data.success) {
                 toast.success('Wallet recharged successfully');
                 setRechargeAmount('');
+                setRechargeNote('');
                 fetchResellerDetails();
             } else {
                 toast.error(data.message);
             }
         } catch (error) {
             toast.error('Recharge failed');
+        }
+    };
+
+    const handleDeduct = async () => {
+        const amount = Number(deductAmount);
+        const reason = deductNote.trim();
+        if (!Number.isFinite(amount) || amount <= 0) {
+            toast.error('Enter a valid amount');
+            return;
+        }
+        if (reason.length < 3) {
+            toast.error('Please write a reason for this deduction');
+            return;
+        }
+        if (!window.confirm(`Deduct ₹${amount} from this reseller?\n\nReason: ${reason}`)) {
+            return;
+        }
+
+        setDeductLoading(true);
+        try {
+            const res = await fetch(`/api/admin/resellers/${params.id}/wallet`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    type: 'deduct',
+                    amount,
+                    description: reason,
+                }),
+            });
+
+            const data = await res.json();
+            if (data.success) {
+                toast.success(`Deducted ₹${amount}. New balance: ₹${data.newBalance?.toLocaleString?.() ?? data.newBalance}`);
+                setDeductAmount('');
+                setDeductNote('');
+                fetchResellerDetails();
+            } else {
+                toast.error(data.message);
+            }
+        } catch {
+            toast.error('Deduction failed');
+        } finally {
+            setDeductLoading(false);
         }
     };
 
@@ -545,7 +594,7 @@ export default function ResellerDetailsPage() {
             case 'recharge':
                 return 'Funds Added';
             case 'deduction':
-                return 'Purchase / Deduction';
+                return 'Wallet Deduction';
             case 'refund':
                 return 'Refund';
             case 'adjustment':
@@ -864,29 +913,78 @@ export default function ResellerDetailsPage() {
                 </TabsContent>
 
                 <TabsContent value="wallet">
-                    <Card>
-                        <CardHeader>
-                            <CardTitle>Add Funds</CardTitle>
-                            <CardDescription>Manually recharge this reseller's wallet</CardDescription>
-                        </CardHeader>
-                        <CardContent className="space-y-4">
-                            <div className="flex gap-4 items-end">
-                                <div className="space-y-2 flex-1">
+                    <div className="grid gap-6 md:grid-cols-2">
+                        <Card>
+                            <CardHeader>
+                                <CardTitle>Add Funds</CardTitle>
+                                <CardDescription>Manually recharge this reseller&apos;s wallet</CardDescription>
+                            </CardHeader>
+                            <CardContent className="space-y-4">
+                                <div className="space-y-2">
                                     <Label>Amount (₹)</Label>
                                     <Input
                                         type="number"
+                                        min={1}
                                         value={rechargeAmount}
                                         onChange={(e) => setRechargeAmount(e.target.value)}
-                                        placeholder="Enter amount"
+                                        placeholder="e.g. 5000"
                                     />
                                 </div>
-                                <Button onClick={handleRecharge}>
+                                <div className="space-y-2">
+                                    <Label>Note (optional)</Label>
+                                    <Textarea
+                                        value={rechargeNote}
+                                        onChange={(e) => setRechargeNote(e.target.value)}
+                                        placeholder="e.g. UPI received, bank transfer ref..."
+                                        rows={3}
+                                    />
+                                </div>
+                                <Button onClick={handleRecharge} className="w-full sm:w-auto">
                                     <Wallet className="mr-2 h-4 w-4" />
                                     Recharge Wallet
                                 </Button>
-                            </div>
-                        </CardContent>
-                    </Card>
+                            </CardContent>
+                        </Card>
+
+                        <Card className="border-destructive/30">
+                            <CardHeader>
+                                <CardTitle>Deduct Funds</CardTitle>
+                                <CardDescription>
+                                    Cut balance manually (renewal off-panel, correction, etc.). Reason is visible in wallet history.
+                                </CardDescription>
+                            </CardHeader>
+                            <CardContent className="space-y-4">
+                                <div className="space-y-2">
+                                    <Label>Amount (₹)</Label>
+                                    <Input
+                                        type="number"
+                                        min={1}
+                                        value={deductAmount}
+                                        onChange={(e) => setDeductAmount(e.target.value)}
+                                        placeholder="e.g. 1300"
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>Reason (required)</Label>
+                                    <Textarea
+                                        value={deductNote}
+                                        onChange={(e) => setDeductNote(e.target.value)}
+                                        placeholder="e.g. Manual panel renew for 138.252.171.138 — wallet charge"
+                                        rows={3}
+                                    />
+                                </div>
+                                <Button
+                                    variant="destructive"
+                                    onClick={handleDeduct}
+                                    disabled={deductLoading}
+                                    className="w-full sm:w-auto"
+                                >
+                                    <CreditCard className="mr-2 h-4 w-4" />
+                                    {deductLoading ? 'Deducting…' : 'Deduct from Wallet'}
+                                </Button>
+                            </CardContent>
+                        </Card>
+                    </div>
                 </TabsContent>
 
                 <TabsContent value="pricing">

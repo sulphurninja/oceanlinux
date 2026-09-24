@@ -120,10 +120,8 @@ const NotificationBell = () => {
                 <Button
                     variant="ghost"
                     size="icon"
-                    className={cn(
-                      'premium-dashboard-icon-btn relative',
-                      unreadCount > 0 && 'premium-dashboard-icon-btn--active'
-                    )}
+                    className="premium-dashboard-icon-btn relative"
+                    aria-label={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : 'Notifications'}
                 >
                     <Bell className="h-4 w-4" />
                     {unreadCount > 0 && (

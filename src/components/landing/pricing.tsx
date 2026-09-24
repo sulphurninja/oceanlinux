@@ -141,7 +141,7 @@ function PricingCard({ plan }: { plan: Plan }) {
             <h3 className="text-lg font-semibold text-white tracking-tight mb-2 leading-snug" itemProp="name">
               {cleanName}
             </h3>
-            <p className="text-sm text-white/45 leading-relaxed" itemProp="description">
+            <p className="text-sm text-white/70 leading-relaxed" itemProp="description">
               {stripEmojis(plan.description)}
             </p>
           </div>
@@ -151,24 +151,24 @@ function PricingCard({ plan }: { plan: Plan }) {
             <meta itemProp="availability" content="https://schema.org/InStock" />
             <div className="flex items-baseline gap-2">
               {plan.originalPrice && (
-                <span className="text-sm text-white/30 line-through tabular-nums">
+                <span className="text-sm text-white/70 line-through tabular-nums">
                   ₹{plan.originalPrice.toLocaleString("en-IN")}
                 </span>
               )}
               <span className="premium-price" itemProp="price" content={plan.price.toString()}>
                 ₹{plan.price.toLocaleString("en-IN")}
               </span>
-              <span className="text-sm text-white/40">/mo</span>
+              <span className="text-sm text-white/70">/mo</span>
             </div>
             {plan.originalPrice && (
-              <p className="text-xs text-emerald-400/70 mt-1.5">
+              <p className="text-sm text-emerald-300 mt-1.5">
                 Save ₹{(plan.originalPrice - plan.price).toLocaleString("en-IN")}/month
               </p>
             )}
           </div>
 
           <div className="premium-specs-box mb-6 text-sm">
-            <p className="text-[10px] font-medium uppercase tracking-widest text-white/35 mb-3">
+            <p className="text-sm font-medium text-white/70 mb-3">
               Specifications
             </p>
             {[
@@ -178,19 +178,19 @@ function PricingCard({ plan }: { plan: Plan }) {
               ["Bandwidth", plan.specs.bandwidth],
             ].map(([label, value]) => (
               <div key={label} className="flex justify-between gap-4 py-1">
-                <span className="text-white/40">{label}</span>
-                <span className="text-white/75 font-medium text-right">{value}</span>
+                <span className="text-white/70">{label}</span>
+                <span className="text-white font-medium text-right">{value}</span>
               </div>
             ))}
-            <div className="pt-2 mt-1 border-t border-white/[0.06] text-xs text-white/35">
+            <div className="pt-2 mt-1 border-t border-white/[0.06] text-sm text-white/70">
               IP: {plan.specs.ip}
             </div>
           </div>
 
           <ul className="space-y-2.5 mb-8 flex-1">
             {cleanFeatures.map((feature, i) => (
-              <li key={i} className="flex items-start gap-2.5 text-sm text-white/60">
-                <Check className="w-3.5 h-3.5 text-emerald-400 mt-0.5 shrink-0" strokeWidth={2.5} />
+              <li key={i} className="flex items-start gap-2.5 text-sm text-white/70">
+                <Check className="w-3.5 h-3.5 text-emerald-300 mt-0.5 shrink-0" strokeWidth={2.5} />
                 <span>{feature}</span>
               </li>
             ))}
@@ -276,7 +276,7 @@ export default function PricingSection() {
         {loading ? (
           <div className="text-center py-20">
             <div className="w-10 h-10 border-2 border-emerald-400/30 border-t-emerald-400 rounded-full animate-spin mx-auto" />
-            <p className="text-white/40 mt-4 text-sm">Loading plans…</p>
+            <p className="text-white/70 mt-4 text-sm">Loading plans…</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 lg:gap-7 max-w-6xl mx-auto" role="list">
@@ -287,7 +287,7 @@ export default function PricingSection() {
         )}
 
         <div className="text-center mt-16">
-          <p className="text-sm text-white/45 mb-5 max-w-md mx-auto">
+          <p className="text-sm text-white/70 mb-5 max-w-md mx-auto">
             Not sure which plan fits? Our team will help you choose the right configuration.
           </p>
           <Link href="/contact-sales">

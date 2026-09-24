@@ -6,9 +6,10 @@ import { floatingActionTooltip } from './floatingActionTooltip';
 
 interface WhatsAppWidgetProps {
   className?: string;
+  variant?: 'fab' | 'menu';
 }
 
-const WhatsAppWidget: React.FC<WhatsAppWidgetProps> = ({ className }) => {
+const WhatsAppWidget: React.FC<WhatsAppWidgetProps> = ({ className, variant = 'fab' }) => {
   const [isHovered, setIsHovered] = useState(false);
   const [whatsappNumber, setWhatsappNumber] = useState('+918004277632');
   const [whatsappMessage, setWhatsappMessage] = useState('Hi! I need help with OceanLinux services.');
@@ -41,6 +42,21 @@ const WhatsAppWidget: React.FC<WhatsAppWidgetProps> = ({ className }) => {
     const whatsappUrl = `https://wa.me/${cleanNumber}?text=${encodedMessage}`;
     window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
   };
+
+  if (variant === 'menu') {
+    return (
+      <button
+        type="button"
+        onClick={handleClick}
+        className={cn(
+          "premium-btn-outline w-full inline-flex items-center justify-center gap-2",
+          className
+        )}
+      >
+        Chat on WhatsApp
+      </button>
+    );
+  }
 
   return (
     <div className={cn("relative", className)}>
