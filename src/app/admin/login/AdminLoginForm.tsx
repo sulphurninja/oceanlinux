@@ -11,12 +11,16 @@ export default function AdminLoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [password, setPassword] = useState('');
+  const [code, setCode] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  // Verified from the live gate API (not the stale URL param).
   const [configured, setConfigured] = useState(true);
+  const [totpEnabled, setTotpEnabled] = useState(false);
+  const [qrDataUrl, setQrDataUrl] = useState('');
+  const [manualKey, setManualKey] = useState('');
 
   const returnUrl = searchParams.get('returnUrl') || '/admin/dashboard';
+  const setupMode = Boolean(qrDataUrl);
 
   useEffect(() => {
     let cancelled = false;
@@ -32,6 +36,8 @@ export default function AdminLoginForm() {
           router.refresh();
           return;
         }
+
+        setTotpEnabled(Boolean(data.totpEnabled));
 
         if (data.configured === false) {
           setConfigured(false);
@@ -64,9 +70,17 @@ export default function AdminLoginForm() {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify({ password, code }),
       });
       const data = await res.json();
+
+      if (data.setupRequired && data.qrDataUrl) {
+        setQrDataUrl(data.qrDataUrl);
+        setManualKey(String(data.manualKey || ''));
+        setCode('');
+        setError('');
+        return;
+      }
 
       if (!res.ok) {
         setError(data.message || 'Access denied');
@@ -91,34 +105,63 @@ export default function AdminLoginForm() {
           </div>
           <CardTitle className="text-2xl">Admin Panel</CardTitle>
           <CardDescription>
-            Enter the admin access password to continue.
+            {setupMode
+              ? 'Scan this QR in Google Authenticator, then enter the 6-digit code.'
+              : totpEnabled
+                ? 'Enter the admin password and the Google Authenticator code.'
+                : 'Enter the admin access password to continue.'}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
-            <Input
-              type="password"
-              placeholder="Admin password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete="current-password"
-              autoFocus
-              required
-              disabled={!configured}
-            />
+            {setupMode ? (
+              <div className="space-y-3 text-center">
+                <img
+                  src={qrDataUrl}
+                  alt="Google Authenticator QR code"
+                  className="mx-auto h-52 w-52 rounded-md border bg-white p-2"
+                />
+                {manualKey ? (
+                  <p className="break-all font-mono text-xs text-muted-foreground">{manualKey}</p>
+                ) : null}
+              </div>
+            ) : (
+              <Input
+                type="password"
+                placeholder="Admin password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete="current-password"
+                autoFocus
+                required
+                disabled={!configured}
+              />
+            )}
+            {(totpEnabled || setupMode) && (
+              <Input
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                placeholder="6-digit authenticator code"
+                value={code}
+                onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                required
+              />
+            )}
             {error && (
               <p className="text-sm text-destructive text-center">{error}</p>
             )}
             <Button
               type="submit"
               className="w-full"
-              disabled={loading || !password || !configured}
+              disabled={loading || !configured || (!setupMode && !password) || ((totpEnabled || setupMode) && code.length !== 6)}
             >
               {loading ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   Verifying…
                 </>
+              ) : setupMode ? (
+                'Confirm authenticator'
               ) : (
                 'Unlock Admin Panel'
               )}

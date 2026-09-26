@@ -77,11 +77,32 @@ interface PaymentOrderLog {
   createdAt: string;
 }
 
-interface PaymentLogSummary {
-  total: number;
-  successCount: number;
-  anomalyCount: number;
-  failedCount: number;
+interface DeliveredDoubt {
+  orderId: string;
+  ip: string;
+  email: string;
+  name: string;
+  product: string;
+  price: number;
+  method: string;
+  status: string;
+  day?: string;
+  reason: string;
+  source: string;
+}
+
+interface DeliveredAudit {
+  date: string;
+  from?: string;
+  to?: string;
+  checked: number;
+  okCount: number;
+  doubtCount: number;
+  unverifiedCount: number;
+  doubtInr: number;
+  bySource: Record<string, number>;
+  doubt: DeliveredDoubt[];
+  unverified: DeliveredDoubt[];
 }
 
 const statusBadge = (status: string) => {
@@ -118,6 +139,11 @@ export default function AdminStatusPage() {
   const [logSummary, setLogSummary] = useState<PaymentLogSummary | null>(null);
   const [logsLoading, setLogsLoading] = useState(false);
   const [scanLoading, setScanLoading] = useState(false);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const todayIst = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+  const [auditFrom, setAuditFrom] = useState(todayIst);
+  const [auditTo, setAuditTo] = useState(todayIst);
+  const [audit, setAudit] = useState<DeliveredAudit | null>(null);
   const [logFilter, setLogFilter] = useState<"all" | "anomaly" | "success" | "failed">("anomaly");
   const [txnFilter, setTxnFilter] = useState("");
   const [selectedLog, setSelectedLog] = useState<PaymentOrderLog | null>(null);
@@ -215,6 +241,46 @@ export default function AdminStatusPage() {
       toast.error(err instanceof Error ? err.message : "Scan failed");
     } finally {
       setScanLoading(false);
+    }
+  };
+
+  const scanDeliveredPayments = async () => {
+    const from = auditFrom <= auditTo ? auditFrom : auditTo;
+    const to = auditFrom <= auditTo ? auditTo : auditFrom;
+    const span =
+      Math.round((new Date(`${to}T00:00:00+05:30`).getTime() - new Date(`${from}T00:00:00+05:30`).getTime()) / 86400000) +
+      1;
+    if (!from || !to || span > 31) {
+      toast.error("Pick a From and To date, at most 31 days apart");
+      return;
+    }
+    try {
+      setAuditLoading(true);
+      const res = await fetch("/api/admin/delivered-payment-audit", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ from, to }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        toast.error(data?.message || "Delivered payment scan failed");
+        return;
+      }
+      setAudit(data);
+      if ((data.doubtCount || 0) > 0) {
+        toast.warning(
+          `${data.doubtCount} delivered order(s) have no traced Razorpay or wallet payment`
+        );
+      } else {
+        toast.success(
+          `Checked ${data.checked} delivered orders on ${data.date} — payment source looks clean`
+        );
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Delivered payment scan failed");
+    } finally {
+      setAuditLoading(false);
     }
   };
 
@@ -470,6 +536,115 @@ export default function AdminStatusPage() {
         </CardContent>
       </Card>
 
+      <Card className="border-red-900/40 overflow-hidden">
+        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <CardTitle className="flex items-center gap-2">
+              <Shield className="w-5 h-5 text-red-500" />
+              Delivered payment check
+            </CardTitle>
+            <p className="text-sm text-muted-foreground mt-1">
+              Pick a From and To date, for example the 1st through the 10th. Razorpay or a wallet debit
+              backed by a real credit is OK. Fake spends stay on the right, including cancelled orders whose IP was removed.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="text-xs text-muted-foreground">
+              From
+              <Input
+                type="date"
+                value={auditFrom}
+                onChange={(e) => setAuditFrom(e.target.value)}
+                className="mt-1 w-[150px]"
+              />
+            </label>
+            <label className="text-xs text-muted-foreground">
+              To
+              <Input
+                type="date"
+                value={auditTo}
+                onChange={(e) => setAuditTo(e.target.value)}
+                className="mt-1 w-[150px]"
+              />
+            </label>
+            <Button onClick={scanDeliveredPayments} disabled={auditLoading} variant="destructive" size="sm">
+              {auditLoading ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Search className="w-4 h-4 mr-1" />}
+              Scan range
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {!audit ? (
+            <p className="text-sm text-muted-foreground">
+              Set From and To, then scan. One day is fine; 1st to 10th is one scan.
+            </p>
+          ) : (
+            <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
+              <div className="space-y-3">
+                <div className="rounded-lg border p-3">
+                  <p className="text-xs text-muted-foreground">Checked · {audit.date}</p>
+                  <p className="text-2xl font-bold tabular-nums">{audit.checked}</p>
+                </div>
+                <div className="rounded-lg border border-green-500/30 bg-green-500/5 p-3">
+                  <p className="text-xs text-muted-foreground">Payment traced</p>
+                  <p className="text-2xl font-bold tabular-nums text-green-600">{audit.okCount}</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {Object.entries(audit.bySource || {})
+                      .map(([k, v]) => `${k} ${v}`)
+                      .join(" · ") || "—"}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-red-500/30 bg-red-500/5 p-3">
+                  <p className="text-xs text-muted-foreground">Doubt / possible loss</p>
+                  <p className="text-2xl font-bold tabular-nums text-red-600">{audit.doubtCount}</p>
+                  <p className="text-xs text-muted-foreground">
+                    ₹{Math.round(audit.doubtInr || 0).toLocaleString("en-IN")}
+                  </p>
+                </div>
+                {audit.unverifiedCount > 0 ? (
+                  <p className="text-xs text-amber-600">
+                    {audit.unverifiedCount} could not be checked (Razorpay API). Run the scan again.
+                  </p>
+                ) : null}
+              </div>
+              <div className="rounded-lg border min-h-[220px] max-h-[420px] overflow-y-auto">
+                <div className="sticky top-0 border-b bg-background px-3 py-2 text-sm font-medium">
+                  Doubtful IPs
+                </div>
+                {audit.doubt.length === 0 ? (
+                  <p className="p-4 text-sm text-muted-foreground">
+                    No untraced payments in this range.
+                  </p>
+                ) : (
+                  <ul className="divide-y">
+                    {audit.doubt.map((row) => (
+                      <li key={row.orderId} className="px-3 py-2 text-sm">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-mono font-semibold">
+                            {row.ip || (row.status === "cancelled" ? "cancelled · no IP" : "no IP")}
+                          </span>
+                          <span className="tabular-nums text-red-600">
+                            ₹{row.price.toLocaleString("en-IN")}
+                          </span>
+                        </div>
+                        <p className="truncate text-xs text-muted-foreground">
+                          {row.email || row.name || "—"} · {row.product}
+                        </p>
+                        <p className="text-[11px] text-muted-foreground">
+                          {row.day ? `${row.day} · ` : ""}
+                          {row.method || "no method"}
+                          {row.status === "cancelled" ? " · cancelled" : ""} · {row.reason}
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Payment / order debug terminal */}
       <Card className="border-gray-800 overflow-hidden">
         <CardHeader className="bg-gray-950 text-gray-100 border-b border-gray-800">
@@ -492,6 +667,20 @@ export default function AdminStatusPage() {
                   <Search className="w-4 h-4 mr-1" />
                 )}
                 Scan paid-but-pending
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={scanDeliveredPayments}
+                disabled={auditLoading}
+                className="border-red-700 text-red-300 hover:bg-red-950"
+              >
+                {auditLoading ? (
+                  <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                ) : (
+                  <Shield className="w-4 h-4 mr-1" />
+                )}
+                Scan delivered payments
               </Button>
               <Button
                 variant="outline"

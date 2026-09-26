@@ -134,8 +134,10 @@ export default function ResellerDetailsPage() {
     const [loading, setLoading] = useState(true);
     const [rechargeAmount, setRechargeAmount] = useState('');
     const [rechargeNote, setRechargeNote] = useState('');
+    const [rechargeAuthCode, setRechargeAuthCode] = useState('');
     const [deductAmount, setDeductAmount] = useState('');
     const [deductNote, setDeductNote] = useState('');
+    const [deductAuthCode, setDeductAuthCode] = useState('');
     const [deductLoading, setDeductLoading] = useState(false);
 
     // Pricing state
@@ -270,15 +272,21 @@ export default function ResellerDetailsPage() {
 
     const handleRecharge = async () => {
         if (!rechargeAmount) return;
+        if (!/^\d{6}$/.test(rechargeAuthCode.trim())) {
+            toast.error('Enter the 6-digit authenticator code');
+            return;
+        }
 
         try {
             const res = await fetch(`/api/admin/resellers/${params.id}/wallet`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
                 body: JSON.stringify({
                     type: 'recharge',
                     amount: rechargeAmount,
                     description: rechargeNote.trim() || 'Manual recharge by admin',
+                    authCode: rechargeAuthCode.trim(),
                 })
             });
 
@@ -287,6 +295,7 @@ export default function ResellerDetailsPage() {
                 toast.success('Wallet recharged successfully');
                 setRechargeAmount('');
                 setRechargeNote('');
+                setRechargeAuthCode('');
                 fetchResellerDetails();
             } else {
                 toast.error(data.message);
@@ -307,6 +316,10 @@ export default function ResellerDetailsPage() {
             toast.error('Please write a reason for this deduction');
             return;
         }
+        if (!/^\d{6}$/.test(deductAuthCode.trim())) {
+            toast.error('Enter the 6-digit authenticator code');
+            return;
+        }
         if (!window.confirm(`Deduct ₹${amount} from this reseller?\n\nReason: ${reason}`)) {
             return;
         }
@@ -320,6 +333,7 @@ export default function ResellerDetailsPage() {
                     type: 'deduct',
                     amount,
                     description: reason,
+                    authCode: deductAuthCode.trim(),
                 }),
             });
 
@@ -328,6 +342,7 @@ export default function ResellerDetailsPage() {
                 toast.success(`Deducted ₹${amount}. New balance: ₹${data.newBalance?.toLocaleString?.() ?? data.newBalance}`);
                 setDeductAmount('');
                 setDeductNote('');
+                setDeductAuthCode('');
                 fetchResellerDetails();
             } else {
                 toast.error(data.message);
@@ -939,7 +954,17 @@ export default function ResellerDetailsPage() {
                                         rows={3}
                                     />
                                 </div>
-                                <Button onClick={handleRecharge} className="w-full sm:w-auto">
+                                <div className="space-y-2">
+                                    <Label>Google Authenticator code</Label>
+                                    <Input
+                                        inputMode="numeric"
+                                        autoComplete="one-time-code"
+                                        placeholder="6-digit code"
+                                        value={rechargeAuthCode}
+                                        onChange={(e) => setRechargeAuthCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                                    />
+                                </div>
+                                <Button onClick={handleRecharge} className="w-full sm:w-auto" disabled={rechargeAuthCode.length !== 6}>
                                     <Wallet className="mr-2 h-4 w-4" />
                                     Recharge Wallet
                                 </Button>
@@ -973,10 +998,20 @@ export default function ResellerDetailsPage() {
                                         rows={3}
                                     />
                                 </div>
+                                <div className="space-y-2">
+                                    <Label>Google Authenticator code</Label>
+                                    <Input
+                                        inputMode="numeric"
+                                        autoComplete="one-time-code"
+                                        placeholder="6-digit code"
+                                        value={deductAuthCode}
+                                        onChange={(e) => setDeductAuthCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                                    />
+                                </div>
                                 <Button
                                     variant="destructive"
                                     onClick={handleDeduct}
-                                    disabled={deductLoading}
+                                    disabled={deductLoading || deductAuthCode.length !== 6}
                                     className="w-full sm:w-auto"
                                 >
                                     <CreditCard className="mr-2 h-4 w-4" />

@@ -381,6 +381,21 @@ async function acquireDatabaseLock() {
                 console.log(`[LOCK] ⏭️ Skip ${candidate._id}: ${skip.reason}`);
                 continue;
             }
+
+            // PAYMENT PROOF: Mongo status=confirmed alone is never enough
+            const { verifyOrderPaymentProof } = require('@/lib/orderPaymentStatus');
+            const proof = await verifyOrderPaymentProof(candidate);
+            if (!proof.ok) {
+                console.log(`[LOCK] ⛔ Skip ${candidate._id}: no payment proof (${proof.reason})`);
+                try {
+                    await Order.findByIdAndUpdate(candidate._id, {
+                        provisioningStatus: 'failed',
+                        provisioningError: `PAYMENT_PROOF: ${proof.reason}`,
+                        updatedAt: new Date(),
+                    });
+                } catch (_) {}
+                continue;
+            }
             
             const validation = await validateOrderConfiguration(candidate);
             

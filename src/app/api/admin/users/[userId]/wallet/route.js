@@ -1,9 +1,12 @@
 import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import User from '@/models/userModel';
-import { getDataFromTokenSafe } from '@/helper/getDataFromToken';
-import userWalletService from '@/services/userWalletService';
+import userWalletService, {
+  MAX_ADMIN_WALLET_CREDIT,
+  inspectIntegrity,
+} from '@/services/userWalletService';
 import { requireAdmin } from '@/lib/adminAuth';
+import { adminTotpFailure } from '@/lib/adminTotp';
 
 export async function GET(request, { params }) {
   try {
@@ -20,6 +23,7 @@ export async function GET(request, { params }) {
 
     const wallet = await userWalletService.getOrCreateWallet(userId);
     const balance = await userWalletService.getBalance(userId);
+    const integrity = await inspectIntegrity(userId);
 
     return NextResponse.json({
       success: true,
@@ -31,6 +35,8 @@ export async function GET(request, { params }) {
         totalDebits: wallet.totalDebits || 0,
         isActive: wallet.isActive !== false,
       },
+      integrity,
+      limits: { maxAdminCredit: MAX_ADMIN_WALLET_CREDIT },
     });
   } catch (error) {
     console.error('[ADMIN-USER-WALLET][GET]', error);
@@ -55,6 +61,11 @@ export async function POST(request, { params }) {
     }
 
     const body = await request.json();
+    const totpError = adminTotpFailure(body.authCode);
+    if (totpError) {
+      return NextResponse.json({ message: totpError.message }, { status: totpError.status });
+    }
+
     const amount = Number(body.amount);
     const action = body.action === 'deduct' ? 'deduct' : 'add';
     const defaultDescription =
@@ -68,6 +79,15 @@ export async function POST(request, { params }) {
 
     if (!Number.isFinite(amount) || amount <= 0) {
       return NextResponse.json({ message: 'Amount must be a positive number' }, { status: 400 });
+    }
+
+    if (action !== 'deduct' && amount > MAX_ADMIN_WALLET_CREDIT) {
+      return NextResponse.json(
+        {
+          message: `Admin credit capped at ₹${MAX_ADMIN_WALLET_CREDIT.toLocaleString('en-IN')} per request (got ₹${amount.toLocaleString('en-IN')}).`,
+        },
+        { status: 400 }
+      );
     }
 
     const metadata = {

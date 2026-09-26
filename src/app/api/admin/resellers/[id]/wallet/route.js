@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import ResellerWalletService from '@/services/resellerWalletService';
 import { enforceAdmin } from '@/lib/apiSecurity';
+import { adminTotpFailure } from '@/lib/adminTotp';
 
 export async function POST(request, { params }) {
     const denied = await enforceAdmin(request);
@@ -10,6 +11,10 @@ export async function POST(request, { params }) {
     await connectDB();
     const { id } = params;
     const body = await request.json();
+    const totpError = adminTotpFailure(body.authCode);
+    if (totpError) {
+        return NextResponse.json({ success: false, message: totpError.message }, { status: totpError.status });
+    }
 
     try {
         const { amount, description, type } = body;

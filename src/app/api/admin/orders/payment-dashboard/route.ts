@@ -4,7 +4,10 @@ import Order from '@/models/orderModel';
 import WalletRecharge from '@/models/walletRechargeModel';
 import CheckoutSession from '@/models/checkoutSessionModel';
 import { requireAdmin } from '@/lib/adminAuth';
-const { buildAdminPaymentDashboard } = require('@/lib/adminPaymentDashboard');
+const {
+  buildAdminPaymentDashboard,
+  buildAdminPaymentDayDetails,
+} = require('@/lib/adminPaymentDashboard');
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -25,8 +28,18 @@ export async function GET(request: NextRequest) {
     await connectDB();
 
     const { searchParams } = new URL(request.url);
-    const days = Math.min(Math.max(parseInt(searchParams.get('days') || '30', 10), 7), 90);
+    const channel = searchParams.get('channel');
+    const date = searchParams.get('date');
 
+    if (channel === 'razorpay' || channel === 'wallet') {
+      const details = await buildAdminPaymentDayDetails(Order, WalletRecharge, CheckoutSession, {
+        date: date || undefined,
+        channel,
+      });
+      return NextResponse.json(details, { headers: NO_CACHE });
+    }
+
+    const days = Math.min(Math.max(parseInt(searchParams.get('days') || '30', 10), 7), 90);
     const dashboard = await buildAdminPaymentDashboard(Order, WalletRecharge, CheckoutSession, { days });
 
     return NextResponse.json(dashboard, { headers: NO_CACHE });

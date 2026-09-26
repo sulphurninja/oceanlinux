@@ -20,7 +20,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { 
     Eye, Settings, Play, RotateCcw, Loader2, AlertCircle, CheckCircle, 
     Wrench, Search, Filter, Calendar, X, ChevronLeft, ChevronRight, 
-    ChevronsLeft, ChevronsRight, Edit2, Save, XCircle, Download, RefreshCw, KeyRound, ArrowRightLeft, Wallet, CreditCard, Clock, TrendingUp, Ban, ShieldOff
+    ChevronsLeft, ChevronsRight, Edit2, Save, XCircle, Download, RefreshCw, KeyRound, ArrowRightLeft, Wallet, CreditCard, Clock, TrendingUp, Ban, ShieldOff, Trash2
 } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -263,7 +263,7 @@ interface PaginationState {
 }
 
 const ManageOrders = () => {
-    const [activeTab, setActiveTab] = useState<'orders' | 'wallet' | 'payments'>('orders');
+    const [activeTab, setActiveTab] = useState<'orders' | 'wallet' | 'payments' | 'delete'>('orders');
     const [orders, setOrders] = useState<Order[]>([]);
     const [walletRecharges, setWalletRecharges] = useState<WalletRecharge[]>([]);
     const [loading, setLoading] = useState(true);
@@ -304,6 +304,13 @@ const ManageOrders = () => {
     const [suspending, setSuspending] = useState(false);
     const [debouncedSearch, setDebouncedSearch] = useState('');
     const [walletLoaded, setWalletLoaded] = useState(false);
+    const [deleteQuery, setDeleteQuery] = useState('');
+    const [deleteResults, setDeleteResults] = useState<Order[]>([]);
+    const [deleteSearching, setDeleteSearching] = useState(false);
+    const [deleteTarget, setDeleteTarget] = useState<Order | null>(null);
+    const [deleteConfirm, setDeleteConfirm] = useState('');
+    const [deleteAuthCode, setDeleteAuthCode] = useState('');
+    const [deleteBusy, setDeleteBusy] = useState(false);
     const filterKeyRef = useRef('');
     const [stats, setStats] = useState({
         total: 0,
@@ -391,6 +398,76 @@ const ManageOrders = () => {
             setWalletLoading(false);
         }
     }, []);
+
+    const searchOrdersToDelete = async () => {
+        const q = deleteQuery.trim();
+        if (q.length < 2) {
+            toast.error('Type an IP, email, or order id');
+            return;
+        }
+        setDeleteSearching(true);
+        try {
+            const params = new URLSearchParams({
+                search: q,
+                page: '1',
+                limit: '30',
+                t: String(Date.now()),
+            });
+            const response = await fetch(`/api/admin/orders?${params}`, {
+                cache: 'no-store',
+                credentials: 'include',
+            });
+            const data = await response.json().catch(() => null);
+            if (!response.ok) {
+                throw new Error(data?.message || 'Search failed');
+            }
+            setDeleteResults(Array.isArray(data?.orders) ? data.orders : []);
+        } catch (err) {
+            toast.error(err instanceof Error ? err.message : 'Search failed');
+        } finally {
+            setDeleteSearching(false);
+        }
+    };
+
+    const confirmDeleteOrder = async () => {
+        if (!deleteTarget) return;
+        const expected = (deleteTarget.ipAddress || '').trim() || deleteTarget._id;
+        if (deleteConfirm.trim() !== expected) {
+            toast.error(deleteTarget.ipAddress ? 'Type the IP exactly' : 'Type the order id exactly');
+            return;
+        }
+        if (!/^\d{6}$/.test(deleteAuthCode.trim())) {
+            toast.error('Enter the 6-digit authenticator code');
+            return;
+        }
+        setDeleteBusy(true);
+        try {
+            const response = await fetch('/api/admin/orders/delete', {
+                method: 'POST',
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    orderId: deleteTarget._id,
+                    confirm: deleteConfirm.trim(),
+                    authCode: deleteAuthCode.trim(),
+                }),
+            });
+            const data = await response.json().catch(() => null);
+            if (!response.ok || !data?.success) {
+                throw new Error(data?.message || 'Delete failed');
+            }
+            setDeleteResults((prev) => prev.filter((order) => order._id !== deleteTarget._id));
+            setOrders((prev) => prev.filter((order) => order._id !== deleteTarget._id));
+            toast.success('Order deleted');
+            setDeleteTarget(null);
+            setDeleteConfirm('');
+            setDeleteAuthCode('');
+        } catch (err) {
+            toast.error(err instanceof Error ? err.message : 'Delete failed');
+        } finally {
+            setDeleteBusy(false);
+        }
+    };
 
     const fetchOrders = useCallback(async () => {
         setLoading(true);
@@ -1181,7 +1258,7 @@ const ManageOrders = () => {
                         </div>
                     </div>
 
-                    <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'orders' | 'wallet' | 'payments')}>
+                    <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'orders' | 'wallet' | 'payments' | 'delete')}>
                         <TabsList>
                             <TabsTrigger value="orders">VPS Orders</TabsTrigger>
                             <TabsTrigger value="payments" className="gap-2">
@@ -1194,6 +1271,10 @@ const ManageOrders = () => {
                                 {walletStats.confirmed > 0 && (
                                     <Badge variant="secondary" className="ml-1">{walletStats.confirmed}</Badge>
                                 )}
+                            </TabsTrigger>
+                            <TabsTrigger value="delete" className="gap-2">
+                                <Trash2 className="w-4 h-4" />
+                                Delete Order
                             </TabsTrigger>
                         </TabsList>
 
@@ -1880,9 +1961,148 @@ const ManageOrders = () => {
                             </Table>
                         </div>
                         </TabsContent>
+
+                        <TabsContent value="delete" className="mt-4 space-y-4 sm:mt-6">
+                            <Card className="border-red-900/40">
+                                <CardHeader>
+                                    <CardTitle className="flex items-center gap-2">
+                                        <Trash2 className="h-5 w-5 text-red-500" />
+                                        Delete any order
+                                    </CardTitle>
+                                    <CardDescription>
+                                        Search by IP, email, product, or order id. Deleting removes the order from the database. It does not shut the VPS down at the provider.
+                                    </CardDescription>
+                                </CardHeader>
+                                <CardContent className="space-y-4">
+                                    <form
+                                        className="flex flex-col gap-2 sm:flex-row"
+                                        onSubmit={(e) => {
+                                            e.preventDefault();
+                                            searchOrdersToDelete();
+                                        }}
+                                    >
+                                        <Input
+                                            value={deleteQuery}
+                                            onChange={(e) => setDeleteQuery(e.target.value)}
+                                            placeholder="IP, email, or order id"
+                                        />
+                                        <Button type="submit" disabled={deleteSearching}>
+                                            {deleteSearching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
+                                            Search
+                                        </Button>
+                                    </form>
+
+                                    {deleteResults.length === 0 ? (
+                                        <p className="text-sm text-muted-foreground">Search to list orders you can delete.</p>
+                                    ) : (
+                                        <ul className="divide-y rounded-lg border">
+                                            {deleteResults.map((order) => (
+                                                <li key={order._id} className="flex flex-col gap-2 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+                                                    <div className="min-w-0">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="font-mono text-sm font-semibold">
+                                                                {order.ipAddress || 'no IP'}
+                                                            </span>
+                                                            <Badge variant="outline">{order.status}</Badge>
+                                                            <span className="text-sm tabular-nums">₹{Number(order.price || 0).toLocaleString('en-IN')}</span>
+                                                        </div>
+                                                        <p className="truncate text-xs text-muted-foreground">
+                                                            {order.user?.email || order.customerEmail || '—'} · {order.productName}
+                                                        </p>
+                                                        <p className="font-mono text-[11px] text-muted-foreground">{order._id}</p>
+                                                    </div>
+                                                    <Button
+                                                        type="button"
+                                                        variant="destructive"
+                                                        size="sm"
+                                                        onClick={() => {
+                                                            setDeleteTarget(order);
+                                                            setDeleteConfirm('');
+                                                            setDeleteAuthCode('');
+                                                        }}
+                                                    >
+                                                        <Trash2 className="mr-1 h-4 w-4" />
+                                                        Delete
+                                                    </Button>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    )}
+                                </CardContent>
+                            </Card>
+                        </TabsContent>
                     </Tabs>
                     </div>
             </div>
+
+            <Dialog
+                open={Boolean(deleteTarget)}
+                onOpenChange={(open) => {
+                    if (!open && !deleteBusy) {
+                        setDeleteTarget(null);
+                        setDeleteConfirm('');
+                        setDeleteAuthCode('');
+                    }
+                }}
+            >
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Delete this order?</DialogTitle>
+                        <DialogDescription>
+                            {deleteTarget?.user?.email || deleteTarget?.customerEmail || 'This customer'} · {deleteTarget?.productName}. This only removes the order record.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-2">
+                        <Label>
+                            Type {deleteTarget?.ipAddress ? 'the IP' : 'the order id'} to confirm
+                        </Label>
+                        <Input
+                            value={deleteConfirm}
+                            onChange={(e) => setDeleteConfirm(e.target.value)}
+                            placeholder={deleteTarget?.ipAddress || deleteTarget?._id || ''}
+                            autoComplete="off"
+                        />
+                        <p className="font-mono text-xs text-muted-foreground">
+                            {deleteTarget?.ipAddress || deleteTarget?._id}
+                        </p>
+                        <Label>Google Authenticator code</Label>
+                        <Input
+                            inputMode="numeric"
+                            autoComplete="one-time-code"
+                            placeholder="6-digit code"
+                            value={deleteAuthCode}
+                            onChange={(e) => setDeleteAuthCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                        />
+                    </div>
+                    <DialogFooter>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            disabled={deleteBusy}
+                            onClick={() => {
+                                setDeleteTarget(null);
+                                setDeleteConfirm('');
+                                setDeleteAuthCode('');
+                            }}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            type="button"
+                            variant="destructive"
+                            disabled={
+                                deleteBusy ||
+                                deleteAuthCode.length !== 6 ||
+                                deleteConfirm.trim() !== ((deleteTarget?.ipAddress || '').trim() || deleteTarget?._id || '')
+                            }
+                            onClick={confirmDeleteOrder}
+                        >
+                            {deleteBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                            Delete order
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
 
             {/* Edit Dialog - FULLY EDITABLE */}
             {isDialogOpen && editingOrder && (

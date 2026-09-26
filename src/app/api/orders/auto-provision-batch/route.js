@@ -86,6 +86,28 @@ export async function POST(request) {
       console.log(`Processing order ${order._id} for ${order.user?.email}`);
 
       try {
+        // PAYMENT PROOF before claiming provisioning lock
+        const { verifyOrderPaymentProof } = require('@/lib/orderPaymentStatus');
+        const proof = await verifyOrderPaymentProof(order);
+        if (!proof.ok) {
+          console.warn(`[BATCH] ⛔ Skip ${order._id}: no payment proof (${proof.reason})`);
+          await Order.findByIdAndUpdate(order._id, {
+            provisioningStatus: 'failed',
+            provisioningError: `PAYMENT_PROOF: ${proof.reason}`,
+            updatedAt: new Date(),
+          });
+          results.push({
+            orderId: order._id,
+            customerEmail: order.user?.email,
+            productName: order.productName,
+            success: false,
+            message: `Blocked: ${proof.reason}`,
+            proofReason: proof.reason,
+            skipped: true,
+          });
+          continue;
+        }
+
         // Set provisioning status atomically
         const updateResult = await Order.findOneAndUpdate(
           {

@@ -1,4 +1,5 @@
-const GATE_SALT = 'oceanlinux-admin-gate-v1';
+// v2: older cookies were issued with password only. They no longer open the panel.
+const GATE_SALT = 'oceanlinux-admin-gate-v2';
 export const ADMIN_GATE_COOKIE = 'admin_gate';
 /** 12 hours */
 export const ADMIN_GATE_MAX_AGE = 60 * 60 * 12;

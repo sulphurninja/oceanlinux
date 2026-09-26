@@ -53,6 +53,35 @@ async function connectDB() {
 
     cached.conn = await cached.promise;
     console.log('[DB] MongoDB connected successfully');
+
+    // Enforce wallets balance↔ledger match at Mongo layer (blocks raw Compass $set fraud).
+    try {
+      if (!cached.walletGuardPromise) {
+        const { ensureWalletCollectionGuard } = require('@/lib/walletCollectionGuard');
+        cached.walletGuardPromise = ensureWalletCollectionGuard(mongoose);
+      }
+      await cached.walletGuardPromise;
+    } catch (guardErr) {
+      console.warn('[DB] wallet collection guard skipped:', guardErr.message);
+    }
+
+    // Confirmed recharges must carry gateway + walletTxnId; HMAC-backfill legacy credits.
+    try {
+      if (!cached.fraudGuardPromise) {
+        const {
+          ensureWalletRechargeCollectionGuard,
+          backfillWalletCreditProofs,
+        } = require('@/lib/mongoFraudGuards');
+        cached.fraudGuardPromise = (async () => {
+          await ensureWalletRechargeCollectionGuard(mongoose);
+          await backfillWalletCreditProofs(mongoose);
+        })();
+      }
+      await cached.fraudGuardPromise;
+    } catch (fraudErr) {
+      console.warn('[DB] mongo fraud guards skipped:', fraudErr.message);
+    }
+
     return cached.conn;
   } catch (error) {
     console.error('[DB] MongoDB connection error:', error.message);

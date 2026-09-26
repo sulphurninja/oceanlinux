@@ -6,7 +6,7 @@ const {
   shouldAssignCompanyInventoryForOrder,
   allocateCompanyInventoryForOrder,
 } = require('@/lib/companyInventory');
-const { orderHasConfirmedPayment } = require('@/lib/orderPaymentStatus');
+const { orderHasConfirmedPayment, verifyOrderPaymentProof } = require('@/lib/orderPaymentStatus');
 const Order = require('@/models/orderModel').default;
 
 /** True when the run actually consumed an IP or a stock unit. */
@@ -52,28 +52,36 @@ async function fulfillOrderInventory(order, options = {}) {
   if (!order) return { skipped: true };
 
   const allowUnpaid = options && options.allowUnpaid === true;
-  if (!allowUnpaid && !orderHasConfirmedPayment(order)) {
-    console.warn(
-      `[FULFILL-INVENTORY] ⛔ Blocked: order ${order._id || order.clientTxnId || '(unknown)'} has no confirmed payment — inventory NOT allocated`
-    );
-    try {
-      const PaymentOrderLogger = require('@/services/paymentOrderLogger');
-      const logger = PaymentOrderLogger.forOrder(order, 'inventory-guard');
-      logger.warning('Inventory fulfilment blocked: order has no confirmed payment', {
-        orderId: String(order._id || ''),
-        status: order.status,
-        transactionId: order.transactionId || null,
-        walletDeducted: order.walletDeduction?.deducted === true,
-      });
-      await logger.save({
-        success: false,
-        anomaly: true,
-        errorMessage: 'inventory_blocked_unpaid_order',
-      });
-    } catch (logErr) {
-      console.error('[FULFILL-INVENTORY] Failed to log payment-guard block:', logErr.message);
+  if (!allowUnpaid) {
+    const proof = await verifyOrderPaymentProof(order);
+    if (!proof.ok) {
+      console.warn(
+        `[FULFILL-INVENTORY] ⛔ Blocked: order ${order._id || order.clientTxnId || '(unknown)'} proof=${proof.reason} — inventory NOT allocated`
+      );
+      try {
+        const PaymentOrderLogger = require('@/services/paymentOrderLogger');
+        const logger = PaymentOrderLogger.forOrder(order, 'inventory-guard');
+        logger.warning('Inventory fulfilment blocked: no verifiable payment proof', {
+          orderId: String(order._id || ''),
+          status: order.status,
+          transactionId: order.transactionId || null,
+          walletDeducted: order.walletDeduction?.deducted === true,
+          proofReason: proof.reason,
+        });
+        await logger.save({
+          success: false,
+          anomaly: true,
+          errorMessage: `inventory_blocked_${proof.reason || 'unpaid_order'}`,
+        });
+      } catch (logErr) {
+        console.error('[FULFILL-INVENTORY] Failed to log payment-guard block:', logErr.message);
+      }
+      return { skipped: true, paymentRequired: true, blocked: true, proofReason: proof.reason };
     }
-    return { skipped: true, paymentRequired: true, blocked: true };
+  } else if (!orderHasConfirmedPayment(order)) {
+    console.warn(
+      `[FULFILL-INVENTORY] ⚠️ allowUnpaid=true — fulfilling complimentary order without payment proof`
+    );
   }
 
   const wantsSlotIp = !!order.slotIpPackageId && !order.slotIpId;

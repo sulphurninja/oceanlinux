@@ -52,7 +52,7 @@ const {
 } = require('@/lib/resellerApiOrderSync');
 const ResellerApi = require('@/services/resellerApi');
 const { pickNetbayExpiryDate } = require('@/lib/netbayOrderSync');
-const { orderHasConfirmedPayment } = require('@/lib/orderPaymentStatus');
+const { orderHasConfirmedPayment, verifyOrderPaymentProof } = require('@/lib/orderPaymentStatus');
 const {
   finalizeIpAssignmentForOrder,
 } = require('@/lib/orderIpOwnership');
@@ -989,41 +989,80 @@ class AutoProvisioningService {
       const alreadyDelivered =
         paymentCheckOrder.provisioningStatus === 'active' && !!paymentCheckOrder.ipAddress;
 
-      if (!alreadyDelivered && !allowUnpaid && !orderHasConfirmedPayment(paymentCheckOrder)) {
-        L.head('STEP 0: PAYMENT GUARD BLOCKED PROVISIONING');
-        L.kv('  → Order ID', String(orderId));
-        L.kv('  → clientTxnId', paymentCheckOrder.clientTxnId || 'none');
-        L.kv('  → gatewayOrderId', paymentCheckOrder.gatewayOrderId || 'none');
-        L.kv('  → status', paymentCheckOrder.status || 'none');
-        L.kv('  → transactionId', paymentCheckOrder.transactionId || 'MISSING');
-        L.line('⛔ No confirmed payment found — provisioning refused.');
+      // Payment proof required even if Mongo shows already delivered
+      // (blocks planting provisioningStatus=active + fake ipAddress).
+      if (!allowUnpaid) {
+        const proof = await verifyOrderPaymentProof(paymentCheckOrder);
+        if (!proof.ok) {
+          // Don't yank a live server if Razorpay API is temporarily down
+          if (alreadyDelivered && proof.reason === 'razorpay_api_error') {
+            L.line('⚠️ Already-delivered order: gateway re-check failed (API); leaving as-is');
+          } else {
+            L.head('STEP 0: PAYMENT GUARD BLOCKED PROVISIONING');
+            L.kv('  → Order ID', String(orderId));
+            L.kv('  → clientTxnId', paymentCheckOrder.clientTxnId || 'none');
+            L.kv('  → gatewayOrderId', paymentCheckOrder.gatewayOrderId || 'none');
+            L.kv('  → status', paymentCheckOrder.status || 'none');
+            L.kv('  → paymentMethod', paymentCheckOrder.paymentMethod || 'none');
+            L.kv('  → transactionId', paymentCheckOrder.transactionId || 'MISSING');
+            L.kv('  → proofReason', proof.reason || 'unknown');
+            L.kv('  → alreadyDeliveredFlag', alreadyDelivered ? 'yes' : 'no');
+            L.line('⛔ No verifiable payment proof — provisioning refused (Mongo confirm alone is not enough).');
 
-        try {
-          const PaymentOrderLogger = require('@/services/paymentOrderLogger');
-          const logger = PaymentOrderLogger.forOrder(paymentCheckOrder, 'provision-guard');
-          logger.warning('Provisioning blocked: order has no confirmed payment', {
-            orderId: String(orderId),
-            status: paymentCheckOrder.status,
-            transactionId: paymentCheckOrder.transactionId || null,
-            walletDeducted: paymentCheckOrder.walletDeduction?.deducted === true,
-          });
-          await logger.save({
-            success: false,
-            anomaly: true,
-            errorMessage: 'provisioning_blocked_unpaid_order',
-          });
-        } catch (logErr) {
-          console.error('[AUTO-PROVISION] Failed to log payment-guard block:', logErr.message);
+            try {
+              const PaymentOrderLogger = require('@/services/paymentOrderLogger');
+              const logger = PaymentOrderLogger.forOrder(paymentCheckOrder, 'provision-guard');
+              logger.warning('Provisioning blocked: no verifiable payment proof', {
+                orderId: String(orderId),
+                status: paymentCheckOrder.status,
+                transactionId: paymentCheckOrder.transactionId || null,
+                walletDeducted: paymentCheckOrder.walletDeduction?.deducted === true,
+                proofReason: proof.reason,
+                alreadyDelivered,
+              });
+              await logger.save({
+                success: false,
+                anomaly: true,
+                errorMessage: `provisioning_blocked_${proof.reason || 'unpaid_order'}`,
+              });
+            } catch (logErr) {
+              console.error('[AUTO-PROVISION] Failed to log payment-guard block:', logErr.message);
+            }
+
+            try {
+              const clearFake = alreadyDelivered
+                ? {
+                    provisioningStatus: 'failed',
+                    provisioningError: `PAYMENT_PROOF: ${proof.reason || 'missing'}`,
+                    ipAddress: '',
+                    autoProvisioned: false,
+                    updatedAt: new Date(),
+                  }
+                : {
+                    provisioningStatus: 'failed',
+                    provisioningError: `PAYMENT_PROOF: ${proof.reason || 'missing'}`,
+                    updatedAt: new Date(),
+                  };
+              await Order.findByIdAndUpdate(orderId, { $set: clearFake });
+            } catch (_) {}
+
+            return {
+              success: false,
+              paymentRequired: true,
+              message:
+                'Provisioning refused: no verifiable payment proof for this order. ' +
+                'Gateway capture or wallet ledger debit required — MongoDB status=confirmed is not enough.',
+              proofReason: proof.reason,
+              totalTime: Date.now() - startTime,
+            };
+          }
         }
+      } else if (allowUnpaid && !orderHasConfirmedPayment(paymentCheckOrder)) {
+        L.line('⚠️ allowUnpaid=true — provisioning complimentary / forced order without payment proof');
+      }
 
-        return {
-          success: false,
-          paymentRequired: true,
-          message:
-            'Provisioning refused: no confirmed payment for this order. ' +
-            'Confirm the payment first, or force with allowUnpaid for a complimentary order.',
-          totalTime: Date.now() - startTime,
-        };
+      if (alreadyDelivered) {
+        L.line('✅ Order already delivered with valid payment proof — skip re-provision');
       }
       // =====================================================================
       // STEP 1: ATOMIC DATABASE LOCK - Prevents duplicate provisioning

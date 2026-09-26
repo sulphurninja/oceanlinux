@@ -295,12 +295,14 @@ function mergeDay(map, dayKey, patch) {
 
 function finalizeDay(dayKey, row, captureMap) {
   const captureStats = summarizeGatewayCaptures(captureMap);
-  const walletSpent = row.vpsWalletAmount + row.cartWalletAmount + row.walletSpentOnRenewals;
+  const walletSpentOnNewBuys = row.vpsWalletAmount + row.cartWalletAmount;
+  const walletSpent = walletSpentOnNewBuys + row.walletSpentOnRenewals;
   return {
     date: dayKey,
     label: istDayLabel(dayKey),
     ...row,
     ...captureStats,
+    walletSpentOnNewBuys,
     walletSpent,
     walletAdded: row.walletTopupAmount,
     totalBusiness: row.vpsRevenue + row.renewalRevenue,
@@ -513,6 +515,9 @@ async function buildAdminPaymentDashboard(Order, WalletRecharge, CheckoutSession
         otherGatewayCollected: acc.otherGatewayCollected + row.otherGatewayCollected,
         walletSpentOnOrders: acc.walletSpentOnOrders + row.walletSpentOnOrders,
         walletSpentOnRenewals: acc.walletSpentOnRenewals + row.walletSpentOnRenewals,
+        walletSpentOnNewBuys: acc.walletSpentOnNewBuys + (row.walletSpentOnNewBuys || 0),
+        walletSpent: acc.walletSpent + (row.walletSpent || 0),
+        walletAdded: acc.walletAdded + (row.walletAdded || 0),
         totalBusiness: acc.totalBusiness + row.totalBusiness,
         gatewayAmount: acc.gatewayAmount + row.gatewayAmount,
         walletUsed: acc.walletUsed + row.walletUsed,
@@ -557,6 +562,9 @@ async function buildAdminPaymentDashboard(Order, WalletRecharge, CheckoutSession
         otherGatewayCollected: 0,
         walletSpentOnOrders: 0,
         walletSpentOnRenewals: 0,
+        walletSpentOnNewBuys: 0,
+        walletSpent: 0,
+        walletAdded: 0,
         totalBusiness: 0,
         gatewayAmount: 0,
         walletUsed: 0,
@@ -588,7 +596,275 @@ async function buildAdminPaymentDashboard(Order, WalletRecharge, CheckoutSession
   };
 }
 
+async function buildAdminPaymentDayDetails(
+  Order,
+  WalletRecharge,
+  CheckoutSession,
+  { date, channel = 'razorpay' } = {}
+) {
+  const todayKey = istDayKey(new Date());
+  const dayKey = String(date || todayKey).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dayKey)) {
+    throw new Error('Invalid date');
+  }
+
+  const rangeStart = new Date(`${dayKey}T00:00:00.000+05:30`);
+  const rangeEnd = new Date(`${dayKey}T23:59:59.999+05:30`);
+  // Look back a bit for orders whose sale day maps to this day via confirmedAt/createdAt
+  const lookbackStart = new Date(rangeStart.getTime() - 3 * 24 * 60 * 60 * 1000);
+  const lookforwardEnd = new Date(rangeEnd.getTime() + 3 * 24 * 60 * 60 * 1000);
+
+  const [orders, recharges, cartSessions] = await Promise.all([
+    Order.find({
+      status: { $in: PAID_STATUSES },
+      $or: [
+        { createdAt: { $gte: lookbackStart, $lte: lookforwardEnd } },
+        { 'paymentDetails.confirmedAt': { $gte: lookbackStart, $lte: lookforwardEnd } },
+        { 'renewalPayments.paidAt': { $gte: rangeStart, $lte: rangeEnd } },
+      ],
+    })
+      .populate('user', 'name email phone')
+      .select(
+        'price status paymentMethod paymentDetails walletDeduction createdAt renewalPayments parentTxnId checkoutSessionId transactionId gatewayOrderId clientTxnId productName memory user ipAddress resellerId'
+      )
+      .lean(),
+    WalletRecharge.find({
+      status: 'confirmed',
+      $or: [
+        { creditedAt: { $gte: rangeStart, $lte: rangeEnd } },
+        { createdAt: { $gte: rangeStart, $lte: rangeEnd } },
+      ],
+    })
+      .populate('user', 'name email phone')
+      .select(
+        'amount creditedAt createdAt clientTxnId transactionId gatewayOrderId paymentMethod paymentDetails user'
+      )
+      .lean(),
+    CheckoutSession
+      ? CheckoutSession.find({
+          status: 'confirmed',
+          $or: [
+            { confirmedAt: { $gte: rangeStart, $lte: rangeEnd } },
+            { createdAt: { $gte: rangeStart, $lte: rangeEnd } },
+          ],
+        })
+          .populate('user', 'name email phone')
+          .select(
+            'clientTxnId gatewayOrderId transactionId walletAmount gatewayAmount total confirmedAt createdAt paymentMethod paymentDetails user'
+          )
+          .lean()
+      : Promise.resolve([]),
+  ]);
+
+  const items = [];
+  let totalAmount = 0;
+
+  function pushItem(item) {
+    items.push(item);
+    totalAmount += Number(item.amount) || 0;
+  }
+
+  function userInfo(doc) {
+    const u = doc?.user;
+    if (!u || typeof u !== 'object') {
+      return { userId: String(doc?.user || ''), name: '—', email: '—', phone: '' };
+    }
+    return {
+      userId: String(u._id || ''),
+      name: u.name || '—',
+      email: u.email || '—',
+      phone: u.phone || '',
+    };
+  }
+
+  if (channel === 'razorpay') {
+    for (const order of orders) {
+      if (isCartChildOrder(order)) continue;
+      const saleDay = vpsSaleDay(order);
+      if (saleDay !== dayKey) continue;
+      const amounts = computeStandaloneOrderAmounts(order);
+      if (!(amounts.gateway > 0)) continue;
+      if (classifyPaymentGateway(order) !== 'razorpay') continue;
+      pushItem({
+        id: String(order._id),
+        kind: 'vps_buy',
+        kindLabel: 'New VPS buy',
+        amount: amounts.gateway,
+        walletPart: amounts.wallet,
+        totalPrice: amounts.total,
+        productName: order.productName || '—',
+        memory: order.memory || '',
+        paymentMethod: order.paymentMethod || '',
+        transactionId: order.transactionId || '',
+        gatewayOrderId: order.gatewayOrderId || '',
+        clientTxnId: order.clientTxnId || '',
+        at: order.paymentDetails?.confirmedAt || order.createdAt,
+        ...userInfo(order),
+      });
+    }
+
+    for (const session of cartSessions) {
+      const when = session.confirmedAt || session.createdAt;
+      if (istDayKey(when) !== dayKey) continue;
+      const gatewayAmt = Number(session.gatewayAmount) || 0;
+      if (!(gatewayAmt > 0)) continue;
+      if (classifyPaymentGateway(session) !== 'razorpay') continue;
+      pushItem({
+        id: String(session._id),
+        kind: 'cart',
+        kindLabel: 'Cart checkout',
+        amount: gatewayAmt,
+        walletPart: Number(session.walletAmount) || 0,
+        totalPrice: Number(session.total) || gatewayAmt,
+        productName: 'Cart checkout',
+        memory: '',
+        paymentMethod: session.paymentMethod || '',
+        transactionId: session.transactionId || '',
+        gatewayOrderId: session.gatewayOrderId || '',
+        clientTxnId: session.clientTxnId || '',
+        at: when,
+        ...userInfo(session),
+      });
+    }
+
+    for (const order of orders) {
+      for (const renewal of order.renewalPayments || []) {
+        if (!renewalPaidOnDay(renewal, dayKey)) continue;
+        const renewalAmounts = computeRenewalAmounts(renewal);
+        if (!(renewalAmounts.gateway > 0)) continue;
+        if (classifyPaymentGateway(renewal) !== 'razorpay') continue;
+        pushItem({
+          id: `${order._id}_${renewal.renewalTxnId || renewal.paymentId}`,
+          kind: 'renew',
+          kindLabel: 'VPS renew',
+          amount: renewalAmounts.gateway,
+          walletPart: renewalAmounts.wallet,
+          totalPrice: renewalAmounts.total,
+          productName: order.productName || '—',
+          memory: order.memory || '',
+          paymentMethod: renewal.paymentMethod || order.paymentMethod || '',
+          transactionId: renewal.paymentId || '',
+          gatewayOrderId: renewal.gatewayOrderId || '',
+          clientTxnId: renewal.renewalTxnId || '',
+          at: renewal.paidAt,
+          orderId: String(order._id),
+          ...userInfo(order),
+        });
+      }
+    }
+
+    for (const recharge of recharges) {
+      const when = recharge.creditedAt || recharge.createdAt;
+      if (istDayKey(when) !== dayKey) continue;
+      if (classifyPaymentGateway(recharge) !== 'razorpay') continue;
+      const amt = Number(recharge.amount) || 0;
+      if (!(amt > 0)) continue;
+      pushItem({
+        id: String(recharge._id),
+        kind: 'topup',
+        kindLabel: 'Wallet top-up',
+        amount: amt,
+        walletPart: 0,
+        totalPrice: amt,
+        productName: 'Wallet recharge',
+        memory: '',
+        paymentMethod: recharge.paymentMethod || '',
+        transactionId: recharge.transactionId || '',
+        gatewayOrderId: recharge.gatewayOrderId || '',
+        clientTxnId: recharge.clientTxnId || '',
+        at: when,
+        ...userInfo(recharge),
+      });
+    }
+  } else if (channel === 'wallet') {
+    for (const order of orders) {
+      if (isCartChildOrder(order)) continue;
+      const saleDay = vpsSaleDay(order);
+      if (saleDay !== dayKey) continue;
+      const amounts = computeStandaloneOrderAmounts(order);
+      if (!(amounts.wallet > 0)) continue;
+      const method = String(order.paymentMethod || '').toLowerCase();
+      const isReseller = method === 'reseller_wallet' || Boolean(order.resellerId);
+      pushItem({
+        id: String(order._id),
+        kind: isReseller ? 'reseller_buy' : 'vps_buy',
+        kindLabel: isReseller ? 'Reseller VPS buy' : 'New VPS buy (wallet)',
+        amount: amounts.wallet,
+        gatewayPart: amounts.gateway,
+        totalPrice: amounts.total,
+        productName: order.productName || '—',
+        memory: order.memory || '',
+        paymentMethod: order.paymentMethod || '',
+        transactionId: order.walletDeduction?.transactionId || order.transactionId || '',
+        clientTxnId: order.clientTxnId || '',
+        at: order.paymentDetails?.confirmedAt || order.createdAt,
+        ...userInfo(order),
+      });
+    }
+
+    for (const session of cartSessions) {
+      const when = session.confirmedAt || session.createdAt;
+      if (istDayKey(when) !== dayKey) continue;
+      const walletAmt = Number(session.walletAmount) || 0;
+      if (!(walletAmt > 0)) continue;
+      pushItem({
+        id: String(session._id),
+        kind: 'cart',
+        kindLabel: 'Cart checkout (wallet)',
+        amount: walletAmt,
+        gatewayPart: Number(session.gatewayAmount) || 0,
+        totalPrice: Number(session.total) || walletAmt,
+        productName: 'Cart checkout',
+        memory: '',
+        paymentMethod: session.paymentMethod || '',
+        transactionId: session.transactionId || '',
+        clientTxnId: session.clientTxnId || '',
+        at: when,
+        ...userInfo(session),
+      });
+    }
+
+    for (const order of orders) {
+      for (const renewal of order.renewalPayments || []) {
+        if (!renewalPaidOnDay(renewal, dayKey)) continue;
+        const renewalAmounts = computeRenewalAmounts(renewal);
+        if (!(renewalAmounts.wallet > 0)) continue;
+        pushItem({
+          id: `${order._id}_${renewal.renewalTxnId || renewal.paymentId}_w`,
+          kind: 'renew',
+          kindLabel: 'VPS renew (wallet)',
+          amount: renewalAmounts.wallet,
+          gatewayPart: renewalAmounts.gateway,
+          totalPrice: renewalAmounts.total,
+          productName: order.productName || '—',
+          memory: order.memory || '',
+          paymentMethod: renewal.paymentMethod || 'wallet',
+          transactionId: renewal.paymentId || '',
+          clientTxnId: renewal.renewalTxnId || '',
+          at: renewal.paidAt,
+          orderId: String(order._id),
+          ...userInfo(order),
+        });
+      }
+    }
+  } else {
+    throw new Error('channel must be razorpay or wallet');
+  }
+
+  items.sort((a, b) => new Date(b.at || 0).getTime() - new Date(a.at || 0).getTime());
+
+  return {
+    date: dayKey,
+    label: istDayLabel(dayKey),
+    channel,
+    count: items.length,
+    totalAmount: Math.round(totalAmount * 100) / 100,
+    items,
+  };
+}
+
 module.exports = {
   buildAdminPaymentDashboard,
+  buildAdminPaymentDayDetails,
   PAID_STATUSES,
 };

@@ -816,6 +816,7 @@ function AdjustWalletBalanceForm({
   const [action, setAction] = useState<'add' | 'deduct'>('add');
   const [amount, setAmount] = useState('');
   const [description, setDescription] = useState('');
+  const [authCode, setAuthCode] = useState('');
   const [currentBalance, setCurrentBalance] = useState<number | null>(user.walletBalance ?? null);
   const [loading, setLoading] = useState(false);
   const [fetchingBalance, setFetchingBalance] = useState(true);
@@ -856,6 +857,10 @@ function AdjustWalletBalanceForm({
       toast.error(`Cannot deduct more than current balance (₹${currentBalance.toLocaleString('en-IN')})`);
       return;
     }
+    if (!/^\d{6}$/.test(authCode.trim())) {
+      toast.error('Enter the 6-digit authenticator code');
+      return;
+    }
 
     setLoading(true);
     try {
@@ -867,6 +872,7 @@ function AdjustWalletBalanceForm({
           action,
           amount: parsedAmount,
           description: description.trim() || undefined,
+          authCode: authCode.trim(),
         }),
       });
       const data = await res.json();
@@ -942,6 +948,18 @@ function AdjustWalletBalanceForm({
       </div>
 
       <div>
+        <label className="text-sm font-medium">Google Authenticator code</label>
+        <Input
+          inputMode="numeric"
+          autoComplete="one-time-code"
+          placeholder="6-digit code"
+          value={authCode}
+          onChange={(e) => setAuthCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+          required
+        />
+      </div>
+
+      <div>
         <label className="text-sm font-medium">Note (optional)</label>
         <Input
           placeholder={
@@ -961,7 +979,7 @@ function AdjustWalletBalanceForm({
         <Button
           type="submit"
           variant={action === 'deduct' ? 'destructive' : 'default'}
-          disabled={loading || fetchingBalance}
+          disabled={loading || fetchingBalance || authCode.length !== 6}
         >
           {loading ? (
             <Loader2 className="w-4 h-4 mr-2 animate-spin" />

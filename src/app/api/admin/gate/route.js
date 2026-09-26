@@ -8,6 +8,13 @@ import {
   verifyAdminGatePassword,
 } from '@/lib/adminGate';
 import { enforceRateLimit } from '@/lib/rateLimit';
+import QRCode from 'qrcode';
+import {
+  beginAdminTotpSetup,
+  confirmAdminTotpSetup,
+  isAdminTotpEnabled,
+  verifyAdminTotp,
+} from '@/lib/adminTotp';
 
 function gateCookieOptions() {
   return {
@@ -29,7 +36,11 @@ export async function GET(request) {
 
   const token = request.cookies.get(ADMIN_GATE_COOKIE)?.value;
   const authenticated = await verifyAdminGateCookie(token);
-  return NextResponse.json({ authenticated, configured: true });
+  return NextResponse.json({
+    authenticated,
+    configured: true,
+    totpEnabled: isAdminTotpEnabled(),
+  });
 }
 
 export async function POST(request) {
@@ -51,9 +62,11 @@ export async function POST(request) {
   }
 
   let password = '';
+  let code = '';
   try {
     const body = await request.json();
     password = String(body?.password || '');
+    code = String(body?.code || '');
   } catch {
     return NextResponse.json(
       { success: false, message: 'Invalid request' },
@@ -65,6 +78,30 @@ export async function POST(request) {
   if (!ok) {
     return NextResponse.json(
       { success: false, message: 'Incorrect password' },
+      { status: 401 }
+    );
+  }
+
+  if (!isAdminTotpEnabled()) {
+    if (!code) {
+      const setup = beginAdminTotpSetup();
+      const qrDataUrl = await QRCode.toDataURL(setup.otpauthUrl, { margin: 1, width: 220 });
+      return NextResponse.json({
+        success: false,
+        setupRequired: true,
+        qrDataUrl,
+        manualKey: setup.secret,
+      });
+    }
+    if (!confirmAdminTotpSetup(code)) {
+      return NextResponse.json(
+        { success: false, message: 'That authenticator code did not match. Wait for the next code and try again.' },
+        { status: 401 }
+      );
+    }
+  } else if (!verifyAdminTotp(code)) {
+    return NextResponse.json(
+      { success: false, message: 'Authenticator code is required and must match Google Authenticator.' },
       { status: 401 }
     );
   }

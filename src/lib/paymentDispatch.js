@@ -486,6 +486,7 @@ export async function confirmRechargeFromWebhook(recharge, { paymentMethod, tran
         description: `Wallet top-up #${recharge._id}`,
         reference: String(recharge._id),
         metadata: {
+          source: 'wallet_recharge',
           rechargeId: recharge._id,
           clientTxnId: recharge.clientTxnId,
           paymentMethod: recharge.paymentMethod,

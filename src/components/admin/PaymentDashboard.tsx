@@ -17,12 +17,21 @@ import {
   Loader2,
   RefreshCw,
   ShoppingCart,
-  TrendingUp,
+  RotateCcw,
   Wallet,
   CreditCard,
   CalendarDays,
-  Info,
+  ArrowDownRight,
+  ArrowUpRight,
+  Equal,
 } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 
 type DailyRow = {
@@ -47,6 +56,7 @@ type DailyRow = {
   renewalWalletCount: number;
   walletTopups: number;
   walletTopupAmount: number;
+  walletSpentOnNewBuys?: number;
   gatewayCaptures: number;
   gatewayCollected: number;
   razorpayCaptures: number;
@@ -66,10 +76,6 @@ type DailyRow = {
   walletSpent: number;
   walletAdded: number;
   totalBusiness: number;
-  gatewayAmount: number;
-  walletUsed: number;
-  renewalGateway: number;
-  totalExternalIn: number;
 };
 
 type PaymentDashboardData = {
@@ -79,270 +85,440 @@ type PaymentDashboardData = {
   daily: DailyRow[];
   periodTotals: DailyRow;
   range: { from: string; to: string; days: number };
-  notes?: string[];
+};
+
+type DayDetailItem = {
+  id: string;
+  kind: string;
+  kindLabel: string;
+  amount: number;
+  walletPart?: number;
+  gatewayPart?: number;
+  totalPrice?: number;
+  productName: string;
+  memory?: string;
+  paymentMethod?: string;
+  transactionId?: string;
+  gatewayOrderId?: string;
+  clientTxnId?: string;
+  at?: string;
+  orderId?: string;
+  userId?: string;
+  name: string;
+  email: string;
+  phone?: string;
+};
+
+type DayDetailData = {
+  date: string;
+  label: string;
+  channel: 'razorpay' | 'wallet';
+  count: number;
+  totalAmount: number;
+  items: DayDetailItem[];
 };
 
 function formatInr(value: number) {
-  return `₹${Math.round(value).toLocaleString('en-IN')}`;
+  return `₹${Math.round(value || 0).toLocaleString('en-IN')}`;
 }
 
-function StatCard({
-  title,
+function Line({
+  label,
   value,
-  hint,
+  count,
+  tone,
+  strong,
+}: {
+  label: string;
+  value: string;
+  count?: string | number;
+  tone?: 'muted' | 'in' | 'out' | 'total' | 'razorpay';
+  strong?: boolean;
+}) {
+  const valueClass =
+    tone === 'in'
+      ? 'text-emerald-700 dark:text-emerald-400'
+      : tone === 'out'
+        ? 'text-amber-700 dark:text-amber-400'
+        : tone === 'total'
+          ? 'text-foreground'
+          : tone === 'razorpay'
+            ? 'text-[#0C6CF2]'
+            : 'text-foreground';
+
+  return (
+    <div
+      className={cn(
+        'flex items-baseline justify-between gap-4 py-2',
+        strong && 'border-t border-border/80 pt-3 mt-1'
+      )}
+    >
+      <div className="min-w-0">
+        <p className={cn('text-sm', strong ? 'font-semibold' : 'text-muted-foreground')}>{label}</p>
+        {count != null && count !== '' && count !== 0 ? (
+          <p className="text-[11px] text-muted-foreground/80 tabular-nums">{count}</p>
+        ) : null}
+      </div>
+      <p className={cn('shrink-0 text-sm tabular-nums', strong ? 'text-base font-bold' : 'font-medium', valueClass)}>
+        {value}
+      </p>
+    </div>
+  );
+}
+
+function SectionShell({
+  title,
+  subtitle,
   icon: Icon,
-  tone = 'default',
+  accent,
+  children,
+  hero,
+  action,
 }: {
   title: string;
-  value: string;
-  hint?: string;
-  icon: typeof IndianRupee;
-  tone?: 'default' | 'green' | 'blue' | 'amber' | 'violet';
+  subtitle?: string;
+  icon: typeof CreditCard;
+  accent?: string;
+  children: React.ReactNode;
+  hero?: React.ReactNode;
+  action?: React.ReactNode;
 }) {
-  const toneClass =
-    tone === 'green'
-      ? 'from-emerald-500/15 to-emerald-500/5 border-emerald-500/20'
-      : tone === 'blue'
-        ? 'from-sky-500/15 to-sky-500/5 border-sky-500/20'
-        : tone === 'amber'
-          ? 'from-amber-500/15 to-amber-500/5 border-amber-500/20'
-          : tone === 'violet'
-            ? 'from-violet-500/15 to-violet-500/5 border-violet-500/20'
-            : 'from-primary/10 to-primary/5 border-border';
-
   return (
-    <Card className={cn('overflow-hidden border bg-gradient-to-br', toneClass)}>
-      <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
-        <CardTitle className="text-sm font-medium text-muted-foreground">{title}</CardTitle>
-        <Icon className="h-4 w-4 text-muted-foreground" />
-      </CardHeader>
-      <CardContent>
-        <div className="text-2xl font-bold tracking-tight">{value}</div>
-        {hint ? <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{hint}</p> : null}
-      </CardContent>
-    </Card>
-  );
-}
-
-function GatewayReconcileCard({ row }: { row: DailyRow }) {
-  return (
-    <Card className="border-[#3395FF]/30 bg-gradient-to-br from-[#3395FF]/10 via-background to-[#072654]/5">
-      <CardHeader className="pb-2">
-        <CardTitle className="text-base flex items-center gap-2">
-          <CreditCard className="h-5 w-5 text-[#3395FF]" />
-          Gateway — aaj ka hisaab (Razorpay + UPI)
-        </CardTitle>
-        <CardDescription>
-          Razorpay dashboard aur KwikUPI se match karo — captured payments & collected amount
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
-          <div>
-            <p className="text-xs text-muted-foreground">Razorpay captures</p>
-            <p className="text-2xl font-bold tabular-nums">{row.razorpayCaptures}</p>
-            <p className="text-xs text-[#3395FF] font-medium tabular-nums">{formatInr(row.razorpayCollected)}</p>
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground">UPI (KwikUPI)</p>
-            <p className="text-2xl font-bold tabular-nums">{row.upiCaptures}</p>
-            <p className="text-xs text-emerald-600 dark:text-emerald-400 font-medium tabular-nums">
-              {formatInr(row.upiCollected)}
-            </p>
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground">Legacy / other</p>
-            <p className="text-2xl font-bold tabular-nums">{row.otherGatewayCaptures}</p>
-            <p className="text-xs text-muted-foreground tabular-nums">
-              {formatInr(row.otherGatewayCollected)}
-            </p>
-          </div>
-          <div className="md:col-span-2">
-            <p className="text-xs text-muted-foreground">Sab gateways total</p>
-            <p className="text-2xl font-bold tabular-nums text-emerald-600 dark:text-emerald-400">
-              {row.gatewayCaptures} · {formatInr(row.gatewayCollected)}
-            </p>
-          </div>
-        </div>
-
-        <div className="grid gap-3 md:grid-cols-2">
-          <div className="rounded-lg border bg-background/80 p-3 text-sm space-y-1.5">
-            <p className="font-medium text-foreground mb-2">Razorpay breakdown</p>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Naye VPS (single buy)</span>
-              <span className="font-medium tabular-nums">{formatInr(row.razorpayVpsAmount)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Cart checkout</span>
-              <span className="font-medium tabular-nums">{formatInr(row.razorpayCartAmount)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Renewals</span>
-              <span className="font-medium tabular-nums">{formatInr(row.razorpayRenewalAmount)}</span>
-            </div>
-            <div className="flex justify-between border-t pt-1.5">
-              <span className="text-muted-foreground">Wallet top-up</span>
-              <span className="font-medium tabular-nums">{formatInr(row.razorpayTopupAmount)}</span>
-            </div>
-          </div>
-
-          <div className="rounded-lg border bg-emerald-500/10 border-emerald-500/20 p-3 text-sm space-y-1.5">
-            <p className="font-medium text-foreground mb-2">UPI breakdown (KwikUPI)</p>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Naye VPS (single buy)</span>
-              <span className="font-medium tabular-nums">{formatInr(row.upiVpsAmount)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Cart checkout</span>
-              <span className="font-medium tabular-nums">{formatInr(row.upiCartAmount)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Renewals</span>
-              <span className="font-medium tabular-nums">{formatInr(row.upiRenewalAmount)}</span>
-            </div>
-            <div className="flex justify-between border-t pt-1.5">
-              <span className="text-muted-foreground">Wallet top-up</span>
-              <span className="font-medium tabular-nums">{formatInr(row.upiTopupAmount)}</span>
-            </div>
-          </div>
-        </div>
-
-        <p className="text-xs text-muted-foreground leading-relaxed">
-          <strong>Razorpay</strong> — card/UPI via Razorpay checkout. <strong>UPI</strong> — inline QR (KwikUPI) se
-          buy, cart, renewal, wallet top-up. Wallet-only orders yahan nahi aate.
-        </p>
-      </CardContent>
-    </Card>
-  );
-}
-
-function TodayBreakdown({ row }: { row: DailyRow }) {
-  const standaloneGateway = row.vpsGatewayAmount;
-  const standaloneWallet = row.vpsWalletAmount;
-  const cartItems = row.vpsCartOrders;
-
-  return (
-    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-medium">New VPS Sales</CardTitle>
-          <CardDescription>{row.vpsOrders} orders · {formatInr(row.vpsRevenue)}</CardDescription>
-        </CardHeader>
-        <CardContent className="text-sm space-y-1.5">
-          <div className="flex justify-between">
-            <span className="text-muted-foreground">Gateway only</span>
-            <span className="font-medium">{row.vpsGatewayOnly} · {formatInr(standaloneGateway)}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-muted-foreground">Wallet only</span>
-            <span className="font-medium">{row.vpsWalletOnly} · {formatInr(standaloneWallet)}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-muted-foreground">Wallet + Gateway</span>
-            <span className="font-medium">{row.vpsMixed} orders</span>
-          </div>
-          {cartItems > 0 ? (
-            <div className="flex justify-between border-t pt-1.5">
-              <span className="text-muted-foreground">Cart checkout items</span>
-              <span className="font-medium">
-                {cartItems} · {row.cartCheckouts} payment{row.cartCheckouts === 1 ? '' : 's'}
+    <Card className="overflow-hidden border-border/70 shadow-sm">
+      <CardHeader className="border-b bg-muted/30 pb-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="space-y-1">
+            <CardTitle className="flex items-center gap-2 text-base font-semibold tracking-tight">
+              <span
+                className={cn(
+                  'flex h-8 w-8 items-center justify-center rounded-md',
+                  accent || 'bg-foreground/5 text-foreground'
+                )}
+              >
+                <Icon className="h-4 w-4" />
               </span>
+              {title}
+            </CardTitle>
+            {subtitle ? <CardDescription className="text-xs sm:text-sm">{subtitle}</CardDescription> : null}
+            {action}
+          </div>
+          {hero}
+        </div>
+      </CardHeader>
+      <CardContent className="pt-4">{children}</CardContent>
+    </Card>
+  );
+}
+
+function RazorpayLedger({
+  row,
+  dayLabel = 'Today',
+  onOpenList,
+}: {
+  row: DailyRow;
+  dayLabel?: string;
+  onOpenList?: () => void;
+}) {
+  return (
+    <SectionShell
+      title={`Razorpay — collected on ${dayLabel}`}
+      subtitle="Match this total with Razorpay Dashboard → Payments for the same day (IST)"
+      icon={CreditCard}
+      accent="bg-[#0C6CF2]/10 text-[#0C6CF2]"
+      action={
+        onOpenList ? (
+          <Button type="button" size="sm" className="mt-2 bg-[#0C6CF2] hover:bg-[#0C6CF2]/90" onClick={onOpenList}>
+            Live list — which orders?
+          </Button>
+        ) : null
+      }
+      hero={
+        <button
+          type="button"
+          onClick={onOpenList}
+          className="rounded-lg border border-[#0C6CF2]/25 bg-[#0C6CF2]/5 px-4 py-2 text-right transition hover:bg-[#0C6CF2]/10"
+        >
+          <p className="text-[10px] uppercase tracking-wider text-[#0C6CF2]/80">Razorpay · {dayLabel}</p>
+          <p className="text-2xl font-bold tabular-nums tracking-tight text-[#0C6CF2]">
+            {formatInr(row.razorpayCollected)}
+          </p>
+          <p className="text-[11px] text-muted-foreground">{row.razorpayCaptures} captures · open list</p>
+        </button>
+      }
+    >
+      <div className="grid gap-6 lg:grid-cols-2">
+        <div>
+          <p className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Line by line
+          </p>
+          <Line
+            label="New VPS buy (single)"
+            value={formatInr(row.razorpayVpsAmount)}
+            tone="razorpay"
+          />
+          <Line label="Cart checkout" value={formatInr(row.razorpayCartAmount)} tone="razorpay" />
+          <Line label="VPS renew" value={formatInr(row.razorpayRenewalAmount)} tone="razorpay" />
+          <Line label="Wallet top-up" value={formatInr(row.razorpayTopupAmount)} tone="razorpay" />
+          <Line
+            label="Razorpay grand total"
+            value={formatInr(row.razorpayCollected)}
+            count={`${row.razorpayCaptures} payments`}
+            tone="total"
+            strong
+          />
+        </div>
+        <div className="rounded-lg border bg-muted/20 p-4 text-sm leading-relaxed text-muted-foreground">
+          <p className="mb-2 font-medium text-foreground">How to match</p>
+          <ol className="list-decimal space-y-1.5 pl-4 text-xs sm:text-sm">
+            <li>Razorpay Dashboard → Payments → filter that day (IST)</li>
+            <li>Captured amount ≈ <strong className="text-foreground">{formatInr(row.razorpayCollected)}</strong></li>
+            <li>Wallet-only and UPI-only payments are in the other sections</li>
+          </ol>
+          {row.upiCollected > 0 ? (
+            <p className="mt-3 border-t pt-3 text-xs">
+              UPI (KwikUPI) is separate: <strong className="text-foreground">{formatInr(row.upiCollected)}</strong> ·{' '}
+              {row.upiCaptures} captures. These do not appear on the Razorpay dashboard.
+            </p>
+          ) : null}
+        </div>
+      </div>
+    </SectionShell>
+  );
+}
+
+function WalletLedger({
+  row,
+  dayLabel = 'Today',
+  onOpenList,
+}: {
+  row: DailyRow;
+  dayLabel?: string;
+  onOpenList?: () => void;
+}) {
+  const newBuyWallet = row.walletSpentOnNewBuys ?? row.vpsWalletAmount + row.cartWalletAmount;
+  const renewWallet = row.renewalWalletAmount;
+  const net = (row.walletAdded || 0) - (row.walletSpent || 0);
+
+  return (
+    <SectionShell
+      title={`Wallet — ${dayLabel} ledger`}
+      subtitle="Top-ups in, then spend on new buys and renewals. Nothing is counted twice."
+      icon={Wallet}
+      accent="bg-amber-500/10 text-amber-700 dark:text-amber-400"
+      action={
+        onOpenList ? (
+          <Button type="button" size="sm" variant="outline" className="mt-2" onClick={onOpenList}>
+            Wallet history — that day's buys
+          </Button>
+        ) : null
+      }
+      hero={
+        <button
+          type="button"
+          onClick={onOpenList}
+          className="rounded-lg border bg-background px-4 py-2 text-right transition hover:bg-muted/40"
+        >
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Net wallet · {dayLabel}</p>
+          <p
+            className={cn(
+              'text-2xl font-bold tabular-nums tracking-tight',
+              net >= 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-amber-700 dark:text-amber-400'
+            )}
+          >
+            {net >= 0 ? '+' : '−'}
+            {formatInr(Math.abs(net))}
+          </p>
+          <p className="text-[11px] text-muted-foreground">open list</p>
+        </button>
+      }
+    >
+      <div className="grid gap-6 lg:grid-cols-3">
+        <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-4">
+          <div className="mb-2 flex items-center gap-2 text-emerald-700 dark:text-emerald-400">
+            <ArrowUpRight className="h-4 w-4" />
+            <p className="text-xs font-semibold uppercase tracking-wider">Money in</p>
+          </div>
+          <Line
+            label="Wallet top-ups"
+            value={`+${formatInr(row.walletAdded)}`}
+            count={`${row.walletTopups} top-up${row.walletTopups === 1 ? '' : 's'}`}
+            tone="in"
+            strong
+          />
+          <p className="mt-2 text-[11px] text-muted-foreground">
+            This money arrives via Razorpay or UPI first, then lands in the wallet balance.
+          </p>
+        </div>
+
+        <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-4">
+          <div className="mb-2 flex items-center gap-2 text-amber-700 dark:text-amber-400">
+            <ShoppingCart className="h-4 w-4" />
+            <p className="text-xs font-semibold uppercase tracking-wider">New VPS buy (wallet)</p>
+          </div>
+          <Line
+            label="Single buy — wallet only"
+            value={formatInr(row.vpsWalletAmount)}
+            count={`${row.vpsWalletOnly} order${row.vpsWalletOnly === 1 ? '' : 's'}`}
+            tone="out"
+          />
+          <Line
+            label="Cart checkout — wallet part"
+            value={formatInr(row.cartWalletAmount)}
+            count={row.cartCheckouts > 0 ? `${row.cartCheckouts} checkout` : undefined}
+            tone="out"
+          />
+          <Line
+            label="Total new buy from wallet"
+            value={`−${formatInr(newBuyWallet)}`}
+            tone="out"
+            strong
+          />
+        </div>
+
+        <div className="rounded-lg border border-sky-500/20 bg-sky-500/5 p-4">
+          <div className="mb-2 flex items-center gap-2 text-sky-700 dark:text-sky-400">
+            <RotateCcw className="h-4 w-4" />
+            <p className="text-xs font-semibold uppercase tracking-wider">Renew (wallet)</p>
+          </div>
+          <Line
+            label="VPS renew via wallet"
+            value={`−${formatInr(renewWallet)}`}
+            count={`${row.renewalWalletCount} renew${row.renewalWalletCount === 1 ? '' : 's'}`}
+            tone="out"
+            strong
+          />
+          <div className="mt-4 border-t pt-3">
+            <div className="mb-1 flex items-center gap-2 text-muted-foreground">
+              <ArrowDownRight className="h-4 w-4" />
+              <p className="text-xs font-semibold uppercase tracking-wider">Total spent</p>
+            </div>
+            <p className="text-xl font-bold tabular-nums text-amber-700 dark:text-amber-400">
+              −{formatInr(row.walletSpent)}
+            </p>
+            <p className="text-[11px] text-muted-foreground">
+              New buy {formatInr(newBuyWallet)} + Renew {formatInr(renewWallet)}
+            </p>
+          </div>
+        </div>
+      </div>
+    </SectionShell>
+  );
+}
+
+function SalesLedger({ row, dayLabel = 'Today' }: { row: DailyRow; dayLabel?: string }) {
+  return (
+    <SectionShell
+      title={`Sales — new buy vs renew · ${dayLabel}`}
+      subtitle="Business total = new VPS sales + renewals (gateway and wallet together)"
+      icon={IndianRupee}
+      accent="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+      hero={
+        <div className="rounded-lg border border-emerald-500/25 bg-emerald-500/5 px-4 py-2 text-right">
+          <p className="text-[10px] uppercase tracking-wider text-emerald-700/80 dark:text-emerald-400/80">
+            Total business · {dayLabel}
+          </p>
+          <p className="text-2xl font-bold tabular-nums tracking-tight text-emerald-700 dark:text-emerald-400">
+            {formatInr(row.totalBusiness)}
+          </p>
+        </div>
+      }
+    >
+      <div className="grid gap-6 lg:grid-cols-2">
+        <div className="rounded-lg border p-4">
+          <div className="mb-3 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <ShoppingCart className="h-4 w-4 text-sky-600" />
+              <p className="font-semibold">New VPS buy</p>
+            </div>
+            <Badge variant="secondary" className="font-normal tabular-nums">
+              {row.vpsOrders} orders
+            </Badge>
+          </div>
+          <Line label="Total sales value" value={formatInr(row.vpsRevenue)} strong />
+          <Line
+            label="Paid via gateway"
+            value={formatInr(row.vpsGatewayAmount + row.cartGatewayAmount)}
+            count={`${row.vpsGatewayOnly} gateway-only · ${row.vpsMixed} mixed`}
+          />
+          <Line
+            label="Paid via wallet"
+            value={formatInr(row.vpsWalletAmount + row.cartWalletAmount)}
+            count={`${row.vpsWalletOnly} wallet-only · cart ${formatInr(row.cartWalletAmount)}`}
+            tone="out"
+          />
+          {row.vpsCartOrders > 0 ? (
+            <Line
+              label="Cart items (inside VPS count)"
+              value={`${row.vpsCartOrders} items`}
+              count={`${row.cartCheckouts} checkout payment${row.cartCheckouts === 1 ? '' : 's'}`}
+            />
+          ) : null}
+        </div>
+
+        <div className="rounded-lg border p-4">
+          <div className="mb-3 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <RotateCcw className="h-4 w-4 text-sky-700" />
+              <p className="font-semibold">VPS renew</p>
+            </div>
+            <Badge variant="secondary" className="font-normal tabular-nums">
+              {row.renewals} renews
+            </Badge>
+          </div>
+          <Line label="Total renew value" value={formatInr(row.renewalRevenue)} strong />
+          <Line
+            label="Renew via gateway"
+            value={formatInr(row.renewalGatewayAmount)}
+            count={`${row.renewalGatewayCount} renew${row.renewalGatewayCount === 1 ? '' : 's'}`}
+          />
+          <Line
+            label="Renew via wallet"
+            value={formatInr(row.renewalWalletAmount)}
+            count={`${row.renewalWalletCount} renew${row.renewalWalletCount === 1 ? '' : 's'}`}
+            tone="out"
+          />
+          <div className="mt-4 flex items-center gap-2 rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+            <Equal className="h-3.5 w-3.5 shrink-0" />
+            New {formatInr(row.vpsRevenue)} + Renew {formatInr(row.renewalRevenue)} ={' '}
+            <strong className="text-foreground">{formatInr(row.totalBusiness)}</strong>
+          </div>
+        </div>
+      </div>
+    </SectionShell>
+  );
+}
+
+function UpiStrip({ row }: { row: DailyRow }) {
+  if (!(row.upiCollected > 0 || row.otherGatewayCollected > 0)) return null;
+  return (
+    <Card className="border-border/70">
+      <CardContent className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-sm font-semibold">Other gateways (not Razorpay)</p>
+          <p className="text-xs text-muted-foreground">KwikUPI and legacy gateways. These do not appear on the Razorpay dashboard.</p>
+        </div>
+        <div className="flex flex-wrap gap-4 text-sm">
+          <div>
+            <p className="text-[10px] uppercase text-muted-foreground">UPI / KwikUPI</p>
+            <p className="font-semibold tabular-nums text-emerald-700 dark:text-emerald-400">
+              {formatInr(row.upiCollected)}
+              <span className="ml-1 text-xs font-normal text-muted-foreground">({row.upiCaptures})</span>
+            </p>
+          </div>
+          {row.otherGatewayCollected > 0 ? (
+            <div>
+              <p className="text-[10px] uppercase text-muted-foreground">Other</p>
+              <p className="font-semibold tabular-nums">
+                {formatInr(row.otherGatewayCollected)}
+                <span className="ml-1 text-xs font-normal text-muted-foreground">
+                  ({row.otherGatewayCaptures})
+                </span>
+              </p>
             </div>
           ) : null}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-medium">Payment Gateway</CardTitle>
-          <CardDescription>
-            Razorpay {row.razorpayCaptures} · {formatInr(row.razorpayCollected)} · UPI{' '}
-            {row.upiCaptures} · {formatInr(row.upiCollected)}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="text-sm space-y-1.5">
-          <div className="flex justify-between">
-            <span className="text-muted-foreground">New orders (single)</span>
-            <span className="font-medium">{formatInr(standaloneGateway)}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-muted-foreground">Cart checkouts</span>
-            <span className="font-medium">{formatInr(row.cartGatewayAmount)}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-muted-foreground">Renewals</span>
-            <span className="font-medium">
-              {row.renewalGatewayCount} · {formatInr(row.renewalGatewayAmount)}
-            </span>
-          </div>
-          <div className="flex justify-between border-t pt-1.5">
-            <span className="text-muted-foreground">Wallet top-ups</span>
-            <span className="font-medium">
-              {row.walletTopups} · {formatInr(row.walletTopupAmount)}
-            </span>
-          </div>
-          <div className="flex justify-between border-t pt-1.5 text-emerald-600 dark:text-emerald-400 font-medium">
-            <span>UPI total (KwikUPI)</span>
-            <span>{row.upiCaptures} · {formatInr(row.upiCollected)}</span>
-          </div>
-          <div className="flex justify-between border-t pt-1.5 text-[#3395FF] font-medium">
-            <span>Razorpay total (match dashboard)</span>
-            <span>{row.razorpayCaptures} · {formatInr(row.razorpayCollected)}</span>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-medium">Wallet</CardTitle>
-          <CardDescription>Balance movement today</CardDescription>
-        </CardHeader>
-        <CardContent className="text-sm space-y-1.5">
-          <div className="flex justify-between text-emerald-700 dark:text-emerald-400">
-            <span>Added (top-ups)</span>
-            <span className="font-medium">+{formatInr(row.walletAdded)}</span>
-          </div>
-          <div className="flex justify-between text-amber-700 dark:text-amber-400">
-            <span>Spent on orders</span>
-            <span className="font-medium">−{formatInr(row.vpsWalletAmount + row.cartWalletAmount)}</span>
-          </div>
-          <div className="flex justify-between text-amber-700 dark:text-amber-400">
-            <span>Spent on renewals</span>
-            <span className="font-medium">−{formatInr(row.renewalWalletAmount)}</span>
-          </div>
-          <div className="flex justify-between border-t pt-1.5 font-medium">
-            <span>Total spent</span>
-            <span>{formatInr(row.walletSpent)}</span>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-medium">Renewals</CardTitle>
-          <CardDescription>
-            {row.renewals} renewals · {formatInr(row.renewalRevenue)}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="text-sm space-y-1.5">
-          <div className="flex justify-between">
-            <span className="text-muted-foreground">Via gateway</span>
-            <span className="font-medium">{row.renewalGatewayCount}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-muted-foreground">Via wallet</span>
-            <span className="font-medium">{row.renewalWalletCount}</span>
-          </div>
-          <div className="flex justify-between border-t pt-1.5 font-medium">
-            <span>Total business</span>
-            <span>{formatInr(row.totalBusiness)}</span>
-          </div>
-          <p className="text-xs text-muted-foreground pt-1">
-            VPS sold ({row.vpsOrders}) ≠ gateway captures ({row.gatewayCaptures}) when cart ya wallet use hota hai.
-          </p>
-        </CardContent>
-      </Card>
-    </div>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -350,6 +526,11 @@ export function PaymentDashboard() {
   const [data, setData] = useState<PaymentDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [days, setDays] = useState(30);
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailChannel, setDetailChannel] = useState<'razorpay' | 'wallet'>('razorpay');
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detail, setDetail] = useState<DayDetailData | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -361,6 +542,10 @@ export function PaymentDashboard() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.message || 'Failed to load dashboard');
       setData(json);
+      setSelectedDate((prev) => {
+        if (prev && json.daily?.some((d: DailyRow) => d.date === prev)) return prev;
+        return json.today?.date || null;
+      });
     } catch (err) {
       console.error(err);
       setData(null);
@@ -373,10 +558,53 @@ export function PaymentDashboard() {
     void load();
   }, [load]);
 
+  const todayKey = data?.today?.date || '';
+  const yesterdayKey = useMemo(() => {
+    if (!todayKey) return '';
+    const [y, m, d] = todayKey.split('-').map(Number);
+    const dt = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+    dt.setUTCDate(dt.getUTCDate() - 1);
+    return dt.toISOString().slice(0, 10);
+  }, [todayKey]);
+
+  const selected = useMemo(() => {
+    if (!data) return null;
+    const key = selectedDate || data.today.date;
+    return data.daily.find((d) => d.date === key) || data.today;
+  }, [data, selectedDate]);
+
+  const openDayList = useCallback(
+    async (channel: 'razorpay' | 'wallet') => {
+      if (!selected?.date) return;
+      setDetailChannel(channel);
+      setDetailOpen(true);
+      setDetailLoading(true);
+      setDetail(null);
+      try {
+        const res = await fetch(
+          `/api/admin/orders/payment-dashboard?channel=${channel}&date=${selected.date}`,
+          { cache: 'no-store', credentials: 'include' }
+        );
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.message || 'Failed to load list');
+        setDetail(json);
+      } catch (err) {
+        console.error(err);
+        setDetail(null);
+      } finally {
+        setDetailLoading(false);
+      }
+    },
+    [selected?.date]
+  );
+
   const maxBar = useMemo(() => {
     if (!data?.last7?.length) return 1;
-    return Math.max(...data.last7.map((d) => d.gatewayCollected), 1);
+    return Math.max(...data.last7.map((d) => d.razorpayCollected || d.gatewayCollected), 1);
   }, [data]);
+
+  const minDate = data?.range?.from || '';
+  const maxDate = data?.range?.to || '';
 
   if (loading && !data) {
     return (
@@ -386,167 +614,318 @@ export function PaymentDashboard() {
     );
   }
 
-  if (!data) {
+  if (!data || !selected) {
     return (
       <Card>
         <CardContent className="py-10 text-center text-muted-foreground">
-          Payment dashboard load nahi hua. Refresh try karo.
+          Could not load the payment dashboard. Try refresh.
         </CardContent>
       </Card>
     );
   }
 
-  const { today, periodTotals } = data;
+  const { periodTotals } = data;
+  const isToday = selected.date === todayKey;
+  const isYesterday = selected.date === yesterdayKey;
+  const dayTag = isToday ? 'Today' : isYesterday ? 'Yesterday' : selected.label;
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <div className="flex items-center gap-2">
-            <h2 className="text-xl font-semibold">Daily Payments</h2>
-            <Badge variant="secondary" className="font-normal">IST</Badge>
+            <h2 className="text-xl font-semibold tracking-tight">Daily Payments</h2>
+            <Badge variant="outline" className="font-normal">
+              IST
+            </Badge>
           </div>
-          <p className="text-sm text-muted-foreground">
-            Gateway captures, wallet top-ups, wallet spend, renewals — {data.range.from} se {data.range.to}
+          <p className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground">
+            <CalendarDays className="h-3.5 w-3.5" />
+            {dayTag} · {selected.label}
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {[7, 30, 60].map((n) => (
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+          <div className="flex flex-wrap items-center gap-2">
             <Button
-              key={n}
               type="button"
               size="sm"
-              variant={days === n ? 'default' : 'outline'}
-              onClick={() => setDays(n)}
+              variant={isToday ? 'default' : 'outline'}
+              onClick={() => setSelectedDate(todayKey)}
             >
-              {n} days
+              Today
             </Button>
-          ))}
-          <Button type="button" size="sm" variant="outline" onClick={() => void load()} disabled={loading}>
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-          </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={isYesterday ? 'default' : 'outline'}
+              onClick={() => setSelectedDate(yesterdayKey)}
+              disabled={!data.daily.some((d) => d.date === yesterdayKey)}
+            >
+              Yesterday
+            </Button>
+            <div className="flex items-center gap-2">
+              <label htmlFor="pay-day-pick" className="sr-only">
+                Select date
+              </label>
+              <input
+                id="pay-day-pick"
+                type="date"
+                value={selected.date}
+                min={minDate}
+                max={maxDate}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v && data.daily.some((d) => d.date === v)) setSelectedDate(v);
+                }}
+                className="h-8 rounded-md border border-input bg-background px-2 text-sm tabular-nums"
+              />
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {[7, 30, 60].map((n) => (
+              <Button
+                key={n}
+                type="button"
+                size="sm"
+                variant={days === n ? 'default' : 'outline'}
+                onClick={() => setDays(n)}
+              >
+                {n}d
+              </Button>
+            ))}
+            <Button type="button" size="sm" variant="outline" onClick={() => void load()} disabled={loading}>
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            </Button>
+          </div>
         </div>
       </div>
 
-      <Card className="border-primary/20 bg-gradient-to-r from-primary/10 via-background to-violet-500/10">
+      {/* Top snapshot */}
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <button
+          type="button"
+          onClick={() => void openDayList('razorpay')}
+          className="rounded-xl border border-[#0C6CF2]/25 bg-[#0C6CF2]/5 text-left transition hover:bg-[#0C6CF2]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0C6CF2]/40"
+        >
+          <div className="p-5">
+            <p className="text-[11px] font-medium uppercase tracking-wider text-[#0C6CF2]/90">
+              Razorpay collected · open list
+            </p>
+            <p className="mt-1 text-3xl font-bold tabular-nums tracking-tight text-[#0C6CF2]">
+              {formatInr(selected.razorpayCollected)}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {selected.razorpayCaptures} captures · {dayTag}
+            </p>
+          </div>
+        </button>
+        <button
+          type="button"
+          onClick={() => void openDayList('wallet')}
+          className="rounded-xl border bg-card text-left transition hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/40"
+        >
+          <div className="p-5">
+            <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+              Wallet spent · open list
+            </p>
+            <p className="mt-1 text-3xl font-bold tabular-nums tracking-tight text-amber-700 dark:text-amber-400">
+              {formatInr(selected.walletSpent)}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Buy{' '}
+              {formatInr(
+                selected.walletSpentOnNewBuys ?? selected.vpsWalletAmount + selected.cartWalletAmount
+              )}{' '}
+              · Renew {formatInr(selected.renewalWalletAmount)}
+            </p>
+          </div>
+        </button>
+        <Card>
+          <CardContent className="pt-5">
+            <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+              New VPS + renewals
+            </p>
+            <p className="mt-1 text-3xl font-bold tabular-nums tracking-tight">
+              {selected.vpsOrders + selected.renewals}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {selected.vpsOrders} buy · {selected.renewals} renew
+            </p>
+          </CardContent>
+        </Card>
+        <Card className="border-emerald-500/25 bg-emerald-500/5">
+          <CardContent className="pt-5">
+            <p className="text-[11px] font-medium uppercase tracking-wider text-emerald-700/90 dark:text-emerald-400/90">
+              Total business
+            </p>
+            <p className="mt-1 text-3xl font-bold tabular-nums tracking-tight text-emerald-700 dark:text-emerald-400">
+              {formatInr(selected.totalBusiness)}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">Sales value · {dayTag}</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      <RazorpayLedger row={selected} dayLabel={dayTag} onOpenList={() => void openDayList('razorpay')} />
+      <WalletLedger row={selected} dayLabel={dayTag} onOpenList={() => void openDayList('wallet')} />
+      <SalesLedger row={selected} dayLabel={dayTag} />
+      <UpiStrip row={selected} />
+
+      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
+        <DialogContent className="flex max-h-[85vh] max-w-4xl flex-col overflow-hidden">
+          <DialogHeader>
+            <DialogTitle>
+              {detailChannel === 'razorpay' ? 'Razorpay' : 'Wallet'} live list · {selected.label}
+            </DialogTitle>
+            <DialogDescription asChild>
+              <div>
+                <p>
+                  {detailChannel === 'razorpay'
+                    ? 'Payments collected on Razorpay that day — user and order details'
+                    : 'Wallet buys and renewals that day — user and history'}
+                </p>
+                {detail ? (
+                  <p className="mt-1 font-medium text-foreground">
+                    {detail.count} entries · {formatInr(detail.totalAmount)}
+                  </p>
+                ) : null}
+              </div>
+            </DialogDescription>
+          </DialogHeader>
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {detailLoading ? (
+              <div className="flex h-40 items-center justify-center">
+                <Loader2 className="h-7 w-7 animate-spin text-primary" />
+              </div>
+            ) : !detail?.items?.length ? (
+              <p className="py-10 text-center text-sm text-muted-foreground">
+                No entries for this day on this channel.
+              </p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Time</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead>User</TableHead>
+                    <TableHead>Product</TableHead>
+                    <TableHead className="text-right">Amount</TableHead>
+                    <TableHead>Txn / Order</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {detail.items.map((item) => (
+                    <TableRow key={item.id}>
+                      <TableCell className="whitespace-nowrap text-xs tabular-nums text-muted-foreground">
+                        {item.at
+                          ? new Date(item.at).toLocaleTimeString('en-IN', {
+                              timeZone: 'Asia/Kolkata',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })
+                          : '—'}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="secondary" className="whitespace-nowrap font-normal">
+                          {item.kindLabel}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="max-w-[180px]">
+                        <p className="truncate text-sm font-medium">{item.name}</p>
+                        <p className="truncate text-xs text-muted-foreground">{item.email}</p>
+                        {item.phone ? (
+                          <p className="text-[11px] text-muted-foreground">{item.phone}</p>
+                        ) : null}
+                      </TableCell>
+                      <TableCell className="max-w-[160px]">
+                        <p className="truncate text-sm">{item.productName}</p>
+                        {item.memory ? (
+                          <p className="text-[11px] text-muted-foreground">{item.memory}</p>
+                        ) : null}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-right font-semibold tabular-nums">
+                        {formatInr(item.amount)}
+                        {detailChannel === 'razorpay' && item.walletPart ? (
+                          <p className="text-[10px] font-normal text-muted-foreground">
+                            +wallet {formatInr(item.walletPart)}
+                          </p>
+                        ) : null}
+                        {detailChannel === 'wallet' && item.gatewayPart ? (
+                          <p className="text-[10px] font-normal text-muted-foreground">
+                            +gw {formatInr(item.gatewayPart)}
+                          </p>
+                        ) : null}
+                      </TableCell>
+                      <TableCell className="max-w-[140px] text-[11px] text-muted-foreground">
+                        <p className="truncate font-mono">
+                          {item.transactionId || item.gatewayOrderId || item.clientTxnId || '—'}
+                        </p>
+                        {item.orderId ? (
+                          <p className="truncate font-mono opacity-70">{item.orderId}</p>
+                        ) : item.kind !== 'topup' && item.kind !== 'cart' ? (
+                          <p className="truncate font-mono opacity-70">{item.id}</p>
+                        ) : null}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Card className="border-border/70">
         <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2 text-lg">
-            <CalendarDays className="h-5 w-5 text-primary" />
-            Aaj — {today.label}
-          </CardTitle>
-          <CardDescription>India time (IST) — poora din ka payment report</CardDescription>
+          <CardTitle className="text-base">Last 7 days — Razorpay</CardTitle>
+          <CardDescription>Click a row to open that day's full ledger</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-7">
-            <StatCard
-              title="VPS Sold"
-              value={String(today.vpsOrders)}
-              hint={`Revenue ${formatInr(today.vpsRevenue)}`}
-              icon={ShoppingCart}
-              tone="blue"
-            />
-            <StatCard
-              title="Razorpay Today"
-              value={formatInr(today.razorpayCollected)}
-              hint={`${today.razorpayCaptures} captures — dashboard se match`}
-              icon={CreditCard}
-              tone="blue"
-            />
-            <StatCard
-              title="UPI Today"
-              value={formatInr(today.upiCollected)}
-              hint={`${today.upiCaptures} captures — KwikUPI inline QR`}
-              icon={IndianRupee}
-              tone="green"
-            />
-            <StatCard
-              title="All Gateway"
-              value={formatInr(today.gatewayCollected)}
-              hint={`${today.gatewayCaptures} captures — Razorpay + UPI`}
-              icon={CreditCard}
-              tone="green"
-            />
-            <StatCard
-              title="Wallet Added"
-              value={formatInr(today.walletAdded)}
-              hint={`${today.walletTopups} top-up${today.walletTopups === 1 ? '' : 's'}`}
-              icon={Wallet}
-            />
-            <StatCard
-              title="Wallet Spent"
-              value={formatInr(today.walletSpent)}
-              hint="Orders + renewals from balance"
-              icon={Wallet}
-              tone="amber"
-            />
-            <StatCard
-              title="Renewals"
-              value={String(today.renewals)}
-              hint={formatInr(today.renewalRevenue)}
-              icon={TrendingUp}
-              tone="violet"
-            />
-            <StatCard
-              title="Total Business"
-              value={formatInr(today.totalBusiness)}
-              hint="New sales + renewals"
-              icon={IndianRupee}
-              tone="green"
-            />
-          </div>
-          <GatewayReconcileCard row={today} />
-          <TodayBreakdown row={today} />
+        <CardContent className="space-y-1">
+          {data.last7.map((row) => {
+            const active = row.date === selected.date;
+            return (
+              <button
+                key={row.date}
+                type="button"
+                onClick={() => setSelectedDate(row.date)}
+                className={cn(
+                  'grid w-full grid-cols-[100px_1fr_140px] items-center gap-3 rounded-md px-2 py-2 text-left transition-colors hover:bg-muted/60',
+                  active && 'bg-[#0C6CF2]/10 ring-1 ring-[#0C6CF2]/25'
+                )}
+              >
+                <div className="text-xs text-muted-foreground">
+                  {row.date === todayKey ? (
+                    <span className="font-semibold text-foreground">Today</span>
+                  ) : row.date === yesterdayKey ? (
+                    <span className="font-semibold text-foreground">Yesterday</span>
+                  ) : (
+                    row.label.split(',')[0]
+                  )}
+                </div>
+                <div className="h-2.5 overflow-hidden rounded-full bg-muted">
+                  <div
+                    className="h-full rounded-full bg-[#0C6CF2] transition-all"
+                    style={{
+                      width: `${Math.max(3, ((row.razorpayCollected || 0) / maxBar) * 100)}%`,
+                    }}
+                  />
+                </div>
+                <div className="text-right text-sm font-semibold tabular-nums text-[#0C6CF2]">
+                  {formatInr(row.razorpayCollected)}
+                  <span className="block text-[10px] font-normal text-muted-foreground">
+                    {row.razorpayCaptures} · wallet −{formatInr(row.walletSpent)}
+                  </span>
+                </div>
+              </button>
+            );
+          })}
         </CardContent>
       </Card>
 
-      <Card className="border-amber-500/20 bg-amber-500/5">
-        <CardContent className="flex gap-3 py-4 text-sm text-muted-foreground">
-          <Info className="h-5 w-5 shrink-0 text-amber-600" />
-          <div className="space-y-1">
-            <p className="font-medium text-foreground">
-              Razorpay: {today.razorpayCaptures} · {formatInr(today.razorpayCollected)} · UPI:{' '}
-              {today.upiCaptures} · {formatInr(today.upiCollected)}
-            </p>
-            <p>
-              <strong>VPS Sold</strong> ({today.vpsOrders}) har order line hai.{' '}
-              <strong>Razorpay</strong> aur <strong>UPI (KwikUPI)</strong> alag count hote hain — wallet-only alag.
-            </p>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
+      <Card className="border-border/70">
         <CardHeader>
-          <CardTitle className="text-base">Last 7 days — gateway collected</CardTitle>
-          <CardDescription>Unique payment captures ka total amount (orders + renewals + top-ups)</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {data.last7.map((row) => (
-            <div key={row.date} className="grid grid-cols-[88px_1fr_120px] items-center gap-3">
-              <div className="text-xs text-muted-foreground">
-                {row.date === today.date ? 'Today' : row.label.split(',')[0]}
-              </div>
-              <div className="h-3 rounded-full bg-muted overflow-hidden">
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-sky-500 transition-all"
-                  style={{ width: `${Math.max(4, (row.gatewayCollected / maxBar) * 100)}%` }}
-                />
-              </div>
-              <div className="text-right text-sm font-semibold tabular-nums">
-                {formatInr(row.gatewayCollected)}
-                <span className="block text-[10px] font-normal text-muted-foreground">
-                  {row.gatewayCaptures} captures
-                </span>
-              </div>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Per-day breakdown</CardTitle>
-          <CardDescription>Din-wise poora report</CardDescription>
+          <CardTitle className="text-base">Day-by-day ledger</CardTitle>
+          <CardDescription>Click any row to open that day above</CardDescription>
         </CardHeader>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
@@ -554,110 +933,112 @@ export function PaymentDashboard() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Date</TableHead>
-                  <TableHead className="text-right">VPS</TableHead>
-                  <TableHead className="text-right">VPS ₹</TableHead>
-                  <TableHead className="text-right">Captures</TableHead>
                   <TableHead className="text-right">Razorpay</TableHead>
                   <TableHead className="text-right">UPI</TableHead>
-                  <TableHead className="text-right">All GW ₹</TableHead>
                   <TableHead className="text-right">Wallet +</TableHead>
-                  <TableHead className="text-right">Wallet −</TableHead>
-                  <TableHead className="text-right">Renewals</TableHead>
-                  <TableHead className="text-right">Business ₹</TableHead>
+                  <TableHead className="text-right">Wallet buy</TableHead>
+                  <TableHead className="text-right">Wallet renew</TableHead>
+                  <TableHead className="text-right">New VPS</TableHead>
+                  <TableHead className="text-right">Renews</TableHead>
+                  <TableHead className="text-right">Business</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {data.daily.map((row) => (
-                  <TableRow
-                    key={row.date}
-                    className={cn(row.date === today.date && 'bg-primary/5 font-medium')}
-                  >
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        {row.label}
-                        {row.date === today.date ? (
-                          <Badge className="text-[10px] h-5">Today</Badge>
-                        ) : null}
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">{row.vpsOrders}</TableCell>
-                    <TableCell className="text-right tabular-nums">{formatInr(row.vpsRevenue)}</TableCell>
-                    <TableCell className="text-right tabular-nums">{row.gatewayCaptures}</TableCell>
-                    <TableCell className="text-right tabular-nums text-[#3395FF]">
-                      {row.razorpayCollected > 0
-                        ? `${row.razorpayCaptures} · ${formatInr(row.razorpayCollected)}`
-                        : '—'}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums text-emerald-700 dark:text-emerald-400">
-                      {row.upiCollected > 0
-                        ? `${row.upiCaptures} · ${formatInr(row.upiCollected)}`
-                        : '—'}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums text-emerald-700 dark:text-emerald-400">
-                      {formatInr(row.gatewayCollected)}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {row.walletTopupAmount > 0 ? formatInr(row.walletTopupAmount) : '—'}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums text-amber-700 dark:text-amber-400">
-                      {row.walletSpent > 0 ? formatInr(row.walletSpent) : '—'}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {row.renewals > 0 ? `${row.renewals} · ${formatInr(row.renewalRevenue)}` : '—'}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums font-semibold">
-                      {formatInr(row.totalBusiness)}
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {data.daily.map((row) => {
+                  const buyW = row.walletSpentOnNewBuys ?? row.vpsWalletAmount + row.cartWalletAmount;
+                  const active = row.date === selected.date;
+                  return (
+                    <TableRow
+                      key={row.date}
+                      className={cn(
+                        'cursor-pointer hover:bg-muted/50',
+                        active && 'bg-[#0C6CF2]/5 font-medium'
+                      )}
+                      onClick={() => setSelectedDate(row.date)}
+                    >
+                      <TableCell>
+                        <div className="flex items-center gap-2 whitespace-nowrap">
+                          {row.label}
+                          {row.date === todayKey ? (
+                            <Badge className="h-5 text-[10px]" variant="secondary">
+                              Today
+                            </Badge>
+                          ) : null}
+                          {row.date === yesterdayKey ? (
+                            <Badge className="h-5 text-[10px]" variant="outline">
+                              Yesterday
+                            </Badge>
+                          ) : null}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums text-[#0C6CF2]">
+                        {row.razorpayCollected > 0
+                          ? `${row.razorpayCaptures} · ${formatInr(row.razorpayCollected)}`
+                          : '—'}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums text-emerald-700 dark:text-emerald-400">
+                        {row.upiCollected > 0 ? formatInr(row.upiCollected) : '—'}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {row.walletTopupAmount > 0 ? formatInr(row.walletTopupAmount) : '—'}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums text-amber-700 dark:text-amber-400">
+                        {buyW > 0 ? formatInr(buyW) : '—'}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums text-amber-700 dark:text-amber-400">
+                        {row.renewalWalletAmount > 0 ? formatInr(row.renewalWalletAmount) : '—'}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {row.vpsOrders > 0 ? `${row.vpsOrders} · ${formatInr(row.vpsRevenue)}` : '—'}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {row.renewals > 0 ? `${row.renewals} · ${formatInr(row.renewalRevenue)}` : '—'}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums font-semibold">
+                        {formatInr(row.totalBusiness)}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           </div>
         </CardContent>
       </Card>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <StatCard
-          title={`${days}-day VPS sales`}
-          value={String(periodTotals.vpsOrders)}
-          hint={formatInr(periodTotals.vpsRevenue)}
-          icon={ShoppingCart}
-          tone="blue"
-        />
-        <StatCard
-          title={`${days}-day Razorpay`}
-          value={formatInr(periodTotals.razorpayCollected)}
-          hint={`${periodTotals.razorpayCaptures} captures`}
-          icon={CreditCard}
-          tone="blue"
-        />
-        <StatCard
-          title={`${days}-day UPI`}
-          value={formatInr(periodTotals.upiCollected)}
-          hint={`${periodTotals.upiCaptures} captures — KwikUPI`}
-          icon={IndianRupee}
-          tone="green"
-        />
-        <StatCard
-          title={`${days}-day all gateway`}
-          value={formatInr(periodTotals.gatewayCollected)}
-          hint={`${periodTotals.gatewayCaptures} captures`}
-          icon={CreditCard}
-          tone="green"
-        />
-        <StatCard
-          title={`${days}-day wallet added`}
-          value={formatInr(periodTotals.walletTopupAmount)}
-          hint={`${periodTotals.walletTopups} top-ups`}
-          icon={Wallet}
-        />
-        <StatCard
-          title={`${days}-day renewals`}
-          value={String(periodTotals.renewals)}
-          hint={formatInr(periodTotals.renewalRevenue)}
-          icon={TrendingUp}
-          tone="violet"
-        />
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <Card>
+          <CardContent className="pt-5">
+            <p className="text-xs text-muted-foreground">{days}d Razorpay</p>
+            <p className="text-xl font-bold tabular-nums text-[#0C6CF2]">
+              {formatInr(periodTotals.razorpayCollected)}
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-5">
+            <p className="text-xs text-muted-foreground">{days}d wallet spent</p>
+            <p className="text-xl font-bold tabular-nums text-amber-700 dark:text-amber-400">
+              {formatInr(periodTotals.walletSpent)}
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-5">
+            <p className="text-xs text-muted-foreground">{days}d new VPS</p>
+            <p className="text-xl font-bold tabular-nums">
+              {periodTotals.vpsOrders} · {formatInr(periodTotals.vpsRevenue)}
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-5">
+            <p className="text-xs text-muted-foreground">{days}d renews</p>
+            <p className="text-xl font-bold tabular-nums">
+              {periodTotals.renewals} · {formatInr(periodTotals.renewalRevenue)}
+            </p>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );
