@@ -594,9 +594,26 @@ async function verifyOrderPaymentProof(order) {
 
   const upiTxn = String(pd.upi_txn_id || pd.payment_id || '').trim();
 
-  const gatewayAmt = Number(pd.gatewayAmount) || Number(order.price) || 0;
+  let gatewayAmt = Number(pd.gatewayAmount) || Number(order.price) || 0;
 
-  const gatewayOrderId = String(order.gatewayOrderId || pd.razorpay_order_id || '').trim();
+  let gatewayOrderId = String(order.gatewayOrderId || pd.razorpay_order_id || '').trim();
+
+  // Cart lines share one Razorpay order. The child often has only pay_ id;
+  // the order_ id and the captured cart total live on the checkout session.
+  if (!gatewayOrderId.startsWith('order_') && (pd.checkoutSessionId || pd.parentTxnId)) {
+    try {
+      const CheckoutSession = require('@/models/checkoutSessionModel').default;
+      const session = pd.checkoutSessionId
+        ? await CheckoutSession.findById(pd.checkoutSessionId).select('gatewayOrderId gatewayAmount status clientTxnId').lean()
+        : await CheckoutSession.findOne({ clientTxnId: pd.parentTxnId }).select('gatewayOrderId gatewayAmount status clientTxnId').lean();
+      if (session && session.status === 'confirmed' && String(session.gatewayOrderId || '').startsWith('order_')) {
+        gatewayOrderId = String(session.gatewayOrderId);
+        if (Number(session.gatewayAmount) > 0) gatewayAmt = Number(session.gatewayAmount);
+      }
+    } catch (err) {
+      console.error('[PAYMENT-PROOF] checkout session lookup failed:', err.message);
+    }
+  }
 
 
 

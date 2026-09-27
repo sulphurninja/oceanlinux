@@ -619,20 +619,25 @@ export async function confirmCheckoutFromWebhook(session, { paymentMethod, trans
   const orders = await Order.find({ _id: { $in: session.orderIds } });
 
   for (const order of orders) {
-    if (order.status === 'confirmed') continue;
-
-    order.status = 'confirmed';
-    const orderExpiry = await resolveOrderExpiryOnPayment(order);
-    if (orderExpiry) order.expiryDate = orderExpiry;
-    if (transactionId) order.transactionId = transactionId;
-    if (paymentMethod) order.paymentMethod = paymentMethod;
+    const alreadyConfirmed = order.status === 'confirmed';
+    if (!alreadyConfirmed) {
+      order.status = 'confirmed';
+      const orderExpiry = await resolveOrderExpiryOnPayment(order);
+      if (orderExpiry) order.expiryDate = orderExpiry;
+      if (transactionId) order.transactionId = transactionId;
+      if (paymentMethod) order.paymentMethod = paymentMethod;
+    }
+    if (session.gatewayOrderId && !String(order.gatewayOrderId || '').startsWith('order_')) {
+      order.gatewayOrderId = session.gatewayOrderId;
+    }
     order.paymentDetails = {
       ...(order.paymentDetails || {}),
       ...(paymentDetails || {}),
       checkoutSessionId: session._id.toString(),
       parentTxnId: session.clientTxnId,
       confirmedViaCheckout: true,
-      confirmedAt: new Date(),
+      confirmedAt: order.paymentDetails?.confirmedAt || new Date(),
+      ...(Number(session.gatewayAmount) > 0 ? { gatewayAmount: Number(session.gatewayAmount) } : {}),
     };
     await order.save();
   }
