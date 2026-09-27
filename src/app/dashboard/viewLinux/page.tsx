@@ -39,6 +39,7 @@ import {
     Download
 } from 'lucide-react';
 import DashboardSearchInput from '@/components/dashboard/DashboardSearchInput';
+import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -589,52 +590,62 @@ const ViewLinux = () => {
                     </div>
                 ) : (
                     <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-3 sm:space-y-5 premium-dashboard-tabs premium-viewlinux-tabs">
-                        <div className="premium-dashboard-toolbar premium-viewlinux-toolbar mb-0 space-y-2.5">
-                            <div className="flex items-center gap-2">
+                        <div className="premium-dashboard-toolbar premium-viewlinux-toolbar mb-0 min-w-0 space-y-2.5">
+                            <div className="premium-viewlinux-toolbar-filters min-w-0">
                                 <DashboardSearchInput
                                     value={searchQuery}
                                     onChange={setSearchQuery}
                                     onClear={clearSearch}
                                     placeholder="Search IP, product, or OS"
-                                    className="min-w-0 flex-1"
+                                    className="premium-viewlinux-toolbar-search w-full min-w-0"
                                 />
-                                <Button
-                                    variant="outline"
-                                    className="premium-btn-outline premium-btn-icon shrink-0 px-0 lg:w-auto lg:px-4 lg:gap-2"
-                                    onClick={() => fetchOrders(true)}
-                                    disabled={loading || refreshing}
-                                    aria-label="Refresh servers"
-                                    title="Refresh"
+
+                                <div
+                                    className={cn(
+                                        'premium-viewlinux-toolbar-actions min-w-0',
+                                        (searchQuery || statusFilter !== 'all' || activeTab !== 'all') &&
+                                            'premium-viewlinux-toolbar-actions--with-clear'
+                                    )}
                                 >
-                                    <RefreshCw className={`h-4 w-4 shrink-0 ${loading || refreshing ? 'animate-spin' : ''}`} />
-                                    <span className="hidden lg:inline">Refresh</span>
-                                </Button>
-                                <div className="hidden lg:block">
-                                    <Select value={statusFilter} onValueChange={setStatusFilter}>
-                                        <SelectTrigger className="premium-dashboard-select w-40">
-                                            <Filter className="h-4 w-4 mr-2" />
-                                            <SelectValue placeholder="Status" />
-                                        </SelectTrigger>
-                                        <SelectContent className={premiumSelectContent}>
-                                            <SelectItem value="all">All Status</SelectItem>
-                                            <SelectItem value="active">Active</SelectItem>
-                                            <SelectItem value="expired">Expired</SelectItem>
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                                {(searchQuery || statusFilter !== 'all' || activeTab !== 'all') && (
                                     <Button
                                         variant="outline"
-                                        size="sm"
-                                        onClick={clearFilters}
-                                        className="premium-btn-outline hidden lg:inline-flex"
+                                        className="premium-btn-outline premium-viewlinux-refresh-btn gap-2"
+                                        onClick={() => fetchOrders(true)}
+                                        disabled={loading || refreshing}
+                                        aria-label="Refresh servers"
                                     >
-                                        Clear
+                                        <RefreshCw className={`h-4 w-4 shrink-0 ${loading || refreshing ? 'animate-spin' : ''}`} />
+                                        <span>Refresh</span>
                                     </Button>
-                                )}
+
+                                    <div className="premium-viewlinux-status-wrap min-w-0 w-full">
+                                        <Select value={statusFilter} onValueChange={setStatusFilter}>
+                                            <SelectTrigger className="premium-dashboard-select premium-viewlinux-status-select min-w-0 w-full">
+                                                <Filter className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1.5 shrink-0" />
+                                                <SelectValue placeholder="Status" />
+                                            </SelectTrigger>
+                                            <SelectContent className={premiumSelectContent}>
+                                                <SelectItem value="all">All Status</SelectItem>
+                                                <SelectItem value="active">Active</SelectItem>
+                                                <SelectItem value="expired">Expired</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+
+                                    {(searchQuery || statusFilter !== 'all' || activeTab !== 'all') && (
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={clearFilters}
+                                            className="premium-btn-outline premium-viewlinux-clear-btn"
+                                        >
+                                            Clear
+                                        </Button>
+                                    )}
+                                </div>
                             </div>
 
-                            <TabsList className="premium-dashboard-tablist premium-viewlinux-tablist grid h-auto w-full grid-cols-3 gap-1">
+                            <TabsList className="premium-dashboard-tablist premium-viewlinux-tablist grid h-auto w-full min-w-0 grid-cols-3 gap-1">
                                 <TabsTrigger value="all" className="flex w-full min-w-0 items-center justify-center gap-1 px-1.5 sm:px-3 py-2 text-xs sm:text-sm">
                                     <Server className="hidden sm:block h-4 w-4" />
                                     <span>All</span>
@@ -659,20 +670,10 @@ const ViewLinux = () => {
                             </TabsList>
 
                             {(searchQuery || statusFilter !== 'all') && (
-                                <div className="flex items-center justify-between gap-2">
-                                    <p className="text-xs sm:text-sm text-white/45 min-w-0 truncate">
-                                        {filteredOrders.length} of {orders.filter(isServerListOrder).length} servers
-                                        {searchQuery && ` matching "${searchQuery}"`}
-                                    </p>
-                                    <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={clearFilters}
-                                        className="lg:hidden h-8 px-2 text-xs shrink-0"
-                                    >
-                                        Clear
-                                    </Button>
-                                </div>
+                                <p className="text-xs sm:text-sm text-white/45 min-w-0 truncate">
+                                    {filteredOrders.length} of {orders.filter(isServerListOrder).length} servers
+                                    {searchQuery && ` matching "${searchQuery}"`}
+                                </p>
                             )}
                         </div>
 

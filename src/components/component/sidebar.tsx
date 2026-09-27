@@ -171,6 +171,18 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
     if (item.badge && /^(\d+|99\+)$/.test(item.badge)) {
       return cn(premiumBadge.neutral, 'text-[10px] px-2 py-0 h-5 font-medium tabular-nums shrink-0');
     }
+    if (item.href === '/dashboard/ipStock' && item.badge === 'Shop') {
+      return cn(
+        'premium-sidebar-badge--shop',
+        'text-[10px] px-2.5 py-0 h-5 font-semibold shrink-0 tracking-wide'
+      );
+    }
+    if (item.href === '/dashboard/proxy-checker' && item.badge === 'Free') {
+      return cn(
+        'premium-sidebar-badge--free',
+        'text-[10px] px-2.5 py-0 h-5 font-semibold shrink-0 tracking-wide'
+      );
+    }
     return cn(
       premiumBadge.neutral,
       'text-[10px] px-2 py-0 h-5 font-medium shrink-0',
@@ -364,14 +376,15 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
                   </span>
                   {(!isCollapsed || isMobile) && (
                     <>
-                      <span className="inline-flex min-w-0 items-center gap-1.5">
-                        <span className="leading-none whitespace-nowrap">{item.label}</span>
-                        {item.badge && (
-                          <Badge variant="outline" className={sidebarNavBadgeClass(item, isActive(item.href))}>
-                            {item.badge}
-                          </Badge>
-                        )}
-                      </span>
+                      <span className="min-w-0 flex-1 truncate leading-none pr-2">{item.label}</span>
+                      {item.badge ? (
+                        <Badge
+                          variant="outline"
+                          className={cn(sidebarNavBadgeClass(item, isActive(item.href)), 'ml-auto shrink-0')}
+                        >
+                          {item.badge}
+                        </Badge>
+                      ) : null}
                     </>
                   )}
                 </Link>

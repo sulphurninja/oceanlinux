@@ -699,6 +699,128 @@ html {
     color: var(--pd-emerald-soft);
   }
 
+  @keyframes premium-sidebar-badge-shop-glow {
+    0%,
+    100% {
+      box-shadow:
+        0 0 0 0 rgba(16, 185, 129, 0.15),
+        inset 0 1px 0 rgba(255, 255, 255, 0.25);
+    }
+    50% {
+      box-shadow:
+        0 0 14px -2px rgba(52, 211, 153, 0.45),
+        inset 0 1px 0 rgba(255, 255, 255, 0.35);
+    }
+  }
+
+  @keyframes premium-sidebar-badge-shop-shift {
+    0%,
+    100% {
+      background-position: 0% 50%;
+    }
+    50% {
+      background-position: 100% 50%;
+    }
+  }
+
+  @keyframes premium-sidebar-badge-free-shift {
+    0%,
+    100% {
+      background-position: 0% 50%;
+    }
+    50% {
+      background-position: 100% 50%;
+    }
+  }
+
+  @keyframes premium-sidebar-badge-free-glow {
+    0%,
+    100% {
+      box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.12);
+    }
+    50% {
+      box-shadow: 0 0 12px -1px rgba(56, 189, 248, 0.42);
+    }
+  }
+
+  .premium-sidebar-badge--shop,
+  .premium-sidebar-badge--free {
+    position: relative;
+    overflow: hidden;
+    isolation: isolate;
+    border-radius: 9999px !important;
+    border-width: 1px !important;
+    border-style: solid !important;
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+
+  .premium-sidebar-badge--shop {
+    border-color: rgba(52, 211, 153, 0.5) !important;
+    background: linear-gradient(
+      110deg,
+      rgba(16, 185, 129, 0.18) 0%,
+      rgba(52, 211, 153, 0.34) 35%,
+      rgba(167, 243, 208, 0.42) 50%,
+      rgba(52, 211, 153, 0.34) 65%,
+      rgba(16, 185, 129, 0.18) 100%
+    ) !important;
+    background-size: 220% 100% !important;
+    color: hsl(158 72% 28%) !important;
+    animation:
+      premium-sidebar-badge-shop-shift 3.2s ease-in-out infinite,
+      premium-sidebar-badge-shop-glow 2.6s ease-in-out infinite;
+  }
+
+  .premium-sidebar-badge--free {
+    border-color: rgba(56, 189, 248, 0.45) !important;
+    background: linear-gradient(
+      120deg,
+      rgba(14, 165, 233, 0.16) 0%,
+      rgba(56, 189, 248, 0.28) 50%,
+      rgba(125, 211, 252, 0.22) 100%
+    ) !important;
+    background-size: 200% 200% !important;
+    color: hsl(199 72% 30%) !important;
+    animation:
+      premium-sidebar-badge-free-shift 4.5s ease infinite,
+      premium-sidebar-badge-free-glow 2.8s ease-in-out infinite;
+  }
+
+  html.premium-dashboard-active.dark .premium-sidebar-badge--shop {
+    color: #a7f3d0 !important;
+    border-color: rgba(52, 211, 153, 0.55) !important;
+    background: linear-gradient(
+      110deg,
+      rgba(16, 185, 129, 0.28) 0%,
+      rgba(52, 211, 153, 0.4) 35%,
+      rgba(167, 243, 208, 0.28) 50%,
+      rgba(52, 211, 153, 0.4) 65%,
+      rgba(16, 185, 129, 0.28) 100%
+    ) !important;
+    background-size: 220% 100% !important;
+  }
+
+  html.premium-dashboard-active.dark .premium-sidebar-badge--free {
+    color: #bae6fd !important;
+    border-color: rgba(56, 189, 248, 0.5) !important;
+    background: linear-gradient(
+      120deg,
+      rgba(14, 165, 233, 0.22) 0%,
+      rgba(56, 189, 248, 0.32) 50%,
+      rgba(125, 211, 252, 0.18) 100%
+    ) !important;
+    background-size: 200% 200% !important;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .premium-sidebar-badge--shop,
+    .premium-sidebar-badge--free {
+      animation: none;
+    }
+
+  }
+
   /* IP Stock — shared controls (fewer one-off button styles) */
   .premium-ipstock-category-tab {
     @apply flex h-9 items-center gap-2 px-2.5 sm:px-3 rounded-lg border text-left transition-all duration-200 min-w-0;
@@ -927,15 +1049,6 @@ html {
       white-space: nowrap;
       font-size: 0.75rem;
       padding: 0.35rem 0.75rem;
-    }
-  }
-
-  @media (min-width: 1024px) {
-    html.premium-dashboard-active .premium-viewlinux-toolbar .premium-btn-icon {
-      width: auto !important;
-      min-width: 0 !important;
-      padding-left: 1.25rem !important;
-      padding-right: 1.25rem !important;
     }
   }
 
@@ -4500,6 +4613,92 @@ html.premium-dashboard-active:not(.dark) .premium-dashboard-toolbar .premium-das
   color: hsl(160 25% 18%) !important;
 }
 
+html.premium-dashboard-active .premium-viewlinux-toolbar {
+  container-type: inline-size;
+  container-name: viewlinux-toolbar;
+}
+
+html.premium-dashboard-active .premium-viewlinux-toolbar .premium-viewlinux-toolbar-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  min-width: 0;
+}
+
+html.premium-dashboard-active .premium-viewlinux-toolbar .premium-viewlinux-toolbar-search {
+  width: 100%;
+  min-width: 0;
+}
+
+html.premium-dashboard-active .premium-viewlinux-toolbar .premium-viewlinux-toolbar-actions {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.5rem;
+  align-items: stretch;
+  width: 100%;
+  min-width: 0;
+}
+
+html.premium-dashboard-active .premium-viewlinux-toolbar .premium-viewlinux-toolbar-actions--with-clear {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+html.premium-dashboard-active .premium-viewlinux-toolbar .premium-viewlinux-refresh-btn,
+html.premium-dashboard-active .premium-viewlinux-toolbar .premium-viewlinux-clear-btn {
+  min-width: 0;
+  white-space: nowrap;
+}
+
+html.premium-dashboard-active .premium-viewlinux-toolbar .premium-viewlinux-status-select {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100%;
+}
+
+@container viewlinux-toolbar (min-width: 40rem) {
+  html.premium-dashboard-active .premium-viewlinux-toolbar .premium-viewlinux-toolbar-filters {
+    flex-direction: row;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  html.premium-dashboard-active .premium-viewlinux-toolbar .premium-viewlinux-toolbar-search {
+    flex: 1 1 auto;
+    min-width: 8rem;
+  }
+
+  html.premium-dashboard-active .premium-viewlinux-toolbar .premium-viewlinux-toolbar-actions {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    width: auto;
+    flex: 0 0 auto;
+    max-width: 20rem;
+  }
+
+  html.premium-dashboard-active .premium-viewlinux-toolbar .premium-viewlinux-status-wrap {
+    flex: 0 0 9.75rem;
+    width: 9.75rem;
+    max-width: 9.75rem;
+  }
+
+  html.premium-dashboard-active .premium-viewlinux-toolbar .premium-viewlinux-status-select {
+    width: 100% !important;
+  }
+}
+
+@container viewlinux-toolbar (min-width: 52rem) {
+  html.premium-dashboard-active .premium-viewlinux-toolbar .premium-viewlinux-toolbar-actions {
+    max-width: none;
+  }
+
+  html.premium-dashboard-active .premium-viewlinux-toolbar .premium-viewlinux-status-wrap {
+    flex: 0 0 10.5rem;
+    width: 10.5rem;
+    max-width: 10.5rem;
+  }
+}
+
 /* Tabs reuse the outline button chrome. Selection is an underline, not a second fill. */
 html.premium-dashboard-active .premium-dashboard-tabs [role="tab"] {
   background-color: transparent !important;
@@ -4571,7 +4770,7 @@ html.premium-dashboard-active .premium-badge {
     line-height: 1.25 !important;
   }
 
-  html.premium-dashboard-active .premium-dashboard-toolbar .premium-dashboard-select {
+  html.premium-dashboard-active .premium-dashboard-toolbar:not(.premium-viewlinux-toolbar) .premium-dashboard-select {
     width: 6.6rem !important;
     min-width: 0 !important;
     padding-left: 0.4rem !important;
@@ -4579,11 +4778,32 @@ html.premium-dashboard-active .premium-badge {
     font-size: 0.75rem !important;
   }
 
-  html.premium-dashboard-active .premium-viewlinux-toolbar .premium-btn-icon {
-    width: 2.75rem !important;
-    min-width: 2.75rem !important;
-    padding-left: 0 !important;
-    padding-right: 0 !important;
+  html.premium-dashboard-active .premium-viewlinux-toolbar .premium-viewlinux-status-select {
+    width: 100% !important;
+    min-width: 0 !important;
+    padding-left: 0.5rem !important;
+    padding-right: 1.75rem !important;
+    font-size: 0.8125rem !important;
+  }
+
+  html.premium-dashboard-active .premium-viewlinux-toolbar .premium-viewlinux-refresh-btn span {
+    display: none;
+  }
+
+  html.premium-dashboard-active .premium-viewlinux-toolbar .premium-viewlinux-refresh-btn {
+    padding-left: 0.65rem !important;
+    padding-right: 0.65rem !important;
+  }
+
+  @media (min-width: 480px) {
+    html.premium-dashboard-active .premium-viewlinux-toolbar .premium-viewlinux-refresh-btn span {
+      display: inline;
+    }
+
+    html.premium-dashboard-active .premium-viewlinux-toolbar .premium-viewlinux-refresh-btn {
+      padding-left: 0.75rem !important;
+      padding-right: 0.85rem !important;
+    }
   }
 
   html.premium-dashboard-active .premium-viewlinux-toolbar .premium-dashboard-tablist,
