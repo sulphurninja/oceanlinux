@@ -45,8 +45,11 @@ function shouldSkipAutoRetry(order) {
         }
         return { skip: true, reason: 'trial_vps_inventory_order' };
     }
-    if (order.slotIpPackageId && order.slotIpId && order.ipAddress) {
-        return { skip: true, reason: 'slot_ip_fulfilled' };
+    if (order.slotIpPackageId) {
+        return {
+            skip: true,
+            reason: order.slotIpId && order.ipAddress ? 'slot_ip_fulfilled' : 'slot_ip_inventory_order',
+        };
     }
     const last = order.lastProvisionAttempt ? new Date(order.lastProvisionAttempt).getTime() : 0;
     if (last && Date.now() - last < 4 * 60 * 1000) {
@@ -528,6 +531,16 @@ export async function POST(request) {
         }
 
         // ADVPS "assignment pending" follow-up: /api/admin/advps-pending-cron (separate schedule; saves ADVPS rate limit)
+
+        try {
+            const { retryPendingSlotIpOrders } = require('@/lib/retryPendingSlotIpOrders');
+            const slotRetry = await retryPendingSlotIpOrders({ limit: 25 });
+            if (slotRetry.retried) {
+                console.log(`[CRON-${cronId}] Slot IP retry:`, JSON.stringify(slotRetry));
+            }
+        } catch (slotRetryErr) {
+            console.warn(`[CRON-${cronId}] Slot IP retry skipped:`, slotRetryErr.message);
+        }
 
         // STEP 1: Try to acquire a database lock on a VALIDATED order
         console.log(`[CRON-${cronId}] 🔒 STEP 1: Attempting to acquire lock on validated order...`);

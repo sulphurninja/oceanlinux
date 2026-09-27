@@ -48,6 +48,22 @@ export async function POST(request) {
     // Find orders that need provisioning - SIMPLIFIED QUERY
     const ordersToProvision = await Order.find({
       status: 'confirmed',
+      $and: [
+        {
+          $or: [
+            { slotIpPackageId: { $exists: false } },
+            { slotIpPackageId: null },
+            { slotIpPackageId: '' },
+          ],
+        },
+        {
+          $or: [
+            { trialVpsPackageId: { $exists: false } },
+            { trialVpsPackageId: null },
+            { trialVpsPackageId: '' },
+          ],
+        },
+      ],
       $or: [
         // New orders
         { autoProvisioned: false },

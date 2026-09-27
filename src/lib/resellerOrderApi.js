@@ -373,8 +373,9 @@ export async function createResellerOrder(reseller, body) {
   };
   await order.save();
 
-  await assignPanelCredentials(order);
-  await fulfillOrderInventory(order);
+  const paidOrder = (await Order.findById(order._id)) || order;
+  await assignPanelCredentials(paidOrder);
+  await fulfillOrderInventory(paidOrder);
 
   try {
     await NotificationService.notifyOrderConfirmed(order.user, order);
@@ -534,8 +535,8 @@ async function createResellerSlotOrder(reseller, body, slotIpPackageId) {
   };
   await order.save();
 
-  await assignPanelCredentials(order);
-  await fulfillOrderInventory(order);
+  const paidOrder = (await Order.findById(order._id)) || order;
+  await fulfillOrderInventory(paidOrder);
 
   const fulfilledOrder = await Order.findById(order._id);
 

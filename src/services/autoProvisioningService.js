@@ -913,7 +913,7 @@ class AutoProvisioningService {
       // payment, regardless of which caller triggered provisioning.
       // =====================================================================
       const paymentCheckOrder = await Order.findById(orderId).select(
-        'transactionId walletDeduction paymentDetails status provisioningStatus ipAddress clientTxnId gatewayOrderId user productName'
+        'transactionId walletDeduction paymentDetails paymentMethod resellerId price status provisioningStatus ipAddress clientTxnId gatewayOrderId user productName slotIpPackageId slotIpId trialVpsPackageId trialVpsSlotId'
       );
 
       if (!paymentCheckOrder) {
@@ -932,7 +932,16 @@ class AutoProvisioningService {
           };
         }
         const { fulfillOrderInventory } = require('@/lib/fulfillOrderInventory');
-        await fulfillOrderInventory(paymentCheckOrder);
+        let fullSlotOrder = await Order.findById(orderId);
+        if (
+          fullSlotOrder &&
+          (fullSlotOrder.provisioningStatus === 'failed' || fullSlotOrder.provisioningStatus === 'provisioning')
+        ) {
+          fullSlotOrder.provisioningStatus = 'pending';
+          fullSlotOrder.provisioningError = '';
+          await fullSlotOrder.save();
+        }
+        await fulfillOrderInventory(fullSlotOrder, allowUnpaid ? { allowUnpaid: true } : {});
         const slotOrder = await Order.findById(orderId);
         if (slotOrder?.slotIpId && slotOrder?.ipAddress) {
           return {
@@ -964,7 +973,16 @@ class AutoProvisioningService {
           };
         }
         const { fulfillOrderInventory } = require('@/lib/fulfillOrderInventory');
-        await fulfillOrderInventory(paymentCheckOrder);
+        let fullTrialOrder = await Order.findById(orderId);
+        if (
+          fullTrialOrder &&
+          (fullTrialOrder.provisioningStatus === 'failed' || fullTrialOrder.provisioningStatus === 'provisioning')
+        ) {
+          fullTrialOrder.provisioningStatus = 'pending';
+          fullTrialOrder.provisioningError = '';
+          await fullTrialOrder.save();
+        }
+        await fulfillOrderInventory(fullTrialOrder, allowUnpaid ? { allowUnpaid: true } : {});
         const trialOrder = await Order.findById(orderId);
         if (trialOrder?.trialVpsSlotId && trialOrder?.ipAddress) {
           return {

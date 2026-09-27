@@ -77,13 +77,16 @@ class ResellerWalletService {
 
             await reseller.save({ session });
 
-            // Update order to mark as deducted
-            if (orderId) {
+            const savedTxn = reseller.wallet.transactions[reseller.wallet.transactions.length - 1];
+
+            // Update order to mark as deducted. Use the saved subdocument id —
+            // the plain object pushed above often has no _id yet.
+            if (orderId && savedTxn?._id) {
                 await Order.findByIdAndUpdate(orderId, {
                     'walletDeduction.deducted': true,
                     'walletDeduction.amount': amount,
                     'walletDeduction.timestamp': new Date(),
-                    'walletDeduction.transactionId': transaction._id
+                    'walletDeduction.transactionId': savedTxn._id
                 }, { session });
             }
 
@@ -98,7 +101,7 @@ class ResellerWalletService {
             return {
                 success: true,
                 newBalance: reseller.wallet.balance,
-                transactionId: reseller.wallet.transactions[reseller.wallet.transactions.length - 1]._id
+                transactionId: savedTxn?._id
             };
 
         } catch (error) {
