@@ -26,11 +26,21 @@ export default function DashboardSearchInput({
     <div className={cn('premium-dashboard-search-wrap', className)}>
       <Search className="premium-dashboard-search-icon" aria-hidden="true" />
       <Input
-        type="search"
+        type="text"
+        inputMode="search"
+        enterKeyHint="search"
+        autoComplete="off"
+        autoCorrect="off"
+        autoCapitalize="off"
+        spellCheck={false}
         placeholder={placeholder}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="premium-dashboard-search"
+        onInput={(e) => onChange(e.currentTarget.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') e.preventDefault();
+        }}
+        className="premium-dashboard-search text-base lg:text-sm"
       />
       {value ? (
         <Button

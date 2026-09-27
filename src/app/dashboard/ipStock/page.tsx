@@ -864,13 +864,13 @@ function IPStockContent() {
           await reloadIpStocks(signal);
         }
         if (!signal.aborted) {
-          writeDashboardCache(DASHBOARD_CACHE_KEYS.stockSyncedAt, Date.now());
+        writeDashboardCache(DASHBOARD_CACHE_KEYS.stockSyncedAt, Date.now());
         }
       } catch (e) {
         if (!signal.aborted) console.warn("[IP Stock] Live stock sync error", e);
       } finally {
         if (liveSyncGenerationRef.current === generation) {
-          setIsRefreshingStock(false);
+        setIsRefreshingStock(false);
         }
       }
     };
@@ -1947,7 +1947,7 @@ function IPStockContent() {
             {sectionJumpLinks.length > 1 && (
               <nav
                 aria-label="Plan sections"
-                className="sticky top-[6.5rem] z-30 mb-4 hidden max-w-full premium-ipstock-section-jump lg:flex"
+                className="sticky top-[6.5rem] z-30 mb-4 hidden w-full min-w-0 max-w-full premium-ipstock-section-jump lg:flex lg:flex-wrap"
               >
                 <span className="premium-ipstock-jump-label">Jump to</span>
                 <div className="premium-ipstock-jump-track">
@@ -1971,7 +1971,7 @@ function IPStockContent() {
                   title="Back to filters"
                 >
                   <ArrowUp className="h-3.5 w-3.5" aria-hidden />
-                  Top
+                  <span className="hidden xl:inline">Top</span>
                 </button>
               </nav>
             )}
@@ -2151,37 +2151,37 @@ function IPStockContent() {
               {showServerPlanList &&
                 (serverIpStocks.length === 0 &&
                 !(activeTab === 'all' && (slotPackages.length > 0 || proxyIpStocks.length > 0 || trialPackages.length > 0)) ? (
-                  <Card className="text-center py-12 premium-dashboard-card border-0">
-                    <CardContent>
-                      <div className="w-16 h-16 bg-white/5 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-white/10">
+                <Card className="text-center py-12 premium-dashboard-card border-0">
+                  <CardContent>
+                    <div className="w-16 h-16 bg-white/5 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-white/10">
                         <AlertCircle className="h-8 w-8 premium-dashboard-subtitle" />
-                      </div>
-                      <h3 className="text-lg font-semibold mb-2 text-white">No Plans Available</h3>
+                    </div>
+                    <h3 className="text-lg font-semibold mb-2 text-white">No Plans Available</h3>
                       <p className="text-sm premium-dashboard-subtitle max-w-md mx-auto px-2">
-                        {searchTerm
-                          ? `No servers match your search "${searchTerm}".`
-                          : activeTab === 'all'
-                          ? 'No server plans are currently available.'
+                      {searchTerm
+                        ? `No servers match your search "${searchTerm}".`
+                        : activeTab === 'all'
+                        ? 'No server plans are currently available.'
                           : `No ${activeTab} plans are currently available.`}
-                      </p>
-                      {(searchTerm || priceFilter !== 'all') && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => { setSearchTerm(""); setPriceFilter("all"); setSortBy("name"); }}
-                          className="mt-4"
-                        >
-                          Clear Filters
-                        </Button>
-                      )}
-                    </CardContent>
-                  </Card>
-                ) : (
-                  (() => {
-                    const { grouped, untagged } = tagGroupedStocks;
-                    const tagKeys = Object.keys(grouped).sort();
+                    </p>
+                    {(searchTerm || priceFilter !== 'all') && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => { setSearchTerm(""); setPriceFilter("all"); setSortBy("name"); }}
+                        className="mt-4"
+                      >
+                        Clear Filters
+                      </Button>
+                    )}
+                  </CardContent>
+                </Card>
+              ) : (
+                (() => {
+                  const { grouped, untagged } = tagGroupedStocks;
+                  const tagKeys = Object.keys(grouped).sort();
 
-                    return (
+                  return (
                       <div className="space-y-6 min-w-0">
                         {tagKeys.map((tag) => {
                           const sectionStocks = grouped[tag];
@@ -2199,50 +2199,50 @@ function IPStockContent() {
                               </h2>
                               <Badge variant="outline" className={cn(premiumBadge.neutral, "text-[10px] h-5 px-2 shrink-0")}>
                                 {sectionStocks.length}
-                              </Badge>
-                            </div>
-                            <div className="space-y-2">
-                              {sectionStocks.map((stock) => (
-                                <CompactServerPlanRow
-                                  key={stock._id}
-                                  stock={stock}
-                                  categoryTab={activeTab}
-                                  onBuyNow={handleBuyNow}
-                                  verifyingPurchaseKey={verifyingPurchaseKey}
-                                />
-                              ))}
-                            </div>
+                            </Badge>
                           </div>
+                          <div className="space-y-2">
+                              {sectionStocks.map((stock) => (
+                              <CompactServerPlanRow
+                                key={stock._id}
+                                stock={stock}
+                                  categoryTab={activeTab}
+                                onBuyNow={handleBuyNow}
+                                verifyingPurchaseKey={verifyingPurchaseKey}
+                              />
+                            ))}
+                          </div>
+                        </div>
                           );
                         })}
 
-                        {untagged.length > 0 && (
+                      {untagged.length > 0 && (
                           <div id="ipstock-section-other" className="space-y-2 min-w-0 premium-ipstock-tag-section scroll-mt-44">
-                            {tagKeys.length > 0 && (
+                          {tagKeys.length > 0 && (
                               <div className="flex flex-wrap items-center gap-2 px-1">
                                 <div className="w-1 h-6 bg-white/25 rounded-full shrink-0"></div>
                                 <h2 className="text-base sm:text-lg font-semibold leading-snug premium-dashboard-title">Other Plans</h2>
                                 <Badge variant="outline" className="text-[10px] premium-badge premium-badge--neutral h-5 px-2">
-                                  {untagged.length}
-                                </Badge>
-                              </div>
-                            )}
-                            <div className="space-y-2">
-                              {untagged.map((stock) => (
-                                <CompactServerPlanRow
-                                  key={stock._id}
-                                  stock={stock}
-                                  categoryTab={activeTab}
-                                  onBuyNow={handleBuyNow}
-                                  verifyingPurchaseKey={verifyingPurchaseKey}
-                                />
-                              ))}
+                                {untagged.length}
+                              </Badge>
                             </div>
+                          )}
+                          <div className="space-y-2">
+                            {untagged.map((stock) => (
+                              <CompactServerPlanRow
+                                key={stock._id}
+                                stock={stock}
+                                  categoryTab={activeTab}
+                                onBuyNow={handleBuyNow}
+                                verifyingPurchaseKey={verifyingPurchaseKey}
+                              />
+                            ))}
                           </div>
-                        )}
-                      </div>
-                    );
-                  })()
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()
                 ))}
             </div>
           </div>
@@ -2968,7 +2968,7 @@ const CompactServerPlanRow = memo(function CompactServerPlanRow({
                   disabled
                   className={cn(PLAN_ROW_ACTION, 'w-[7.25rem]')}
                 >
-                  Sold out
+                Sold out
                 </Button>
               </>
             )}
@@ -3029,8 +3029,8 @@ const CompactServerPlanRow = memo(function CompactServerPlanRow({
                       <div className="flex items-center justify-between gap-2 min-w-0 sm:flex-1">
                         {isOceanSmartVps ? (
                           <span className="inline-flex items-center gap-2 min-w-0">
-                            <span className={cn(
-                              "text-sm font-medium font-mono tracking-wide truncate",
+                        <span className={cn(
+                          "text-sm font-medium font-mono tracking-wide truncate",
                               memoryInStock ? "premium-dashboard-title" : "premium-dashboard-subtitle"
                             )}>
                               {formatOceanMemoryDisplay(memory)}
@@ -3041,9 +3041,9 @@ const CompactServerPlanRow = memo(function CompactServerPlanRow({
                           <span className={cn(
                             "text-sm font-medium font-mono tracking-wide truncate",
                             memoryInStock ? "premium-dashboard-title" : "premium-dashboard-subtitle"
-                          )}>
-                            {label}
-                          </span>
+                        )}>
+                          {label}
+                        </span>
                         )}
                         <span className={cn(
                           "font-bold text-base shrink-0 sm:hidden",
@@ -3061,33 +3061,33 @@ const CompactServerPlanRow = memo(function CompactServerPlanRow({
                         </span>
                         {memoryInStock && hasPrice ? (
                           <>
-                            <AddToCartButton
-                              kind="ipstock"
-                              ipStockId={stock._id}
-                              memory={memory}
-                              netbayGroupTag={tag || undefined}
-                              size="sm"
-                              variant="outline"
+                        <AddToCartButton
+                          kind="ipstock"
+                          ipStockId={stock._id}
+                          memory={memory}
+                          netbayGroupTag={tag || undefined}
+                          size="sm"
+                          variant="outline"
                               iconOnly
                               className={cn(PLAN_ROW_ACTION, 'w-10 px-0')}
                               label="Add to cart"
-                            />
-                            <Button
-                              size="sm"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onBuyNow(stock.name, memory, details.price!, stock._id, undefined, memoryInStock, tag || undefined);
-                              }}
+                        />
+                        <Button
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onBuyNow(stock.name, memory, details.price!, stock._id, undefined, memoryInStock, tag || undefined);
+                          }}
                               disabled={verifyingPurchaseKey === verifyKey}
                               className={cn(PLAN_ROW_ACTION, 'flex-1 sm:flex-none gap-1.5 premium-btn-primary border-0')}
-                            >
-                              {verifyingPurchaseKey === verifyKey ? (
-                                <Loader2 className="h-3 w-3 animate-spin" />
+                        >
+                          {verifyingPurchaseKey === verifyKey ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
                               ) : (
                                 <Zap className="h-3 w-3" />
                               )}
                               {verifyingPurchaseKey === verifyKey ? 'Checking…' : 'Buy Now'}
-                            </Button>
+                        </Button>
                           </>
                         ) : (
                           <span className="premium-ipstock-status-label">

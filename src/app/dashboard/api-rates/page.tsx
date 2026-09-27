@@ -2,12 +2,12 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tag, ArrowUpRight, BookOpen, Wallet, Loader2 } from 'lucide-react';
 import { dashboardFetch } from '@/lib/dashboardFetch';
+import DashboardSearchInput from '@/components/dashboard/DashboardSearchInput';
 import { cn } from '@/lib/utils';
 
 interface RatePlan {
@@ -29,12 +29,23 @@ interface RateSlot {
 
 const softCard = 'premium-dashboard-card border-0';
 
+function matchesQuery(haystack: string[], query: string) {
+    const tokens = query
+        .toLowerCase()
+        .split(/[\s,/]+/)
+        .map((t) => t.trim())
+        .filter(Boolean);
+    if (tokens.length === 0) return true;
+    const blob = haystack.join(' ').toLowerCase();
+    return tokens.every((token) => blob.includes(token));
+}
+
 export default function ResellerApiRatesPage() {
-    const router = useRouter();
     const [loading, setLoading] = useState(true);
     const [forbidden, setForbidden] = useState(false);
     const [plans, setPlans] = useState<RatePlan[]>([]);
     const [slotIps, setSlotIps] = useState<RateSlot[]>([]);
+    const [searchQuery, setSearchQuery] = useState('');
 
     const formatINR = useMemo(
         () =>
@@ -66,6 +77,31 @@ export default function ResellerApiRatesPage() {
         return () => { cancelled = true; };
     }, []);
 
+    const filteredPlans = useMemo(() => {
+        const q = searchQuery.trim();
+        if (!q) return plans;
+        return plans.filter((plan) =>
+            matchesQuery(
+                [
+                    plan.name,
+                    plan.serverType,
+                    ...(plan.tags || []),
+                    ...plan.rates.map((rate) => rate.memory),
+                ],
+                q,
+            ),
+        );
+    }, [plans, searchQuery]);
+
+    const filteredSlots = useMemo(() => {
+        const q = searchQuery.trim();
+        if (!q) return slotIps;
+        return slotIps.filter((slot) => matchesQuery([slot.name], q));
+    }, [slotIps, searchQuery]);
+
+    const hasCatalog = plans.length > 0 || slotIps.length > 0;
+    const hasMatches = filteredPlans.length > 0 || filteredSlots.length > 0;
+
     if (loading) {
         return (
             <div className="min-h-screen flex items-center justify-center">
@@ -93,49 +129,81 @@ export default function ResellerApiRatesPage() {
     }
 
     return (
-        <div className="min-h-screen p-4 sm:p-6 space-y-4 max-w-7xl mx-auto">
-            <div className="flex items-start justify-between gap-3 flex-wrap">
-                <div>
-                    <h1 className="text-xl sm:text-2xl font-bold premium-dashboard-title flex items-center gap-2">
-                        <Tag className="h-5 w-5 text-emerald-600 dark:text-emerald-300" />
+        <div className="min-h-screen px-3 py-4 sm:p-6 space-y-4 max-w-7xl mx-auto pb-8">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
+                    <h1 className="text-lg sm:text-2xl font-bold premium-dashboard-title flex items-center gap-2">
+                        <Tag className="h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-300" />
                         Your API Rates
                     </h1>
-                    <p className="text-sm premium-dashboard-subtitle mt-1">
+                    <p className="text-xs sm:text-sm premium-dashboard-subtitle mt-1 leading-relaxed">
                         Your negotiated reseller rates — applied automatically on every Reseller API order. No promo
                         codes needed.
                     </p>
                 </div>
-                <div className="flex gap-2 shrink-0">
-                    <Button variant="outline" size="sm" asChild className="premium-btn-outline">
+                <div className="grid grid-cols-2 gap-2 w-full sm:w-auto sm:flex sm:shrink-0">
+                    <Button variant="outline" size="sm" asChild className="premium-btn-outline w-full sm:w-auto justify-center">
                         <Link href="/dashboard/reseller-api-docs">
                             <BookOpen className="h-3.5 w-3.5 mr-1.5" />
                             API Docs
                         </Link>
                     </Button>
-                    <Button variant="outline" size="sm" asChild className="premium-btn-outline">
+                    <Button variant="outline" size="sm" asChild className="premium-btn-outline w-full sm:w-auto justify-center">
                         <Link href="/dashboard/reseller-wallet">
                             <Wallet className="h-3.5 w-3.5 mr-1.5" />
-                            Reseller Console
+                            Console
                         </Link>
                     </Button>
                 </div>
             </div>
 
-            {plans.length === 0 && slotIps.length === 0 ? (
+            {hasCatalog ? (
+                <div className="sticky top-0 z-10 -mx-3 px-3 py-2 sm:static sm:mx-0 sm:px-0 sm:py-0 bg-[color:var(--background)]/95 sm:bg-transparent backdrop-blur-md sm:backdrop-blur-none">
+                    <DashboardSearchInput
+                        value={searchQuery}
+                        onChange={setSearchQuery}
+                        placeholder="Search products, e.g. 103.109"
+                    />
+                    {searchQuery.trim() ? (
+                        <p className="mt-2 text-[11px] sm:text-xs premium-dashboard-subtitle">
+                            {hasMatches
+                                ? `${filteredPlans.length + filteredSlots.length} product${filteredPlans.length + filteredSlots.length === 1 ? '' : 's'} matching “${searchQuery.trim()}”`
+                                : `No products matching “${searchQuery.trim()}”`}
+                        </p>
+                    ) : null}
+                </div>
+            ) : null}
+
+            {!hasCatalog ? (
                 <Card className={softCard}>
                     <CardContent className="py-12 text-center">
                         <p className="text-sm text-white/45">No rate plans available right now.</p>
                     </CardContent>
                 </Card>
+            ) : !hasMatches ? (
+                <Card className={softCard}>
+                    <CardContent className="py-10 text-center space-y-3">
+                        <p className="text-sm text-white/55">No products match that search.</p>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="premium-btn-outline"
+                            onClick={() => setSearchQuery('')}
+                        >
+                            Clear search
+                        </Button>
+                    </CardContent>
+                </Card>
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                    {plans.map((plan) => (
+                    {filteredPlans.map((plan) => (
                         <div
                             key={plan.id}
-                            className="rounded-xl border border-white/10 bg-white/[0.03] p-3.5 space-y-2.5"
+                            className="rounded-xl border border-white/10 bg-white/[0.03] p-3 sm:p-3.5 space-y-2.5"
                         >
                             <div className="flex items-start justify-between gap-2">
-                                <p className="text-sm font-semibold text-white leading-snug line-clamp-2">
+                                <p className="text-sm font-semibold text-white leading-snug break-words min-w-0">
                                     {plan.name}
                                 </p>
                                 <Badge
@@ -170,13 +238,13 @@ export default function ResellerApiRatesPage() {
                             </div>
                         </div>
                     ))}
-                    {slotIps.map((slot) => (
+                    {filteredSlots.map((slot) => (
                         <div
                             key={slot.id}
-                            className="rounded-xl border border-white/10 bg-white/[0.03] p-3.5 space-y-2.5"
+                            className="rounded-xl border border-white/10 bg-white/[0.03] p-3 sm:p-3.5 space-y-2.5"
                         >
                             <div className="flex items-start justify-between gap-2">
-                                <p className="text-sm font-semibold text-white leading-snug line-clamp-2">
+                                <p className="text-sm font-semibold text-white leading-snug break-words min-w-0">
                                     {slot.name}
                                 </p>
                                 <Badge
@@ -191,7 +259,7 @@ export default function ResellerApiRatesPage() {
                                     {slot.available ? 'In stock' : 'Out of stock'}
                                 </Badge>
                             </div>
-                            <div className="flex items-baseline gap-1.5">
+                            <div className="flex flex-wrap items-baseline gap-1.5">
                                 <span className="font-semibold text-emerald-300 text-sm">
                                     {formatINR(slot.pricePerIp)}
                                 </span>

@@ -220,14 +220,27 @@ const ViewLinux = () => {
 
         // Apply search filter
         if (searchQuery.trim()) {
-            const query = searchQuery.toLowerCase();
-            filtered = filtered.filter(order =>
-                order.ipAddress?.toLowerCase().includes(query) ||
-                order.productName.toLowerCase().includes(query) ||
-                order.os.toLowerCase().includes(query) ||
-                order.username?.toLowerCase().includes(query) ||
-                (order.provider && order.provider.toLowerCase().includes(query))
-            );
+            const query = searchQuery.toLowerCase().trim();
+            const compactQuery = query.replace(/\s+/g, '');
+            filtered = filtered.filter((order) => {
+                const ip = (order.ipAddress || '').toLowerCase();
+                const haystack = [
+                    ip,
+                    ip.replace(/[^a-z0-9.]/g, ''),
+                    order.productName,
+                    order.os,
+                    humanizeOsLabel(order.os, order.productName),
+                    order.memory,
+                    order.username,
+                    order.provider,
+                    getProviderDisplayName(order),
+                    order._id,
+                ]
+                    .filter(Boolean)
+                    .join(' ')
+                    .toLowerCase();
+                return haystack.includes(query) || haystack.replace(/\s+/g, '').includes(compactQuery);
+            });
         }
 
         // Apply status filter
@@ -542,69 +555,6 @@ const ViewLinux = () => {
     return (
         <div className='premium-dashboard-page'>
             <div className='premium-dashboard-page-inner'>
-                {/* Search and Filters Section - Enhanced */}
-                {!loading && orders.filter(isServerListOrder).length > 0 && (
-                    <div className="premium-dashboard-toolbar mb-4 sm:mb-6 space-y-3 sm:space-y-4">
-                        <div className="flex flex-row items-center gap-2">
-                            <DashboardSearchInput
-                                value={searchQuery}
-                                onChange={setSearchQuery}
-                                onClear={clearSearch}
-                                placeholder="Search servers..."
-                                className="min-w-0 flex-1"
-                            />
-
-                            <div className="flex shrink-0 items-center gap-2">
-                                <Button
-                                    variant="outline"
-                                    className="gap-1.5 premium-btn-outline shrink-0 px-2.5 sm:gap-2 sm:px-4"
-                                    onClick={() => fetchOrders(true)}
-                                    disabled={loading || refreshing}
-                                >
-                                    <RefreshCw className={`h-4 w-4 shrink-0 ${loading || refreshing ? 'animate-spin' : ''}`} />
-                                    <span>Refresh</span>
-                                </Button>
-
-                            {/* Status Filter */}
-                            <div className="flex min-w-0 shrink-0 gap-2">
-                                <Select value={statusFilter} onValueChange={setStatusFilter}>
-                                    <SelectTrigger className="premium-dashboard-select w-[7.25rem] sm:w-40">
-                                        <Filter className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
-                                        <SelectValue placeholder="Status" />
-                                    </SelectTrigger>
-                                    <SelectContent className={premiumSelectContent}>
-                                        <SelectItem value="all">All Status</SelectItem>
-                                        <SelectItem value="active">Active</SelectItem>
-                                        <SelectItem value="expired">Expired</SelectItem>
-                                    </SelectContent>
-                                </Select>
-
-                                {/* Clear Filters Button */}
-                                {(searchQuery || statusFilter !== 'all' || activeTab !== 'all') && (
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={clearFilters}
-                                        className="premium-btn-outline shrink-0"
-                                    >
-                                        Clear
-                                    </Button>
-                                )}
-                            </div>
-                            </div>
-                        </div>
-
-                        {/* Show filter summary */}
-                        {(searchQuery || statusFilter !== 'all') && (
-                            <p className="text-xs sm:text-sm text-white/45">
-                                {filteredOrders.length} of {orders.filter(isServerListOrder).length} servers
-                                {searchQuery && ` matching "${searchQuery}"`}
-                                {statusFilter !== 'all' && ` with status "${statusFilter}"`}
-                            </p>
-                        )}
-                    </div>
-                )}
-
                 {loading ? (
                     <div className="flex justify-center items-center py-12 sm:py-16 min-h-[50vh]">
                         <div className="flex flex-col items-center gap-3 sm:gap-4">
@@ -638,35 +588,95 @@ const ViewLinux = () => {
                         </div>
                     </div>
                 ) : (
-                    <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4 sm:space-y-6 premium-dashboard-tabs">
-                        {/* Enhanced Tab Navigation with Counts */}
-                        <div className="w-full min-w-0">
-                            <TabsList className="premium-dashboard-tablist grid h-auto w-full grid-cols-3 gap-1.5 sm:gap-2">
-                                <TabsTrigger value="all" className="flex w-full min-w-0 items-center justify-center gap-1 px-2 sm:px-3 py-2 text-xs sm:text-sm">
-                                    <Server className="h-3 w-3 sm:h-4 sm:w-4" />
+                    <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-3 sm:space-y-5 premium-dashboard-tabs premium-viewlinux-tabs">
+                        <div className="premium-dashboard-toolbar premium-viewlinux-toolbar mb-0 space-y-2.5">
+                            <div className="flex items-center gap-2">
+                                <DashboardSearchInput
+                                    value={searchQuery}
+                                    onChange={setSearchQuery}
+                                    onClear={clearSearch}
+                                    placeholder="Search IP, product, or OS"
+                                    className="min-w-0 flex-1"
+                                />
+                                <Button
+                                    variant="outline"
+                                    className="premium-btn-outline premium-btn-icon shrink-0 px-0 lg:w-auto lg:px-4 lg:gap-2"
+                                    onClick={() => fetchOrders(true)}
+                                    disabled={loading || refreshing}
+                                    aria-label="Refresh servers"
+                                    title="Refresh"
+                                >
+                                    <RefreshCw className={`h-4 w-4 shrink-0 ${loading || refreshing ? 'animate-spin' : ''}`} />
+                                    <span className="hidden lg:inline">Refresh</span>
+                                </Button>
+                                <div className="hidden lg:block">
+                                    <Select value={statusFilter} onValueChange={setStatusFilter}>
+                                        <SelectTrigger className="premium-dashboard-select w-40">
+                                            <Filter className="h-4 w-4 mr-2" />
+                                            <SelectValue placeholder="Status" />
+                                        </SelectTrigger>
+                                        <SelectContent className={premiumSelectContent}>
+                                            <SelectItem value="all">All Status</SelectItem>
+                                            <SelectItem value="active">Active</SelectItem>
+                                            <SelectItem value="expired">Expired</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                {(searchQuery || statusFilter !== 'all' || activeTab !== 'all') && (
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={clearFilters}
+                                        className="premium-btn-outline hidden lg:inline-flex"
+                                    >
+                                        Clear
+                                    </Button>
+                                )}
+                            </div>
+
+                            <TabsList className="premium-dashboard-tablist premium-viewlinux-tablist grid h-auto w-full grid-cols-3 gap-1">
+                                <TabsTrigger value="all" className="flex w-full min-w-0 items-center justify-center gap-1 px-1.5 sm:px-3 py-2 text-xs sm:text-sm">
+                                    <Server className="hidden sm:block h-4 w-4" />
                                     <span>All</span>
-                                    <Badge variant="secondary" className="premium-tab-count ml-0.5 text-xs h-4 px-1">
+                                    <Badge variant="secondary" className="premium-tab-count ml-0.5 text-[10px] sm:text-xs h-4 px-1">
                                         {counts.all}
                                     </Badge>
                                 </TabsTrigger>
-                                <TabsTrigger value="active" className="flex w-full min-w-0 items-center justify-center gap-1 px-2 sm:px-3 py-2 text-xs sm:text-sm">
-                                    <CheckCircle className="h-3 w-3 sm:h-4 sm:w-4" />
+                                <TabsTrigger value="active" className="flex w-full min-w-0 items-center justify-center gap-1 px-1.5 sm:px-3 py-2 text-xs sm:text-sm">
+                                    <CheckCircle className="hidden sm:block h-4 w-4" />
                                     <span>Active</span>
-                                    <Badge variant="secondary" className="premium-tab-count ml-0.5 text-xs h-4 px-1">
+                                    <Badge variant="secondary" className="premium-tab-count ml-0.5 text-[10px] sm:text-xs h-4 px-1">
                                         {counts.active}
                                     </Badge>
                                 </TabsTrigger>
-                                <TabsTrigger value="expired" className="flex w-full min-w-0 items-center justify-center gap-1 px-2 sm:px-3 py-2 text-xs sm:text-sm">
-                                    <Calendar className="h-3 w-3 sm:h-4 sm:w-4" />
+                                <TabsTrigger value="expired" className="flex w-full min-w-0 items-center justify-center gap-1 px-1.5 sm:px-3 py-2 text-xs sm:text-sm">
+                                    <Calendar className="hidden sm:block h-4 w-4" />
                                     <span>Expired</span>
-                                    <Badge variant="secondary" className="premium-tab-count ml-0.5 text-xs h-4 px-1">
+                                    <Badge variant="secondary" className="premium-tab-count ml-0.5 text-[10px] sm:text-xs h-4 px-1">
                                         {counts.expired}
                                     </Badge>
                                 </TabsTrigger>
                             </TabsList>
+
+                            {(searchQuery || statusFilter !== 'all') && (
+                                <div className="flex items-center justify-between gap-2">
+                                    <p className="text-xs sm:text-sm text-white/45 min-w-0 truncate">
+                                        {filteredOrders.length} of {orders.filter(isServerListOrder).length} servers
+                                        {searchQuery && ` matching "${searchQuery}"`}
+                                    </p>
+                                    <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={clearFilters}
+                                        className="lg:hidden h-8 px-2 text-xs shrink-0"
+                                    >
+                                        Clear
+                                    </Button>
+                                </div>
+                            )}
                         </div>
 
-                        <TabsContent value={activeTab} className="mt-4 sm:mt-6">
+                        <TabsContent value={activeTab} className="mt-0">
                             {filteredOrders.length === 0 ? (
                                 <div className="text-center py-12 sm:py-16 px-4 min-h-[50vh] flex flex-col justify-center">
                                     <div className="w-16 h-16 sm:w-20 sm:h-20 mx-auto mb-4 sm:mb-6 bg-muted rounded-full flex items-center justify-center">

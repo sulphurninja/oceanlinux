@@ -875,6 +875,68 @@ html {
     .premium-ipstock-page {
       padding-right: 0.25rem;
     }
+
+    .premium-ipstock-section-jump {
+      width: 100%;
+      max-width: 100%;
+      min-width: 0;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.4rem 0.5rem;
+      padding: 0.45rem 0.55rem;
+      border-radius: 1.15rem;
+    }
+
+    .premium-ipstock-jump-label {
+      padding-top: 0.15rem;
+      align-self: center;
+    }
+
+    .premium-ipstock-jump-track {
+      flex: 1 1 14rem;
+      flex-wrap: wrap;
+      overflow-x: visible;
+      row-gap: 0.35rem;
+      column-gap: 0.35rem;
+      min-width: 0;
+    }
+
+    .premium-ipstock-section-jump-link {
+      white-space: normal;
+      text-align: center;
+      line-height: 1.2;
+      height: auto;
+      min-height: 2rem;
+      max-width: min(12.5rem, 100%);
+      padding: 0.35rem 0.65rem;
+      font-size: 0.6875rem;
+    }
+
+    .premium-ipstock-jump-top {
+      margin-left: auto;
+    }
+
+    [id^="ipstock-section-"] {
+      scroll-margin-top: 11rem;
+    }
+  }
+
+  @media (min-width: 1440px) {
+    .premium-ipstock-section-jump-link {
+      max-width: none;
+      white-space: nowrap;
+      font-size: 0.75rem;
+      padding: 0.35rem 0.75rem;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    html.premium-dashboard-active .premium-viewlinux-toolbar .premium-btn-icon {
+      width: auto !important;
+      min-width: 0 !important;
+      padding-left: 1.25rem !important;
+      padding-right: 1.25rem !important;
+    }
   }
 
   .premium-ipstock-plan-icon {
@@ -4504,11 +4566,38 @@ html.premium-dashboard-active .premium-badge {
     gap: 0.3rem !important;
   }
 
+  html.premium-dashboard-active .premium-dashboard-search {
+    font-size: 16px !important;
+    line-height: 1.25 !important;
+  }
+
   html.premium-dashboard-active .premium-dashboard-toolbar .premium-dashboard-select {
     width: 6.6rem !important;
     min-width: 0 !important;
     padding-left: 0.4rem !important;
     padding-right: 1.4rem !important;
+    font-size: 0.75rem !important;
+  }
+
+  html.premium-dashboard-active .premium-viewlinux-toolbar .premium-btn-icon {
+    width: 2.75rem !important;
+    min-width: 2.75rem !important;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+  }
+
+  html.premium-dashboard-active .premium-viewlinux-toolbar .premium-dashboard-tablist,
+  html.premium-dashboard-active .premium-viewlinux-tabs .premium-viewlinux-tablist {
+    padding: 0.2rem !important;
+    gap: 0.25rem !important;
+    border-radius: 0.85rem !important;
+    background: transparent !important;
+    border: 0 !important;
+  }
+
+  html.premium-dashboard-active .premium-viewlinux-toolbar [role="tab"] {
+    min-height: 2.25rem !important;
+    padding: 0.35rem 0.35rem !important;
     font-size: 0.75rem !important;
   }
 
