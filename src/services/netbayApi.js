@@ -329,12 +329,15 @@ class NetbayApi {
   }
 
   /** POST renew — extends service for `months` (min 1), deducts Netbay wallet. */
-  async renewService(serviceId, { months = 1 } = {}) {
+  async renewService(serviceId, { months = 1, couponCode } = {}) {
     if (!serviceId) throw new Error('NetbayApi.renewService: serviceId is required');
     const m = Math.max(1, Math.floor(Number(months) || 1));
+    const body = { months: m };
+    const code = String(couponCode || '').trim();
+    if (code) body.couponCode = code;
     return this._request(`/api/v1/services/${encodeURIComponent(serviceId)}/renew`, {
       method: 'POST',
-      body: { months: m },
+      body,
     });
   }
 
@@ -525,12 +528,15 @@ class NetbayApi {
     return this._request(`/api/v1/proxy/${encodeURIComponent(proxyId)}/renewal-pricing`);
   }
 
-  async renewProxy(proxyId, { months = 1 } = {}) {
+  async renewProxy(proxyId, { months = 1, couponCode } = {}) {
     if (!proxyId) throw new Error('NetbayApi.renewProxy: proxyId is required');
     const m = Math.max(1, Math.floor(Number(months) || 1));
+    const body = { months: m };
+    const code = String(couponCode || '').trim();
+    if (code) body.couponCode = code;
     return this._request(`/api/v1/proxy/${encodeURIComponent(proxyId)}/renew`, {
       method: 'POST',
-      body: { months: m },
+      body,
     });
   }
 
