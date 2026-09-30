@@ -47,7 +47,15 @@ const renewalRequestSchema = new mongoose.Schema({
   amount: { type: Number, required: true },
   paymentMethod: {
     type: String,
-    enum: ['cashfree', 'razorpay', 'upi'],
+    enum: [
+      'wallet',
+      'cashfree',
+      'razorpay',
+      'upi',
+      'wallet+cashfree',
+      'wallet+razorpay',
+      'wallet+upi',
+    ],
     required: true,
   },
   paymentId: { type: String },           // gateway payment id (cf_payment_id / razorpay_payment_id)

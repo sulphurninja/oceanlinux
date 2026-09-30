@@ -405,6 +405,18 @@ export async function POST(request) {
       const customer = await User.findById(order.user).select('name email').lean();
       const stockName = companyCheck.stockName || '';
 
+      const storedRenewalPaymentMethod =
+        order.pendingRenewal?.paymentMethod &&
+        String(order.pendingRenewal.paymentMethod).startsWith('wallet+')
+          ? String(order.pendingRenewal.paymentMethod)
+          : actualPaymentMethod;
+
+      const renewalGatewayOrderId =
+        storedRenewalPaymentMethod === 'razorpay' ||
+        storedRenewalPaymentMethod === 'wallet+razorpay'
+          ? order.pendingRenewal?.gatewayOrderId || razorpayOrderId || renewalTxnId
+          : renewalTxnId;
+
       let renewalReq;
       try {
         renewalReq = await RenewalRequest.create({
@@ -413,13 +425,15 @@ export async function POST(request) {
           companyId: companyCheck.companyId,
           renewalTxnId,
           amount: renewalPrice,
-          paymentMethod: actualPaymentMethod,
+          paymentMethod: storedRenewalPaymentMethod,
           paymentId: cf_payment_id,
-          gatewayOrderId: actualPaymentMethod === 'razorpay' ? razorpayPaymentId : renewalTxnId,
+          gatewayOrderId: renewalGatewayOrderId,
           paymentDetails: {
-            method: actualPaymentMethod,
+            method: storedRenewalPaymentMethod,
             payment_id: cf_payment_id,
-            order_id: actualPaymentMethod === 'razorpay' ? razorpayPaymentId : renewalTxnId,
+            order_id: renewalGatewayOrderId,
+            walletTxnId: order.pendingRenewal?.walletTxnId || null,
+            walletAmount: order.pendingRenewal?.walletAmount || 0,
             confirmedAt: new Date(),
           },
           status: 'pending',

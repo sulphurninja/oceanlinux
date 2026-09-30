@@ -260,7 +260,14 @@ interface RenewalRequestDoc {
   orderId: string;
   renewalTxnId: string;
   amount: number;
-  paymentMethod: 'cashfree' | 'razorpay' | 'upi';
+  paymentMethod:
+    | 'wallet'
+    | 'cashfree'
+    | 'razorpay'
+    | 'upi'
+    | 'wallet+cashfree'
+    | 'wallet+razorpay'
+    | 'wallet+upi';
   paymentId?: string;
   status: 'pending' | 'approved' | 'rejected';
   requestedAt: string;
