@@ -175,11 +175,11 @@ const PROVIDER_CAPABILITIES = {
     notes: 'Joy Services — power actions + status only. OS reinstall/change is not exposed by the Joy connect API.',
   },
   'reseller-api': {
-    supported: ['start', 'stop', 'restart', 'status', 'sync', 'templates', 'reinstall', 'resetmac'],
+    supported: ['start', 'stop', 'restart', 'status', 'sync', 'templates', 'reinstall', 'resetmac', 'reconfigure-network'],
     reinstallRequiresOs: true,
     changeosRequiresOs: false,
     osOptions: ['ubuntu', 'centos', 'windows'],
-    notes: 'PrimeVPS / Hostheaven panel — osType must be an ISO id or name from the templates action. resetmac stops the VM, assigns a new MAC, then restarts it.',
+    notes: 'PrimeVPS / Hostheaven panel — osType must be an ISO id or name from the templates action. resetmac stops the VM, assigns a new MAC, then restarts it. reconfigure-network repairs primary NIC settings on the panel.',
   },
   oceanlinux: {
     supported: [],
@@ -195,6 +195,7 @@ export function normalizeResellerAction(action) {
   if (a === 'format' || a === 'rebuild') return 'reinstall';
   if (a === 'reboot') return 'restart';
   if (a === 'reset-mac') return 'resetmac';
+  if (a === 'reconfigurenetwork' || a === 'repair-network' || a === 'repairnetwork') return 'reconfigure-network';
   return a;
 }
 
@@ -880,6 +881,22 @@ async function runResellerApi(order, orderId, action, osType, ipStock) {
         message: apiRes?.message || 'MAC address regenerated successfully',
         data: {
           newMacAddress,
+          vmId,
+          apiResponse: apiRes,
+        },
+      };
+    }
+    case 'reconfigure-network': {
+      const { vmId } = await findVm();
+      const apiRes = await api.reconfigureNetwork(vmId);
+      await Order.findByIdAndUpdate(orderId, {
+        lastAction: 'reconfigure-network',
+        lastActionTime: new Date(),
+      });
+      return {
+        success: true,
+        message: apiRes?.message || 'Network reconfiguration initiated',
+        data: {
           vmId,
           apiResponse: apiRes,
         },

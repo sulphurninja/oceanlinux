@@ -1894,7 +1894,7 @@ export default function CompaniesPage() {
                   Use this to wire orders linked to this company up to an external
                   reseller hosting panel API (e.g.{' '}
                   <code className="text-foreground">https://vps.hostheaven.in</code>).
-                  Power, reinstall and MAC reset will be driven through that API.
+                  Power, reinstall, MAC reset and network reconfigure (primary NIC) will be driven through that API.
                   This is an alternative to Virtualizor — Virtualizor takes priority
                   if both are configured.
                 </p>

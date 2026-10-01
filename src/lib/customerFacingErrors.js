@@ -13,6 +13,7 @@ const ACTION_MESSAGES = {
   restart: 'Could not restart your server. Please try again or contact support.',
   reboot: 'Could not reboot your server. Please try again or contact support.',
   resetmac: 'Could not reset the MAC address. Please try again later.',
+  'reconfigure-network': 'Could not reconfigure network. Please try again later or contact support.',
   changepassword: 'Could not update the password. Please try again or contact support.',
   generatepassword: 'Could not generate a new password. Try Format Server or contact support.',
   sync: 'Could not refresh server details right now. Please try again.',
@@ -116,7 +117,8 @@ function customerServiceErrorMessage(raw, { action, code } = {}) {
 
   const actionKey = String(action || '')
     .toLowerCase()
-    .replace(/reset-mac/, 'resetmac');
+    .replace(/reset-mac/, 'resetmac')
+    .replace(/reconfigurenetwork/, 'reconfigure-network');
   return ACTION_MESSAGES[actionKey] || GENERIC_SERVICE_ERROR;
 }
 

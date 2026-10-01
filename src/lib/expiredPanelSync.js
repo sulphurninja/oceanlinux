@@ -18,6 +18,8 @@ const EXPIRED_BLOCKED_ACTIONS = new Set([
   'pullpassword',
   'resetmac',
   'reset-mac',
+  'reconfigure-network',
+  'reconfigurenetwork',
   'changeos',
   'templates',
 ]);

@@ -566,7 +566,7 @@ x-api-secret: YOUR_API_SECRET`}
   },
   "management": {
     "available": true,
-    "supportedActions": ["start", "stop", "restart", "status", "sync", "templates", "reinstall", "resetmac"],
+    "supportedActions": ["start", "stop", "restart", "status", "sync", "templates", "reinstall", "resetmac", "reconfigure-network"],
     "reinstallRequiresOs": true,
     "osOptions": ["Windows Server 2022", "Windows Server 2025", "Ubuntu 22.04"],
     "osTemplates": [
@@ -580,14 +580,14 @@ x-api-secret: YOUR_API_SECRET`}
                             <p className="mt-3 text-sm premium-dashboard-subtitle">
                                 osTemplates Ocean panel ke reinstall dropdown jaisi live list hai (2022, 2025, Ubuntu,
                                 etc.). Reinstall ke liye osType me id ya name bhejo.{' '}
-                                <code>resetmac</code> sirf ADVPS aur Reseller-panel VPS par dikhega — har product par nahi.
+                                <code>resetmac</code> aur <code>reconfigure-network</code> sirf ADVPS / Reseller-panel VPS par — har product par nahi.
                             </p>
                         </EndpointCard>
 
                         <EndpointCard
                             method="POST"
                             path="/orders/manage"
-                            description="Server actions: start, stop, restart, status, templates, reinstall, changeos, resetmac, sync"
+                            description="Server actions: start, stop, restart, status, templates, reinstall, changeos, resetmac, reconfigure-network, sync"
                         >
                             <CodeBlock
                                 label="Request body"
@@ -620,6 +620,9 @@ x-api-secret: YOUR_API_SECRET`}
                                         <code>resetmac</code> — New MAC address (ADVPS + Reseller-panel VPS only; alias{' '}
                                         <code>reset-mac</code>)
                                     </li>
+                                    <li>
+                                        <code>reconfigure-network</code> — Repair primary NIC / network on Hostheaven-style panels
+                                    </li>
                                     <li><code>sync</code> — Provider se status / password sync</li>
                                 </ul>
                             </div>
@@ -630,6 +633,10 @@ x-api-secret: YOUR_API_SECRET`}
                             <CodeBlock
                                 label="MAC reset request"
                                 code={`{ "orderId": "65b...", "action": "resetmac" }`}
+                            />
+                            <CodeBlock
+                                label="Network reconfigure request"
+                                code={`{ "orderId": "65b...", "action": "reconfigure-network" }`}
                             />
                             <CodeBlock
                                 label="Status response"

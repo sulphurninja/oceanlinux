@@ -1694,6 +1694,14 @@ export async function POST(request) {
                 await Order.findByIdAndUpdate(orderId, {
                   lastAction: 'reconfigure-network',
                   lastActionTime: new Date(),
+                  $push: {
+                    logs: {
+                      action: 'reconfigure-network',
+                      timestamp: new Date(),
+                      details: `Network reconfigure via reseller API (vmId=${vmId})`,
+                      success: true,
+                    },
+                  },
                 });
                 return NextResponse.json({
                   success: true,

@@ -1491,6 +1491,15 @@ const OrderDetails = () => {
           }
           toast.info('Waiting for server to come back online…', { duration: 3000 });
           await pollPowerStateAfterAction('restart');
+        } else if (action === 'reconfigure-network') {
+          const msg = data.result?.message;
+          toast.success(
+            msg && typeof msg === 'string'
+              ? customerSuccessMessage(msg, 'Network reconfiguration started.')
+              : 'Network reconfiguration started.',
+            { duration: 5000 }
+          );
+          toast.info('This may take a minute. Refresh status if connectivity does not return.', { duration: 4000 });
         } else if (action === 'reinstall' || action === 'format') {
           toast.success(
             action === 'format'
@@ -1517,7 +1526,7 @@ const OrderDetails = () => {
 
         await Promise.all([
           loadServiceDetails({
-            skipPowerRefresh: ['start', 'stop', 'restart', 'resetmac'].includes(action),
+            skipPowerRefresh: ['start', 'stop', 'restart', 'resetmac', 'reconfigure-network'].includes(action),
           }),
           fetchOrder({ silent: true }),
         ]);
@@ -1634,6 +1643,17 @@ const OrderDetails = () => {
       destructive: true,
     });
     if (ok) void runServiceAction('resetmac');
+  };
+
+  const handleReconfigureNetwork = async () => {
+    const ok = await confirm({
+      title: 'Reconfigure Network',
+      description:
+        'Repair and reapply network settings (primary NIC) on the reseller panel? Use this if the VM lost connectivity after a panel change. The server may reboot or briefly drop connection.',
+      confirmLabel: 'Reconfigure Network',
+      destructive: true,
+    });
+    if (ok) void runServiceAction('reconfigure-network');
   };
 
   const executeAdvancedAction = async (action: 'reinstall' | 'format') => {
@@ -2315,6 +2335,7 @@ const OrderDetails = () => {
         'format': { label: 'Formatting', icon: Loader2, color: 'bg-muted text-muted-foreground border-border' },
         'changepassword': { label: 'Changing Password', icon: Loader2, color: 'bg-primary/10 text-primary border-primary/20' },
         'resetmac': { label: 'Resetting MAC', icon: Loader2, color: 'bg-primary/10 text-primary border-primary/20' },
+        'reconfigure-network': { label: 'Reconfiguring network', icon: Loader2, color: 'bg-primary/10 text-primary border-primary/20' },
       };
 
       const actionConfig = actionLabels[actionBusy as keyof typeof actionLabels];
@@ -3622,12 +3643,19 @@ const OrderDetails = () => {
                           {order.lastAction === 'reinstall' && <HardDriveIcon className="h-5 w-5 text-primary" />}
                           {order.lastAction === 'format' && <HardDriveIcon className="h-5 w-5 text-primary" />}
                           {order.lastAction === 'resetmac' && <Network className="h-5 w-5 text-primary" />}
+                          {order.lastAction === 'reconfigure-network' && <Network className="h-5 w-5 text-primary" />}
                           {!order.lastAction && <Activity className="h-5 w-5 text-primary" />}
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="font-semibold text-foreground text-sm break-words">
                             {order.lastAction ?
-                              `Last action: ${order.lastAction === 'resetmac' ? 'Reset MAC' : order.lastAction.charAt(0).toUpperCase() + order.lastAction.slice(1)}`
+                              `Last action: ${
+                                order.lastAction === 'resetmac'
+                                  ? 'Reset MAC'
+                                  : order.lastAction === 'reconfigure-network'
+                                    ? 'Reconfigure Network'
+                                    : order.lastAction.charAt(0).toUpperCase() + order.lastAction.slice(1)
+                              }`
                               : 'Server Activity'
                             }
                           </p>
@@ -4164,6 +4192,22 @@ const OrderDetails = () => {
                                   </Button>
                                   <p className="text-xs text-muted-foreground px-1">
                                     The VM will be briefly stopped to apply the new MAC, then restarted automatically.
+                                  </p>
+                                  <Button
+                                    variant="outline"
+                                    onClick={() => void handleReconfigureNetwork()}
+                                    disabled={!!actionBusy}
+                                    className="w-full h-10 gap-2 text-sm"
+                                  >
+                                    {actionBusy === 'reconfigure-network' ? (
+                                      <Loader2 className="h-4 w-4 animate-spin" />
+                                    ) : (
+                                      <Globe className="h-4 w-4" />
+                                    )}
+                                    Reconfigure Network
+                                  </Button>
+                                  <p className="text-xs text-muted-foreground px-1">
+                                    Repairs primary network (NIC 1) on the panel — use if IP or gateway stopped working.
                                   </p>
                                 </>
                               )}
