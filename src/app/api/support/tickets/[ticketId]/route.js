@@ -4,6 +4,7 @@ import User from "@/models/userModel";
 import { getDataFromToken } from "@/helper/getDataFromToken";
 import NotificationService from '@/services/notificationService';
 import { buildUserTicketFilter, markTicketReadByUserUpdate } from '@/lib/supportTicketQuery';
+import { assertPlainText, plainDisplayName } from '@/lib/plainUserText';
 
 export async function GET(request, { params }) {
     try {
@@ -62,8 +63,9 @@ export async function POST(request, { params }) {
         const user = await User.findById(userId);
         const { message } = await request.json();
 
-        if (!message) {
-            return new Response(JSON.stringify({ message: 'Message is required' }), {
+        const safeMessage = assertPlainText(message, 'Message');
+        if (!safeMessage.ok) {
+            return new Response(JSON.stringify({ message: safeMessage.error.message }), {
                 status: 400,
                 headers: { 'Content-Type': 'application/json' }
             });
@@ -75,8 +77,8 @@ export async function POST(request, { params }) {
                 $push: {
                     messages: {
                         author: 'user',
-                        authorName: user.name,
-                        message,
+                        authorName: plainDisplayName(user.name),
+                        message: safeMessage.text,
                         timestamp: new Date()
                     }
                 },

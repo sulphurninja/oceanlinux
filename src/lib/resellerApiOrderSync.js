@@ -34,11 +34,10 @@ function sleep(ms) {
 
 /** e.g. "🖥️ 103.129.xx Windows VPS" → "103.129", "🌊 103.148 - 8GB Vps" → "103.148" */
 function extractExpectedIpPrefix(ipStock, order) {
-  const texts = [
-    order?.productName,
-    ipStock?.name,
-    ipStock?.defaultConfigurations?.resellerApi?.zoneName,
-  ];
+  // Use product + stock titles only. Panel zoneName (e.g. Hotstar zone 6
+  // "103.170.151…") often labels a different subnet than the IPs that zone
+  // actually assigns (103.109.110.x for Windows) — using it breaks sync.
+  const texts = [order?.productName, ipStock?.name];
   for (const text of texts) {
     const prefix = extractSmartVpsIpPrefix(text);
     if (prefix) return prefix.replace(/\.x+$/i, '');

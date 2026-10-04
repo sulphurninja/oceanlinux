@@ -2624,6 +2624,7 @@ class AutoProvisioningService {
         priceIds = await autoResolveResellerPriceIds(api, {
           memory: order.memory,
           planType: stockCfg.planType,
+          isWindows: isWindowsProduct,
         });
         effectivePlanType = resolveEffectiveResellerPlanType(stockCfg, priceIds);
         L.kv('[RESELLER-API] Resolved planType', effectivePlanType);
@@ -2660,19 +2661,33 @@ class AutoProvisioningService {
 
       for (const candidate of zoneCandidates) {
         zoneId = candidate.zoneId;
-        zoneIsoId =
+        const configuredIsoId =
           priceIds.zoneIsoId ||
           stockCfg.defaultOs?.[isWindowsProduct ? 'Windows' : 'Linux']?.zoneIsoId ||
           null;
+        zoneIsoId = configuredIsoId;
 
-        if (zoneIsoId == null) {
-          try {
-            const isos = await api.getZoneIsos(zoneId);
-            zoneIsoId = resolveZoneIsoIdFromCatalog(isos, {
+        // ISO ids are per zone. A saved id from zone 1 (or a removed zone) must not
+        // be reused on the fallback zone — that returns "ISO/Zone mismatch" and
+        // kills the buy even though the fallback region is in stock.
+        try {
+          const isos = await api.getZoneIsos(zoneId);
+          const isoList = Array.isArray(isos) ? isos : (isos?.isos || isos?.content || isos?.data || []);
+          const configuredExists = zoneIsoId != null && isoList.some((iso) => Number(iso.id) === Number(zoneIsoId));
+          if (!configuredExists) {
+            const resolved = resolveZoneIsoIdFromCatalog(isos, {
               isWindows: isWindowsProduct,
               orderOs: order.os || orderOs,
             });
-          } catch (err) {
+            if (resolved != null) {
+              L.line(
+                `[RESELLER-API] Zone ${zoneId} has no ISO ${zoneIsoId ?? '(none)'} — using catalog ISO ${resolved}`
+              );
+              zoneIsoId = resolved;
+            }
+          }
+        } catch (err) {
+          if (zoneIsoId == null) {
             lastPurchaseError = err;
             L.line(`[RESELLER-API] ISO lookup failed for zone ${zoneId}: ${err.message}`);
             continue;

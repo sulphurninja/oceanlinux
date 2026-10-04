@@ -137,6 +137,9 @@ export function ResellerZonePicker({
       )}
       <p className="text-[11px] text-muted-foreground">
         Primary inactive ho to agla selected zone par auto-buy try hoga (2, 3, … jitne select karo).
+        Hotstar/Hostheaven par panel region ka naam alag subnet dikhata ho sakta hai (e.g. label 103.170)
+        — Windows 103.109.110 ke liye aksar wahi zone ID chalegi jahan pehle 103.109.110.x VMs bani hon;
+        product title (103.109.110) par trust karo, sirf panel label par nahi.
       </p>
     </div>
   );

@@ -8,6 +8,7 @@ import EmailService from '../../../lib/sendgrid';
 import { hashUserPassword } from '@/lib/userPassword';
 import { findUserByEmail, normalizeEmail } from '@/lib/userEmail';
 import { enforceRateLimit } from '@/lib/rateLimit';
+import { assertPlainText } from '@/lib/plainUserText';
 
 export async function POST(request) {
     const rateLimited = enforceRateLimit(request, {
@@ -24,7 +25,14 @@ export async function POST(request) {
         const reqBody = await request.json();
         const { name, email, password } = reqBody;
 
-        const trimmedName = String(name || '').trim();
+        const safeName = assertPlainText(name, 'Name');
+        if (!safeName.ok && String(name || '').trim()) {
+            return new NextResponse(JSON.stringify({ message: safeName.error.message }), {
+                status: 400,
+                headers: { 'Content-Type': 'application/json' }
+            });
+        }
+        const trimmedName = safeName.text;
         const normalizedEmail = normalizeEmail(email);
 
         if (!trimmedName || !normalizedEmail || !password) {

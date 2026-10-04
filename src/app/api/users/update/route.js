@@ -1,6 +1,7 @@
 import connectDB from '../../../../lib/db';
 import User from '../../../../models/userModel';
 import { getDataFromToken } from '../../../../helper/getDataFromToken';
+import { assertPlainText } from '@/lib/plainUserText';
 
 /**
  * Profile fields a customer may edit about themselves.
@@ -86,6 +87,16 @@ export async function POST(request) {
         }
 
         const body = await request.json();
+        if (body?.name !== undefined) {
+            const safeName = assertPlainText(body.name, 'Name');
+            if (!safeName.ok) {
+                return new Response(JSON.stringify({ message: safeName.error.message }), {
+                    status: 400,
+                    headers: { 'Content-Type': 'application/json' }
+                });
+            }
+            body.name = safeName.text;
+        }
         const profileUpdate = buildProfileUpdate(body);
 
         const updatedUser = await User.findByIdAndUpdate(

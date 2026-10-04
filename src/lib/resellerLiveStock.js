@@ -78,12 +78,14 @@ async function getResellerApiForStock(stock) {
   };
 }
 
-async function resolvePriceIds(api, stockCfg, memory) {
+async function resolvePriceIds(api, stockCfg, memory, stock) {
   let priceIds = resolvePriceIdsForMemory(stockCfg, memory);
   if (!priceIds?.cpuPriceId) {
+    const { isLinuxProductName } = require('@/lib/orderOs');
     priceIds = await autoResolveResellerPriceIds(api, {
       memory,
       planType: stockCfg.planType,
+      isWindows: !isLinuxProductName(stock?.name),
     });
   }
   return priceIds;
@@ -165,8 +167,8 @@ async function checkResellerZoneStock(api, { stockCfg, memory, zonesList = null 
 /**
  * Legacy wallet-based stock when plan has no zoneId.
  */
-async function checkResellerWalletStock(api, { stockCfg, memory }) {
-  const priceIds = await resolvePriceIds(api, stockCfg, memory);
+async function checkResellerWalletStock(api, { stockCfg, memory, stock = null }) {
+  const priceIds = await resolvePriceIds(api, stockCfg, memory, stock);
   const planType = resolveEffectiveResellerPlanType(stockCfg, priceIds);
   const [wallet, pricing, activeZones, adminPool] = await Promise.all([
     api.getWallet(),
@@ -220,14 +222,14 @@ async function checkResellerWalletStock(api, { stockCfg, memory }) {
 /**
  * Check one RAM tier — zone API when zoneId set, else wallet fallback.
  */
-async function checkResellerVariantStock(api, { stockCfg, memory, zonesList = null }) {
+async function checkResellerVariantStock(api, { stockCfg, memory, zonesList = null, stock = null }) {
   if (
     (stockCfg?.zoneIds?.length ?? 0) > 0 ||
     (stockCfg?.zoneId != null && Number.isFinite(Number(stockCfg.zoneId)))
   ) {
     return checkResellerZoneStock(api, { stockCfg, memory, zonesList });
   }
-  return checkResellerWalletStock(api, { stockCfg, memory });
+  return checkResellerWalletStock(api, { stockCfg, memory, stock });
 }
 
 async function syncResellerIpStockRow(stock, { force = false, memoryOnly = null, zonesList = null } = {}) {
@@ -294,6 +296,7 @@ async function syncResellerIpStockRow(stock, { force = false, memoryOnly = null,
         stockCfg,
         memory,
         zonesList: resolvedZones,
+        stock,
       });
       variantResults[memory] = result;
       if (result.zoneName) lastZoneName = result.zoneName;
@@ -406,6 +409,7 @@ async function verifyResellerMemoryInStock(stock, memory, { preferCache = false,
       stockCfg,
       memory,
       zonesList,
+      stock,
     });
 
     if (!result.available) {

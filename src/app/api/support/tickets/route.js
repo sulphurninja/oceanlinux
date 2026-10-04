@@ -4,6 +4,7 @@ import User from "@/models/userModel";
 import { getDataFromToken } from "@/helper/getDataFromToken";
 import NotificationService from '@/services/notificationService';
 import { buildUserTicketFilter } from '@/lib/supportTicketQuery';
+import { assertPlainText, plainDisplayName } from '@/lib/plainUserText';
 
 function generateTicketId() {
     const timestamp = Date.now().toString(36);
@@ -42,19 +43,30 @@ export async function POST(request) {
             });
         }
 
+        const safeSubject = assertPlainText(subject, 'Subject');
+        const safeDescription = assertPlainText(description, 'Message');
+        if (!safeSubject.ok || !safeDescription.ok) {
+            return new Response(JSON.stringify({
+                message: (safeSubject.error || safeDescription.error).message,
+            }), {
+                status: 400,
+                headers: { 'Content-Type': 'application/json' }
+            });
+        }
+
         const ticketId = generateTicketId();
 
         const ticket = new SupportTicket({
             ticketId,
             userId,
-            subject,
-            description,
+            subject: safeSubject.text,
+            description: safeDescription.text,
             category,
             priority,
             messages: [{
                 author: 'user',
-                authorName: user.name,
-                message: description,
+                authorName: plainDisplayName(user.name),
+                message: safeDescription.text,
                 timestamp: new Date()
             }]
         });

@@ -5,6 +5,7 @@ import { verifyGoogleIdToken, isGoogleAuthConfigured } from '@/lib/googleAuth';
 import { sanitizeAuthUser, setAuthCookie } from '@/lib/authSession';
 import EmailService from '@/lib/sendgrid';
 import { NextResponse } from 'next/server';
+import { plainDisplayName } from '@/lib/plainUserText';
 
 export async function POST(request) {
   try {
@@ -42,12 +43,12 @@ export async function POST(request) {
           user.authProvider = user.password ? 'local' : 'google';
         }
         if (!user.avatar && profile.avatar) user.avatar = profile.avatar;
-        if (!user.name && profile.name) user.name = profile.name;
+        if (!user.name && profile.name) user.name = plainDisplayName(profile.name);
         user.lastLogin = new Date();
         await user.save();
       } else {
         user = await User.create({
-          name: profile.name,
+          name: plainDisplayName(profile.name),
           email: profile.email,
           googleId: profile.googleId,
           authProvider: 'google',

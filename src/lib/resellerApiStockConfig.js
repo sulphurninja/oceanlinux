@@ -315,7 +315,14 @@ async function resolvePriceIdsForVmSpec(api, vmDetails, { planType = 'SHARED' } 
   };
 }
 
-async function resolvePriceIdsFromPlanCatalog(api, { gb, planType }) {
+/** Linux 4GB buys the 20GB disk. Other plans keep the panel catalog's first disk (48GB). */
+function preferredPurchaseDiskGb(memory, { isWindows = null } = {}) {
+  if (isWindows !== false) return null;
+  if (parseMemoryGb(memory) === 4) return 20;
+  return null;
+}
+
+async function resolvePriceIdsFromPlanCatalog(api, { gb, planType, diskGb = null }) {
   const pt = String(planType || 'SHARED').toUpperCase();
   const [cpuList, ramList, diskList, bwList] = await Promise.all([
     api.getPricingCatalog(pt, 'cpu'),
@@ -330,7 +337,7 @@ async function resolvePriceIdsFromPlanCatalog(api, { gb, planType }) {
   const targetCores = Math.max(1, Math.min(8, Math.ceil(gb / 2)));
   const cpuEntry = findCpuEntryForCores(cpuList, targetCores);
 
-  const diskEntry = diskList[0];
+  const diskEntry = diskGb ? findDiskEntryForGb(diskList, diskGb) : diskList[0];
   const bwEntry = bwList[0];
 
   if (!cpuEntry?.id || !diskEntry?.id || !bwEntry?.id) return null;
@@ -346,8 +353,9 @@ async function resolvePriceIdsFromPlanCatalog(api, { gb, planType }) {
   };
 }
 
-async function autoResolveResellerPriceIds(api, { memory, planType = 'SHARED' }) {
+async function autoResolveResellerPriceIds(api, { memory, planType = 'SHARED', isWindows = null, diskGb = null } = {}) {
   const gb = parseMemoryGb(memory);
+  const wantedDiskGb = diskGb != null ? Number(diskGb) : preferredPurchaseDiskGb(memory, { isWindows });
   const preferred = String(planType || 'SHARED').toUpperCase();
   const planCandidates = [preferred];
   if (gb > 4 && !planCandidates.includes('DEDICATED')) planCandidates.push('DEDICATED');
@@ -356,7 +364,11 @@ async function autoResolveResellerPriceIds(api, { memory, planType = 'SHARED' })
   let lastError = null;
   for (const pt of planCandidates) {
     try {
-      const hit = await resolvePriceIdsFromPlanCatalog(api, { gb, planType: pt });
+      const hit = await resolvePriceIdsFromPlanCatalog(api, {
+        gb,
+        planType: pt,
+        diskGb: wantedDiskGb,
+      });
       if (!hit) continue;
 
       const resolvedGb =
@@ -414,6 +426,7 @@ module.exports = {
   normalizeCompanyCouponConfig,
   normalizeCouponByMemory,
   resolveZoneIsoIdFromCatalog,
+  preferredPurchaseDiskGb,
   autoResolveResellerPriceIds,
   resolvePriceIdsForVmSpec,
   resolveEffectiveResellerPlanType,
