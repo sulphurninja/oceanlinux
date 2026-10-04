@@ -508,15 +508,20 @@ function isServerPlanRowVisible(stock: IPStock, categoryTab: string) {
   return true;
 }
 
-/** Put plan name before masked IP for consistent scanning (Windows rows). */
+/** Put plan name before the leading IP so sold-out rows still show the product, not just the badge. */
 function formatPlanDisplayName(name: string) {
   const trimmed = String(name || '').trim();
-  const m = trimmed.match(/^([🖥️🌊]\s*)?([\d.*xX]+(?:\.[\d*xX]+)*)\s*\|\s*(.+)$/);
-  if (!m) return trimmed;
-  const emoji = m[1] || '';
-  const ipPart = m[2];
-  const rest = m[3].trim();
-  return `${emoji}${rest} · ${ipPart}`;
+  const piped = trimmed.match(/^(\p{Extended_Pictographic}\uFE0F?\s*)?([\d.*xX]+(?:\.[\d*xX]+)*)\s*\|\s*(.+)$/u);
+  if (piped?.[3]) {
+    return `${piped[1] || ''}${piped[3].trim()} · ${piped[2]}`;
+  }
+  const leadingIp = trimmed.match(
+    /^(\p{Extended_Pictographic}\uFE0F?\s*)?((?:\d{1,3}|[xX*]{1,3})(?:\.(?:\d{1,3}|[xX*]{2,3}))+)\s+(.+)$/u
+  );
+  if (leadingIp?.[3]) {
+    return `${leadingIp[1] || ''}${leadingIp[3].trim()} · ${leadingIp[2]}`;
+  }
+  return trimmed;
 }
 
 const PLAN_ROW_ACTION = 'h-10 px-3 shrink-0';
@@ -2579,8 +2584,10 @@ const TrialVpsPlanRow = memo(function TrialVpsPlanRow({
             <div className="flex items-start gap-2">
               <h3
                 className={cn(
-                  'font-semibold text-sm md:text-base min-w-0 flex-1 break-words sm:truncate',
-                  inStock ? 'text-white' : 'premium-dashboard-subtitle line-through decoration-white/25'
+                  'font-semibold text-sm md:text-base min-w-0 flex-1',
+                  inStock
+                    ? 'text-white break-words sm:truncate'
+                    : 'premium-dashboard-subtitle line-through decoration-white/25 line-clamp-2 break-words'
                 )}
               >
                 {pkg.name}
@@ -2872,8 +2879,10 @@ const CompactServerPlanRow = memo(function CompactServerPlanRow({
           <div className="flex-1 min-w-0">
             <div className="flex items-start gap-2">
               <h3 className={cn(
-                "font-semibold text-sm md:text-base min-w-0 flex-1 break-words sm:truncate",
-                inStock ? "premium-dashboard-title" : "premium-dashboard-subtitle line-through decoration-white/25"
+                "font-semibold text-sm md:text-base min-w-0 flex-1",
+                inStock
+                  ? "premium-dashboard-title break-words sm:truncate"
+                  : "premium-dashboard-subtitle line-through decoration-white/25 line-clamp-2 break-words"
               )}>
                 {formatPlanDisplayName(stock.name)}
               </h3>
