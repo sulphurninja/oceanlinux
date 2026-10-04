@@ -279,6 +279,12 @@ function isResellerMemoryInStock(stock: IPStock, memory: string) {
   return variant.available === true;
 }
 
+function pricedMemoryKeys(stock: IPStock) {
+  return Object.entries(stock.memoryOptions || {})
+    .filter(([key, details]) => key && !String(key).startsWith('$') && Number(details?.price) > 0)
+    .map(([key]) => key);
+}
+
 function isStockPurchasable(stock: IPStock, memory?: string) {
   const savedVps = stock.inventoryAvailable ?? 0;
   if (savedVps > 0) return true;
@@ -311,6 +317,8 @@ function isStockPurchasable(stock: IPStock, memory?: string) {
   }
   if (isResellerLiveStock(stock)) {
     if (memory) return isResellerMemoryInStock(stock, memory);
+    const sellable = pricedMemoryKeys(stock);
+    if (sellable.length) return sellable.some((key) => isResellerMemoryInStock(stock, key));
     if (stock.available) return true;
     return resellerVariantValues(stock).some((v) => v?.available === true);
   }
@@ -2763,7 +2771,6 @@ const CompactServerPlanRow = memo(function CompactServerPlanRow({
   verifyingPurchaseKey?: string | null;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
-  const inStock = isStockPurchasable(stock);
   const unitsLeft = getStockUnitsRemaining(stock);
   const manualUnits = usesCompanyManualUnits(stock);
   const showUnits = manualUnits && Number.isFinite(unitsLeft) && unitsLeft < Number.POSITIVE_INFINITY;
@@ -2836,6 +2843,10 @@ const CompactServerPlanRow = memo(function CompactServerPlanRow({
     const hasPrice = row.details.price != null && Number(row.details.price) > 0;
     return hasPrice && isStockPurchasable(stock, row.memory);
   });
+  const sellableRows = configRows.filter(
+    (row) => row.details.price != null && Number(row.details.price) > 0
+  );
+  const inStock = sellableRows.length ? Boolean(primaryRow) : isStockPurchasable(stock);
   const primaryVerifyKey = primaryRow
     ? `${stock._id}:${primaryRow.memory}:${primaryRow.tag || ''}`
     : null;
