@@ -2,7 +2,7 @@
 // SIMPLE SmartVPS sync - MATCH BY NAME:
 // 1. Fetch packages from SmartVPS API
 // 2. For each package: find existing IPStock by NAME (🌊 {name}) OR create new
-// 3. Update availability based on API response
+// 3. Update availability and which RAM sizes are on. Never replace an admin-written rate.
 // 4. DO NOT touch non-SmartVPS entries
 
 export const runtime = 'nodejs';

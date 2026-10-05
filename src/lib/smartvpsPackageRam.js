@@ -13,11 +13,27 @@ function memoryKeyForGb(gb) {
   return `${gb}GB`;
 }
 
+function readMapLike(value) {
+  if (value == null || Array.isArray(value)) return null;
+  if (typeof value.forEach !== 'function' || typeof value.get !== 'function') return null;
+  const plain = {};
+  value.forEach((entry, key) => {
+    plain[key] = entry;
+  });
+  return plain;
+}
+
 function toPlainMemoryOptions(memoryOptions) {
   if (!memoryOptions) return {};
+  const asMap = readMapLike(memoryOptions);
+  if (asMap) return asMap;
   if (memoryOptions instanceof Map) return Object.fromEntries(memoryOptions);
   if (typeof memoryOptions.toObject === 'function') {
-    return memoryOptions.toObject({ minimize: true });
+    try {
+      return memoryOptions.toObject({ flattenMaps: true, minimize: false });
+    } catch {
+      return memoryOptions.toObject({ minimize: true });
+    }
   }
   return { ...memoryOptions };
 }
@@ -76,18 +92,20 @@ function mergeAdminLockedMemoryPrices(existingLocked, memoryOptions, archivedMem
   for (const [gb, price] of pricesByGbFromLocked(existingLocked)) {
     out[memoryKeyForGb(gb)] = price;
   }
-  for (const source of [memoryOptions, archivedMemoryOptions]) {
-    for (const [gb, price] of collectAdminPricesByGb(source)) {
-      const key = memoryKeyForGb(gb);
-      out[key] = Math.max(Number(out[key]) || 0, price);
-    }
+  for (const [gb, price] of collectAdminPricesByGb(archivedMemoryOptions)) {
+    const key = memoryKeyForGb(gb);
+    if (!(Number(out[key]) > 0)) out[key] = price;
+  }
+  // The rate written in admin replaces an older lock, including a lower rate.
+  for (const [gb, price] of collectAdminPricesByGb(memoryOptions)) {
+    out[memoryKeyForGb(gb)] = price;
   }
   return out;
 }
 
 /**
- * After SmartVPS RAM sync, never lower prices admin already set.
- * Sync may only add missing tiers (defaults) — existing admin rates stay fixed.
+ * Sync must not change a rate already saved in admin.
+ * A live price stays exactly as written. Archive and lock only fill a tier that is not live.
  */
 function preserveAdminMemoryPrices(
   existingMemoryOptions,
@@ -95,34 +113,53 @@ function preserveAdminMemoryPrices(
   archivedMemoryOptions = {},
   adminLockedMemoryPrices = {}
 ) {
-  const adminByGb = collectAdminPricesByGb(existingMemoryOptions, archivedMemoryOptions);
-  for (const [gb, price] of pricesByGbFromLocked(adminLockedMemoryPrices)) {
-    adminByGb.set(gb, Math.max(adminByGb.get(gb) || 0, price));
-  }
-  if (!adminByGb.size) return syncedMemoryOptions;
-
+  const existing = toPlainMemoryOptions(existingMemoryOptions);
+  const archived = toPlainObject(archivedMemoryOptions);
+  const lockedByGb = pricesByGbFromLocked(adminLockedMemoryPrices);
   const out = { ...toPlainMemoryOptions(syncedMemoryOptions) };
-  for (const [gb, adminPrice] of adminByGb) {
-    const key = memoryKeyForGb(gb);
-    if (!out[key]) continue;
-    const syncedPrice = Number(out[key]?.price) || 0;
-    if (syncedPrice !== adminPrice) {
-      out[key] = {
-        ...out[key],
-        price: adminPrice,
-        hostycareProductId: out[key]?.hostycareProductId ?? null,
-        hostycareProductName: out[key]?.hostycareProductName ?? null,
-      };
-    }
+
+  for (const [key, option] of Object.entries(out)) {
+    const match = String(key).match(/(\d+)\s*gb/i);
+    if (!match) continue;
+    const gb = Number(match[1]);
+    const kept = keptAdminPrice(gb, existing, archived, lockedByGb, option);
+    if (kept == null || Number(option?.price) === kept) continue;
+    out[key] = {
+      ...option,
+      price: kept,
+      hostycareProductId: option?.hostycareProductId ?? null,
+      hostycareProductName: option?.hostycareProductName ?? null,
+    };
   }
   return out;
 }
 
 function toPlainObject(value) {
   if (!value || typeof value !== 'object') return {};
+  const asMap = readMapLike(value);
+  if (asMap) return asMap;
   if (value instanceof Map) return Object.fromEntries(value);
-  if (typeof value.toObject === 'function') return value.toObject({ minimize: true });
+  if (typeof value.toObject === 'function') {
+    try {
+      return value.toObject({ flattenMaps: true, minimize: false });
+    } catch {
+      return value.toObject({ minimize: true });
+    }
+  }
   return { ...value };
+}
+
+/** Admin-written price wins. Sync may fill a brand-new tier only. */
+function keptAdminPrice(gb, existing, archived, lockedByGb, prev) {
+  const live = collectAdminPricesByGb(existing).get(gb);
+  if (live > 0) return live;
+  const archivedPrice = collectAdminPricesByGb(archived).get(gb);
+  if (archivedPrice > 0) return archivedPrice;
+  const locked = lockedByGb.get(gb);
+  if (locked > 0) return locked;
+  const prevPrice = Number(prev?.price);
+  if (prevPrice > 0) return prevPrice;
+  return null;
 }
 
 /**
@@ -160,14 +197,8 @@ function buildSmartVpsMemorySync(
 
     const prev =
       findMemoryOptionForGb(existing, tier.gb) || findMemoryOptionForGb(nextArchived, tier.gb);
-    const adminPrice =
-      lockedByGb.get(tier.gb) || collectAdminPricesByGb(existing, archived).get(tier.gb);
-    const resolvedPrice =
-      adminPrice != null && adminPrice > 0
-        ? adminPrice
-        : prev?.price != null && Number(prev.price) > 0
-          ? Number(prev.price)
-          : (DEFAULT_PRICING_GB[tier.gb] ?? 999);
+    const savedPrice = keptAdminPrice(tier.gb, existing, archived, lockedByGb, prev);
+    const resolvedPrice = savedPrice != null ? savedPrice : (DEFAULT_PRICING_GB[tier.gb] ?? 999);
     memoryOptions[key] = {
       price: resolvedPrice,
       hostycareProductId: prev?.hostycareProductId ?? null,

@@ -50,6 +50,7 @@ const {
 
 const {
   buildSmartVpsBlockFromPackage,
+  toPlainMemoryOptions,
   isSmartVpsMemoryListed,
   normalizeMemoryTierKey,
   validateSmartVpsPackageRam,
@@ -126,11 +127,7 @@ async function syncSmartVpsIpStockRow(stock) {
   const qty = pkg ? Number(pkg.ipv4 || 0) : 0;
   const isAvailable = !!(pkg && qty > 0 && String(pkg.status).toLowerCase() === 'active');
 
-  const existingMemory = stock.memoryOptions instanceof Map
-    ? Object.fromEntries(stock.memoryOptions)
-    : (typeof stock.memoryOptions?.toObject === 'function'
-      ? stock.memoryOptions.toObject({ minimize: true })
-      : { ...(stock.memoryOptions || {}) });
+  const existingMemory = toPlainMemoryOptions(stock.memoryOptions);
 
   const { memoryOptions, smartvpsBlock } = pkg
     ? buildSmartVpsBlockFromPackage(pkg, smartvps || {}, existingMemory)

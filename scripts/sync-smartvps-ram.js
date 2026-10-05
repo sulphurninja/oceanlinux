@@ -5,8 +5,21 @@ const SmartVpsAPI = require('../src/services/smartvpsApi');
 
 function toPlainMap(m) {
   if (!m) return {};
+  if (typeof m.forEach === 'function' && typeof m.get === 'function' && !Array.isArray(m)) {
+    const plain = {};
+    m.forEach((entry, key) => {
+      plain[key] = entry;
+    });
+    return plain;
+  }
   if (m instanceof Map) return Object.fromEntries(m);
-  if (typeof m.toObject === 'function') return m.toObject({ minimize: true });
+  if (typeof m.toObject === 'function') {
+    try {
+      return m.toObject({ flattenMaps: true, minimize: false });
+    } catch {
+      return m.toObject({ minimize: true });
+    }
+  }
   return { ...m };
 }
 
