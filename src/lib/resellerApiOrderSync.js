@@ -204,6 +204,32 @@ function buildRenewBody(vmId, order, stockCfg, priceIds, { couponCode, planType 
   return body;
 }
 
+/**
+ * Hostheaven calculate-renewal reads monthsToAdd.
+ * upgrade-renew reads addMonths. Same price IDs with only monthsToAdd come back
+ * as "No changes detected" and the month is not added.
+ * A same-spec renew is addMonths + wallet, matching the panel Renew button.
+ */
+function buildRenewApplyBody(vmId, quoteBody, { specChange = false, couponCode } = {}) {
+  const addMonths = Number(quoteBody?.monthsToAdd) || 1;
+  const code = String(couponCode || quoteBody?.couponCode || '').trim().toUpperCase();
+  if (!specChange) {
+    const body = {
+      vmId: Number(vmId),
+      addMonths,
+      useWalletBalance: true,
+    };
+    if (code) body.couponCode = code;
+    return body;
+  }
+  return {
+    ...quoteBody,
+    vmId: Number(vmId),
+    addMonths,
+    useWalletBalance: true,
+  };
+}
+
 async function resolveVmId(api, order) {
   if (order.resellerVmId) return String(order.resellerVmId);
   const ip = order.ipAddress ||
@@ -912,36 +938,59 @@ async function renewResellerPanelVm({ api, order, ipStock, Order, companyCoupon 
   let couponUsed = null;
 
   const gateway = stockCfg.gateway || 'WALLET';
+  const specChange = calcWithCoupon?.isSpecChange === true;
+  const applyBody = buildRenewApplyBody(vmId, renewBody, {
+    specChange,
+    couponCode: upstreamCoupon,
+  });
+  console.log(
+    `[RESELLER-RENEW] VM ${vmId} apply ${specChange ? 'upgrade' : 'same-spec renew'} addMonths=${applyBody.addMonths}`
+  );
   let renewRes;
   try {
-    const out = await upgradeRenewWithCouponFallback(api, vmId, renewBody, gateway, { calcWithCoupon });
+    const out = await upgradeRenewWithCouponFallback(api, vmId, applyBody, gateway, { calcWithCoupon });
     renewRes = out.res;
-    couponUsed = out.couponUsed ? upstreamCoupon : out.couponFallback ? null : renewBody.couponCode || null;
+    couponUsed = out.couponUsed ? upstreamCoupon : out.couponFallback ? null : applyBody.couponCode || null;
   } catch (err) {
+    let failure = err;
     const errMsg = String(err?.body?.error || err.message || '');
-    if (/no changes detected/i.test(errMsg)) {
+    if (/no changes detected/i.test(errMsg) && !specChange) {
+      const withIds = { ...renewBody, addMonths: Number(renewBody.monthsToAdd) || 1 };
+      console.warn(`[RESELLER-RENEW] VM ${vmId} same-spec renew rejected, retrying with current price IDs + addMonths`);
+      try {
+        const out = await upgradeRenewWithCouponFallback(api, vmId, withIds, gateway, { calcWithCoupon });
+        renewRes = out.res;
+        couponUsed = out.couponUsed ? upstreamCoupon : out.couponFallback ? null : withIds.couponCode || null;
+      } catch (retryErr) {
+        failure = retryErr;
+      }
+    }
+    if (!renewRes) {
+      const retryMsg = String(failure?.body?.error || failure.message || '');
+      if (/no changes detected/i.test(retryMsg)) {
+        return {
+          success: false,
+          error:
+            'Hostheaven panel says renewal already applied for this billing cycle — extend manually on panel if expiry is still short.',
+          vmId,
+          upstream: failure.body || null,
+          couponUsed: upstreamCoupon || null,
+          calcQuote: calcWithCoupon
+            ? {
+                payableAmount: calcWithCoupon.payableAmount,
+                couponStatus: calcWithCoupon.couponStatus,
+                isSpecChange: calcWithCoupon.isSpecChange,
+              }
+            : null,
+        };
+      }
       return {
         success: false,
-        error:
-          'Hostheaven panel says renewal already applied for this billing cycle — extend manually on panel if expiry is still short.',
+        error: failure.message,
         vmId,
-        upstream: err.body || null,
-        couponUsed: upstreamCoupon || null,
-        calcQuote: calcWithCoupon
-          ? {
-              payableAmount: calcWithCoupon.payableAmount,
-              couponStatus: calcWithCoupon.couponStatus,
-              isSpecChange: calcWithCoupon.isSpecChange,
-            }
-          : null,
+        upstream: failure.body || null,
       };
     }
-    return {
-      success: false,
-      error: err.message,
-      vmId,
-      upstream: err.body || null,
-    };
   }
 
   let newExpiryDate = null;
