@@ -149,6 +149,12 @@ const AdminSidebar = () => {
       badge: 'New'
     },
     {
+      href: '/admin/whatsapp-broadcast',
+      label: 'WhatsApp Broadcast',
+      icon: MessageSquare,
+      badge: 'New'
+    },
+    {
       href: '/admin/settings',
       label: 'Site Settings',
       icon: Settings,

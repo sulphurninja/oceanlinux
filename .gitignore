@@ -30,6 +30,15 @@ yarn-error.log*
 .env*.local
 data/admin-totp.json
 
+# one-off local scripts / dumps with hardcoded credentials — never commit
+save_secret.js
+verify_secret.js
+debug_users.js
+fix_user.js
+recharge_wallet.js
+secret.txt
+ses-smtp-user.*_credentials.csv
+
 # vercel
 .vercel
 
