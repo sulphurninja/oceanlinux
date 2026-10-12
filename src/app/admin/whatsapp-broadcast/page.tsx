@@ -220,7 +220,7 @@ export default function WhatsAppBroadcastPage() {
           }
           return;
         }
-        await new Promise((r) => setTimeout(r, data.locked ? 5000 : 800));
+        await new Promise((r) => setTimeout(r, data.locked ? 2000 : 50));
       }
     } finally {
       processingLoops.current.delete(jobId);
@@ -388,7 +388,7 @@ export default function WhatsAppBroadcastPage() {
             <h1 className="text-xl md:text-2xl font-bold leading-tight">WhatsApp Broadcast</h1>
             <p className="text-xs md:text-sm text-muted-foreground flex items-center gap-1.5">
               <ShieldCheck className="h-3.5 w-3.5 text-[#25D366]" />
-              Duplicate-safe · ~1 msg/sec · one broadcast per account at a time
+              Duplicate-safe · 40 at a time · every running slot sends together, even with this page closed
             </p>
           </div>
         </div>
@@ -573,7 +573,7 @@ export default function WhatsAppBroadcastPage() {
                       </div>
                     </div>
                     <p className="text-[11px] text-muted-foreground text-center">
-                      Keep this page open — messages go out at ~1 per second. Already-messaged phones are skipped.
+                      Messages go out 40 at a time. You can close this page — the cron keeps every running slot going. Already-messaged phones are skipped.
                     </p>
                   </div>
                 ) : (
@@ -638,6 +638,9 @@ export default function WhatsAppBroadcastPage() {
                           onChange={(e) => updateForm(selectedSlot, { templateLanguage: e.target.value })}
                         />
                       </div>
+                      <p className="text-[11px] text-muted-foreground">
+                        Use <span className="font-mono">{'{{1}}'}</span> for the customer&apos;s first name. Example: Hi {'{{1}}'}, your VPS has started.
+                      </p>
                     </div>
 
                     <Separator />
@@ -874,7 +877,7 @@ export default function WhatsAppBroadcastPage() {
                     <p className="text-xs flex items-start gap-1.5">
                       <ShieldCheck className="h-3.5 w-3.5 mt-0.5 text-[#25D366] shrink-0" />
                       Phones that already received this template from this account are skipped
-                      automatically. Sending is paced at ~1 message per second.
+                      automatically. Each slot sends 40 at a time, and several slots can run together.
                     </p>
                   </>
                 )}

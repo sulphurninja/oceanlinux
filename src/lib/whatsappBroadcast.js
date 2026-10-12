@@ -7,14 +7,23 @@ const Zaptick = require('zaptick').default || require('zaptick');
 
 export const BROADCAST_SLOTS = [1, 2, 3, 4, 5, 6, 7];
 
-/** Pacing: ~1 message/second, small batches per process call. */
-export const SEND_INTERVAL_MS = 1100;
-export const PROCESS_BATCH_SIZE = 8;
+/** In-flight template sends. 40 concurrent keeps throughput at 40/sec when each call takes ~1s, and higher when Zaptick responds faster. */
+export const SEND_CONCURRENCY = 40;
+/** Recipients claimed per wave inside one process request. */
+export const PROCESS_WAVE_SIZE = 200;
+/** How long one process request keeps sending before returning progress. */
+export const PROCESS_TIME_BUDGET_MS = 12 * 1000;
 /** A running job whose lock is older than this is considered stale. */
 export const STALE_LOCK_MS = 90 * 1000;
 
 /** Order statuses that count as "made a purchase". */
 export const PURCHASED_STATUSES = ['confirmed', 'paid', 'completed', 'active'];
+
+/** First word of the profile name, for "Hi {{1}}" templates. */
+export function greetingName(name) {
+  const first = String(name || '').trim().split(/\s+/)[0];
+  return first || 'there';
+}
 
 /**
  * Normalize a raw phone into E.164 (+<digits>) or return null when invalid.
