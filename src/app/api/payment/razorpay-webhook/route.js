@@ -8,6 +8,7 @@ import {
   confirmCheckoutFromWebhook,
   confirmRechargeFromWebhook,
 } from '@/lib/paymentDispatch';
+import { resolveRazorpayReceipt } from '@/lib/razorpayWebhookReceipt';
 const PaymentOrderLogger = require('@/services/paymentOrderLogger');
 
 /**
@@ -55,7 +56,11 @@ export async function POST(request) {
   const orderEntity = event.payload?.order?.entity;
   const razorpayOrderId = paymentEntity?.order_id || orderEntity?.id;
   const paymentId = paymentEntity?.id;
-  const receipt = orderEntity?.receipt || paymentEntity?.notes?.receipt;
+  const receipt = await resolveRazorpayReceipt({
+    paymentEntity,
+    orderEntity,
+    razorpayOrderId,
+  });
 
   if (!razorpayOrderId && !receipt) {
     return NextResponse.json({ success: false, message: 'Missing order reference' }, { status: 400 });

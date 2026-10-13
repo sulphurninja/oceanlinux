@@ -1,24 +1,23 @@
 import Order from '@/models/orderModel';
-import { getRazorpayClient } from '@/lib/razorpayClient';
+import { probeRazorpayOrderPaid, completeRenewalViaWebhook, recoverOrphanPaidRazorpayRenewals } from '@/lib/completePaidRenewal';
+import { lookupRazorpayRenewalByReceipt } from '@/lib/renewalOrderLookup';
 
 async function razorpayRenewalIsPaid(pendingRenewal) {
   const gatewayOrderId = String(pendingRenewal?.gatewayOrderId || '').trim();
-  if (!gatewayOrderId || pendingRenewal?.paymentMethod !== 'razorpay') {
-    return { paid: false };
+  if (gatewayOrderId) {
+    const direct = await probeRazorpayOrderPaid(gatewayOrderId);
+    if (direct.paid) return direct;
   }
-  const razorpay = getRazorpayClient();
-  if (!razorpay) return { paid: false, reason: 'razorpay_unconfigured' };
 
-  const razorpayOrder = await razorpay.orders.fetch(gatewayOrderId);
-  if (razorpayOrder.status !== 'paid') return { paid: false, status: razorpayOrder.status };
+  const renewalTxnId = String(pendingRenewal?.renewalTxnId || '').trim();
+  if (!renewalTxnId.startsWith('RENEWAL_')) return { paid: false };
 
-  const payments = await razorpay.orders.fetchPayments(gatewayOrderId);
-  const captured = payments.items?.find((p) => p.status === 'captured');
-  return {
-    paid: true,
-    paymentId: captured?.id || gatewayOrderId,
-    amountInr: Number(captured?.amount ?? razorpayOrder.amount) / 100,
-  };
+  const meta = await lookupRazorpayRenewalByReceipt(renewalTxnId);
+  if (meta?.paid && meta.razorpayOrderId) {
+    return probeRazorpayOrderPaid(meta.razorpayOrderId);
+  }
+
+  return { paid: false };
 }
 
 /**
@@ -40,8 +39,6 @@ export async function recoverPaidRenewalsInScan({ since, limit = 50, logSource =
     return { scanned: 0, recovered, anomalies, errors };
   }
 
-  const { handleRenewalWebhook } = await import('@/app/api/payment/webhook/route.js');
-
   for (const order of pendingRenewalOrders) {
     const renewalTxnId = order.pendingRenewal?.renewalTxnId;
     if (!renewalTxnId) continue;
@@ -53,26 +50,14 @@ export async function recoverPaidRenewalsInScan({ since, limit = 50, logSource =
       const paid = await razorpayRenewalIsPaid(order.pendingRenewal);
       if (!paid.paid) continue;
 
-      const adaptedPayment = {
-        order: { order_id: renewalTxnId },
-        payment: {
-          cf_payment_id: paid.paymentId,
-          payment_amount: paid.amountInr,
-          payment_status: 'SUCCESS',
-          payment_method: 'razorpay',
-        },
-      };
+      const completion = await completeRenewalViaWebhook(renewalTxnId, {
+        paymentId: paid.paymentId,
+        amountInr: paid.amountInr,
+        paymentMethod: 'razorpay',
+        logSource,
+      });
 
-      const res = await handleRenewalWebhook(renewalTxnId, adaptedPayment, Date.now());
-      const ok = res?.status === 200 || res?.status === undefined;
-      let body = {};
-      try {
-        body = typeof res?.json === 'function' ? await res.json() : res;
-      } catch {
-        body = {};
-      }
-
-      if (ok && body?.success !== false) {
+      if (completion.success) {
         recovered.push({
           kind: 'renewal',
           orderId: String(order._id),
@@ -86,7 +71,7 @@ export async function recoverPaidRenewalsInScan({ since, limit = 50, logSource =
           kind: 'renewal',
           orderId: String(order._id),
           renewalTxnId,
-          reason: body?.message || 'renewal_webhook_failed',
+          reason: completion.body?.message || 'renewal_webhook_failed',
         });
       }
     } catch (err) {
@@ -94,5 +79,15 @@ export async function recoverPaidRenewalsInScan({ since, limit = 50, logSource =
     }
   }
 
-  return { scanned: pendingRenewalOrders.length, recovered, anomalies, errors };
+  const orphanScan = await recoverOrphanPaidRazorpayRenewals({ since, limit, logSource });
+  recovered.push(...orphanScan.recovered);
+  anomalies.push(...orphanScan.anomalies);
+  errors.push(...(orphanScan.errors || []));
+
+  return {
+    scanned: pendingRenewalOrders.length + orphanScan.scanned,
+    recovered,
+    anomalies,
+    errors,
+  };
 }

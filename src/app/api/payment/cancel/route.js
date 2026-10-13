@@ -51,6 +51,10 @@ export async function POST(request) {
     order = isRenewal
       ? await Order.findOne({ 'pendingRenewal.renewalTxnId': clientTxnId })
       : await Order.findOne({ clientTxnId });
+    if (isRenewal && !order) {
+      const { resolveOrderForRenewalTransaction } = await import('@/lib/renewalOrderLookup');
+      order = await resolveOrderForRenewalTransaction({ renewalTxnId: clientTxnId, orderIdHint: orderId });
+    }
   }
 
   if (!order && orderId) {
@@ -62,6 +66,20 @@ export async function POST(request) {
   }
 
   if (!order) {
+    if (isRenewal && clientTxnId) {
+      const { tryRecoverPaidRenewalByTxnId } = await import('@/lib/completePaidRenewal');
+      const recovery = await tryRecoverPaidRenewalByTxnId(clientTxnId, orderId);
+      if (recovery.recovered) {
+        return NextResponse.json({
+          success: true,
+          recovered: true,
+          orderId: recovery.orderId,
+          renewalTxnId: recovery.renewalTxnId,
+          alreadyProcessed: !!recovery.alreadyProcessed,
+          message: 'Payment was already successful — renewal applied',
+        });
+      }
+    }
     return NextResponse.json({
       success: true,
       alreadyProcessed: true,
@@ -72,6 +90,21 @@ export async function POST(request) {
 
   if (String(order.user) !== String(userId)) {
     return NextResponse.json({ success: false, message: 'Forbidden' }, { status: 403 });
+  }
+
+  if (isRenewal && order.pendingRenewal?.renewalTxnId) {
+    const { tryRecoverPaidRenewalForOrder } = await import('@/lib/completePaidRenewal');
+    const recovery = await tryRecoverPaidRenewalForOrder(order);
+    if (recovery.recovered) {
+      return NextResponse.json({
+        success: true,
+        recovered: true,
+        orderId: recovery.orderId || order._id,
+        renewalTxnId: recovery.renewalTxnId,
+        alreadyProcessed: !!recovery.alreadyProcessed,
+        message: 'Payment was already successful — renewal applied',
+      });
+    }
   }
 
   // If gateway already captured payment, recover instead of cancelling

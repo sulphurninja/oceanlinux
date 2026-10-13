@@ -2970,6 +2970,15 @@ class AutoProvisioningService {
         }
       }
 
+      if (provisioned?.wrongIpHold && provisioned?.ip && locationCtx.expectedIpPrefix) {
+        wrongIpHold = `WRONG_IP: VM ${provisioned.vmId || 'unknown'} provisioned with ${provisioned.ip}, but this product needs ${locationCtx.expectedIpPrefix}.x. Fix the VM IP on the reseller panel — the order auto-completes once it matches.`;
+        resellerVmId = provisioned.vmId || resellerVmId;
+        L.line(`[RESELLER-API] ${wrongIpHold} — holding order in processing, VM link kept`);
+        ipAddress = '';
+        password = '';
+        provisioned = { vmId: resellerVmId, ip: '', password: '' };
+      }
+
       if (provisioned?.vmId) resellerVmId = provisioned.vmId;
       if (provisioned?.ip) ipAddress = provisioned.ip;
       if (provisioned?.password) password = provisioned.password;

@@ -154,6 +154,11 @@ export function UpiQrPaymentDialog({
 
         if (data.paymentStatus === 'SUCCESS') {
           if (session.flow === 'renewal' && session.orderId) {
+            if (data.renewalApplied) {
+              setPaid(true);
+              onSuccess(data);
+              return;
+            }
             const confirmRes = await dashboardFetch('/api/payment/renew-confirm', {
               method: 'POST',
               credentials: 'include',

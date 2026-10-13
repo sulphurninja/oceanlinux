@@ -8,7 +8,7 @@ import { getRazorpayClient } from '@/lib/razorpayClient';
 import { resolveOrderRenewalPrice } from '@/lib/orderRenewalPricingServer';
 
 const PENDING_REUSE_MAX_MS = 45 * 60 * 1000;
-const RAZORPAY_RECEIPT_LOOKBACK_MS = 24 * 60 * 60 * 1000;
+const RAZORPAY_RECEIPT_LOOKBACK_MS = 72 * 60 * 60 * 1000;
 
 async function razorpayOrderHasCapturedPayment(razorpay, razorpayOrderId) {
   if (!razorpay || !razorpayOrderId) return false;

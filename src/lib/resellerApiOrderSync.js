@@ -481,6 +481,12 @@ async function findProvisionedVmByPurchaseRef(
         rowIp &&
         !ipMatchesOrderedRange(rowIp, locationCtx.expectedIpPrefix)
       ) {
+        const hydrated = await hydrateProvisionedRow(api, row, order);
+        if (hydrated) {
+          hydrated._trustPurchaseRef = true;
+          hydrated.wrongIpHold = true;
+          return hydrated;
+        }
         continue;
       }
       const hydrated = await hydrateProvisionedRow(api, row, order);
@@ -1089,6 +1095,24 @@ async function completeResellerPendingOrder(order, ipStock, { api: existingApi =
 
   if (purchaseRefs.resellerGroupId || purchaseRefs.resellerOrderId || purchaseRefs.resellerVmId) {
     provisioned = await findProvisionedVmByPurchaseRef(api, purchaseRefs, { order, locationCtx });
+    if (provisioned?.wrongIpHold && provisioned.ip && locationCtx.expectedIpPrefix) {
+      const wrongIpHold = `WRONG_IP: VM ${provisioned.vmId || 'unknown'} provisioned with ${provisioned.ip}, but this product needs ${locationCtx.expectedIpPrefix}.x. Fix the VM IP on the reseller panel — the order auto-completes once it matches.`;
+      await Order.findByIdAndUpdate(order._id, {
+        resellerVmId: provisioned.vmId || order.resellerVmId || undefined,
+        provisioningStatus: 'provisioning',
+        provisioningError: wrongIpHold,
+        lastProvisionAttempt: new Date(),
+        provider: 'reseller-api',
+      });
+      return {
+        success: false,
+        pending: true,
+        wrongIp: true,
+        vmId: provisioned.vmId,
+        ipAddress: provisioned.ip,
+        error: wrongIpHold,
+      };
+    }
   }
   let ipLooksWrong =
     order.ipAddress &&

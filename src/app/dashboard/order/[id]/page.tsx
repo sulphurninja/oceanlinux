@@ -2050,6 +2050,12 @@ const OrderDetails = () => {
       });
       const result = await res.json();
       if (result.success) {
+        if (result.recovered) {
+          toast.success('Payment was already received — your renewal has been applied.');
+          await fetchOrder({ silent: true });
+          setActionBusy(null);
+          return result;
+        }
         fetchWalletSummary().then((wallet) => {
           if (wallet) setWalletBalance(wallet.balance);
         }).catch(() => {});

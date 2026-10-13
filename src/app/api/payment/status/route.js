@@ -31,6 +31,32 @@ function renewalGatewayMethod(pendingRenewal) {
   return raw;
 }
 
+async function respondRenewalPaidAndApply(txnId, orderWithPending, rawPaymentMethod, paymentInfo) {
+  const { completeRenewalViaWebhook } = await import('@/lib/completePaidRenewal');
+  const completion = await completeRenewalViaWebhook(txnId, {
+    paymentId: paymentInfo.paymentId || txnId,
+    amountInr: paymentInfo.amountInr,
+    paymentMethod: paymentInfo.gatewayMethod || 'razorpay',
+    logSource: 'payment-status',
+  });
+
+  return NextResponse.json({
+    isRenewal: true,
+    renewalTxnId: txnId,
+    paymentStatus: 'SUCCESS',
+    paymentMethod: rawPaymentMethod,
+    renewalApplied: completion.success,
+    alreadyProcessed: !!completion.alreadyProcessed,
+    orderId: orderWithPending._id,
+    razorpayPaymentId: paymentInfo.paymentId,
+    message: completion.success
+      ? completion.alreadyProcessed
+        ? 'Renewal already processed'
+        : 'Renewal payment confirmed and applied'
+      : completion.body?.message || 'Payment confirmed; renewal processing will retry',
+  });
+}
+
 export async function POST(request) {
   const rateLimited = enforcePaymentRateLimit(request);
   if (rateLimited) return rateLimited;
@@ -162,12 +188,10 @@ export async function POST(request) {
                 $set: { 'pendingRenewal.gatewayAmount': upiCheck.amount },
               });
             }
-            return NextResponse.json({
-              isRenewal: true,
-              renewalTxnId: txnId,
-              paymentStatus: 'SUCCESS',
-              paymentMethod: rawPaymentMethod,
-              message: 'UPI renewal payment confirmed',
+            return respondRenewalPaidAndApply(txnId, orderWithPending, rawPaymentMethod, {
+              paymentId: upiCheck.transactionId || upiCheck.paymentId || txnId,
+              amountInr: upiCheck.amount,
+              gatewayMethod: 'upi',
             });
           }
           if (upiCheck.failed) break;
@@ -194,25 +218,21 @@ export async function POST(request) {
           console.log(`[PAYMENT-STATUS] Razorpay order status:`, razorpayOrder.status);
 
           if (razorpayOrder.status === 'paid') {
-            return NextResponse.json({
-              isRenewal: true,
-              renewalTxnId: txnId,
-              paymentStatus: 'SUCCESS',
-              paymentMethod: 'razorpay',
-              message: "Razorpay renewal payment confirmed"
+            const payments = await razorpay.orders.fetchPayments(gatewayOrderId);
+            const successPayment = payments.items?.find((p) => p.status === 'captured');
+            return respondRenewalPaidAndApply(txnId, orderWithPending, rawPaymentMethod, {
+              paymentId: successPayment?.id || gatewayOrderId,
+              amountInr: Number(successPayment?.amount ?? razorpayOrder.amount) / 100,
+              gatewayMethod: 'razorpay',
             });
           } else if (razorpayOrder.status === 'attempted') {
-            // Payment was attempted, check for payments
             const payments = await razorpay.orders.fetchPayments(gatewayOrderId);
-            const successPayment = payments.items?.find(p => p.status === 'captured');
+            const successPayment = payments.items?.find((p) => p.status === 'captured');
             if (successPayment) {
-              return NextResponse.json({
-                isRenewal: true,
-                renewalTxnId: txnId,
-                paymentStatus: 'SUCCESS',
-                paymentMethod: 'razorpay',
-                razorpayPaymentId: successPayment.id,
-                message: "Razorpay renewal payment confirmed"
+              return respondRenewalPaidAndApply(txnId, orderWithPending, rawPaymentMethod, {
+                paymentId: successPayment.id,
+                amountInr: Number(successPayment.amount) / 100,
+                gatewayMethod: 'razorpay',
               });
             }
           }
