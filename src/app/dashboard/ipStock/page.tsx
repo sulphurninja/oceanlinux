@@ -79,6 +79,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { z } from "zod";
 import { cn } from "@/lib/utils";
+import { removeEmojiKeepText } from "@/lib/stripEmojis";
 import { premiumBadge } from "@/lib/premium-badges";
 import Link from "next/link";
 import AddToCartButton from "@/components/cart/AddToCartButton";
@@ -518,16 +519,16 @@ function isServerPlanRowVisible(stock: IPStock, categoryTab: string) {
 
 /** Put plan name before the leading IP so sold-out rows still show the product, not just the badge. */
 function formatPlanDisplayName(name: string) {
-  const trimmed = String(name || '').trim();
-  const piped = trimmed.match(/^(\p{Extended_Pictographic}\uFE0F?\s*)?([\d.*xX]+(?:\.[\d*xX]+)*)\s*\|\s*(.+)$/u);
-  if (piped?.[3]) {
-    return `${piped[1] || ''}${piped[3].trim()} · ${piped[2]}`;
+  const trimmed = removeEmojiKeepText(String(name || ''));
+  const piped = trimmed.match(/^([\d.*xX]+(?:\.[\d*xX]+)*)\s*\|\s*(.+)$/);
+  if (piped?.[2]) {
+    return `${piped[2].trim()} · ${piped[1]}`;
   }
   const leadingIp = trimmed.match(
-    /^(\p{Extended_Pictographic}\uFE0F?\s*)?((?:\d{1,3}|[xX*]{1,3})(?:\.(?:\d{1,3}|[xX*]{2,3}))+)\s+(.+)$/u
+    /^((?:\d{1,3}|[xX*]{1,3})(?:\.(?:\d{1,3}|[xX*]{2,3}))+)\s+(.+)$/
   );
-  if (leadingIp?.[3]) {
-    return `${leadingIp[1] || ''}${leadingIp[3].trim()} · ${leadingIp[2]}`;
+  if (leadingIp?.[2]) {
+    return `${leadingIp[2].trim()} · ${leadingIp[1]}`;
   }
   return trimmed;
 }
@@ -742,6 +743,7 @@ function IPStockContent() {
   const [paymentMethod, setPaymentMethod] = useState<PaymentGateway>('upi');
   const [gatewayUserPicked, setGatewayUserPicked] = useState(false);
   const [walletBalance, setWalletBalance] = useState(0);
+  const [walletLoaded, setWalletLoaded] = useState(false);
   const [useWallet, setUseWallet] = useState(true);
   const [upiQrSession, setUpiQrSession] = useState<UpiQrSession | null>(null);
 
@@ -1167,9 +1169,12 @@ function IPStockContent() {
 
   useEffect(() => {
     if (!showDialog) return;
-    fetchWalletSummary().then((w) => {
-      if (w) setWalletBalance(w.balance);
-    });
+    setWalletLoaded(false);
+    fetchWalletSummary()
+      .then((w) => {
+        if (w) setWalletBalance(w.balance);
+      })
+      .finally(() => setWalletLoaded(true));
   }, [showDialog]);
 
   const openOutOfStockPopup = useCallback((opts: {
@@ -2012,12 +2017,12 @@ function IPStockContent() {
                       <div key={pkg._id} className="premium-dashboard-card rounded-lg border-l-4 border-l-orange-400 hover:border-orange-400/40 transition-colors overflow-hidden">
                         <div className="p-3 grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_auto] gap-2.5 sm:gap-3 sm:items-center">
                           <div className="flex items-start gap-2.5 min-w-0">
-                            <div className="w-9 h-9 rounded-lg bg-orange-500/20 flex items-center justify-center border border-orange-400/35 flex-shrink-0">
-                              <Zap className="h-4 w-4 text-orange-300" />
+                            <div className="premium-ipstock-plan-icon flex-shrink-0" data-server-type="Proxy">
+                              <Zap className="h-4 w-4" aria-hidden />
                             </div>
                             <div className="flex-1 min-w-0">
                               <div className="flex items-start gap-2">
-                                <h3 className="font-semibold text-sm md:text-base text-white break-words min-w-0 flex-1">{pkg.name}</h3>
+                                <h3 className="font-semibold text-sm md:text-base text-white break-words min-w-0 flex-1">{removeEmojiKeepText(pkg.name)}</h3>
                                 <ChevronDown className="h-4 w-4 mt-0.5 shrink-0 premium-dashboard-subtitle sm:hidden" aria-hidden />
                               </div>
                               <div className="flex items-center gap-1.5 flex-wrap mt-1">
@@ -2041,7 +2046,7 @@ function IPStockContent() {
                                 </Badge>
                               </div>
                               {pkg.description && (
-                                <p className="text-xs premium-dashboard-subtitle mt-1 break-words">{pkg.description}</p>
+                                <p className="text-xs premium-dashboard-subtitle mt-1 break-words">{removeEmojiKeepText(pkg.description)}</p>
                               )}
                             </div>
                           </div>
@@ -2348,14 +2353,14 @@ function IPStockContent() {
                 <div className="min-w-0">
                   <p className="text-xs font-medium leading-none">Wallet</p>
                   <p className="text-[10px] text-muted-foreground truncate">
-                    ₹{walletBalance.toLocaleString('en-IN')} available
+                    {walletLoaded ? `₹${walletBalance.toLocaleString('en-IN')} available` : 'Checking balance…'}
                   </p>
                 </div>
               </div>
               <Switch
                 checked={useWallet}
                 onCheckedChange={setUseWallet}
-                disabled={walletBalance <= 0 || paymentInitiating}
+                disabled={!walletLoaded || walletBalance <= 0 || paymentInitiating}
               />
             </div>
 
@@ -2407,7 +2412,7 @@ function IPStockContent() {
             </Button>
             <Button
               onClick={handleProceedToPayment}
-              disabled={paymentInitiating || !purchaseDisclaimerAccepted}
+              disabled={paymentInitiating || !purchaseDisclaimerAccepted || !walletLoaded}
               className="w-full sm:w-auto sm:flex-none premium-btn-pay order-1 sm:order-2"
             >
               {paymentInitiating ? (
@@ -2594,11 +2599,11 @@ const TrialVpsPlanRow = memo(function TrialVpsPlanRow({
                 className={cn(
                   'font-semibold text-sm md:text-base min-w-0 flex-1',
                   inStock
-                    ? 'text-white break-words sm:truncate'
+                    ? 'text-white break-words'
                     : 'premium-dashboard-subtitle line-through decoration-white/25 line-clamp-2 break-words'
                 )}
               >
-                {pkg.name}
+                {removeEmojiKeepText(pkg.name)}
               </h3>
               <ChevronDown
                 className={cn(
@@ -2660,7 +2665,7 @@ const TrialVpsPlanRow = memo(function TrialVpsPlanRow({
                   : `${pkg.trialDays}-day trial · HTTP proxy · one-time · no renewal`}
             </p>
             {pkg.description ? (
-              <p className="text-xs premium-dashboard-subtitle mt-1 break-words line-clamp-2">{pkg.description}</p>
+              <p className="text-xs premium-dashboard-subtitle mt-1 break-words line-clamp-2">{removeEmojiKeepText(pkg.description)}</p>
             ) : null}
           </div>
         </div>

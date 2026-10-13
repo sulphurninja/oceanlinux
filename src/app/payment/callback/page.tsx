@@ -525,7 +525,7 @@ function PaymentCallbackContent() {
   // Reseller wallet recharge — dedicated celebration UI
   if (status === "success" && rechargeInfo) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-emerald-50 via-background to-background dark:from-emerald-950/30 p-4">
+      <div className="min-h-screen flex items-center justify-center p-4">
         <div className="max-w-md w-full bg-card rounded-3xl shadow-2xl p-8 border border-emerald-500/20 relative overflow-hidden">
           <div className="absolute -top-24 -left-24 h-56 w-56 rounded-full bg-emerald-500/20 blur-3xl" />
           <div className="absolute -bottom-24 -right-24 h-56 w-56 rounded-full bg-emerald-400/10 blur-3xl" />
@@ -581,7 +581,7 @@ function PaymentCallbackContent() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4">
+    <div className="min-h-screen flex items-center justify-center p-4">
       <div className="max-w-md w-full bg-card rounded-xl shadow-xl p-8 border border-border">
         <div className="flex flex-col items-center justify-center text-center space-y-6">
           {/* Icon with glow effect */}
@@ -700,7 +700,7 @@ function PaymentCallbackContent() {
 // Fallback component to show while content is loading
 function PaymentCallbackFallback() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4">
+    <div className="min-h-screen flex items-center justify-center p-4">
       <div className="max-w-md w-full bg-card rounded-xl shadow-xl p-8 border border-border">
         <div className="flex flex-col items-center justify-center text-center space-y-6">
           <div className="p-4 rounded-full bg-blue-500/10">

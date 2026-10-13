@@ -125,7 +125,7 @@ export default function Header() {
               </DropdownMenuTrigger>
               <DropdownMenuContent
                 align="start"
-                className="w-48 bg-[hsl(160_30%_8%)] border-white/10 text-white"
+                className="w-48 border-white/10 bg-white/[0.06] text-white backdrop-blur-xl"
               >
                 {RESOURCE_LINKS.map((item) => (
                   <DropdownMenuItem key={item.href} asChild>

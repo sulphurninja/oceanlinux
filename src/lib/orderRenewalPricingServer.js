@@ -6,6 +6,14 @@ import {
   extractIpPrefixFromLabel,
   labelContainsIpPrefix,
 } from '@/lib/orderRenewalPricing';
+import { isNetbayProxyOrder, isNetbayProxyStock } from '@/lib/netbayGroupTags';
+
+/** "Dynamic Multi-IP - 163.227" → catalogue name. The suffix is a range, not a RAM tier. */
+function proxyCatalogueName(productName) {
+  return String(productName || '')
+    .replace(/\s+-\s+\d{1,3}(?:\.\d{1,3}){1,3}\s*$/, '')
+    .trim();
+}
 
 function pickBestStockCandidate(candidates, order, productPrefix) {
   let best = null;
@@ -50,6 +58,35 @@ export async function resolveRenewalIpStockForOrder(order) {
     } catch {
       linked = null;
     }
+  }
+
+  // Proxy orders put the IP range in the title ("… - 163.227"). That prefix also
+  // matches a Windows VPS product, which is a different plan. Stay on the proxy
+  // catalogue, and move a wrongly parked order back onto it.
+  if (isNetbayProxyOrder(order, linked)) {
+    if (linked && isNetbayProxyStock(linked)) {
+      return {
+        stock: linked,
+        listPrice: getCurrentListPriceFromStock(linked, order.memory),
+        correctedFrom: null,
+      };
+    }
+    const baseName = proxyCatalogueName(order.productName);
+    if (baseName && baseName !== String(order.productName || '').trim()) {
+      const proxyStock = await IPStock.findOne({ name: baseName }).lean();
+      if (proxyStock && isNetbayProxyStock(proxyStock)) {
+        return {
+          stock: proxyStock,
+          listPrice: getCurrentListPriceFromStock(proxyStock, order.memory),
+          correctedFrom: linked?._id || order.ipStockId,
+        };
+      }
+    }
+    return {
+      stock: linked,
+      listPrice: getCurrentListPriceFromStock(linked, order.memory),
+      correctedFrom: null,
+    };
   }
 
   const productPrefix = extractIpPrefixFromLabel(order.productName);

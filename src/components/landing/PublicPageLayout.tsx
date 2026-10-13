@@ -1,5 +1,6 @@
 import Header from "@/components/landing/Header";
 import Footer from "@/components/landing/Footer";
+import LandingGlassClass from "@/components/landing/LandingGlassClass";
 import FloatingSupport from "@/components/component/floating-support";
 import { cn } from "@/lib/utils";
 
@@ -20,6 +21,7 @@ export default function PublicPageLayout({
 }: PublicPageLayoutProps) {
   return (
     <div className={cn("premium-landing flex flex-col overflow-x-hidden min-w-0 w-full max-w-[100vw]", className ?? "min-h-dvh")}>
+      <LandingGlassClass />
       {showHeader && <Header />}
       <main className="flex-1 flex flex-col min-h-0 min-w-0 overflow-x-hidden">{children}</main>
       {showFooter && <Footer />}

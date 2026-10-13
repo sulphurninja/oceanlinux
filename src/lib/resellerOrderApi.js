@@ -10,6 +10,7 @@ import NotificationService from '@/services/notificationService';
 import ResellerWalletService from '@/services/resellerWalletService';
 import { normalizeOs } from '@/lib/v1ServerApi';
 import { getCustomPriceForStockMemory } from '@/lib/resellerPlanGroups';
+import { nonRenewablePackageMessage } from '@/lib/trialVpsOrder';
 
 const SlotIPPackage = require('@/models/slotIpPackageModel');
 
@@ -56,8 +57,25 @@ export function calculateResellerPlanPrice(reseller, productId, memoryOption, ba
  */
 async function refundUnfulfilledResellerOrder(order, reseller, amount, reason) {
   try {
-    const fresh = await Order.findById(order._id).select('walletDeduction status');
+    const fresh = await Order.findById(order._id).select(
+      'walletDeduction status ipAddress resellerVmId provisioningStatus'
+    );
     if (!fresh || fresh.walletDeduction?.refunded) return;
+    if (fresh.ipAddress || fresh.resellerVmId || fresh.provisioningStatus === 'active') {
+      console.log(
+        `[RESELLER-ORDER] skip refund for ${order._id} — panel VM already exists ` +
+        `(ip=${fresh.ipAddress || 'none'}, vm=${fresh.resellerVmId || 'none'})`
+      );
+      return;
+    }
+
+    const reasonText = String(reason || '');
+    if (/operation was aborted|timed out/i.test(reasonText) && !/no new VM appeared/i.test(reasonText)) {
+      console.log(
+        `[RESELLER-ORDER] skip refund for ${order._id} — panel create was cut off and may still have created the VM`
+      );
+      return;
+    }
 
     await ResellerWalletService.refundOrder(
       reseller._id,
@@ -190,6 +208,7 @@ export function sanitizeResellerOrder(order) {
     id: String(o._id),
     _id: String(o._id),
     productType: o.slotIpPackageId ? 'slotip' : (o.netbayProductKind === 'proxy' ? 'proxy' : 'vps'),
+    renewable: !nonRenewablePackageMessage(o),
     slotIpPackageId: o.slotIpPackageId ? String(o.slotIpPackageId) : null,
     ipStockId: o.ipStockId ? String(o.ipStockId) : null,
     productName: o.productName,

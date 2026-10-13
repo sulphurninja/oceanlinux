@@ -3,6 +3,7 @@ import connectDB from '@/lib/db';
 import Order from '@/models/orderModel';
 import { authenticateReseller } from '@/lib/resellerAuth';
 import { orderToVm } from '@/lib/resellerPanelApi';
+import { nonRenewablePackageMessage } from '@/lib/trialVpsOrder';
 import {
   getResellerManagementCapabilities,
   listResellerOsTemplates,
@@ -63,7 +64,13 @@ export async function PATCH(request, { params }) {
     const body = await request.json().catch(() => ({}));
     const meta = { ...(order.apiMetadata || {}) };
 
-    if (typeof body.autoRenew === 'boolean') meta.autoRenew = body.autoRenew;
+    if (typeof body.autoRenew === 'boolean') {
+      const renewBlock = nonRenewablePackageMessage(order);
+      if (body.autoRenew && renewBlock) {
+        return NextResponse.json({ success: false, message: renewBlock }, { status: 400 });
+      }
+      meta.autoRenew = body.autoRenew;
+    }
     if (body.customerEmail) meta.endUserEmail = String(body.customerEmail).trim();
 
     order.apiMetadata = meta;

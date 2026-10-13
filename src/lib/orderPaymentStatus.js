@@ -482,6 +482,78 @@ async function verifyWalletDebitForOrder(order) {
 
 
 
+/** Cart checkout debits the wallet once on the session. Child orders stay paid without their own debit row. */
+
+async function verifyCheckoutSessionWalletDebit(order) {
+
+  const pd = order?.paymentDetails || {};
+
+  if (pd.confirmedViaCheckout !== true) return { ok: false, reason: 'not_checkout_order' };
+
+
+
+  const sessionId = String(pd.checkoutSessionId || '').trim();
+
+  if (!looksLikeObjectId(sessionId)) return { ok: false, reason: 'checkout_session_missing' };
+
+
+
+  const CheckoutSession = require('@/models/checkoutSessionModel').default;
+
+  const session = await CheckoutSession.findById(sessionId)
+
+    .select('status walletAmount walletTxnId orderIds user')
+
+    .lean();
+
+  if (!session || session.status !== 'confirmed') return { ok: false, reason: 'checkout_not_confirmed' };
+
+  if (!(Number(session.walletAmount) > 0) || !looksLikeObjectId(session.walletTxnId)) {
+
+    return { ok: false, reason: 'checkout_wallet_missing' };
+
+  }
+
+
+
+  const orderId = String(order._id || '');
+
+  const inCart = (session.orderIds || []).some((id) => String(id) === orderId);
+
+  if (!inCart) return { ok: false, reason: 'order_not_in_checkout' };
+
+
+
+  const sessionUser = String(session.user || '');
+
+  const orderUser = String(order.user?._id || order.user || '');
+
+  if (!sessionUser || sessionUser !== orderUser) return { ok: false, reason: 'checkout_user_mismatch' };
+
+
+
+  return verifyWalletDebitForOrder({
+
+    user: order.user,
+
+    walletDeduction: {
+
+      deducted: true,
+
+      refunded: false,
+
+      transactionId: String(session.walletTxnId),
+
+      amount: Number(session.walletAmount),
+
+    },
+
+  });
+
+}
+
+
+
 async function verifyResellerWalletDebitForOrder(order) {
 
   if (!order?.walletDeduction || order.walletDeduction.deducted !== true) {

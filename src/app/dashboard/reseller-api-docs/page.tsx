@@ -340,7 +340,7 @@ export default function ResellerApiDocsPage() {
                                     <li><code>GET /vms</code> — Your VMs (alias of /orders)</li>
                                     <li><code>POST /vms</code> — Deploy VM (alias of POST /orders)</li>
                                     <li><code>PATCH /vms/{`{id}`}</code> — Auto-renew toggle</li>
-                                    <li><code>POST /vms/{`{id}`}/renew</code> — Renew service</li>
+                                    <li><code>POST /vms/{`{id}`}/renew</code> — Renew a VPS. Slot IP and Trial are not renewable.</li>
                                     <li><code>GET /customers</code> — White-label customers</li>
                                     <li><code>GET /account</code> — Account profile and wallet summary</li>
                                     <li><code>GET /products</code> — Legacy catalogue path</li>
@@ -742,9 +742,11 @@ x-api-secret: YOUR_API_SECRET`}
                             />
                         </EndpointCard>
 
-                        <EndpointCard method="POST" path="/vms/{id}/renew" description="Renew VM for a term from wallet">
+                        <EndpointCard method="POST" path="/vms/{id}/renew" description="Renew a VPS from the reseller wallet">
                             <p className="text-sm premium-dashboard-subtitle">
-                                <code>GET</code> on same path returns renewal quote. <code>POST</code> executes renewal.
+                                <code>GET</code> on the same path returns the quote. Show a Renew button only when{' '}
+                                <code>eligible</code> / <code>renewable</code> is true. Slot IP and Trial stay{' '}
+                                <code>eligible: false</code>.
                             </p>
                         </EndpointCard>
 
@@ -888,8 +890,8 @@ x-api-secret: YOUR_API_SECRET`}
                                     <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-amber-600 dark:text-amber-300" />
                                     <p>
                                         Proxies are not virtual machines, so <code>POST /orders/manage</code> power
-                                        actions do not apply to them. Renewals work exactly as they do for VPS
-                                        orders.
+                                        actions do not apply to them. Catalogue proxy plans can renew like a VPS.
+                                        Slot IP packages cannot — buy a new package when one expires.
                                     </p>
                                 </div>
                             </CardContent>

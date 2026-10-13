@@ -4,6 +4,7 @@ import Order from '@/models/orderModel';
 import { authenticateReseller } from '@/lib/resellerAuth';
 import { renewResellerOrder } from '@/lib/resellerRenewApi';
 import { getDaysUntilExpiry } from '@/lib/expiryHelper';
+import { nonRenewablePackageMessage } from '@/lib/trialVpsOrder';
 
 /** GET — renewal quote / eligibility */
 export async function GET(request, { params }) {
@@ -18,18 +19,20 @@ export async function GET(request, { params }) {
     return NextResponse.json({ success: false, message: 'Order not found' }, { status: 404 });
   }
 
-  const renewalPrice = Math.ceil(Number(order.price) || 0);
+  const renewBlock = nonRenewablePackageMessage(order);
+  const renewalPrice = renewBlock ? 0 : Math.ceil(Number(order.price) || 0);
   const daysUntilExpiry = order.expiryDate ? getDaysUntilExpiry(order.expiryDate) : null;
 
   return NextResponse.json({
     success: true,
     orderId: params.orderId,
-    eligible: !!order.expiryDate,
+    eligible: renewBlock ? false : !!order.expiryDate,
+    renewable: !renewBlock,
     renewalPrice,
     currency: auth.reseller.wallet?.currency || 'INR',
     expiryDate: order.expiryDate,
     daysUntilExpiry,
-    message: 'POST to this endpoint to renew using reseller wallet',
+    message: renewBlock || 'POST to this endpoint to renew using reseller wallet',
   });
 }
 

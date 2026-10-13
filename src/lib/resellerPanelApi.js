@@ -3,6 +3,8 @@
  * Maps existing orders/products to vms/plans naming for reseller integrations.
  */
 
+import { nonRenewablePackageMessage } from '@/lib/trialVpsOrder';
+
 export const RESELLER_PANEL_ENDPOINTS = [
   { method: 'GET', path: '/', description: 'API index — lists every endpoint' },
   { method: 'GET', path: '/wallet', description: 'Wallet balance, minimum balance, credit limit, overview' },
@@ -11,7 +13,7 @@ export const RESELLER_PANEL_ENDPOINTS = [
   { method: 'GET', path: '/vms', description: 'List your VMs / services' },
   { method: 'POST', path: '/vms', description: 'Deploy a VM — wallet charged, auto-provisioned' },
   { method: 'PATCH', path: '/vms/{id}', description: 'Update VM settings (e.g. autoRenew toggle)' },
-  { method: 'POST', path: '/vms/{id}/renew', description: 'Renew VM for a term from reseller wallet' },
+  { method: 'POST', path: '/vms/{id}/renew', description: 'Renew a VPS from the reseller wallet. Slot IP and Trial return eligible:false.' },
   { method: 'GET', path: '/vms/{id}/plan', description: 'Same-series upgrade/downgrade options + prorated cost quote' },
   { method: 'POST', path: '/vms/{id}/plan', description: 'Upgrade or downgrade VM plan (same series)' },
   { method: 'POST', path: '/vms/{id}/assign', description: 'Assign or unassign VM to a white-label customer' },
@@ -30,8 +32,10 @@ export function orderToVm(order) {
   if (!order) return null;
   const o = order.toObject ? order.toObject() : order;
   const meta = o.apiMetadata || {};
+  const renewBlock = nonRenewablePackageMessage(o);
   return {
     id: String(o._id),
+    renewable: !renewBlock,
     planId: o.ipStockId ? String(o.ipStockId) : o.slotIpPackageId ? String(o.slotIpPackageId) : null,
     name: o.productName,
     memory: o.memory,

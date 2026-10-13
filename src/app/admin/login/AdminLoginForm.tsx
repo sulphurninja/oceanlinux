@@ -97,7 +97,7 @@ export default function AdminLoginForm() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-6">
+    <div className="premium-dashboard min-h-screen flex items-center justify-center p-6">
       <Card className="w-full max-w-md border-border/60 shadow-lg">
         <CardHeader className="space-y-2 text-center">
           <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">

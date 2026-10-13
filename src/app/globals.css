@@ -143,12 +143,12 @@ html {
 
   /* Header — emerald tone matching hero (not flat black) */
   .premium-header {
-    background: linear-gradient(
-      180deg,
-      hsl(158 42% 10%) 0%,
-      hsl(154 36% 12%) 100%
-    );
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    background: rgba(8, 28, 22, 0.45);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(20px) saturate(1.25);
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.06) inset,
+      0 8px 32px -12px rgba(0, 0, 0, 0.45);
   }
 
   .premium-header--scrolled {
@@ -234,7 +234,11 @@ html {
   .premium-landing,
   .premium-page {
     @apply text-white overflow-x-hidden min-w-0 w-full max-w-[100vw];
-    background: hsl(160 32% 6%);
+    background:
+      radial-gradient(ellipse 80% 45% at 8% 0%, rgba(110, 231, 183, 0.16), transparent 52%),
+      radial-gradient(ellipse 60% 40% at 92% 18%, rgba(52, 211, 153, 0.1), transparent 48%),
+      radial-gradient(ellipse 50% 35% at 50% 100%, rgba(16, 185, 129, 0.08), transparent 50%),
+      hsl(160 32% 6%);
     color-scheme: dark;
     --background: 160 32% 6%;
     --foreground: 0 0% 98%;
@@ -313,9 +317,12 @@ html {
 
   .premium-cta-box {
     @apply rounded-2xl p-10 sm:p-12 text-center relative overflow-hidden;
-    background: linear-gradient(160deg, rgba(52, 211, 153, 0.08) 0%, rgba(255, 255, 255, 0.02) 100%);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    box-shadow: 0 32px 64px -16px rgba(0, 0, 0, 0.5);
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(16px) saturate(1.2);
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.06) inset,
+      0 32px 64px -16px rgba(0, 0, 0, 0.45);
   }
 
   /* Neutralize light-mode badge colors inside public pages */
@@ -345,15 +352,16 @@ html {
 
   .premium-page-section {
     @apply section-padding relative overflow-hidden text-white;
-    background: hsl(160 32% 6%);
-    border-top: 1px solid rgba(255, 255, 255, 0.04);
+    background: rgba(255, 255, 255, 0.025);
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(16px) saturate(1.15);
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset;
   }
 
   .premium-page-section--alt {
-    background:
-      radial-gradient(ellipse 60% 40% at 50% 0%, rgba(52, 211, 153, 0.05), transparent 50%),
-      hsl(158 34% 8%);
-    border-top: 1px solid rgba(255, 255, 255, 0.04);
+    background: rgba(255, 255, 255, 0.045);
+    backdrop-filter: blur(16px) saturate(1.15);
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
   }
 
   /* ── Premium dashboard (matches marketing emerald theme) ── */
@@ -365,30 +373,30 @@ html {
     --pd-mobile-topbar-h: 4.5rem;
     --pd-mobile-sticky-offset: calc(var(--pd-mobile-header-h) + var(--pd-mobile-topbar-h));
     --pd-page-bg: 152 40% 98%;
-    --pd-fg: 160 30% 10%;
-    --pd-fg-muted: 160 14% 32%;
+    --pd-fg: 160 35% 6%;
+    --pd-fg-muted: 160 22% 20%;
     --pd-glow-a: rgba(16, 185, 129, 0.14);
     --pd-glow-b: rgba(5, 150, 105, 0.08);
-    --pd-card-bg: hsl(0 0% 100%);
-    --pd-card-border: rgba(16, 185, 129, 0.2);
-    --pd-card-inset: rgba(255, 255, 255, 1);
-    --pd-card-shadow: 0 4px 28px -6px rgba(16, 80, 60, 0.12), 0 1px 0 rgba(16, 185, 129, 0.06) inset;
-    --pd-surface-soft: hsl(0 0% 100%);
+    --pd-card-bg: rgba(255, 255, 255, 0.7);
+    --pd-card-border: rgba(5, 150, 105, 0.5);
+    --pd-card-inset: rgba(255, 255, 255, 0.95);
+    --pd-card-shadow: 0 12px 30px -10px rgba(6, 78, 59, 0.32), 0 1px 0 rgba(255, 255, 255, 0.9) inset;
+    --pd-surface-soft: rgba(255, 255, 255, 0.36);
     --pd-border: rgba(16, 185, 129, 0.18);
     --pd-border-strong: rgba(5, 150, 105, 0.32);
-    --pd-input-bg: hsl(0 0% 100%);
-    --pd-input-border: rgba(16, 185, 129, 0.28);
+    --pd-input-bg: rgba(255, 255, 255, 0.5);
+    --pd-input-border: rgba(5, 150, 105, 0.42);
     --pd-input-text: hsl(160 28% 12%);
     --pd-input-placeholder: hsl(160 10% 48%);
     --pd-search-icon: hsl(158 45% 38%);
-    --pd-dialog-bg: hsl(0 0% 100%);
-    --pd-dialog-border: rgba(16, 185, 129, 0.22);
+    --pd-dialog-bg: rgba(255, 255, 255, 0.86);
+    --pd-dialog-border: rgba(255, 255, 255, 0.7);
     --pd-dialog-text: hsl(160 28% 12%);
-    --pd-topbar-bg: linear-gradient(180deg, hsl(152 45% 99% / 0.98) 0%, hsl(156 38% 97% / 0.96) 100%);
+    --pd-topbar-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.72) 0%, rgba(236, 253, 245, 0.58) 100%);
     --pd-topbar-border: rgba(16, 185, 129, 0.16);
-    --pd-sidebar-bg: linear-gradient(180deg, hsl(152 44% 97%) 0%, hsl(158 38% 95%) 100%);
+    --pd-sidebar-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.62) 0%, rgba(236, 253, 245, 0.48) 100%);
     --pd-sidebar-border: rgba(16, 185, 129, 0.16);
-    --pd-nav-text: hsl(160 14% 32%);
+    --pd-nav-text: hsl(160 22% 20%);
     --pd-nav-hover-bg: rgba(16, 185, 129, 0.1);
     --pd-nav-active-bg: rgba(16, 185, 129, 0.16);
     --pd-nav-active-text: hsl(158 72% 28%);
@@ -397,18 +405,18 @@ html {
     --pd-emerald-muted: hsl(158 72% 28%);
     --pd-icon-bg: rgba(16, 185, 129, 0.12);
     --pd-icon-border: rgba(16, 185, 129, 0.28);
-    --pd-actions-bg: hsl(0 0% 100%);
-    --pd-actions-border: rgba(16, 185, 129, 0.18);
+    --pd-actions-bg: rgba(255, 255, 255, 0.4);
+    --pd-actions-border: rgba(5, 150, 105, 0.3);
     --pd-scroll-track: rgba(16, 185, 129, 0.06);
     --pd-scroll-thumb: rgba(5, 150, 105, 0.22);
-    --pd-stat-label: hsl(160 14% 32%);
-    --pd-title: hsl(160 30% 10%);
-    --pd-subtitle: hsl(160 14% 32%);
+    --pd-stat-label: hsl(160 24% 18%);
+    --pd-title: hsl(160 40% 5%);
+    --pd-subtitle: hsl(160 22% 20%);
     --pd-chart-grid: rgba(16, 80, 60, 0.14);
-    --pd-chart-tick: hsl(160 14% 36%);
+    --pd-chart-tick: hsl(160 22% 20%);
     --pd-chart-stroke: #059669;
     --pd-sidebar-brand: hsl(160 30% 10%);
-    --pd-sidebar-muted: hsl(160 14% 32%);
+    --pd-sidebar-muted: hsl(160 22% 20%);
     --pd-btn-outline-text: hsl(160 30% 10%);
     --pd-btn-outline-border: rgba(16, 185, 129, 0.32);
     --pd-btn-outline-hover-bg: rgba(16, 185, 129, 0.1);
@@ -416,9 +424,9 @@ html {
     --pd-payment-inactive-bg: hsl(152 30% 97%);
     --pd-payment-inactive-text: hsl(160 12% 38%);
     --pd-payment-inactive-border: rgba(16, 185, 129, 0.22);
-    --pd-dropdown-bg: hsl(0 0% 100%);
+    --pd-dropdown-bg: rgba(255, 255, 255, 0.78);
     --pd-dropdown-border: rgba(16, 185, 129, 0.18);
-    --pd-mobile-header-bg: hsl(152 45% 99% / 0.98);
+    --pd-mobile-header-bg: rgba(255, 255, 255, 0.72);
     --background: 156 32% 97%;
     --foreground: 160 25% 15%;
     --card: 0 0% 100%;
@@ -445,12 +453,12 @@ html {
     --pd-page-bg: 160 32% 6%;
     --pd-fg: 0 0% 98%;
     --pd-fg-muted: 0 0% 100% / 0.62;
-    --pd-glow-a: rgba(52, 211, 153, 0.06);
-    --pd-glow-b: rgba(52, 211, 153, 0.04);
-    --pd-card-bg: rgba(255, 255, 255, 0.025);
-    --pd-card-border: rgba(255, 255, 255, 0.08);
-    --pd-card-inset: rgba(255, 255, 255, 0.04);
-    --pd-card-shadow: 0 24px 48px -12px rgba(0, 0, 0, 0.45);
+    --pd-glow-a: rgba(52, 211, 153, 0.22);
+    --pd-glow-b: rgba(16, 185, 129, 0.16);
+    --pd-card-bg: rgba(255, 255, 255, 0.12);
+    --pd-card-border: rgba(52, 211, 153, 0.4);
+    --pd-card-inset: rgba(255, 255, 255, 0.14);
+    --pd-card-shadow: 0 20px 44px -12px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(52, 211, 153, 0.06);
     --pd-surface-soft: rgba(255, 255, 255, 0.03);
     --pd-border: rgba(255, 255, 255, 0.08);
     --pd-border-strong: rgba(255, 255, 255, 0.12);
@@ -459,12 +467,12 @@ html {
     --pd-input-text: #fff;
     --pd-input-placeholder: rgba(255, 255, 255, 0.3);
     --pd-search-icon: rgba(255, 255, 255, 0.4);
-    --pd-dialog-bg: hsl(158 28% 10%);
+    --pd-dialog-bg: rgba(10, 28, 22, 0.72);
     --pd-dialog-border: rgba(255, 255, 255, 0.12);
     --pd-dialog-text: #fff;
-    --pd-topbar-bg: linear-gradient(180deg, hsl(158 38% 9% / 0.97) 0%, hsl(158 34% 8% / 0.92) 100%);
+    --pd-topbar-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.09) 0%, rgba(255, 255, 255, 0.04) 100%);
     --pd-topbar-border: rgba(255, 255, 255, 0.06);
-    --pd-sidebar-bg: linear-gradient(180deg, hsl(158 42% 10%) 0%, hsl(154 36% 12%) 100%);
+    --pd-sidebar-bg: linear-gradient(180deg, rgba(8, 28, 22, 0.72) 0%, rgba(10, 32, 26, 0.58) 100%);
     --pd-sidebar-border: rgba(255, 255, 255, 0.06);
     --pd-nav-text: rgba(255, 255, 255, 0.62);
     --pd-nav-hover-bg: rgba(255, 255, 255, 0.06);
@@ -494,7 +502,7 @@ html {
     --pd-payment-inactive-bg: rgba(255, 255, 255, 0.03);
     --pd-payment-inactive-text: rgba(255, 255, 255, 0.55);
     --pd-payment-inactive-border: rgba(255, 255, 255, 0.12);
-    --pd-dropdown-bg: hsl(158 28% 10%);
+    --pd-dropdown-bg: rgba(10, 28, 22, 0.78);
     --pd-dropdown-border: rgba(255, 255, 255, 0.1);
     --pd-mobile-header-bg: hsl(158 40% 8% / 0.98);
     --background: 160 32% 6%;
@@ -520,6 +528,59 @@ html {
 
   .premium-dashboard {
     @apply min-w-0 w-full;
+    position: relative;
+    isolation: isolate;
+  }
+
+  /* Colour orbs behind the glass so blur has something to refract */
+  .premium-dashboard::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background:
+      radial-gradient(circle at 12% 18%, rgba(52, 211, 153, 0.32), transparent 38%),
+      radial-gradient(circle at 88% 42%, rgba(14, 165, 233, 0.2), transparent 42%),
+      radial-gradient(circle at 36% 88%, rgba(16, 185, 129, 0.26), transparent 44%);
+  }
+
+  html.premium-dashboard-active.dark .premium-dashboard::before {
+    opacity: 1;
+  }
+
+  /* Light theme: glass only reads when there is colour behind it. Richer, larger
+     colour blobs so the translucent white panels pick up a visible frosted tint. */
+  html.premium-dashboard-active:not(.dark) .premium-dashboard::before {
+    opacity: 1;
+    background:
+      radial-gradient(circle at 8% 14%, rgba(16, 185, 129, 0.62), transparent 34%),
+      radial-gradient(circle at 92% 30%, rgba(14, 165, 233, 0.5), transparent 36%),
+      radial-gradient(circle at 28% 92%, rgba(52, 211, 153, 0.6), transparent 40%),
+      radial-gradient(circle at 78% 82%, rgba(99, 102, 241, 0.3), transparent 34%),
+      radial-gradient(circle at 60% 40%, rgba(132, 204, 22, 0.32), transparent 30%);
+  }
+
+  /* Public pages: same colour orbs behind the glass cards so the blur is visible */
+  .premium-landing {
+    position: relative;
+    isolation: isolate;
+  }
+
+  .premium-landing::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background:
+      radial-gradient(circle at 12% 18%, rgba(52, 211, 153, 0.5), transparent 38%),
+      radial-gradient(circle at 88% 42%, rgba(14, 165, 233, 0.34), transparent 42%),
+      radial-gradient(circle at 36% 88%, rgba(16, 185, 129, 0.42), transparent 44%);
+  }
+
+  .premium-dashboard {
+    @apply min-w-0 w-full;
     color: var(--pd-dialog-text);
     background:
       radial-gradient(ellipse 80% 50% at 100% 0%, var(--pd-glow-a), transparent 55%),
@@ -529,9 +590,9 @@ html {
 
   html.premium-dashboard-active:not(.dark) .premium-dashboard {
     background:
-      radial-gradient(ellipse 85% 55% at 100% -10%, rgba(16, 185, 129, 0.07), transparent 52%),
-      radial-gradient(ellipse 70% 45% at -5% 100%, rgba(5, 150, 105, 0.04), transparent 48%),
-      linear-gradient(180deg, hsl(152 42% 99.5%) 0%, hsl(156 34% 97.5%) 100%);
+      radial-gradient(ellipse 85% 55% at 100% -10%, rgba(16, 185, 129, 0.22), transparent 52%),
+      radial-gradient(ellipse 70% 45% at -5% 100%, rgba(5, 150, 105, 0.14), transparent 48%),
+      linear-gradient(165deg, hsl(152 46% 94%) 0%, hsl(160 34% 90%) 48%, hsl(152 40% 96%) 100%);
   }
 
   .premium-dashboard-title {
@@ -540,6 +601,13 @@ html {
 
   .premium-dashboard-subtitle {
     color: var(--pd-subtitle);
+  }
+
+  /* Light glass: a faint white halo keeps text crisp over tinted, blurred panels. */
+  html.premium-dashboard-active:not(.dark) .premium-dashboard-title,
+  html.premium-dashboard-active:not(.dark) .premium-dashboard-subtitle,
+  html.premium-dashboard-active:not(.dark) .premium-dashboard .text-muted-foreground {
+    text-shadow: 0 1px 0 rgba(255, 255, 255, 0.55);
   }
 
   .premium-sidebar-brand {
@@ -836,6 +904,89 @@ html {
     @apply text-white border-emerald-400/50 bg-emerald-500/15 ring-1 ring-emerald-400/20;
   }
 
+  /* Light theme: category tabs are glass, the active one gets a green tint */
+  html.premium-dashboard-active:not(.dark) .premium-ipstock-category-tab {
+    background-color: rgba(255, 255, 255, 0.42) !important;
+    border-color: rgba(5, 150, 105, 0.3) !important;
+    backdrop-filter: blur(12px) saturate(1.1);
+  }
+
+  html.premium-dashboard-active:not(.dark) .premium-ipstock-category-tab--active {
+    background-color: rgba(16, 185, 129, 0.2) !important;
+    border-color: rgba(5, 150, 105, 0.45) !important;
+    color: hsl(160 25% 14%);
+  }
+
+  /* Light theme: IN-STOCK plan rows are bright glass with a strong green edge */
+  html.premium-dashboard-active:not(.dark) .premium-ipstock-page .premium-dashboard-card.border-l-4:not(.premium-ipstock-row-sold-out) {
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.86) 0%, rgba(209, 250, 229, 0.7) 100%) !important;
+    border-top-color: rgba(5, 150, 105, 0.6) !important;
+    border-right-color: rgba(5, 150, 105, 0.6) !important;
+    border-bottom-color: rgba(5, 150, 105, 0.6) !important;
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 1) inset,
+      0 2px 4px rgba(6, 78, 59, 0.12),
+      0 14px 30px -10px rgba(6, 78, 59, 0.32);
+  }
+
+  /* Light theme: SOLD-OUT rows are flat, grey and dashed so they read as unavailable */
+  html.premium-dashboard-active:not(.dark) .premium-ipstock-page .premium-dashboard-card.premium-ipstock-row-sold-out {
+    background: linear-gradient(135deg, rgba(241, 245, 249, 0.6) 0%, rgba(226, 232, 240, 0.5) 100%) !important;
+    opacity: 1 !important;
+    filter: none !important;
+    border-style: dashed !important;
+    border-top-color: rgba(100, 116, 139, 0.45) !important;
+    border-right-color: rgba(100, 116, 139, 0.45) !important;
+    border-bottom-color: rgba(100, 116, 139, 0.45) !important;
+    box-shadow: none !important;
+  }
+
+  /* Light theme: only the "Out of stock" badge on sold-out rows is bright red */
+  html.premium-dashboard-active:not(.dark) .premium-ipstock-page .premium-ipstock-row-sold-out .premium-badge--error {
+    background: rgba(239, 68, 68, 0.16) !important;
+    color: hsl(0 78% 46%) !important;
+    border-color: rgba(220, 38, 38, 0.6) !important;
+    font-weight: 700 !important;
+  }
+
+  /* Dark theme: IN-STOCK plan rows are brighter glass with an emerald edge */
+  html.premium-dashboard-active.dark .premium-ipstock-page .premium-dashboard-card.border-l-4:not(.premium-ipstock-row-sold-out) {
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.14) 0%, rgba(16, 185, 129, 0.1) 100%) !important;
+    border-top-color: rgba(52, 211, 153, 0.55) !important;
+    border-right-color: rgba(52, 211, 153, 0.55) !important;
+    border-bottom-color: rgba(52, 211, 153, 0.55) !important;
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.12) inset,
+      0 14px 34px -12px rgba(0, 0, 0, 0.6);
+  }
+
+  /* Dark theme: SOLD-OUT rows are dim and dashed */
+  html.premium-dashboard-active.dark .premium-ipstock-page .premium-dashboard-card.premium-ipstock-row-sold-out {
+    background: rgba(255, 255, 255, 0.03) !important;
+    opacity: 1 !important;
+    filter: none !important;
+    border-style: dashed !important;
+    border-top-color: rgba(148, 163, 184, 0.45) !important;
+    border-right-color: rgba(148, 163, 184, 0.45) !important;
+    border-bottom-color: rgba(148, 163, 184, 0.45) !important;
+    box-shadow: none !important;
+  }
+
+  /* Dark theme: only the "Out of stock" badge on sold-out rows is bright red */
+  html.premium-dashboard-active.dark .premium-ipstock-page .premium-ipstock-row-sold-out .premium-badge--error {
+    background: rgba(239, 68, 68, 0.28) !important;
+    color: #ff7b7b !important;
+    border-color: rgba(248, 113, 113, 0.8) !important;
+    font-weight: 700 !important;
+  }
+
+  /* Light theme: cart buttons on IP Stock are solid glass with a green icon and border */
+  html.premium-dashboard-active:not(.dark) .premium-ipstock-page button:has(> svg.lucide-shopping-cart) {
+    background-color: rgba(255, 255, 255, 0.6) !important;
+    border-color: rgba(5, 150, 105, 0.45) !important;
+    color: hsl(158 72% 28%) !important;
+  }
+
   .premium-ipstock-row-sold-out {
     @apply opacity-55 saturate-[0.6] grayscale-[0.25];
   }
@@ -1120,7 +1271,8 @@ html {
   }
 
   html.premium-dashboard-active:not(.dark) .premium-sidebar-account-card {
-    background: linear-gradient(145deg, rgba(255, 255, 255, 0.98) 0%, rgba(236, 253, 245, 0.9) 100%);
+    background: linear-gradient(145deg, rgba(255, 255, 255, 0.28) 0%, rgba(236, 253, 245, 0.32) 100%);
+    backdrop-filter: blur(14px) saturate(1.15);
     border-color: rgba(16, 185, 129, 0.22);
     box-shadow:
       0 4px 18px -4px rgba(16, 80, 60, 0.1),
@@ -1223,11 +1375,56 @@ html {
     color: hsl(158 72% 28%);
   }
 
+  .premium-dashboard .min-h-screen.bg-background,
+  .premium-dashboard .min-h-dvh.bg-background {
+    background-color: transparent;
+  }
+
+  /* Page-level solid wrappers (any theme) -> let the glass background show through */
+  html.premium-dashboard-active .min-h-screen:is(.bg-background, .bg-white, .bg-gray-50, .bg-gray-100, .bg-gray-900, .bg-gray-950, .bg-slate-50, .bg-slate-900, .bg-slate-950, .bg-zinc-900, .bg-zinc-950, .bg-black, [class*="bg-[#"], [class*="bg-[hsl"]),
+  html.premium-landing-active .min-h-screen:is(.bg-background, .bg-white, .bg-gray-50, .bg-gray-100, .bg-gray-900, .bg-gray-950, .bg-slate-50, .bg-slate-900, .bg-slate-950, .bg-zinc-900, .bg-zinc-950, .bg-black, [class*="bg-[#"], [class*="bg-[hsl"]),
+  html.premium-dashboard-active .min-h-dvh:is(.bg-background, .bg-white, .bg-gray-50, .bg-gray-900, .bg-gray-950, .bg-slate-900, .bg-black),
+  html.premium-landing-active .min-h-dvh:is(.bg-background, .bg-white, .bg-gray-50, .bg-gray-900, .bg-gray-950, .bg-slate-900, .bg-black) {
+    background-color: transparent !important;
+  }
+
+  .glass-admin-page {
+    background: transparent;
+    color: var(--pd-dialog-text);
+  }
+
+  .glass-admin-page .bg-gray-900,
+  .glass-admin-page .bg-gray-800,
+  .glass-admin-page .bg-gray-700 {
+    background-color: var(--pd-card-bg) !important;
+    border-color: var(--pd-card-border) !important;
+    backdrop-filter: blur(14px) saturate(1.1);
+    box-shadow: 0 1px 0 var(--pd-card-inset) inset;
+  }
+
+  .glass-admin-page .text-white,
+  .glass-admin-page .text-gray-100,
+  .glass-admin-page .text-gray-200,
+  .glass-admin-page .text-gray-300 {
+    color: var(--pd-title);
+  }
+
+  .glass-admin-page .text-gray-400,
+  .glass-admin-page .text-gray-500 {
+    color: var(--pd-subtitle);
+  }
+
+  .glass-admin-page .border-gray-700,
+  .glass-admin-page .border-gray-800,
+  .glass-admin-page .border-gray-600 {
+    border-color: var(--pd-card-border) !important;
+  }
+
   .premium-dashboard .bg-card,
   .premium-dashboard [data-slot="card"] {
     background: var(--pd-card-bg);
     border-color: var(--pd-card-border);
-    backdrop-filter: blur(6px);
+    backdrop-filter: blur(16px) saturate(1.15);
     box-shadow:
       0 1px 0 var(--pd-card-inset) inset,
       var(--pd-card-shadow);
@@ -1444,6 +1641,7 @@ html {
     background: var(--pd-dropdown-bg) !important;
     border: 1px solid var(--pd-dropdown-border) !important;
     color: var(--pd-dialog-text);
+    backdrop-filter: blur(16px) saturate(1.2);
     box-shadow:
       0 1px 0 var(--pd-card-inset) inset,
       0 12px 32px -8px rgba(16, 80, 60, 0.12) !important;
@@ -2364,6 +2562,7 @@ html {
   .premium-dashboard-sidebar {
     background: var(--pd-sidebar-bg);
     border-color: var(--pd-sidebar-border);
+    backdrop-filter: blur(18px) saturate(1.15);
   }
 
   .premium-dashboard-nav-active,
@@ -2439,6 +2638,48 @@ html {
     background: var(--pd-dialog-bg) !important;
     border: 1px solid var(--pd-dialog-border) !important;
     color: var(--pd-dialog-text);
+    backdrop-filter: blur(18px) saturate(1.2);
+  }
+
+  html.premium-dashboard-active [role="dialog"],
+  html.premium-dashboard-active [role="alertdialog"] {
+    background: var(--pd-dialog-bg) !important;
+    border-color: var(--pd-dialog-border) !important;
+    backdrop-filter: blur(18px) saturate(1.2);
+    box-shadow:
+      0 1px 0 var(--pd-card-inset) inset,
+      0 24px 48px -16px rgba(0, 0, 0, 0.35);
+  }
+
+  /* Light theme: Radix overlay is bg-black/80, which turns the page muddy grey
+     and dims the glass dialog. Use a soft green-tinted veil instead. */
+  html.premium-dashboard-active:not(.dark) .fixed.inset-0.bg-black\/80 {
+    background-color: rgba(16, 60, 46, 0.22) !important;
+    backdrop-filter: blur(6px) saturate(1.1);
+  }
+
+  html.premium-dashboard-active .bg-popover {
+    background: var(--pd-dropdown-bg) !important;
+    border-color: var(--pd-dropdown-border) !important;
+    backdrop-filter: blur(16px) saturate(1.2);
+  }
+
+  html.premium-landing-active [role="dialog"],
+  html.premium-landing-active [role="alertdialog"] {
+    background: rgba(8, 24, 20, 0.72) !important;
+    border-color: rgba(255, 255, 255, 0.12) !important;
+    color: rgba(255, 255, 255, 0.92);
+    backdrop-filter: blur(18px) saturate(1.2);
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.06) inset,
+      0 24px 48px -16px rgba(0, 0, 0, 0.45);
+  }
+
+  html.premium-landing-active .bg-popover {
+    background: rgba(8, 24, 20, 0.78) !important;
+    border-color: rgba(255, 255, 255, 0.1) !important;
+    color: rgba(255, 255, 255, 0.92);
+    backdrop-filter: blur(16px) saturate(1.2);
   }
 
   .premium-login-news-dialog {
@@ -3252,8 +3493,8 @@ html {
   html.premium-dashboard-active:not(.dark) .premium-dashboard-card {
     box-shadow:
       0 1px 0 rgba(255, 255, 255, 1) inset,
-      0 1px 3px rgba(16, 80, 60, 0.05),
-      0 8px 28px -8px rgba(16, 80, 60, 0.1);
+      0 1px 2px rgba(6, 78, 59, 0.1),
+      0 10px 26px -10px rgba(6, 78, 59, 0.22);
   }
 
   html.premium-dashboard-active:not(.dark) .premium-dashboard-toolbar {
@@ -4134,8 +4375,9 @@ html {
 
   .premium-inner-card {
     @apply rounded-xl p-4;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(12px);
   }
 
   .premium-page .text-muted-foreground {
@@ -4148,8 +4390,10 @@ html {
 
   .premium-section {
     @apply section-padding relative overflow-hidden text-white;
-    background: hsl(160 32% 6%);
-    border-top: 1px solid rgba(255, 255, 255, 0.04);
+    background: rgba(255, 255, 255, 0.025);
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(16px) saturate(1.15);
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset;
   }
 
   .premium-section-grid {
@@ -4251,9 +4495,12 @@ html {
   .premium-panel,
   .premium-panel--dark {
     @apply rounded-2xl p-5 sm:p-8 lg:p-10 relative overflow-hidden;
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px solid rgba(255, 255, 255, 0.07);
-    box-shadow: 0 32px 64px -16px rgba(0, 0, 0, 0.5);
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(16px) saturate(1.2);
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.06) inset,
+      0 32px 64px -16px rgba(0, 0, 0, 0.45);
   }
 
   .premium-icon-box {
@@ -4290,8 +4537,9 @@ html {
   .premium-stat-card,
   .premium-stat-card--dark {
     @apply text-center min-w-0 p-3 sm:p-6 lg:p-7 rounded-xl transition-all duration-300;
-    background: rgba(255, 255, 255, 0.025);
-    border: 1px solid rgba(255, 255, 255, 0.07);
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(12px);
   }
 
   .premium-stat-card:hover {
@@ -4390,10 +4638,10 @@ html {
   }
 
   .premium-footer {
-    background:
-      radial-gradient(ellipse 70% 50% at 90% 0%, rgba(52, 211, 153, 0.06), transparent 50%),
-      linear-gradient(180deg, hsl(158 38% 9%) 0%, hsl(160 32% 5%) 100%);
-    @apply text-white border-t border-white/[0.06];
+    background: rgba(8, 24, 20, 0.5);
+    backdrop-filter: blur(18px) saturate(1.2);
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06) inset;
+    @apply text-white border-t border-white/[0.1];
   }
 
   .premium-pricing-card {
@@ -4577,7 +4825,8 @@ html.premium-dashboard-active .premium-btn-outline:hover {
 }
 
 html.premium-dashboard-active:not(.dark) .premium-btn-outline {
-  background-color: #fff !important;
+  background-color: rgba(255, 255, 255, 0.22) !important;
+  backdrop-filter: blur(12px) saturate(1.1);
   border-color: rgba(16, 185, 129, 0.32) !important;
   color: hsl(160 25% 18%) !important;
   box-shadow: 0 1px 3px rgba(16, 80, 60, 0.07) !important;
@@ -4608,7 +4857,8 @@ html.premium-dashboard-active .premium-dashboard-toolbar .premium-dashboard-sele
 }
 
 html.premium-dashboard-active:not(.dark) .premium-dashboard-toolbar .premium-dashboard-select {
-  background-color: #fff !important;
+  background-color: rgba(255, 255, 255, 0.22) !important;
+  backdrop-filter: blur(12px) saturate(1.1);
   border-color: rgba(16, 185, 129, 0.32) !important;
   color: hsl(160 25% 18%) !important;
 }
@@ -4711,7 +4961,8 @@ html.premium-dashboard-active .premium-dashboard-tabs [role="tab"] {
 }
 
 html.premium-dashboard-active:not(.dark) .premium-dashboard-tabs [role="tab"] {
-  background-color: #fff !important;
+  background-color: rgba(255, 255, 255, 0.22) !important;
+  backdrop-filter: blur(12px) saturate(1.1);
   border-color: rgba(16, 185, 129, 0.32) !important;
   color: hsl(160 25% 18%) !important;
   box-shadow: 0 1px 3px rgba(16, 80, 60, 0.07) !important;
@@ -4722,10 +4973,62 @@ html.premium-dashboard-active .premium-dashboard-tabs [role="tab"][data-state="a
 }
 
 html.premium-dashboard-active:not(.dark) .premium-dashboard-tabs [role="tab"][data-state="active"] {
-  background-color: #fff !important;
+  background-color: rgba(255, 255, 255, 0.38) !important;
+  backdrop-filter: blur(12px) saturate(1.1);
   border-color: rgba(16, 185, 129, 0.32) !important;
   color: hsl(160 25% 18%) !important;
   box-shadow: inset 0 -2px 0 hsl(158 72% 28%), 0 1px 3px rgba(16, 80, 60, 0.07) !important;
+}
+
+/* Light theme: shadcn surfaces (outline buttons, selects, inputs, tab lists, white chips)
+   use solid bg-background / bg-white / bg-muted. Make them translucent glass so the
+   frosted backdrop shows. Dialogs, menus and popovers keep their own glass rules. */
+html.premium-dashboard-active:not(.dark) .premium-dashboard :is(.bg-background, .bg-white, .bg-muted, .bg-secondary, [role="tab"][data-state="active"]):not(.min-h-screen, .min-h-dvh, .bg-popover, [role="dialog"], [role="alertdialog"], [role="listbox"], [role="menu"]) {
+  background-color: rgba(255, 255, 255, 0.28) !important;
+  backdrop-filter: blur(12px) saturate(1.1);
+}
+
+/* Light theme: pastel panels, neutral badges and the sidebar logo chip were solid
+   (for example bg-green-50, bg-yellow-50, #fff). Turn them into light tinted glass. */
+html.premium-dashboard-active:not(.dark) .premium-dashboard :is(.bg-green-50, .bg-green-100, .bg-emerald-50) {
+  background-color: rgba(34, 197, 94, 0.12) !important;
+  backdrop-filter: blur(12px) saturate(1.1);
+}
+html.premium-dashboard-active:not(.dark) .premium-dashboard :is(.bg-yellow-50, .bg-amber-50) {
+  background-color: rgba(234, 179, 8, 0.14) !important;
+  backdrop-filter: blur(12px) saturate(1.1);
+}
+html.premium-dashboard-active:not(.dark) .premium-dashboard :is(.bg-blue-50, .bg-blue-100, .bg-sky-50) {
+  background-color: rgba(59, 130, 246, 0.12) !important;
+  backdrop-filter: blur(12px) saturate(1.1);
+}
+html.premium-dashboard-active:not(.dark) .premium-dashboard :is(.bg-purple-50, .bg-purple-100, .bg-violet-50, .bg-indigo-50) {
+  background-color: rgba(168, 85, 247, 0.12) !important;
+  backdrop-filter: blur(12px) saturate(1.1);
+}
+html.premium-dashboard-active:not(.dark) .premium-dashboard :is(.bg-orange-50, .bg-red-50, .bg-rose-50) {
+  background-color: rgba(239, 68, 68, 0.1) !important;
+  backdrop-filter: blur(12px) saturate(1.1);
+}
+html.premium-dashboard-active:not(.dark) .premium-dashboard :is(.bg-slate-50, .bg-gray-50, .bg-zinc-50, .bg-neutral-50) {
+  background-color: rgba(255, 255, 255, 0.24) !important;
+  backdrop-filter: blur(12px) saturate(1.1);
+}
+html.premium-dashboard-active:not(.dark) .premium-badge--neutral {
+  background: rgba(255, 255, 255, 0.3) !important;
+  backdrop-filter: blur(10px) saturate(1.1);
+}
+html.premium-dashboard-active:not(.dark) .premium-sidebar-brand-mark {
+  background: rgba(255, 255, 255, 0.3);
+  backdrop-filter: blur(12px) saturate(1.1);
+}
+
+/* Dark theme: shadcn outline buttons, selects and muted chips use bg-background,
+   which resolves to near-black (#121212) and reads as flat black on the green glass.
+   Give them a subtle translucent tint instead. Terminal blocks keep their own black. */
+html.premium-dashboard-active.dark .premium-dashboard :is(.bg-background, .bg-muted, .bg-secondary):not(.min-h-screen, .min-h-dvh, .bg-popover, [role="dialog"], [role="alertdialog"], [role="listbox"], [role="menu"]) {
+  background-color: rgba(255, 255, 255, 0.07) !important;
+  backdrop-filter: blur(12px) saturate(1.1);
 }
 
 html.premium-dashboard-active .premium-tab-count {
@@ -5017,8 +5320,8 @@ html.premium-dashboard-active.dark .premium-ipstock-promo-btn svg {
 
   .hero-feature-item {
     @apply flex items-center gap-2.5 text-sm text-white rounded-xl px-3 py-2.5 transition-all duration-300;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
   }
 
   .hero-feature-item:hover {
@@ -5054,8 +5357,8 @@ html.premium-dashboard-active.dark .premium-ipstock-promo-btn svg {
 
   .hero-plan-row {
     @apply flex items-start gap-3 p-3 sm:p-4 min-w-0 w-full rounded-xl border transition-all duration-300 cursor-pointer;
-    background: rgba(255, 255, 255, 0.04);
-    border-color: rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.1);
   }
 
   .hero-plan-row:hover {
@@ -5998,6 +6301,22 @@ html {
   body {
     @apply bg-background text-foreground overflow-x-hidden;
   }
+}
+
+/* Theme switch: circular reveal (see components/ui/theme-toggle.tsx).
+   Disable the default cross-fade so only the clip-path reveal plays. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+::view-transition-new(root) {
+  z-index: 2147483646;
+}
+
+::view-transition-old(root) {
+  z-index: 1;
 }
 
 @media (prefers-reduced-motion: reduce) {

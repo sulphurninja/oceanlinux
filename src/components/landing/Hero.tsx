@@ -188,9 +188,9 @@ export default function Hero() {
               maxTilt={4}
               scale={1.01}
               className="relative z-10 w-full min-w-0"
-              innerClassName="rounded-2xl p-px bg-gradient-to-br from-white/20 via-emerald-300/25 to-white/5 w-full min-w-0"
+              innerClassName="rounded-2xl p-px bg-gradient-to-br from-white/10 via-emerald-400/10 to-white/0 w-full min-w-0"
             >
-              <div className="rounded-2xl bg-[rgba(8,20,14,0.92)] p-4 sm:p-6 min-w-0">
+              <div className="rounded-2xl hero-premium-glass backdrop-blur-md p-4 sm:p-6 min-w-0 !bg-emerald-950/70">
                 <h2 id="affordable-plans-heading" className="text-lg sm:text-xl font-semibold text-white leading-tight">
                   Most Affordable Plans
                 </h2>

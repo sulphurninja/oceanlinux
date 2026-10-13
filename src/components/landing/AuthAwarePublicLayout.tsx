@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import PublicPageLayout from "@/components/landing/PublicPageLayout";
@@ -15,6 +16,13 @@ export default function AuthAwarePublicLayout({
   const isAuthPage = AUTH_ROUTES.some(
     (route) => pathname === route || pathname.startsWith(`${route}/`)
   );
+
+  useEffect(() => {
+    document.documentElement.classList.add("premium-landing-active");
+    return () => {
+      document.documentElement.classList.remove("premium-landing-active");
+    };
+  }, []);
 
   return (
     <PublicPageLayout

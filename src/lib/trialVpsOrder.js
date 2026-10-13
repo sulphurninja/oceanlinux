@@ -1,4 +1,4 @@
-import { isSlotIpOrder } from '@/lib/slotIpOrder';
+import { isSlotIpOrder, SLOT_IP_NO_RENEWAL_MESSAGE } from '@/lib/slotIpOrder';
 
 /** True for admin-upload trial VPS orders (fixed trial period, no renewals). */
 export function isTrialVpsOrder(order) {
@@ -37,4 +37,11 @@ export function isTrialVpsPanelManageOrder(order) {
 /** Slot IP + Trial VPS — one-time inventory packages. */
 export function isNonRenewablePackageOrder(order) {
   return isSlotIpOrder(order) || isTrialVpsOrder(order);
+}
+
+/** Empty when the order can be renewed. Otherwise the customer-facing reason. */
+export function nonRenewablePackageMessage(order) {
+  if (isTrialVpsOrder(order)) return TRIAL_VPS_NO_RENEWAL_MESSAGE;
+  if (isSlotIpOrder(order)) return SLOT_IP_NO_RENEWAL_MESSAGE;
+  return '';
 }

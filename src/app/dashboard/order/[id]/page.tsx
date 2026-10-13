@@ -2540,7 +2540,7 @@ const OrderDetails = () => {
 
   if (loading) {
     return (
-      <div className='min-h-screen bg-background flex justify-center items-center'>
+      <div className="min-h-screen flex justify-center items-center">
         <div className="w-full flex justify-center items-center px-4">
           <div className="flex flex-col items-center gap-4">
             <div className="relative">
@@ -2556,7 +2556,7 @@ const OrderDetails = () => {
 
   if (!order) {
     return (
-      <div className='min-h-screen bg-background flex justify-center items-center'>
+      <div className="min-h-screen flex justify-center items-center">
         <div className="w-full flex justify-center items-center px-4">
           <div className="text-center">
             <div className="w-20 h-20 mx-auto mb-6 bg-red-100 dark:bg-red-900/20 rounded-full flex items-center justify-center">

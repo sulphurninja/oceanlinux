@@ -219,7 +219,7 @@ export default function RenewalLogsPage() {
         providerFilter !== 'all';
 
     return (
-        <div className="min-h-screen bg-gray-900 text-gray-100 p-4 sm:p-6 min-w-0 overflow-x-hidden">
+        <div className="glass-admin-page min-h-screen p-4 sm:p-6 min-w-0 overflow-x-hidden">
             <div className="max-w-7xl mx-auto mb-6 min-w-0">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
                     <h1 className="text-xl sm:text-3xl font-bold text-white break-words">

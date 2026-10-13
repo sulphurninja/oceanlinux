@@ -396,14 +396,26 @@ async function resolveOverviewRowForVm(api, vmId, { maxPages = 5 } = {}) {
   return null;
 }
 
+function purchaseRefIsNear(row, purchaseStartedAt) {
+  if (!purchaseStartedAt) return false;
+  return collectOverviewOrderIds(row).some((id) => {
+    const ts = extractTimestampFromPurchaseRef(id);
+    // Hostheaven stamps ORD-<ms> when the VM is created. A slow create
+    // response can arrive a couple of minutes later.
+    return ts && ts >= purchaseStartedAt - 180_000 && ts <= purchaseStartedAt + 6 * 60_000;
+  });
+}
+
 async function isRecentPanelVm(api, row, purchaseStartedAt) {
   const vmId = extractOverviewVmId(row);
   if (!vmId || !purchaseStartedAt) return false;
   if (isMigrationOverviewRow(row)) return false;
+  if (purchaseRefIsNear(row, purchaseStartedAt)) return true;
   try {
     const details = await api.getVmDetails(String(vmId));
+    if (purchaseRefIsNear(details, purchaseStartedAt)) return true;
     const created = details?.createdAt ? new Date(details.createdAt).getTime() : 0;
-    return created >= purchaseStartedAt - 120_000;
+    return created > 0 && created >= purchaseStartedAt - 180_000;
   } catch {
     return false;
   }

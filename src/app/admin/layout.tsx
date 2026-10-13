@@ -1,7 +1,7 @@
 'use client'
 
 import AdminSidebar from '@/components/component/adminsidebar'
-import React, { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 
 type Props = { children: React.ReactNode }
@@ -12,6 +12,13 @@ export default function Layout({ children }: Props) {
   const isLoginPage = pathname === '/admin/login';
   const [role, setRole] = useState<string | null>(null);
   const [gateChecked, setGateChecked] = useState(isLoginPage);
+
+  useEffect(() => {
+    document.documentElement.classList.add('premium-dashboard-active');
+    return () => {
+      document.documentElement.classList.remove('premium-dashboard-active');
+    };
+  }, []);
 
   useEffect(() => {
     if (isLoginPage) return;
@@ -51,19 +58,19 @@ export default function Layout({ children }: Props) {
   }, [isLoginPage, pathname, router]);
 
   if (isLoginPage) {
-    return <>{children}</>;
+    return <div className="premium-dashboard min-h-screen">{children}</div>;
   }
 
   if (!gateChecked || role === null) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="premium-dashboard min-h-screen flex items-center justify-center">
         <div className="animate-pulse">Loading...</div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-background overflow-x-hidden">
+    <div className="premium-dashboard min-h-screen overflow-x-hidden">
       {role === 'Admin' ? (
         <div className="flex min-h-screen">
           <AdminSidebar />
@@ -74,7 +81,7 @@ export default function Layout({ children }: Props) {
           </main>
         </div>
       ) : (
-        <div className="min-h-screen flex items-center justify-center p-6">
+        <div className="premium-dashboard min-h-screen flex items-center justify-center p-6">
           <div className="text-center space-y-4">
             <h1 className="text-2xl font-semibold">Access Denied</h1>
             <p className="text-muted-foreground">You're not authorized to access the Admin Panel</p>

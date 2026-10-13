@@ -198,12 +198,12 @@ function SectionShell({
                 <Icon className="h-4 w-4" />
               </span>
               {title}
-            </CardTitle>
+        </CardTitle>
             {subtitle ? <CardDescription className="text-xs sm:text-sm">{subtitle}</CardDescription> : null}
             {action}
           </div>
           {hero}
-        </div>
+          </div>
       </CardHeader>
       <CardContent className="pt-4">{children}</CardContent>
     </Card>
@@ -247,7 +247,7 @@ function RazorpayLedger({
       }
     >
       <div className="grid gap-6 lg:grid-cols-2">
-        <div>
+          <div>
           <p className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
             Line by line
           </p>
@@ -266,7 +266,7 @@ function RazorpayLedger({
             tone="total"
             strong
           />
-        </div>
+          </div>
         <div className="rounded-lg border bg-muted/20 p-4 text-sm leading-relaxed text-muted-foreground">
           <p className="mb-2 font-medium text-foreground">How to match</p>
           <ol className="list-decimal space-y-1.5 pl-4 text-xs sm:text-sm">
@@ -280,8 +280,8 @@ function RazorpayLedger({
               {row.upiCaptures} captures. These do not appear on the Razorpay dashboard.
             </p>
           ) : null}
+          </div>
         </div>
-      </div>
     </SectionShell>
   );
 }
@@ -337,7 +337,7 @@ function WalletLedger({
           <div className="mb-2 flex items-center gap-2 text-emerald-700 dark:text-emerald-400">
             <ArrowUpRight className="h-4 w-4" />
             <p className="text-xs font-semibold uppercase tracking-wider">Money in</p>
-          </div>
+            </div>
           <Line
             label="Wallet top-ups"
             value={`+${formatInr(row.walletAdded)}`}
@@ -348,13 +348,13 @@ function WalletLedger({
           <p className="mt-2 text-[11px] text-muted-foreground">
             This money arrives via Razorpay or UPI first, then lands in the wallet balance.
           </p>
-        </div>
+            </div>
 
         <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-4">
           <div className="mb-2 flex items-center gap-2 text-amber-700 dark:text-amber-400">
             <ShoppingCart className="h-4 w-4" />
             <p className="text-xs font-semibold uppercase tracking-wider">New VPS buy (wallet)</p>
-          </div>
+            </div>
           <Line
             label="Single buy — wallet only"
             value={formatInr(row.vpsWalletAmount)}
@@ -373,13 +373,13 @@ function WalletLedger({
             tone="out"
             strong
           />
-        </div>
+          </div>
 
         <div className="rounded-lg border border-sky-500/20 bg-sky-500/5 p-4">
           <div className="mb-2 flex items-center gap-2 text-sky-700 dark:text-sky-400">
             <RotateCcw className="h-4 w-4" />
             <p className="text-xs font-semibold uppercase tracking-wider">Renew (wallet)</p>
-          </div>
+            </div>
           <Line
             label="VPS renew via wallet"
             value={`−${formatInr(renewWallet)}`}
@@ -398,9 +398,9 @@ function WalletLedger({
             <p className="text-[11px] text-muted-foreground">
               New buy {formatInr(newBuyWallet)} + Renew {formatInr(renewWallet)}
             </p>
+            </div>
+            </div>
           </div>
-        </div>
-      </div>
     </SectionShell>
   );
 }
@@ -420,7 +420,7 @@ function SalesLedger({ row, dayLabel = 'Today' }: { row: DailyRow; dayLabel?: st
           <p className="text-2xl font-bold tabular-nums tracking-tight text-emerald-700 dark:text-emerald-400">
             {formatInr(row.totalBusiness)}
           </p>
-        </div>
+          </div>
       }
     >
       <div className="grid gap-6 lg:grid-cols-2">
@@ -429,7 +429,7 @@ function SalesLedger({ row, dayLabel = 'Today' }: { row: DailyRow; dayLabel?: st
             <div className="flex items-center gap-2">
               <ShoppingCart className="h-4 w-4 text-sky-600" />
               <p className="font-semibold">New VPS buy</p>
-            </div>
+          </div>
             <Badge variant="secondary" className="font-normal tabular-nums">
               {row.vpsOrders} orders
             </Badge>
@@ -460,7 +460,7 @@ function SalesLedger({ row, dayLabel = 'Today' }: { row: DailyRow; dayLabel?: st
             <div className="flex items-center gap-2">
               <RotateCcw className="h-4 w-4 text-sky-700" />
               <p className="font-semibold">VPS renew</p>
-            </div>
+          </div>
             <Badge variant="secondary" className="font-normal tabular-nums">
               {row.renewals} renews
             </Badge>
@@ -482,8 +482,8 @@ function SalesLedger({ row, dayLabel = 'Today' }: { row: DailyRow; dayLabel?: st
             New {formatInr(row.vpsRevenue)} + Renew {formatInr(row.renewalRevenue)} ={' '}
             <strong className="text-foreground">{formatInr(row.totalBusiness)}</strong>
           </div>
-        </div>
-      </div>
+          </div>
+          </div>
     </SectionShell>
   );
 }
@@ -496,7 +496,7 @@ function UpiStrip({ row }: { row: DailyRow }) {
         <div>
           <p className="text-sm font-semibold">Other gateways (not Razorpay)</p>
           <p className="text-xs text-muted-foreground">KwikUPI and legacy gateways. These do not appear on the Razorpay dashboard.</p>
-        </div>
+          </div>
         <div className="flex flex-wrap gap-4 text-sm">
           <div>
             <p className="text-[10px] uppercase text-muted-foreground">UPI / KwikUPI</p>
@@ -514,11 +514,11 @@ function UpiStrip({ row }: { row: DailyRow }) {
                   ({row.otherGatewayCaptures})
                 </span>
               </p>
-            </div>
+          </div>
           ) : null}
-        </div>
-      </CardContent>
-    </Card>
+          </div>
+        </CardContent>
+      </Card>
   );
 }
 
@@ -680,22 +680,22 @@ export function PaymentDashboard() {
                 className="h-8 rounded-md border border-input bg-background px-2 text-sm tabular-nums"
               />
             </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            {[7, 30, 60].map((n) => (
-              <Button
-                key={n}
-                type="button"
-                size="sm"
-                variant={days === n ? 'default' : 'outline'}
-                onClick={() => setDays(n)}
-              >
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {[7, 30, 60].map((n) => (
+            <Button
+              key={n}
+              type="button"
+              size="sm"
+              variant={days === n ? 'default' : 'outline'}
+              onClick={() => setDays(n)}
+            >
                 {n}d
-              </Button>
-            ))}
-            <Button type="button" size="sm" variant="outline" onClick={() => void load()} disabled={loading}>
-              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
             </Button>
+          ))}
+          <Button type="button" size="sm" variant="outline" onClick={() => void load()} disabled={loading}>
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+          </Button>
           </div>
         </div>
       </div>
@@ -751,8 +751,8 @@ export function PaymentDashboard() {
             <p className="mt-1 text-xs text-muted-foreground">
               {selected.vpsOrders} buy · {selected.renewals} renew
             </p>
-          </CardContent>
-        </Card>
+        </CardContent>
+      </Card>
         <Card className="border-emerald-500/25 bg-emerald-500/5">
           <CardContent className="pt-5">
             <p className="text-[11px] font-medium uppercase tracking-wider text-emerald-700/90 dark:text-emerald-400/90">
@@ -762,8 +762,8 @@ export function PaymentDashboard() {
               {formatInr(selected.totalBusiness)}
             </p>
             <p className="mt-1 text-xs text-muted-foreground">Sales value · {dayTag}</p>
-          </CardContent>
-        </Card>
+        </CardContent>
+      </Card>
       </div>
 
       <RazorpayLedger row={selected} dayLabel={dayTag} onOpenList={() => void openDayList('razorpay')} />
@@ -893,7 +893,7 @@ export function PaymentDashboard() {
                   active && 'bg-[#0C6CF2]/10 ring-1 ring-[#0C6CF2]/25'
                 )}
               >
-                <div className="text-xs text-muted-foreground">
+              <div className="text-xs text-muted-foreground">
                   {row.date === todayKey ? (
                     <span className="font-semibold text-foreground">Today</span>
                   ) : row.date === yesterdayKey ? (
@@ -901,21 +901,21 @@ export function PaymentDashboard() {
                   ) : (
                     row.label.split(',')[0]
                   )}
-                </div>
+              </div>
                 <div className="h-2.5 overflow-hidden rounded-full bg-muted">
                   <div
                     className="h-full rounded-full bg-[#0C6CF2] transition-all"
                     style={{
                       width: `${Math.max(3, ((row.razorpayCollected || 0) / maxBar) * 100)}%`,
                     }}
-                  />
-                </div>
+                />
+              </div>
                 <div className="text-right text-sm font-semibold tabular-nums text-[#0C6CF2]">
                   {formatInr(row.razorpayCollected)}
-                  <span className="block text-[10px] font-normal text-muted-foreground">
+                <span className="block text-[10px] font-normal text-muted-foreground">
                     {row.razorpayCaptures} · wallet −{formatInr(row.walletSpent)}
-                  </span>
-                </div>
+                </span>
+              </div>
               </button>
             );
           })}
@@ -948,17 +948,17 @@ export function PaymentDashboard() {
                   const buyW = row.walletSpentOnNewBuys ?? row.vpsWalletAmount + row.cartWalletAmount;
                   const active = row.date === selected.date;
                   return (
-                    <TableRow
-                      key={row.date}
+                  <TableRow
+                    key={row.date}
                       className={cn(
                         'cursor-pointer hover:bg-muted/50',
                         active && 'bg-[#0C6CF2]/5 font-medium'
                       )}
                       onClick={() => setSelectedDate(row.date)}
-                    >
-                      <TableCell>
+                  >
+                    <TableCell>
                         <div className="flex items-center gap-2 whitespace-nowrap">
-                          {row.label}
+                        {row.label}
                           {row.date === todayKey ? (
                             <Badge className="h-5 text-[10px]" variant="secondary">
                               Today
@@ -968,21 +968,21 @@ export function PaymentDashboard() {
                             <Badge className="h-5 text-[10px]" variant="outline">
                               Yesterday
                             </Badge>
-                          ) : null}
-                        </div>
-                      </TableCell>
+                        ) : null}
+                      </div>
+                    </TableCell>
                       <TableCell className="text-right tabular-nums text-[#0C6CF2]">
-                        {row.razorpayCollected > 0
-                          ? `${row.razorpayCaptures} · ${formatInr(row.razorpayCollected)}`
-                          : '—'}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums text-emerald-700 dark:text-emerald-400">
+                      {row.razorpayCollected > 0
+                        ? `${row.razorpayCaptures} · ${formatInr(row.razorpayCollected)}`
+                        : '—'}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums text-emerald-700 dark:text-emerald-400">
                         {row.upiCollected > 0 ? formatInr(row.upiCollected) : '—'}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {row.walletTopupAmount > 0 ? formatInr(row.walletTopupAmount) : '—'}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums text-amber-700 dark:text-amber-400">
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {row.walletTopupAmount > 0 ? formatInr(row.walletTopupAmount) : '—'}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums text-amber-700 dark:text-amber-400">
                         {buyW > 0 ? formatInr(buyW) : '—'}
                       </TableCell>
                       <TableCell className="text-right tabular-nums text-amber-700 dark:text-amber-400">
@@ -990,14 +990,14 @@ export function PaymentDashboard() {
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
                         {row.vpsOrders > 0 ? `${row.vpsOrders} · ${formatInr(row.vpsRevenue)}` : '—'}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {row.renewals > 0 ? `${row.renewals} · ${formatInr(row.renewalRevenue)}` : '—'}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums font-semibold">
-                        {formatInr(row.totalBusiness)}
-                      </TableCell>
-                    </TableRow>
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {row.renewals > 0 ? `${row.renewals} · ${formatInr(row.renewalRevenue)}` : '—'}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums font-semibold">
+                      {formatInr(row.totalBusiness)}
+                    </TableCell>
+                  </TableRow>
                   );
                 })}
               </TableBody>

@@ -112,6 +112,31 @@ async function validateOrderConfiguration(order) {
         
         console.log(`[VALIDATION] ✅ Found IPStock: ${ipStock.name}`);
 
+        const { isNetbayProxyOrder, isNetbayProxyStock } = require('@/lib/netbayGroupTags');
+        if (isNetbayProxyOrder(order, ipStock) && !isNetbayProxyStock(ipStock)) {
+            const baseName = String(order.productName || '')
+                .replace(/\s+-\s+\d{1,3}(?:\.\d{1,3}){1,3}\s*$/, '')
+                .trim();
+            if (baseName && baseName !== String(order.productName || '').trim()) {
+                const proxyStock = await IPStock.findOne({ name: baseName });
+                if (proxyStock && isNetbayProxyStock(proxyStock)) {
+                    await Order.findByIdAndUpdate(order._id, { ipStockId: String(proxyStock._id) });
+                    order.ipStockId = String(proxyStock._id);
+                    ipStock = proxyStock;
+                    console.log(`[VALIDATION] Re-linked proxy order ${order._id} to ${proxyStock.name}`);
+                }
+            }
+        }
+        if (isNetbayProxyStock(ipStock)) {
+            console.log(`[VALIDATION] ✅ Netbay proxy stock — group tag is not a RAM key`);
+            return {
+                valid: true,
+                productId: 'netbay-proxy',
+                ipStock: ipStock.name,
+                isNetbayProxy: true,
+            };
+        }
+
         const AutoProvisioningService = require('@/services/autoProvisioningService');
         const provisioner = new AutoProvisioningService();
         const isSmartVps =

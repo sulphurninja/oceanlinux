@@ -5,6 +5,7 @@ import IPStock from '@/models/ipStockModel';
 import { authenticateReseller } from '@/lib/resellerAuth';
 import { memoryOptionsToObject, calculateResellerPlanPrice } from '@/lib/resellerOrderApi';
 import { getDaysUntilExpiry } from '@/lib/expiryHelper';
+import { nonRenewablePackageMessage } from '@/lib/trialVpsOrder';
 
 async function loadOwnedOrder(resellerId, vmId) {
   return Order.findOne({ _id: vmId, resellerId });
@@ -46,7 +47,8 @@ export async function GET(request, { params }) {
     });
   }
 
-  const renewalPrice = Math.ceil(Number(order.price) || 0);
+  const renewBlock = nonRenewablePackageMessage(order);
+  const renewalPrice = renewBlock ? 0 : Math.ceil(Number(order.price) || 0);
 
   return NextResponse.json({
     success: true,
@@ -55,11 +57,13 @@ export async function GET(request, { params }) {
     planId: order.ipStockId ? String(order.ipStockId) : null,
     options,
     renewal: {
-      eligible: !!order.expiryDate,
+      eligible: renewBlock ? false : !!order.expiryDate,
+      renewable: !renewBlock,
       price: renewalPrice,
       currency: auth.reseller.wallet?.currency || 'INR',
       expiryDate: order.expiryDate,
       daysUntilExpiry: order.expiryDate ? getDaysUntilExpiry(order.expiryDate) : null,
+      message: renewBlock || undefined,
     },
     message: 'POST with { memory } to change plan. Upgrade charges prorated difference; downgrade does not refund.',
   });

@@ -2763,12 +2763,60 @@ class AutoProvisioningService {
         L.line(
           `[RESELLER-API] POST /api/users/vms/create zone ${zoneId} ${JSON.stringify(createBody)}`
         );
+        const createStartedAt = Date.now();
         try {
           createRes = await api.createVm(createBody, { gateway: stockCfg.gateway || 'WALLET' });
           L.line(`[RESELLER-API] Purchase OK on zone ${zoneId}${candidate.zone?.name ? ` (${candidate.zone.name})` : ''}`);
           break;
         } catch (err) {
           lastPurchaseError = err;
+          const aborted = err?.name === 'AbortError' || /aborted|timed out|timeout/i.test(String(err?.message || ''));
+          if (aborted) {
+            L.line(
+              `[RESELLER-API] Zone ${zoneId} create timed out (${err.message}). ` +
+              `Checking the panel for a VM before buying another region.`
+            );
+            const recovered = await waitForProvisionedVm(api, {
+              purchaseStartedAt: createStartedAt - 15_000,
+              excludeOrderId: order._id,
+              order,
+              expectedZoneId: locationCtx.expectedZoneId,
+              expectedZoneIds: locationCtx.expectedZoneIds,
+              expectedIpPrefix: locationCtx.expectedIpPrefix,
+              maxWaitMs: 90_000,
+              pollMs: 4000,
+            });
+            if (recovered && !recovered.pending && (recovered.vmId || recovered.ip)) {
+              resellerVmId = recovered.vmId ? String(recovered.vmId) : '';
+              if (recovered.ip) order.ipAddress = recovered.ip;
+              if (recovered.username) order.username = recovered.username;
+              if (recovered.password) order.password = recovered.password;
+              if (recovered.expiryDate) order.expiryDate = recovered.expiryDate;
+              await Order.findByIdAndUpdate(order._id, {
+                resellerVmId: resellerVmId || undefined,
+                ipAddress: recovered.ip || undefined,
+                username: recovered.username || undefined,
+                password: recovered.password || undefined,
+                expiryDate: recovered.expiryDate || undefined,
+                provider: 'reseller-api',
+                provisioningError: '',
+              });
+              createRes = {
+                data: {
+                  recoveredAfterTimeout: true,
+                  vmId: resellerVmId || undefined,
+                },
+              };
+              L.line(
+                `[RESELLER-API] Timed-out create still produced VM ${resellerVmId || '(pending id)'} ` +
+                `${recovered.ip || ''}`
+              );
+              break;
+            }
+            throw new Error(
+              `Panel create timed out and no new VM appeared. Not buying another region. ${err.message}`
+            );
+          }
           L.line(`[RESELLER-API] Zone ${zoneId} purchase failed: ${err.message} — trying fallback`);
         }
       }

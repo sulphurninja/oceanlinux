@@ -9,7 +9,7 @@ import ProxyCheckerPanel from '@/components/tools/ProxyCheckerPanel';
 export default function ProxyCheckerPage() {
   return (
     <>
-      <section className="border-b border-white/10 bg-[hsl(160_32%_6%)]">
+      <section className="border-b border-white/10 bg-white/[0.04] backdrop-blur-md">
         <div className="container mx-auto container-padding py-4 sm:py-5">
           <div className="max-w-6xl mx-auto flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0">

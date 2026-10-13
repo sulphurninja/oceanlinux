@@ -137,9 +137,10 @@ class ResellerApi {
     return { res, parsed, text };
   }
 
-  async _withTimeout(fn) {
+  async _withTimeout(fn, timeoutMs) {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), this.timeoutMs);
+    const ms = Number(timeoutMs) > 0 ? Number(timeoutMs) : this.timeoutMs;
+    const timer = setTimeout(() => ctrl.abort(), ms);
     try {
       return await fn(ctrl.signal);
     } finally {

@@ -49,7 +49,7 @@ export async function GET() {
       renew: {
         method: 'POST',
         path: '/orders/{orderId}/renew',
-        description: 'Renew service — wallet deduct + extend expiry',
+        description: 'Renew a VPS from the reseller wallet. Slot IP and Trial cannot be renewed.',
       },
       renewQuote: {
         method: 'GET',
