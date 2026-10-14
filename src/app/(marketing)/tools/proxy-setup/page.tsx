@@ -898,7 +898,7 @@ const PublicProxySetupPage = () => {
             </section>
             {/* Proxy Credentials Dialog */}
             <Dialog open={showProxyDialog} onOpenChange={setShowProxyDialog}>
-                <DialogContent className="sm:max-w-md bg-background text-foreground">
+                <DialogContent className="proxy-credentials-dialog sm:max-w-md">
                     <DialogHeader>
                         <DialogTitle className="flex items-center gap-2 text-foreground">
                             <div className="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center">

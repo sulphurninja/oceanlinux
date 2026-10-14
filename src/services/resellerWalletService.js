@@ -2,6 +2,36 @@ import mongoose from 'mongoose';
 import Reseller from '@/models/resellerModel';
 import Order from '@/models/orderModel';
 
+function isTransientMongoWriteConflict(error) {
+    const msg = String(error?.message || error?.errmsg || '');
+    const labels = error?.errorLabels || error?.errorResponse?.errorLabels || [];
+    return (
+        error?.code === 112 ||
+        error?.codeName === 'WriteConflict' ||
+        labels.includes('TransientTransactionError') ||
+        /write conflict|yielding is disabled|please retry your operation/i.test(msg)
+    );
+}
+
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** MongoDB aborts multi-doc txns on transient write conflicts — retry is the documented fix. */
+async function withWriteConflictRetry(fn, { attempts = 4 } = {}) {
+    let lastError;
+    for (let i = 0; i < attempts; i++) {
+        try {
+            return await fn();
+        } catch (error) {
+            lastError = error;
+            if (!isTransientMongoWriteConflict(error) || i === attempts - 1) throw error;
+            await sleep(80 * (i + 1) + Math.floor(Math.random() * 40));
+        }
+    }
+    throw lastError;
+}
+
 class ResellerWalletService {
     /**
      * Deduct amount from reseller wallet for an order
@@ -33,6 +63,10 @@ class ResellerWalletService {
      * @returns {Promise<{success: true, transactionId: string, newBalance: number}>}
      */
     async deductForOrder(resellerId, amount, orderId, description = 'Order provisioning') {
+        return withWriteConflictRetry(() => this._deductForOrderOnce(resellerId, amount, orderId, description));
+    }
+
+    async _deductForOrderOnce(resellerId, amount, orderId, description = 'Order provisioning') {
         const session = await mongoose.startSession();
         session.startTransaction();
 
@@ -119,6 +153,10 @@ class ResellerWalletService {
      * the stats the deduction had counted.
      */
     async refundOrder(resellerId, amount, orderId, description = 'Order refund') {
+        return withWriteConflictRetry(() => this._refundOrderOnce(resellerId, amount, orderId, description));
+    }
+
+    async _refundOrderOnce(resellerId, amount, orderId, description = 'Order refund') {
         const session = await mongoose.startSession();
         session.startTransaction();
 
@@ -249,6 +287,10 @@ class ResellerWalletService {
      * Deduct for renewal (does not increment totalOrders)
      */
     async deductForRenewal(resellerId, amount, orderId, description = 'Order renewal') {
+        return withWriteConflictRetry(() => this._deductForRenewalOnce(resellerId, amount, orderId, description));
+    }
+
+    async _deductForRenewalOnce(resellerId, amount, orderId, description = 'Order renewal') {
         const session = await mongoose.startSession();
         session.startTransaction();
 

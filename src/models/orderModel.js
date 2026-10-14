@@ -181,7 +181,10 @@ const orderSchema = new mongoose.Schema({
         // company has to approve it before the expiry is extended.
         awaitingCompanyApproval: { type: Boolean, default: false },
         renewalRequestId: { type: mongoose.Schema.Types.ObjectId, ref: 'RenewalRequest' },
-        paymentConfirmedAt: { type: Date }
+        paymentConfirmedAt: { type: Date },
+        // Set before the upstream renew API so webhook + confirm-api cannot both charge.
+        upstreamClaimTxnId: { type: String },
+        upstreamClaimedAt: { type: Date },
     },
 
     // Reseller Tracking

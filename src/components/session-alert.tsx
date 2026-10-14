@@ -289,10 +289,9 @@ export function SessionAlertProvider({ children }: { children: ReactNode }) {
       {children}
 
       <AlertDialog open={isVisible} onOpenChange={setIsVisible}>
-        <AlertDialogContent className="sm:max-w-md border-border/50 bg-background/95 backdrop-blur-xl">
+        <AlertDialogContent className="session-alert-dialog w-[calc(100%-2rem)] max-w-md border-border/50">
           <AlertDialogHeader className="space-y-4">
-            {/* Icon with glow effect */}
-            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-muted/50 ring-8 ring-muted/20">
+            <div className="session-alert-icon mx-auto flex h-16 w-16 items-center justify-center rounded-full">
               <IconComponent className={`h-8 w-8 ${currentConfig?.iconColor || 'text-primary'}`} />
             </div>
 

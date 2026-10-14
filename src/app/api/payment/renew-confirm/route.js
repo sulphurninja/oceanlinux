@@ -28,6 +28,7 @@ const { executeResellerPanelUpstreamRenewal } = require('@/lib/resellerPanelRene
 const { executeHostdzireUpstreamRenewal } = require('@/lib/hostdzireRenewal');
 const { resolveRenewalExpiryFromPanel } = require('@/lib/companyResellerInventorySync');
 const { pickAdvpsExpiryDate } = require('@/lib/advpsOrderExpiry');
+const { acquireRenewalUpstream } = require('@/lib/renewalUpstreamClaim');
 const { extractAdvpsStatusCredentials } = require('@/lib/advpsStatusNormalize');
 const HostycareAPI = require('@/services/hostycareApi');
 const { notifyRenewalCompleted } = require('@/lib/renewalNotifications');
@@ -527,6 +528,30 @@ export async function POST(request) {
       }
     };
 
+    const upstream = await acquireRenewalUpstream(order._id, renewalTxnId);
+    if (!upstream.proceed) {
+      if (upstream.alreadyProcessed) {
+        console.log(`[RENEWAL-CONFIRM] ⚠️ Skipping provider renew — ${renewalTxnId} already applied`);
+        logger.logWarning('Skipped provider renew — another request already applied this payment');
+        await logger.finalize(true, upstream.expiryDate || order.expiryDate);
+        return NextResponse.json({
+          success: true,
+          message: 'Renewal was already processed',
+          alreadyProcessed: true,
+          orderId: order._id,
+          newExpiryDate: upstream.expiryDate || order.expiryDate,
+        });
+      }
+      console.log(`[RENEWAL-CONFIRM] ⚠️ Skipping provider renew — ${renewalTxnId} still in progress`);
+      logger.logWarning('Skipped provider renew — another request is still applying this payment');
+      await logger.finalize(false, order.expiryDate, 'Renewal already in progress');
+      return NextResponse.json({
+        success: false,
+        message: 'Renewal is already being applied',
+        inProgress: true,
+        orderId: order._id,
+      }, { status: 409 });
+    }
     // Handle provider-specific renewal logic
     let providerRenewalResult = null;
     let providerRenewalSuccess = false;
@@ -839,7 +864,7 @@ export async function POST(request) {
     // renewal records and extend the expiry twice for a single payment.
     const renewalClaim = { _id: orderId };
     if (renewalTxnId) {
-      renewalClaim['renewalPayments.renewalTxnId'] = { $ne: renewalTxnId };
+      renewalClaim.renewalPayments = { $not: { $elemMatch: { renewalTxnId } } };
     }
 
     const updatedOrder = await Order.findOneAndUpdate(renewalClaim, {

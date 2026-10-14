@@ -1420,6 +1420,101 @@ html {
     border-color: var(--pd-card-border) !important;
   }
 
+  /* Renewal logs: light theme needs opaque cards and darker accents.
+     Shared glass remaps turn gray text dark, which disappears on bg-black log panels. */
+  html.premium-dashboard-active:not(.dark) .renewal-logs-page .bg-gray-800,
+  html.premium-dashboard-active:not(.dark) .renewal-logs-page .bg-gray-900 {
+    background-color: #ffffff !important;
+    color: hsl(160 40% 8%);
+    border-color: hsl(160 14% 82%) !important;
+    box-shadow: 0 1px 2px rgba(15, 40, 30, 0.06);
+  }
+
+  html.premium-dashboard-active:not(.dark) .renewal-logs-page button.bg-gray-700 {
+    background-color: hsl(160 14% 94%) !important;
+    color: hsl(160 40% 12%) !important;
+    border: 1px solid hsl(160 12% 78%);
+  }
+
+  html.premium-dashboard-active:not(.dark) .renewal-logs-page button.bg-gray-700:hover {
+    background-color: hsl(160 14% 88%) !important;
+  }
+
+  html.premium-dashboard-active:not(.dark) .renewal-logs-page button.bg-blue-600,
+  html.premium-dashboard-active:not(.dark) .renewal-logs-page button.bg-green-600,
+  html.premium-dashboard-active:not(.dark) .renewal-logs-page button.bg-sky-600,
+  html.premium-dashboard-active:not(.dark) .renewal-logs-page button.bg-sky-500 {
+    color: #fff !important;
+  }
+
+  html.premium-dashboard-active:not(.dark) .renewal-logs-page .bg-black,
+  html.premium-dashboard-active:not(.dark) .renewal-logs-page .bg-black\/30 {
+    background-color: hsl(160 20% 96%) !important;
+    color: hsl(160 40% 10%);
+  }
+
+  html.premium-dashboard-active:not(.dark) .renewal-logs-page .text-green-400,
+  html.premium-dashboard-active:not(.dark) .renewal-logs-page .text-green-300 {
+    color: #166534 !important;
+  }
+
+  html.premium-dashboard-active:not(.dark) .renewal-logs-page .text-red-400,
+  html.premium-dashboard-active:not(.dark) .renewal-logs-page .text-red-300,
+  html.premium-dashboard-active:not(.dark) .renewal-logs-page .text-red-400\/60 {
+    color: #b91c1c !important;
+  }
+
+  html.premium-dashboard-active:not(.dark) .renewal-logs-page .text-sky-400,
+  html.premium-dashboard-active:not(.dark) .renewal-logs-page .text-sky-300 {
+    color: #075985 !important;
+  }
+
+  html.premium-dashboard-active:not(.dark) .renewal-logs-page .text-emerald-300 {
+    color: #047857 !important;
+  }
+
+  html.premium-dashboard-active:not(.dark) .renewal-logs-page .text-blue-400 {
+    color: #1d4ed8 !important;
+  }
+
+  html.premium-dashboard-active:not(.dark) .renewal-logs-page .text-purple-400 {
+    color: #6d28d9 !important;
+  }
+
+  html.premium-dashboard-active:not(.dark) .renewal-logs-page .text-cyan-400 {
+    color: #0e7490 !important;
+  }
+
+  html.premium-dashboard-active:not(.dark) .renewal-logs-page .text-yellow-300,
+  html.premium-dashboard-active:not(.dark) .renewal-logs-page .text-yellow-400 {
+    color: #a16207 !important;
+  }
+
+  html.premium-dashboard-active:not(.dark) .renewal-logs-page .text-orange-300 {
+    color: #c2410c !important;
+  }
+
+  html.premium-dashboard-active:not(.dark) .renewal-logs-page .text-gray-600 {
+    color: #4b5563 !important;
+  }
+
+  html.premium-dashboard-active:not(.dark) .renewal-logs-page .bg-red-900\/40,
+  html.premium-dashboard-active:not(.dark) .renewal-logs-page .bg-red-900\/30,
+  html.premium-dashboard-active:not(.dark) .renewal-logs-page .bg-red-900\/20 {
+    background-color: #fee2e2 !important;
+  }
+
+  html.premium-dashboard-active:not(.dark) .renewal-logs-page .bg-green-900\/30 {
+    background-color: #dcfce7 !important;
+  }
+
+  html.premium-dashboard-active:not(.dark) .renewal-logs-page .border-red-900,
+  html.premium-dashboard-active:not(.dark) .renewal-logs-page .border-red-500,
+  html.premium-dashboard-active:not(.dark) .renewal-logs-page .border-green-900\/30,
+  html.premium-dashboard-active:not(.dark) .renewal-logs-page .border-sky-900\/30 {
+    border-color: hsl(160 14% 82%) !important;
+  }
+
   .premium-dashboard .bg-card,
   .premium-dashboard [data-slot="card"] {
     background: var(--pd-card-bg);
@@ -2673,6 +2768,149 @@ html {
     box-shadow:
       0 1px 0 rgba(255, 255, 255, 0.06) inset,
       0 24px 48px -16px rgba(0, 0, 0, 0.45);
+  }
+
+  /* Proxy credentials dialog is portaled outside .premium-landing, so light-theme
+     bg-background / bg-muted painted white fields inside the dark glass shell. */
+  html.premium-landing-active:not(.premium-dashboard-active) .proxy-credentials-dialog {
+    background: rgba(10, 28, 24, 0.96) !important;
+    color: rgba(255, 255, 255, 0.92);
+  }
+
+  html.premium-landing-active:not(.premium-dashboard-active) .proxy-credentials-dialog .text-foreground,
+  html.premium-landing-active:not(.premium-dashboard-active) .proxy-credentials-dialog .text-muted-foreground {
+    color: rgba(255, 255, 255, 0.82) !important;
+  }
+
+  html.premium-landing-active:not(.premium-dashboard-active) .proxy-credentials-dialog .bg-muted,
+  html.premium-landing-active:not(.premium-dashboard-active) .proxy-credentials-dialog input,
+  html.premium-landing-active:not(.premium-dashboard-active) .proxy-credentials-dialog button.border {
+    background-color: rgba(255, 255, 255, 0.08) !important;
+    color: rgba(255, 255, 255, 0.92) !important;
+    border-color: rgba(255, 255, 255, 0.16) !important;
+  }
+
+  html.premium-landing-active:not(.premium-dashboard-active) .proxy-credentials-dialog input::placeholder {
+    color: rgba(255, 255, 255, 0.4);
+  }
+
+  html.premium-landing-active:not(.premium-dashboard-active) .proxy-credentials-dialog button.bg-emerald-600 {
+    background-color: #059669 !important;
+    color: #fff !important;
+    border-color: transparent !important;
+  }
+
+  html.premium-dashboard-active .proxy-credentials-dialog input,
+  html.premium-dashboard-active .proxy-credentials-dialog .bg-muted,
+  html.premium-dashboard-active .proxy-credentials-dialog .bg-muted\/50,
+  html.premium-dashboard-active .proxy-credentials-dialog button.border {
+    background-color: var(--pd-input-bg) !important;
+    color: var(--pd-input-text) !important;
+    border: 1px solid var(--pd-input-border) !important;
+  }
+
+  html.premium-dashboard-active .proxy-credentials-dialog .text-muted-foreground {
+    color: var(--pd-fg-muted) !important;
+  }
+
+  html.premium-dashboard-active .proxy-credentials-dialog input::placeholder {
+    color: var(--pd-input-placeholder);
+  }
+
+  html.premium-dashboard-active .proxy-credentials-dialog button.bg-primary {
+    background-color: hsl(var(--primary)) !important;
+    color: hsl(var(--primary-foreground)) !important;
+    border-color: transparent !important;
+  }
+
+  /* Dark dashboard: dialog is a translucent green. Inputs were near-invisible
+     because dark:border-none removed the edge and the fill was only 4% white. */
+  html.premium-dashboard-active.dark .proxy-credentials-dialog {
+    background: #0c1f1a !important;
+    color: #f4fbf8 !important;
+    border-color: rgba(255, 255, 255, 0.14) !important;
+  }
+
+  html.premium-dashboard-active.dark .proxy-credentials-dialog input,
+  html.premium-dashboard-active.dark .proxy-credentials-dialog .bg-muted,
+  html.premium-dashboard-active.dark .proxy-credentials-dialog .bg-muted\/50,
+  html.premium-dashboard-active.dark .proxy-credentials-dialog button.border {
+    background-color: rgba(255, 255, 255, 0.08) !important;
+    color: #f4fbf8 !important;
+    border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  }
+
+  html.premium-dashboard-active.dark .proxy-credentials-dialog .text-muted-foreground,
+  html.premium-dashboard-active.dark .proxy-credentials-dialog input::placeholder {
+    color: rgba(244, 251, 248, 0.55) !important;
+  }
+
+  html.premium-dashboard-active.dark .proxy-credentials-dialog button.bg-primary {
+    background-color: #059669 !important;
+    color: #fff !important;
+  }
+
+  /* Session alert is portaled to body. Glass dialog tokens and dark:border-none
+     made the secondary button disappear into the shell in both themes. */
+  html.premium-dashboard-active:not(.dark) .session-alert-dialog {
+    background: #ffffff !important;
+    color: #163027 !important;
+    border: 1px solid rgba(16, 80, 60, 0.14) !important;
+    box-shadow: 0 24px 48px -16px rgba(16, 80, 60, 0.22) !important;
+  }
+
+  html.premium-dashboard-active:not(.dark) .session-alert-dialog .text-muted-foreground {
+    color: rgba(22, 48, 39, 0.68) !important;
+  }
+
+  html.premium-dashboard-active:not(.dark) .session-alert-dialog .session-alert-icon {
+    background: rgba(16, 185, 129, 0.12) !important;
+    box-shadow: 0 0 0 8px rgba(16, 185, 129, 0.08);
+  }
+
+  html.premium-dashboard-active:not(.dark) .session-alert-dialog button.bg-primary {
+    background-color: #059669 !important;
+    color: #ffffff !important;
+    border: none !important;
+  }
+
+  html.premium-dashboard-active:not(.dark) .session-alert-dialog button.border {
+    background-color: #ffffff !important;
+    color: #163027 !important;
+    border: 1px solid rgba(16, 80, 60, 0.22) !important;
+  }
+
+  html.premium-dashboard-active.dark .session-alert-dialog,
+  html.premium-landing-active:not(.premium-dashboard-active) .session-alert-dialog {
+    background: #0e241e !important;
+    color: #f4fbf8 !important;
+    border: 1px solid rgba(255, 255, 255, 0.14) !important;
+    box-shadow: 0 28px 56px -18px rgba(0, 0, 0, 0.65) !important;
+  }
+
+  html.premium-dashboard-active.dark .session-alert-dialog .text-muted-foreground,
+  html.premium-landing-active:not(.premium-dashboard-active) .session-alert-dialog .text-muted-foreground {
+    color: rgba(244, 251, 248, 0.72) !important;
+  }
+
+  html.premium-dashboard-active.dark .session-alert-dialog .session-alert-icon,
+  html.premium-landing-active:not(.premium-dashboard-active) .session-alert-dialog .session-alert-icon {
+    background: rgba(16, 185, 129, 0.16) !important;
+    box-shadow: 0 0 0 8px rgba(16, 185, 129, 0.08);
+  }
+
+  html.premium-dashboard-active.dark .session-alert-dialog button.bg-primary,
+  html.premium-landing-active:not(.premium-dashboard-active) .session-alert-dialog button.bg-primary {
+    background-color: #059669 !important;
+    color: #ffffff !important;
+    border: none !important;
+  }
+
+  html.premium-dashboard-active.dark .session-alert-dialog button.border,
+  html.premium-landing-active:not(.premium-dashboard-active) .session-alert-dialog button.border {
+    background-color: rgba(255, 255, 255, 0.06) !important;
+    color: #f4fbf8 !important;
+    border: 1px solid rgba(255, 255, 255, 0.22) !important;
   }
 
   html.premium-landing-active .bg-popover {

@@ -675,7 +675,7 @@ const ProxySetupTerminal = () => {
 
             {/* Proxy Credentials Dialog */}
             <Dialog open={showProxyDialog} onOpenChange={setShowProxyDialog}>
-                <DialogContent className="sm:max-w-md">
+                <DialogContent className="proxy-credentials-dialog sm:max-w-md">
                     <DialogHeader>
                         <DialogTitle className="flex items-center gap-2">
                             <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">

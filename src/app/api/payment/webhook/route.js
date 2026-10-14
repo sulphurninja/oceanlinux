@@ -38,6 +38,7 @@ const { executeNetbayUpstreamRenewal } = require('@/lib/netbayRenewal');
 const { executeResellerPanelUpstreamRenewal } = require('@/lib/resellerPanelRenewal');
 const { executeHostdzireUpstreamRenewal } = require('@/lib/hostdzireRenewal');
 const { resolveRenewalExpiryFromPanel } = require('@/lib/companyResellerInventorySync');
+const { acquireRenewalUpstream } = require('@/lib/renewalUpstreamClaim');
 
 export async function POST(request) {
   const webhookStartTime = Date.now();
@@ -574,6 +575,29 @@ export async function handleRenewalWebhook(renewalTxnId, payment, webhookStartTi
       });
     }
 
+    const upstream = await acquireRenewalUpstream(order._id, renewalTxnId);
+    if (!upstream.proceed) {
+      if (upstream.alreadyProcessed) {
+        console.log(`[WEBHOOK-RENEWAL] ⚠️ Skipping provider renew — ${renewalTxnId} already applied`);
+        logger.logWarning('Skipped provider renew — another request already applied this payment');
+        await logger.finalize(true, upstream.expiryDate || order.expiryDate);
+        return NextResponse.json({
+          success: true,
+          message: 'Renewal already processed',
+          alreadyProcessed: true,
+          orderId: order._id,
+        });
+      }
+      console.log(`[WEBHOOK-RENEWAL] ⚠️ Skipping provider renew — ${renewalTxnId} still in progress`);
+      logger.logWarning('Skipped provider renew — another request is still applying this payment');
+      await logger.finalize(false, order.expiryDate, 'Renewal already in progress');
+      return NextResponse.json({
+        success: false,
+        message: 'Renewal already in progress',
+        inProgress: true,
+        orderId: order._id,
+      }, { status: 409 });
+    }
     // Process provider-specific renewal
     let providerRenewalResult = null;
     let providerRenewalSuccess = false;
@@ -807,7 +831,7 @@ export async function handleRenewalWebhook(renewalTxnId, payment, webhookStartTi
     // renewal period for a single payment.
     const renewalClaim = { _id: order._id };
     if (renewalTxnId) {
-      renewalClaim['renewalPayments.renewalTxnId'] = { $ne: renewalTxnId };
+      renewalClaim.renewalPayments = { $not: { $elemMatch: { renewalTxnId } } };
     }
 
     const updatedOrder = await Order.findOneAndUpdate(renewalClaim, {

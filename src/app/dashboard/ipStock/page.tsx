@@ -79,7 +79,6 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { z } from "zod";
 import { cn } from "@/lib/utils";
-import { removeEmojiKeepText } from "@/lib/stripEmojis";
 import { premiumBadge } from "@/lib/premium-badges";
 import Link from "next/link";
 import AddToCartButton from "@/components/cart/AddToCartButton";
@@ -515,22 +514,6 @@ function isServerPlanRowVisible(stock: IPStock, categoryTab: string) {
     return false;
   }
   return true;
-}
-
-/** Put plan name before the leading IP so sold-out rows still show the product, not just the badge. */
-function formatPlanDisplayName(name: string) {
-  const trimmed = removeEmojiKeepText(String(name || ''));
-  const piped = trimmed.match(/^([\d.*xX]+(?:\.[\d*xX]+)*)\s*\|\s*(.+)$/);
-  if (piped?.[2]) {
-    return `${piped[2].trim()} · ${piped[1]}`;
-  }
-  const leadingIp = trimmed.match(
-    /^((?:\d{1,3}|[xX*]{1,3})(?:\.(?:\d{1,3}|[xX*]{2,3}))+)\s+(.+)$/
-  );
-  if (leadingIp?.[2]) {
-    return `${leadingIp[2].trim()} · ${leadingIp[1]}`;
-  }
-  return trimmed;
 }
 
 const PLAN_ROW_ACTION = 'h-10 px-3 shrink-0';
@@ -2022,7 +2005,7 @@ function IPStockContent() {
                             </div>
                             <div className="flex-1 min-w-0">
                               <div className="flex items-start gap-2">
-                                <h3 className="font-semibold text-sm md:text-base text-white break-words min-w-0 flex-1">{removeEmojiKeepText(pkg.name)}</h3>
+                                <h3 className="font-semibold text-sm md:text-base text-white break-words min-w-0 flex-1">{pkg.name}</h3>
                                 <ChevronDown className="h-4 w-4 mt-0.5 shrink-0 premium-dashboard-subtitle sm:hidden" aria-hidden />
                               </div>
                               <div className="flex items-center gap-1.5 flex-wrap mt-1">
@@ -2046,7 +2029,7 @@ function IPStockContent() {
                                 </Badge>
                               </div>
                               {pkg.description && (
-                                <p className="text-xs premium-dashboard-subtitle mt-1 break-words">{removeEmojiKeepText(pkg.description)}</p>
+                                <p className="text-xs premium-dashboard-subtitle mt-1 break-words">{pkg.description}</p>
                               )}
                             </div>
                           </div>
@@ -2603,7 +2586,7 @@ const TrialVpsPlanRow = memo(function TrialVpsPlanRow({
                     : 'premium-dashboard-subtitle line-through decoration-white/25 line-clamp-2 break-words'
                 )}
               >
-                {removeEmojiKeepText(pkg.name)}
+                {pkg.name}
               </h3>
               <ChevronDown
                 className={cn(
@@ -2665,7 +2648,7 @@ const TrialVpsPlanRow = memo(function TrialVpsPlanRow({
                   : `${pkg.trialDays}-day trial · HTTP proxy · one-time · no renewal`}
             </p>
             {pkg.description ? (
-              <p className="text-xs premium-dashboard-subtitle mt-1 break-words line-clamp-2">{removeEmojiKeepText(pkg.description)}</p>
+              <p className="text-xs premium-dashboard-subtitle mt-1 break-words line-clamp-2">{pkg.description}</p>
             ) : null}
           </div>
         </div>
@@ -2900,7 +2883,7 @@ const CompactServerPlanRow = memo(function CompactServerPlanRow({
                   ? "premium-dashboard-title break-words sm:truncate"
                   : "premium-dashboard-subtitle line-through decoration-white/25 line-clamp-2 break-words"
               )}>
-                {formatPlanDisplayName(stock.name)}
+                {stock.name}
               </h3>
             </div>
             <div className="flex items-center gap-2 flex-wrap mt-1">
