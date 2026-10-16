@@ -114,8 +114,10 @@ declare global {
   }
 }
 
-/** Catalog paints from Mongo first. Live provider syncs run one-by-one in the background. */
-const STOCK_SYNC_MIN_INTERVAL_MS = 2 * 60 * 1000;
+/** Catalog paints from Mongo first. Provider syncs already run on a cron, so the page
+ *  only kicks a background refresh when that cache is stale — and never one-by-one. */
+const STOCK_SYNC_MIN_INTERVAL_MS = 8 * 60 * 1000;
+const LIVE_SYNC_TIMEOUT_MS = 12_000;
 const LIVE_STOCK_SYNC_ENDPOINTS = [
   '/api/advps/refresh-stock',
   '/api/reseller-panel/refresh-stock',
@@ -832,43 +834,47 @@ function IPStockContent() {
       setIpStocks(rows);
     };
 
-    const syncLiveStockSequentially = async (signal: AbortSignal, generation: number) => {
+    const syncLiveStock = async (signal: AbortSignal, generation: number) => {
       setIsRefreshingStock(true);
+      const timeoutMs = manual ? 20_000 : LIVE_SYNC_TIMEOUT_MS;
       try {
-        if (!manual && !waitForLiveSync) {
-          await new Promise((resolve) => window.setTimeout(resolve, 400));
-        }
-        for (const url of LIVE_STOCK_SYNC_ENDPOINTS) {
-          if (signal.aborted) return;
-          try {
+        const results = await Promise.all(
+          LIVE_STOCK_SYNC_ENDPOINTS.map(async (url) => {
+            if (signal.aborted) return { skipped: true };
             const timeoutCtrl = new AbortController();
-            const timeoutId = window.setTimeout(() => timeoutCtrl.abort(), 90_000);
+            const timeoutId = window.setTimeout(() => timeoutCtrl.abort(), timeoutMs);
             const onAbort = () => timeoutCtrl.abort();
             signal.addEventListener("abort", onAbort, { once: true });
             try {
-              await dashboardFetch(url, {
+              const res = await dashboardFetch(url, {
                 cache: "no-store",
                 signal: timeoutCtrl.signal,
               });
+              return await res.json().catch(() => ({ skipped: true }));
+            } catch (err) {
+              if (!signal.aborted) console.warn("[IP Stock] background live sync skipped", url, err);
+              return { skipped: true };
             } finally {
               window.clearTimeout(timeoutId);
               signal.removeEventListener("abort", onAbort);
             }
-          } catch (err) {
-            if (signal.aborted) return;
-            console.warn("[IP Stock] background live sync skipped", url, err);
-          }
-          if (signal.aborted) return;
+          })
+        );
+        if (signal.aborted) return;
+        const changed = results.some(
+          (row) => row && row.skipped !== true && row.throttled !== true && row.success !== false
+        );
+        if (manual || changed) {
           await reloadIpStocks(signal);
         }
         if (!signal.aborted) {
-        writeDashboardCache(DASHBOARD_CACHE_KEYS.stockSyncedAt, Date.now());
+          writeDashboardCache(DASHBOARD_CACHE_KEYS.stockSyncedAt, Date.now());
         }
       } catch (e) {
         if (!signal.aborted) console.warn("[IP Stock] Live stock sync error", e);
       } finally {
         if (liveSyncGenerationRef.current === generation) {
-        setIsRefreshingStock(false);
+          setIsRefreshingStock(false);
         }
       }
     };
@@ -892,7 +898,7 @@ function IPStockContent() {
     const ac = new AbortController();
     liveSyncAbortRef.current = ac;
     if (waitForLiveSync || manual) {
-      await syncLiveStockSequentially(ac.signal, generation);
+      await syncLiveStock(ac.signal, generation);
       if (!ac.signal.aborted) {
         try {
           await fetchFullCatalog(ac.signal);
@@ -901,7 +907,7 @@ function IPStockContent() {
         }
       }
     } else {
-      void syncLiveStockSequentially(ac.signal, generation);
+      void syncLiveStock(ac.signal, generation);
     }
 
     return catalogOk;

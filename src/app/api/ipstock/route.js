@@ -280,19 +280,33 @@ export async function GET(request) {
         }
 
         if (customerView) {
-            try {
-                await relistAutoHiddenStocksNowInStock();
-            } catch (relistErr) {
+            // Don't block the catalog read on this write. A plan that just
+            // came back in stock shows on the next load instead of every
+            // visitor waiting on the update.
+            void relistAutoHiddenStocksNowInStock().catch((relistErr) => {
                 console.warn('[IPSTOCK-API] auto-relist hidden in-stock plans failed:', relistErr.message);
-            }
+            });
         }
 
         let ipStocks;
         if (customerView) {
-            ipStocks = await IPStock.aggregate([
-                { $match: query },
+            // Inventory rows hold credentials and can be huge. Load counts
+            // only for company plans that actually have inventory, and never
+            // send the rows themselves.
+            ipStocks = await IPStock.find(query)
+                .select('-inventoryItems')
+                .lean()
+                .maxTimeMS(10000);
+            const countRows = await IPStock.aggregate([
                 {
-                    $addFields: {
+                    $match: {
+                        ...query,
+                        company: { $ne: null },
+                        'inventoryItems.0': { $exists: true },
+                    },
+                },
+                {
+                    $project: {
                         inventoryItemCount: { $size: { $ifNull: ['$inventoryItems', []] } },
                         inventoryAvailable: {
                             $size: {
@@ -305,25 +319,14 @@ export async function GET(request) {
                         },
                     },
                 },
-                {
-                    $project: {
-                        name: 1,
-                        description: 1,
-                        available: 1,
-                        hiddenFromStore: 1,
-                        stockCount: 1,
-                        availabilityManual: 1,
-                        company: 1,
-                        serverType: 1,
-                        tags: 1,
-                        memoryOptions: 1,
-                        promoCodes: 1,
-                        defaultConfigurations: 1,
-                        inventoryItemCount: 1,
-                        inventoryAvailable: 1,
-                    },
-                },
-            ]).option({ maxTimeMS: 10000 });
+            ]).option({ maxTimeMS: 8000 });
+            const countById = new Map(countRows.map((row) => [String(row._id), row]));
+            for (const stock of ipStocks) {
+                const counts = countById.get(String(stock._id));
+                if (!counts) continue;
+                stock.inventoryItemCount = counts.inventoryItemCount;
+                stock.inventoryAvailable = counts.inventoryAvailable;
+            }
         } else {
             ipStocks = await IPStock.find(query).lean().maxTimeMS(10000);
         }

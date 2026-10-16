@@ -991,6 +991,15 @@ html {
     @apply opacity-55 saturate-[0.6] grayscale-[0.25];
   }
 
+  /* Plan rows are a long list. Blur on every card forces a full-page repaint
+     while scrolling, which is what makes this page feel stuck. */
+  .premium-ipstock-page .premium-dashboard-card.border-l-4 {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    content-visibility: auto;
+    contain-intrinsic-size: auto 96px;
+  }
+
   .premium-ipstock-tag-section {
     @apply rounded-xl border border-white/10 bg-white/[0.02] p-2 sm:p-3;
   }

@@ -11,7 +11,7 @@ import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import IPStock from '@/models/ipStockModel';
 import { storeAutoUnhideUpdate } from '@/lib/ipStockAvailability';
-import { enforceCronOrLoggedInUser } from '@/lib/apiSecurity';
+import { enforceCronOrLoggedInUser, isCronAuthorized } from '@/lib/apiSecurity';
 const {
   buildSmartVpsBlockFromPackage,
   toPlainMemoryOptions,
@@ -225,10 +225,40 @@ function authorizeSync(req: Request) {
   return null;
 }
 
+/** Customer page must not call SmartVPS ipstock on every visit. Cron bypasses this. */
+const CUSTOMER_SYNC_INTERVAL_MS = 8 * 60 * 1000;
+
+function customerSyncCache() {
+  const g = globalThis as { __smartvpsCustomerSync?: { lastAt: number; inFlight: boolean } };
+  if (!g.__smartvpsCustomerSync) g.__smartvpsCustomerSync = { lastAt: 0, inFlight: false };
+  return g.__smartvpsCustomerSync;
+}
+
+async function runSyncForRequest(req: Request) {
+  if (isCronAuthorized(req as any)) return runSync(req);
+  const cache = customerSyncCache();
+  const now = Date.now();
+  if (cache.inFlight || (cache.lastAt && now - cache.lastAt < CUSTOMER_SYNC_INTERVAL_MS)) {
+    return NextResponse.json({
+      success: true,
+      skipped: true,
+      throttled: true,
+      refreshedAt: cache.lastAt || null,
+    });
+  }
+  cache.inFlight = true;
+  try {
+    return await runSync(req);
+  } finally {
+    cache.inFlight = false;
+    cache.lastAt = Date.now();
+  }
+}
+
 export async function GET(req: Request) {
   const denied = authorizeSync(req);
   if (denied) return denied;
-  try { return await runSync(req); }
+  try { return await runSyncForRequest(req); }
   catch (e: any) {
     console.error('[SVPS-SYNC GET] error:', e);
     return NextResponse.json({ success: false, error: e.message }, { status: 500 });
@@ -238,7 +268,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   const denied = authorizeSync(req);
   if (denied) return denied;
-  try { return await runSync(req); }
+  try { return await runSyncForRequest(req); }
   catch (e: any) {
     console.error('[SVPS-SYNC POST] error:', e);
     return NextResponse.json({ success: false, error: e.message }, { status: 500 });
