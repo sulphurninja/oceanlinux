@@ -616,24 +616,33 @@ function cleanOrderIp(ip) {
 
 /**
  * Resolve reseller-panel VM for an order.
- * Order IP wins (admin manual IP change) — lookup by IP before stale resellerVmId.
+ * Saved VM id is one details call. The full overview scan runs only when that
+ * id is missing or its IP no longer matches the order (admin reassigned the IP).
  */
 async function resolveResellerVmForOrder(resellerApi, order) {
   const wantedIp = cleanOrderIp(order.ipAddress);
+  const savedVmId = order?.resellerVmId ? String(order.resellerVmId).trim() : '';
+
+  if (savedVmId) {
+    try {
+      const details = await resellerApi.getVmDetails(savedVmId);
+      const detailIp = cleanOrderIp(details?.ipAddress || details?.ip);
+      if (details && (!wantedIp || !detailIp || detailIp === wantedIp)) {
+        return {
+          vmId: savedVmId,
+          ip: detailIp || wantedIp || '',
+          raw: null,
+          details,
+        };
+      }
+    } catch (_) {
+      // Saved id is gone. Fall through to a single IP search.
+    }
+  }
 
   if (wantedIp) {
     const foundByIp = await resellerApi.findVmByIp(wantedIp);
     if (foundByIp) return foundByIp;
-  }
-
-  if (order.resellerVmId) {
-    const overviewRow = await resolveOverviewRowForVm(resellerApi, order.resellerVmId).catch(() => null);
-    const panelIp = overviewRow ? ResellerApi.extractOverviewRowIp(overviewRow) : null;
-    return {
-      vmId: String(order.resellerVmId),
-      ip: panelIp || wantedIp || '',
-      raw: overviewRow,
-    };
   }
 
   const err = new Error(
@@ -648,23 +657,20 @@ async function resolveResellerVmForOrder(resellerApi, order) {
 async function syncResellerVmCredentials(api, order, vmId) {
   let effectiveVmId = vmId ? String(vmId) : null;
   let resolved = null;
-  try {
+  if (!effectiveVmId) {
     resolved = await resolveResellerVmForOrder(api, order);
     if (resolved?.vmId) effectiveVmId = String(resolved.vmId);
-  } catch {
-    // fall back to caller vmId when order has no resolvable IP yet
   }
   if (!effectiveVmId) {
     throw new Error('No reseller VM id available for credential sync');
   }
 
-  const details = await api.getVmDetails(effectiveVmId);
+  const details = resolved?.details || await api.getVmDetails(effectiveVmId);
   const resolvedRaw = resolved?.raw || null;
-  const resolvedMatchesVm =
-    resolvedRaw && String(extractOverviewVmId(resolvedRaw)) === String(effectiveVmId);
   const overviewRow =
-    (resolvedMatchesVm ? resolvedRaw : null) ||
-    (await resolveOverviewRowForVm(api, effectiveVmId, { maxPages: 100 }));
+    resolvedRaw && String(extractOverviewVmId(resolvedRaw)) === String(effectiveVmId)
+      ? resolvedRaw
+      : null;
   const password = ResellerApi.extractVmPassword(details);
   const rawUsername = ResellerApi.extractVmUsername(details);
   const rawOs = ResellerApi.extractVmOs(details);
@@ -1338,7 +1344,7 @@ async function syncStuckResellerPendingOrders({ limit = 25 } = {}) {
   return results;
 }
 
-const RESELLER_FETCH_SYNC_COOLDOWN_MS = 5000;
+const RESELLER_FETCH_SYNC_COOLDOWN_MS = 60 * 1000;
 const pendingCompletionTimers = new Map();
 
 /**
@@ -1389,9 +1395,9 @@ function scheduleResellerPendingCompletion(orderId, { delaysMs = [3000, 8000, 20
 }
 
 /**
- * When customer opens manage order, pull IP/credentials from panel.
- * Always syncs os/username/password when a panel ref exists — a reinstall
- * can change the OS even though IP+password were already stored.
+ * Pending orders (no IP or password yet) get one panel completion attempt.
+ * Orders that already have login details stay on the database. The Sync
+ * button is what refreshes a password after a reinstall.
  */
 async function maybeSyncResellerOrderOnFetch(order) {
   if (!order) return order;
@@ -1413,26 +1419,9 @@ async function maybeSyncResellerOrderOnFetch(order) {
   const lastSync = order.lastSyncTime ? new Date(order.lastSyncTime).getTime() : 0;
   if (Date.now() - lastSync < RESELLER_FETCH_SYNC_COOLDOWN_MS) return order;
 
-  if (ip && pwd) {
-    try {
-      const Company = (await import('@/models/companyModel')).default;
-      const Order = (await import('@/models/orderModel')).default;
-      const company = await Company.findById(ipStock.company).select('resellerApi name').lean();
-      const cfg = getCompanyResellerApiConfig(company);
-      if (!cfg) return order;
-
-      const api = new ResellerApi(cfg);
-      const resolved = await resolveResellerVmForOrder(api, order);
-      const synced = await syncResellerVmCredentials(api, order, resolved.vmId);
-      if (synced.changes.length) {
-        await commitPanelSyncToOrder(order, synced.updates);
-      }
-      return await Order.findById(order._id).lean();
-    } catch (err) {
-      console.warn('[RESELLER-SYNC] Credential sync on fetch failed:', err.message);
-      return order;
-    }
-  }
+  // Opening the page must not scan the panel. Password is already on the order.
+  // The Sync button is the explicit refresh.
+  if (ip && pwd) return order;
 
   const lastAttempt = order.lastProvisionAttempt
     ? new Date(order.lastProvisionAttempt).getTime()

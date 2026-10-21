@@ -16,6 +16,12 @@ const {
 const { resolvePanelSyncExpiryDate } = require('@/lib/expiryHelper');
 
 const EXPIRY_FETCH_COOLDOWN_MS = 5 * 60 * 1000;
+const LIST_SYNC_INTERVAL_MS = 10 * 60 * 1000;
+
+function hostheavenListSyncState() {
+  if (!globalThis.__hostheavenUserListSync) globalThis.__hostheavenUserListSync = new Map();
+  return globalThis.__hostheavenUserListSync;
+}
 
 function expiryMs(value) {
   if (!value) return null;
@@ -55,14 +61,28 @@ function cleanIpAddress(ipAddress) {
 /**
  * Fetch panel expiry for one IP (overview `expiresAt` + details fallback).
  */
-async function fetchResellerExpiryByIp(company, ipAddress) {
+async function fetchResellerExpiryByIp(company, ipAddress, { vmId = null } = {}) {
   const cleanIp = cleanIpAddress(ipAddress);
   if (!cleanIp) {
     throw new Error('IP address is required');
   }
 
   const api = createResellerApiClient(company);
-  const found = await api.findVmByIp(cleanIp, { skipCache: true });
+  const savedVmId = vmId ? String(vmId).trim() : '';
+  if (savedVmId) {
+    const details = await api.getVmDetails(savedVmId);
+    const expiryDate = ResellerApi.extractVmExpiryDate(details);
+    if (!expiryDate) {
+      throw new Error(`Panel did not return expiry for VM ${savedVmId}`);
+    }
+    return {
+      ipAddress: cleanIpAddress(details?.ipAddress || details?.ip) || cleanIp,
+      expiryDate,
+      vmId: savedVmId,
+    };
+  }
+
+  const found = await api.findVmByIp(cleanIp);
   if (!found) {
     throw new Error(`No VM found on Hostheaven for IP ${cleanIp}`);
   }
@@ -382,8 +402,10 @@ async function syncSingleOrderExpiryFromPanel(order, { force = false, companyDoc
 
   let panel;
   try {
-    panel = await fetchResellerExpiryByIp(company, order.ipAddress);
+    panel = await fetchResellerExpiryByIp(company, order.ipAddress, { vmId: order.resellerVmId });
   } catch (err) {
+    // A missing VM used to rescan the whole panel on every page open.
+    await Order.updateOne({ _id: order._id }, { $set: { lastSyncTime: new Date() } });
     return { order, synced: false, error: err.message };
   }
 
@@ -464,14 +486,21 @@ async function syncUserHostheavenOrderExpiries(orders) {
 
   for (const [companyId, companyOrders] of byCompany) {
     const company = companyById.get(companyId);
+    const syncState = hostheavenListSyncState();
+    const previous = syncState.get(companyId) || { at: 0, inFlight: false };
+    if (previous.inFlight || Date.now() - previous.at < LIST_SYNC_INTERVAL_MS) continue;
+
     let ipIndex;
+    syncState.set(companyId, { at: Date.now(), inFlight: true });
     try {
       const api = createResellerApiClient(company);
       ipIndex = await api.buildVmIpIndex();
     } catch (err) {
       console.warn('[HOSTHEAVEN-EXPIRY] User list sync overview failed:', err.message);
+      syncState.set(companyId, { at: Date.now(), inFlight: false });
       continue;
     }
+    syncState.set(companyId, { at: Date.now(), inFlight: false });
 
     for (const order of companyOrders) {
       const ip = cleanIpAddress(order.ipAddress);
@@ -529,7 +558,7 @@ async function resolveRenewalExpiryFromPanel(order, calculatedExpiry, { panelRen
       if (ipStock?.company) {
         const company = await Company.findById(ipStock.company).select('resellerApi name').lean();
         if (getCompanyResellerApiConfig(company)) {
-          const panel = await fetchResellerExpiryByIp(company, order.ipAddress);
+          const panel = await fetchResellerExpiryByIp(company, order.ipAddress, { vmId: order.resellerVmId });
           panelExpiry = panel?.expiryDate || null;
         }
       }

@@ -1523,7 +1523,29 @@ export async function POST(request) {
                   result: { success: true, message: 'Restart command sent successfully', apiResponse: apiRes, vmId },
                 });
               }
-              case 'status':
+              case 'status': {
+                const savedVmId = String(order.resellerVmId || '').trim();
+                let vmId = savedVmId;
+                let overviewRaw = null;
+                if (!savedVmId) {
+                  const found = await findVm();
+                  vmId = found.vmId;
+                  overviewRaw = found.raw;
+                }
+                const { powerState, rawStatus, source } = await resellerApi.resolveVmPowerState(
+                  vmId,
+                  { overviewRaw }
+                );
+                return NextResponse.json({
+                  success: true,
+                  powerState,
+                  rawStatus,
+                  powerSource: source,
+                  provider: 'reseller-api',
+                  vmId,
+                  expiryDate: order.expiryDate || null,
+                });
+              }
               case 'sync': {
                 const found = await findVm();
                 const { powerState, rawStatus, source } = await resellerApi.resolveVmPowerState(

@@ -7,7 +7,6 @@ import { dashboardFetch } from '@/lib/dashboardFetch';
 import {
   readDashboardCache,
   writeDashboardCache,
-  dashboardCacheAge,
   DASHBOARD_CACHE_KEYS,
 } from '@/lib/dashboardCache';
 import { normalizeMemoryKey } from '@/lib/orderRenewalPricing';
@@ -114,9 +113,7 @@ declare global {
   }
 }
 
-/** Catalog paints from Mongo first. Provider syncs already run on a cron, so the page
- *  only kicks a background refresh when that cache is stale — and never one-by-one. */
-const STOCK_SYNC_MIN_INTERVAL_MS = 8 * 60 * 1000;
+/** Catalog paints from Mongo. Provider sync runs only when the user hits Refresh. */
 const LIVE_SYNC_TIMEOUT_MS = 12_000;
 const LIVE_STOCK_SYNC_ENDPOINTS = [
   '/api/advps/refresh-stock',
@@ -936,9 +933,8 @@ function IPStockContent() {
     }
   }, [isManualRefreshing, loadPlans]);
 
-  // Paint cached plans immediately, then refresh in the background. Upstream
-  // provider sync is heavy (multi-second), so it only runs when stock data is
-  // actually stale rather than on every visit.
+  // Paint from the database. Provider stock sync stays on the Refresh button
+  // and the server cron — running it on every visit stalled the whole site.
   useEffect(() => {
     const cachedStocks = readDashboardCache(DASHBOARD_CACHE_KEYS.ipStock) as IPStock[] | null;
     const cachedSlots = readDashboardCache(DASHBOARD_CACHE_KEYS.slotIps) as SlotIPPackage[] | null;
@@ -952,10 +948,9 @@ function IPStockContent() {
       setIsLoading(false);
     }
 
-    const syncAge = dashboardCacheAge(DASHBOARD_CACHE_KEYS.stockSyncedAt);
     loadPlans({
       silent: hasCache,
-      skipUpstreamSync: syncAge < STOCK_SYNC_MIN_INTERVAL_MS,
+      skipUpstreamSync: true,
     });
 
     return () => {
