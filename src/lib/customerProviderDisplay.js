@@ -1,78 +1,57 @@
-/**
- * Customer-facing provider label. Upstream backends (Netbay, etc.) are shown as OceanLinux.
- */
-export function getCustomerProviderDisplayName(provider) {
-  if (!provider) return 'OceanLinux';
-
-  switch (String(provider).toLowerCase()) {
-    case 'smartvps':
-      return 'SmartVPS';
-    case 'hostycare':
-      return 'Hostycare';
-    case 'oceanlinux':
-    case 'slotip':
-    case 'netbay':
-      return 'OceanLinux';
-    case 'advps':
-      return 'ADVPS';
-    case 'reseller-api':
-      return 'Hostheaven';
-    case 'kurohost':
-      return 'KuroHost';
-    case 'joy':
-      return 'Joy';
-    case 'hostdzire':
-      return 'HostDzire';
-    case 'virtualizor':
-      return 'Virtualizor';
-    case 'trialvps':
-      return 'Trial VPS';
-    case 'oceanlinux':
-      return 'OceanLinux';
-    default:
-      return provider.charAt(0).toUpperCase() + provider.slice(1);
-  }
+function filled(value) {
+  return value != null && String(value).trim() !== '';
 }
 
-/** Admin / manage-orders label — same mapping, keeps DB `provider` key unchanged. */
-export function getAdminProviderDisplayName(provider, order) {
-  if (order?.resellerVmId || order?.resellerOrderId) {
-    if (!provider || provider === 'reseller-api') return 'Hostheaven';
+function companyLabel(order) {
+  const fromStock = String(order?.providerCompanyName || '').trim();
+  if (fromStock) return fromStock;
+  return String(order?.companyAutomation?.companyName || '').trim();
+}
+
+/**
+ * Provider label. A company order uses the name from Admin → Companies
+ * (Oceanlinux-N, Host Heaven, Oceanlinux-P). advps, smartvps, netbay,
+ * trial and slot are only for orders that are not tied to a company.
+ */
+export function getProviderDisplayLabel(order) {
+  if (!order) return '';
+
+  const company = companyLabel(order);
+  if (company) return company;
+
+  const provider = String(order.provider || '').toLowerCase();
+
+  if (filled(order.slotIpPackageId) || provider === 'slotip') return 'slot';
+  if (filled(order.trialVpsPackageId) || provider === 'trialvps') return 'trial';
+
+  if (provider === 'advps' || filled(order.advpsServiceId)) return 'advps';
+  if (provider === 'smartvps' || filled(order.smartvpsServiceId)) return 'smartvps';
+  if (
+    provider === 'netbay' ||
+    filled(order.netbayServiceId) ||
+    String(order.netbayProductKind || '').toLowerCase() === 'proxy'
+  ) {
+    return 'netbay';
   }
-  return getCustomerProviderDisplayName(provider);
+
+  return '';
+}
+
+/** @deprecated string-only callers. Prefer getProviderDisplayLabel(order). */
+export function getCustomerProviderDisplayName(provider) {
+  return getProviderDisplayLabel({ provider }) || '';
+}
+
+export function getAdminProviderDisplayName(provider, order) {
+  return getProviderDisplayLabel({ ...(order || {}), provider: provider || order?.provider }) || '—';
 }
 
 export function getAdminProviderDisplayNameFromOrder(order) {
-  if (!order) return 'OceanLinux';
-  return getAdminProviderDisplayName(order.provider, order);
+  if (!order) return '—';
+  return getProviderDisplayLabel(order) || '—';
 }
 
-/** Infer provider key from an order row (dashboard lists). */
 export function getCustomerProviderDisplayNameFromOrder(order) {
-  if (!order) return 'OceanLinux';
-
-  if (order.slotIpPackageId || order.provider === 'slotip') {
-    return 'OceanLinux';
-  }
-
-  if (order.provider) {
-    return getCustomerProviderDisplayName(order.provider);
-  }
-
-  if (order.resellerVmId || order.resellerOrderId) return 'Hostheaven';
-
-  if (order.netbayServiceId) return 'OceanLinux';
-  if (order.advpsServiceId) return 'ADVPS';
-  if (order.hostycareServiceId) return 'Hostycare';
-  if (order.smartvpsServiceId) return 'SmartVPS';
-
-  if (
-    order.productName?.includes('103.195') ||
-    order.ipAddress?.startsWith('103.195') ||
-    order.productName?.includes('🏅')
-  ) {
-    return 'SmartVPS';
-  }
-
-  return 'OceanLinux';
+  if (!order) return '—';
+  return getProviderDisplayLabel(order) || '—';
 }

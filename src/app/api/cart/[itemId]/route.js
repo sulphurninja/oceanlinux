@@ -44,7 +44,12 @@ async function buildCartResponse(cart, reseller = null) {
             lineTotal: line.priced.lineTotal,
             promoApplied: line.priced.promoApplied || null,
           }
-        : { valid: false, reason: line.priced.reason },
+        : {
+            valid: false,
+            reason: line.priced.reason,
+            productName: line.priced.stock?.name,
+            serverType: line.priced.stock?.serverType,
+          },
     };
   });
 

@@ -2,12 +2,6 @@
 @tailwind components;
 @tailwind utilities;
 
-@property --brand-orbit {
-  syntax: "<angle>";
-  inherits: false;
-  initial-value: 0deg;
-}
-
 :root {
   --background: 0 0% 98.8235%;
   --foreground: 0 0% 9.0196%;
@@ -615,138 +609,57 @@ html {
   }
 
   .premium-sidebar-brand-card {
-    position: relative;
-    isolation: isolate;
-    overflow: hidden;
     display: flex;
     align-items: center;
     gap: 0.75rem;
     width: 100%;
     max-width: 100%;
     min-width: 0;
-    padding: 0.7rem 0.75rem;
-    border-radius: 1rem;
-    background: transparent;
-    border: 1px solid var(--pd-border-strong);
-    box-shadow: 0 10px 24px -16px rgba(16, 80, 60, 0.45);
-  }
-
-  .premium-sidebar-brand-card::after {
-    content: "";
-    position: absolute;
-    z-index: 0;
-    inset: 1px;
-    border-radius: calc(1rem - 1px);
-    pointer-events: none;
-    background:
-      radial-gradient(120% 80% at 0% 0%, rgba(16, 185, 129, 0.18), transparent 55%),
-      var(--pd-surface-soft);
-  }
-
-  .premium-sidebar-brand-orbit {
-    position: absolute;
-    z-index: 1;
-    inset: 0;
-    border-radius: inherit;
-    padding: 1px;
-    pointer-events: none;
-    background: conic-gradient(
-      from var(--brand-orbit),
-      transparent 0deg,
-      transparent 326deg,
-      rgba(16, 185, 129, 0.12) 340deg,
-      rgba(167, 243, 208, 0.92) 351deg,
-      rgba(52, 211, 153, 0.18) 360deg
-    );
-    -webkit-mask:
-      linear-gradient(#000 0 0) content-box,
-      linear-gradient(#000 0 0);
-    -webkit-mask-composite: xor;
-    mask:
-      linear-gradient(#000 0 0) content-box,
-      linear-gradient(#000 0 0);
-    mask-composite: exclude;
-    animation: premium-brand-orbit 9s linear infinite;
-  }
-
-  .premium-sidebar-brand-card > :not(.premium-sidebar-brand-orbit) {
-    position: relative;
-    z-index: 1;
-  }
-
-  @keyframes premium-brand-orbit {
-    to {
-      --brand-orbit: 360deg;
-    }
+    padding: 0.625rem 0.75rem;
+    border-radius: 0.875rem;
+    background: var(--pd-surface-soft);
+    border: 1px solid var(--pd-border);
   }
 
   .premium-sidebar-brand-mark {
     display: grid;
     place-items: center;
-    height: 2.75rem;
-    width: 2.75rem;
+    height: 2.5rem;
+    width: 2.5rem;
     flex-shrink: 0;
-    border-radius: 0.8rem;
-    background: #fff;
-    border: 1px solid rgba(16, 185, 129, 0.22);
-    box-shadow: 0 6px 14px -10px rgba(16, 185, 129, 0.8);
+  }
+
+  .premium-sidebar-brand-mark img {
+    height: 2.5rem;
+    width: 2.5rem;
   }
 
   .premium-sidebar-brand-credit {
     display: inline-flex;
     align-items: center;
-    gap: 0.35rem;
+    gap: 0.3rem;
     max-width: 100%;
-    margin-top: 0.4rem;
-    padding: 0.15rem 0.45rem 0.15rem 0.4rem;
-    border-radius: 999px;
-    background: rgba(16, 185, 129, 0.1);
-    border: 1px solid rgba(16, 185, 129, 0.22);
+    margin-top: 0.3rem;
     color: var(--pd-sidebar-muted);
-    font-size: 9px;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1;
     white-space: nowrap;
+    opacity: 0.85;
+    transition: opacity 150ms ease-out;
+  }
+
+  .premium-sidebar-brand-credit:hover {
+    opacity: 1;
   }
 
   .premium-sidebar-brand-credit-name {
-    color: var(--pd-emerald-soft);
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0;
-    text-transform: none;
+    color: var(--pd-sidebar-brand);
+    font-weight: 600;
   }
 
   html.premium-dashboard-active:not(.dark) .premium-sidebar-brand-credit img {
     filter: brightness(0);
-  }
-
-  html.premium-dashboard-active.dark .premium-sidebar-brand-mark {
-    background: hsl(158 32% 12%);
-    border-color: rgba(110, 231, 183, 0.28);
-  }
-
-  html.premium-dashboard-active.dark .premium-sidebar-brand-card {
-    box-shadow: 0 12px 28px -18px rgba(0, 0, 0, 0.8);
-  }
-
-  html.premium-dashboard-active:not(.dark) .premium-sidebar-brand-orbit {
-    background: conic-gradient(
-      from var(--brand-orbit),
-      transparent 0deg,
-      transparent 314deg,
-      rgba(5, 150, 105, 0.12) 334deg,
-      rgba(4, 120, 87, 0.72) 348deg,
-      rgba(16, 185, 129, 0.2) 358deg,
-      transparent 360deg
-    );
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .premium-sidebar-brand-orbit {
-      animation: none;
-    }
   }
 
   .premium-sidebar-muted {
@@ -3458,50 +3371,11 @@ html {
     transform: translate(-50%, -50%);
   }
 
-  .premium-mobile-brand-slot::before {
-    content: "";
-    position: absolute;
-    inset: 0.15rem;
-    border-radius: 999px;
-    border: 1px solid rgba(110, 231, 183, 0.45);
-    animation: premium-mobile-brand-ring 3.2s ease-out infinite;
-  }
-
   .premium-mobile-brand-logo {
     position: relative;
     z-index: 1;
     height: 2.25rem;
     width: auto;
-    animation: premium-mobile-brand-float 3.4s ease-in-out infinite;
-  }
-
-  @keyframes premium-mobile-brand-float {
-    0%,
-    100% {
-      transform: translateY(0);
-    }
-    50% {
-      transform: translateY(-3px);
-    }
-  }
-
-  @keyframes premium-mobile-brand-ring {
-    0% {
-      transform: scale(0.82);
-      opacity: 0.55;
-    }
-    70%,
-    100% {
-      transform: scale(1.45);
-      opacity: 0;
-    }
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .premium-mobile-brand-logo,
-    .premium-mobile-brand-slot::before {
-      animation: none;
-    }
   }
 
   .premium-dashboard .bg-secondary,
@@ -5265,11 +5139,6 @@ html.premium-dashboard-active:not(.dark) .premium-badge--neutral {
   background: rgba(255, 255, 255, 0.3) !important;
   backdrop-filter: blur(10px) saturate(1.1);
 }
-html.premium-dashboard-active:not(.dark) .premium-sidebar-brand-mark {
-  background: rgba(255, 255, 255, 0.3);
-  backdrop-filter: blur(12px) saturate(1.1);
-}
-
 /* Dark theme: shadcn outline buttons, selects and muted chips use bg-background,
    which resolves to near-black (#121212) and reads as flat black on the green glass.
    Give them a subtle translucent tint instead. Terminal blocks keep their own black. */
@@ -5306,6 +5175,15 @@ html.premium-dashboard-active .premium-badge {
 
   .premium-dashboard-content-wrap {
     padding-top: calc(var(--pd-mobile-header-h) + var(--pd-mobile-topbar-h)) !important;
+  }
+
+  /* Must match --pd-mobile-topbar-h or the fixed bar covers the top of the page. */
+  .premium-dashboard-topbar-row {
+    box-sizing: border-box;
+    height: calc(var(--pd-mobile-topbar-h) - 1px) !important;
+    min-height: 0 !important;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
   }
 
   html.premium-dashboard-active .premium-dashboard-toolbar .premium-btn-outline {

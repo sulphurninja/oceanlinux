@@ -35,8 +35,13 @@ const LIST_SELECT = [
   'netbayServiceId',
   'netbayGroupTag',
   'netbayProductKind',
+  'ipStockId',
   'slotIpPackageId',
   'slotIpId',
+  'trialVpsPackageId',
+  'trialManageCompanyId',
+  'resellerVmId',
+  'resellerOrderId',
   'provider',
   'autoProvisioned',
   'ipAddress',
@@ -452,7 +457,7 @@ export async function GET(request: NextRequest) {
 
     const filter = await buildFilter(searchParams);
 
-    const [orders, total, stats] = await Promise.all([
+    const [rawOrders, total, stats] = await Promise.all([
       Order.find(filter)
         .select(LIST_SELECT)
         .populate('user', 'name email phone billingAddress')
@@ -463,6 +468,9 @@ export async function GET(request: NextRequest) {
       Order.countDocuments(filter),
       fetchGlobalStats(),
     ]);
+
+    const { attachProviderCompanyNames } = require('@/lib/attachProviderCompanyName');
+    const orders = await attachProviderCompanyNames(rawOrders);
 
     return NextResponse.json(
       {

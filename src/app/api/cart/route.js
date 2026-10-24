@@ -66,7 +66,12 @@ async function buildCartResponse(cart, reseller = null) {
               ? Array.from(stockDoc.memoryOptions.keys?.() || Object.keys(stockDoc.memoryOptions))
               : undefined,
           }
-        : { valid: false, reason: line.priced.reason },
+        : {
+            valid: false,
+            reason: line.priced.reason,
+            productName: stockDoc?.name,
+            serverType: stockDoc?.serverType,
+          },
     };
   });
 

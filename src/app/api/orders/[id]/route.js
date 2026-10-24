@@ -79,7 +79,10 @@ export async function GET(request, { params }) {
             }
         }
 
-        return NextResponse.json(sanitizeOrderForCustomer(order, { isAdmin: resolved.isAdmin }));
+        const { attachProviderCompanyNames } = require('@/lib/attachProviderCompanyName');
+        const [named] = await attachProviderCompanyNames([order]);
+
+        return NextResponse.json(sanitizeOrderForCustomer(named || order, { isAdmin: resolved.isAdmin }));
     } catch (error) {
         console.error('Error fetching order:', error);
         const { customerServiceErrorMessage } = require('@/lib/customerFacingErrors');

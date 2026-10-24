@@ -33,7 +33,9 @@ export async function GET(request) {
             });
         }
 
-        const orders = await Order.find({ user: userId }).lean().sort({ createdAt: -1 });
+        const rawOrders = await Order.find({ user: userId }).lean().sort({ createdAt: -1 });
+        const { attachProviderCompanyNames } = require('@/lib/attachProviderCompanyName');
+        const orders = await attachProviderCompanyNames(rawOrders);
 
         // Do not block the manage-orders list on Hostheaven. Panel sync can take
         // many seconds and made the page feel hung / laggy.

@@ -312,12 +312,11 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
           </div>
         ) : (
           <div className="premium-sidebar-brand-card">
-            <span className="premium-sidebar-brand-orbit" aria-hidden="true" />
             <div className="premium-sidebar-brand-mark">
               <img
                 src='/ol.png'
                 data-ocean-brand-logo
-                className="h-9 w-9 object-contain"
+                className="object-contain"
                 alt=""
               />
             </div>

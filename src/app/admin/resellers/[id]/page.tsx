@@ -29,6 +29,7 @@ import {
     resellerPlanGroup,
     stockCustomStatus,
 } from '@/lib/resellerPlanGroups';
+import { getProviderDisplayLabel } from '@/lib/customerProviderDisplay';
 import {
     Dialog,
     DialogContent,
@@ -908,7 +909,7 @@ export default function ResellerDetailsPage() {
                                                 <DetailField label="Rate" value={`₹${selectedTxn.order.price?.toLocaleString()}`} />
                                                 <DetailField label="Order Status" value={selectedTxn.order.status} />
                                                 <DetailField label="Provisioning" value={selectedTxn.order.provisioningStatus || '—'} />
-                                                <DetailField label="Provider" value={selectedTxn.order.provider || '—'} />
+                                                <DetailField label="Provider" value={getProviderDisplayLabel(selectedTxn.order) || '—'} />
                                                 <DetailField label="End User Email" value={selectedTxn.order.endUserEmail || '—'} />
                                                 <DetailField label="Order Date" value={formatDateTime(selectedTxn.order.createdAt)} />
                                                 <DetailField label="Expiry" value={selectedTxn.order.expiryDate ? formatDateTime(selectedTxn.order.expiryDate) : '—'} />

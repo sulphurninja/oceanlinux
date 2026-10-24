@@ -24,6 +24,7 @@ const cartItemSchema = new mongoose.Schema({
 
   // For 'ipstock' lines this is the key into `ipStock.memoryOptions`.
   // For 'slotip' lines this is just a label and is forced to 'Slot IP'.
+  memory: { type: String, default: '' },
   netbayGroupTag: { type: String, default: '' },
   os: {
     type: String,

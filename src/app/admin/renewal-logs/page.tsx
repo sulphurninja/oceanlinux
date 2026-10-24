@@ -330,12 +330,12 @@ export default function RenewalLogsPage() {
                                 className="w-full min-w-0 px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white focus:outline-none focus:border-blue-500"
                             >
                                 <option value="all">All</option>
-                                <option value="hostycare">Hostycare</option>
-                                <option value="smartvps">SmartVPS</option>
-                                <option value="advps">ADVPS</option>
-                                <option value="netbay">Netbay</option>
-                                <option value="reseller-api">Reseller API</option>
-                                <option value="oceanlinux">OceanLinux</option>
+                                <option value="advps">advps</option>
+                                <option value="smartvps">smartvps</option>
+                                <option value="netbay">netbay</option>
+                                <option value="trialvps">trial</option>
+                                <option value="slotip">slot</option>
+                                <option value="reseller-api">reseller-api</option>
                             </select>
                         </div>
                     </div>

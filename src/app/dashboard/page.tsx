@@ -431,8 +431,11 @@ export default function Dashboard() {
             STAT CARDS
         ════════════════════════════════════════════════════════════════ */}
         <div className={cn(
-          "grid gap-2.5 sm:gap-3",
-          stats?.resellerWallet ? "grid-cols-2 xl:grid-cols-5" : "grid-cols-2 xl:grid-cols-4"
+          "grid grid-cols-2 gap-2.5 sm:gap-3",
+          "[&>*:last-child:nth-child(odd)]:col-span-2 xl:[&>*:last-child:nth-child(odd)]:col-span-1",
+          ({ 3: "xl:grid-cols-3", 4: "xl:grid-cols-4", 5: "xl:grid-cols-5" } as Record<number, string>)[
+            3 + (stats?.resellerWallet ? 1 : 0) + ((stats?.pendingOrders || 0) > 0 ? 1 : 0)
+          ]
         )}>
           {stats?.resellerWallet && (
             <Card className={cn("relative overflow-hidden group", softCard)}>

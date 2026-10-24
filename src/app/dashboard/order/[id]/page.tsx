@@ -57,7 +57,7 @@ import { premiumBadge } from '@/lib/premium-badges';
 import { ADVPS_REBUILD_LIMIT, getAdvpsRebuildUsage } from '@/lib/advpsRebuildLimit';
 import { isWithinRenewalWindow, getDaysUntilExpiryIST, isExpiredServiceForCustomer } from '@/lib/expiryHelper';
 import { getOrderRenewalPrice, getOrderRenewalPriceNote, getCurrentListPriceFromStock } from '@/lib/orderRenewalPricing';
-import { getCustomerProviderDisplayName } from '@/lib/customerProviderDisplay';
+import { getProviderDisplayLabel } from '@/lib/customerProviderDisplay';
 import { customerServiceErrorMessage, customerProvisioningErrorMessage, customerSuccessMessage } from '@/lib/customerFacingErrors';
 import { contactCustomerSupport } from '@/lib/customerSupportContact';
 import { useSessionAlert } from '@/components/session-alert';
@@ -798,9 +798,8 @@ const OrderDetails = () => {
     return 'oceanlinux';
   };
 
-  // Get provider display name (customer-facing — Netbay-backed orders show as OceanLinux)
-  const getProviderDisplayName = (provider: string): string =>
-    getCustomerProviderDisplayName(provider);
+  const getProviderDisplayName = (_provider?: string): string =>
+    getProviderDisplayLabel(order) || '—';
 
   const OS_DIALOG_AUTO_CLOSE_MS = 600_000; // 10 minutes — cross-OS SmartVPS changes are slow
   const osAutoCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);

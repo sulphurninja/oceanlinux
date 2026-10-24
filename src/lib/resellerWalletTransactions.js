@@ -3,7 +3,7 @@ import Order from '@/models/orderModel';
 export const RESELLER_TXN_HISTORY_DAYS = 50;
 
 const ORDER_SELECT =
-    'productName memory price status ipAddress transactionId clientTxnId gatewayOrderId paymentMethod paymentDetails os username password provisioningStatus expiryDate createdAt provider apiMetadata';
+    'productName memory price status ipAddress transactionId clientTxnId gatewayOrderId paymentMethod paymentDetails os username password provisioningStatus expiryDate createdAt provider apiMetadata ipStockId slotIpPackageId trialVpsPackageId trialManageCompanyId advpsServiceId smartvpsServiceId netbayServiceId netbayProductKind hostycareServiceId resellerVmId resellerOrderId';
 
 export function paymentSourceLabel(txn, order) {
     if (order?.paymentMethod) {
@@ -40,6 +40,19 @@ export function mapOrderForTxnDetail(order) {
         expiryDate: order.expiryDate || null,
         createdAt: order.createdAt,
         provider: order.provider || '',
+        ipStockId: order.ipStockId || '',
+        slotIpPackageId: order.slotIpPackageId || '',
+        trialVpsPackageId: order.trialVpsPackageId || '',
+        trialManageCompanyId: order.trialManageCompanyId || '',
+        advpsServiceId: order.advpsServiceId || '',
+        smartvpsServiceId: order.smartvpsServiceId || '',
+        netbayServiceId: order.netbayServiceId || '',
+        netbayProductKind: order.netbayProductKind || '',
+        hostycareServiceId: order.hostycareServiceId || '',
+        resellerVmId: order.resellerVmId || '',
+        resellerOrderId: order.resellerOrderId || '',
+        providerCompanyName: order.providerCompanyName || '',
+        providerCompanyIsReseller: order.providerCompanyIsReseller === true,
         endUserEmail: order.apiMetadata?.endUserEmail || '',
     };
 }
@@ -82,7 +95,9 @@ export async function fetchEnrichedWalletTransactions(reseller, days = RESELLER_
     const linkedOrders = orderIds.length
         ? await Order.find({ _id: { $in: orderIds } }).select(ORDER_SELECT).lean()
         : [];
+    const { attachProviderCompanyNames } = require('@/lib/attachProviderCompanyName');
+    const namedOrders = await attachProviderCompanyNames(linkedOrders);
 
-    const orderById = new Map(linkedOrders.map((o) => [String(o._id), o]));
+    const orderById = new Map(namedOrders.map((o) => [String(o._id), o]));
     return serializeWalletTransactions(reseller, orderById, days);
 }

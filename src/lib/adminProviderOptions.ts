@@ -2,19 +2,29 @@
 
 export type AdminProviderOption = { value: string; label: string; group?: string };
 
+/** Shown in the manage-orders Provider filter. Company names are added separately. */
+export const ADMIN_PROVIDER_FILTER_CORE: AdminProviderOption[] = [
+  { value: 'advps', label: 'advps', group: 'Plans' },
+  { value: 'smartvps', label: 'smartvps', group: 'Plans' },
+  { value: 'netbay', label: 'netbay', group: 'Plans' },
+  { value: 'trialvps', label: 'trial', group: 'Plans' },
+  { value: 'slotip', label: 'slot', group: 'Plans' },
+];
+
+/** Stored provider keys for the edit dialog. Labels match the list, not a guessed vendor. */
 export const ADMIN_CORE_PROVIDER_OPTIONS: AdminProviderOption[] = [
-  { value: 'hostycare', label: 'Hostycare', group: 'Upstream' },
-  { value: 'smartvps', label: 'SmartVPS', group: 'Upstream' },
-  { value: 'advps', label: 'ADVPS', group: 'Upstream' },
-  { value: 'netbay', label: 'Netbay', group: 'Upstream' },
-  { value: 'reseller-api', label: 'Hostheaven (Reseller API)', group: 'Upstream' },
-  { value: 'kurohost', label: 'KuroHost', group: 'Upstream' },
-  { value: 'joy', label: 'Joy Services', group: 'Upstream' },
-  { value: 'hostdzire', label: 'HostDzire', group: 'Upstream' },
-  { value: 'virtualizor', label: 'Virtualizor', group: 'Upstream' },
-  { value: 'slotip', label: 'Slot IP', group: 'OceanLinux' },
-  { value: 'trialvps', label: 'Trial VPS', group: 'OceanLinux' },
-  { value: 'oceanlinux', label: 'OceanLinux (manual)', group: 'OceanLinux' },
+  { value: 'advps', label: 'advps', group: 'Plans' },
+  { value: 'smartvps', label: 'smartvps', group: 'Plans' },
+  { value: 'netbay', label: 'netbay', group: 'Plans' },
+  { value: 'trialvps', label: 'trial', group: 'Plans' },
+  { value: 'slotip', label: 'slot', group: 'Plans' },
+  { value: 'reseller-api', label: 'reseller-api', group: 'Plans' },
+  { value: 'hostycare', label: 'hostycare', group: 'Other' },
+  { value: 'kurohost', label: 'kurohost', group: 'Other' },
+  { value: 'joy', label: 'joy', group: 'Other' },
+  { value: 'hostdzire', label: 'hostdzire', group: 'Other' },
+  { value: 'virtualizor', label: 'virtualizor', group: 'Other' },
+  { value: 'oceanlinux', label: 'oceanlinux', group: 'Other' },
 ];
 
 export const ADMIN_PROVIDER_EDIT_OPTIONS: AdminProviderOption[] = ADMIN_CORE_PROVIDER_OPTIONS;
@@ -33,7 +43,7 @@ export function buildAdminProviderFilterOptions(
       group: 'Companies',
     }));
 
-  return [...ADMIN_CORE_PROVIDER_OPTIONS, ...companyOptions];
+  return [...ADMIN_PROVIDER_FILTER_CORE, ...companyOptions];
 }
 
 export function isCompanyProviderFilter(value: string) {

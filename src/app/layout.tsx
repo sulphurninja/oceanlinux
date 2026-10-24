@@ -5,6 +5,7 @@ import "./globals.css";
 import { Toaster } from "sonner";
 import { ThemeProvider } from "@/components/theme-provider";
 import OceanBirdFlyRoot from "@/components/landing/OceanBirdFlyRoot";
+import BlockInspect from "@/components/blockInspect";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -129,6 +130,7 @@ export default function RootLayout({
           }}
         />
         <OceanBirdFlyRoot />
+        <BlockInspect />
         {children}
         </ThemeProvider>
       </body>

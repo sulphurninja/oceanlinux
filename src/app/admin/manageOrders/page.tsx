@@ -2237,11 +2237,11 @@ const ManageOrders = () => {
                                     <div className="space-y-2">
                                         <Label>Provider *</Label>
                                         <Select
-                                            value={editingOrder.provider || 'hostycare'}
+                                            value={editingOrder.provider || undefined}
                                             onValueChange={(value) => setEditingOrder({ ...editingOrder, provider: value })}
                                         >
                                             <SelectTrigger>
-                                                <SelectValue />
+                                                <SelectValue placeholder="Provider" />
                                             </SelectTrigger>
                                             <SelectContent className="max-h-[min(420px,70vh)]">
                                                 {ADMIN_PROVIDER_EDIT_OPTIONS.map((opt) => (

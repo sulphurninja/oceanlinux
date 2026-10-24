@@ -155,7 +155,7 @@ export default function Footer() {
         <div className="container mx-auto container-padding">
           <div className="py-5 flex flex-col sm:flex-row justify-between items-center gap-4">
             <div className="text-sm text-white/70 text-center sm:text-left leading-relaxed">
-              <p>© 2024 OceanLinux. All rights reserved · Backtick Labs</p>
+              <p>© {new Date().getFullYear()} OceanLinux. All rights reserved · Backtick Labs</p>
             </div>
             <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2">
               {[
