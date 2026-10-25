@@ -495,7 +495,12 @@ export class VirtualizorAPI {
    */
   static extractVpsPowerCandidate(vm) {
     if (!vm || typeof vm !== 'object') return null;
-    for (const value of [vm.status, vm.state, vm.running, vm.power, vm.vps_status, vm.cached_status]) {
+    // listvs `status` is the account flag (1 = not suspended). On Proxmox the
+    // live power is `machine_status` (0 = off, 1 = on).
+    const fields = vm.machine_status !== undefined && vm.machine_status !== null && vm.machine_status !== ''
+      ? [vm.machine_status]
+      : [vm.vps_status, vm.power, vm.running, vm.state, vm.cached_status, vm.status];
+    for (const value of fields) {
       if (value !== undefined && value !== null && value !== '') return value;
     }
     return null;
