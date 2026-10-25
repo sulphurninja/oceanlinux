@@ -9,6 +9,7 @@ const {
   getAdvpsRebuildUsage,
   getAdvpsRebuildLimitMessage,
   consumeAdvpsRebuildCredit,
+  consumeAdvpsRebuildCreditForTask,
 } = require('@/lib/advpsRebuildLimit');
 const { syncAdvpsOrderCredentials, configureAdvpsServiceIp, commitAdvpsOrderSync } = require('@/lib/advpsOrderSync');
 import { internalKeyMatches } from '@/lib/internalApiKey';
@@ -174,7 +175,12 @@ export async function POST(request) {
         const rebuildRes = await api.rebuild(serviceId, os);
         const taskId = rebuildRes?.data?.taskId;
 
-        await Order.findByIdAndUpdate(orderId, { provisioningStatus: 'provisioning', lastAction: 'format', lastActionTime: new Date() });
+        await Order.findByIdAndUpdate(orderId, {
+          provisioningStatus: 'provisioning',
+          lastAction: 'format',
+          lastActionTime: new Date(),
+          ...(taskId ? { advpsRebuildTaskId: String(taskId) } : {}),
+        });
 
         if (taskId) {
           (async () => {
@@ -182,7 +188,7 @@ export async function POST(request) {
               await connectDB();
             } catch (_) { /* already connected */ }
 
-            const pollDelays = [10000, 15000, 20000, 30000, 60000, 60000];
+            const pollDelays = [10000, 15000, 20000, 30000, 60000, 60000, 60000, 60000];
             for (let i = 0; i < pollDelays.length; i++) {
               await new Promise(r => setTimeout(r, pollDelays[i]));
               try {
@@ -191,10 +197,10 @@ export async function POST(request) {
                 const taskStatus = (taskData.status || '').toUpperCase();
                 console.log(`[INTERNAL-ADVPS] Rebuild poll ${i + 1}: status=${taskStatus}`);
 
-                if (taskStatus === 'COMPLETED' || taskStatus === 'SUCCESS' || taskStatus === 'DONE') {
+                if (taskStatus === 'COMPLETED' || taskStatus === 'SUCCESS' || taskStatus === 'DONE' || taskStatus === 'COMPLETE' || taskStatus === 'FINISHED') {
                   console.log(`[INTERNAL-ADVPS] Rebuild completed for ${serviceId}; consuming rebuild credit`);
 
-                  await consumeAdvpsRebuildCredit(Order, orderId);
+                  await consumeAdvpsRebuildCreditForTask(Order, orderId, taskId);
 
                   await runAdvpsPostRebuildGeneratePasswordFlow({
                     api,
@@ -205,9 +211,12 @@ export async function POST(request) {
                   });
                   return;
                 }
-                if (taskStatus === 'FAILED' || taskStatus === 'ERROR') {
+                if (taskStatus === 'FAILED' || taskStatus === 'ERROR' || taskStatus === 'CANCELLED' || taskStatus === 'CANCELED') {
                   console.error(`[INTERNAL-ADVPS] Rebuild task FAILED for ${serviceId} — rebuild credit not consumed`);
-                  await Order.findByIdAndUpdate(orderId, { provisioningStatus: 'failed', provisioningError: 'Rebuild task failed' });
+                  await Order.updateOne(
+                    { _id: orderId, advpsRebuildTaskId: String(taskId) },
+                    { $unset: { advpsRebuildTaskId: 1 }, $set: { provisioningStatus: 'failed', provisioningError: 'Rebuild task failed' } }
+                  );
                   return;
                 }
               } catch (e) {

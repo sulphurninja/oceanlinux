@@ -43,6 +43,17 @@ type CompanyOption = {
     name: string;
     netbayApi?: { enabled?: boolean } | null;
     resellerApi?: { enabled?: boolean; useLiveStockApi?: boolean } | null;
+    rackatoApi?: { enabled?: boolean } | null;
+};
+
+type RackatoPlanRow = { productId: string; appId: string; diskSize: string };
+type RackatoCatalogProduct = {
+    id: string | number;
+    name: string;
+    price?: number | null;
+    diskSize?: number | null;
+    memory?: number | null;
+    apps?: { id: string | number; name: string }[];
 };
 
 type PanelZone = {
@@ -68,6 +79,11 @@ const IPStockFormWithParams = () => {
     );
     const [netbayDefaultOsLinux, setNetbayDefaultOsLinux] = useState('');
     const [netbayDefaultOsWindows, setNetbayDefaultOsWindows] = useState('');
+    const [rackatoPlans, setRackatoPlans] = useState<Record<string, RackatoPlanRow>>(() =>
+        Object.fromEntries(DEFAULT_MEMORY_SIZES.map((size) => [size, { productId: '', appId: '', diskSize: '' }]))
+    );
+    const [rackatoCatalog, setRackatoCatalog] = useState<RackatoCatalogProduct[]>([]);
+    const [rackatoCatalogLoading, setRackatoCatalogLoading] = useState(false);
     const [resellerZoneIds, setResellerZoneIds] = useState<number[]>([]);
     const [resellerCoupon4gb, setResellerCoupon4gb] = useState('');
     const [resellerCoupon8gb, setResellerCoupon8gb] = useState('');
@@ -165,6 +181,7 @@ const IPStockFormWithParams = () => {
         setPrices((prev) => ({ ...prev, [size]: '' }));
         setHostycareProductIds((prev) => ({ ...prev, [size]: '' }));
         setNetbayPlanIds((prev) => ({ ...prev, [size]: '' }));
+        setRackatoPlans((prev) => ({ ...prev, [size]: { productId: '', appId: '', diskSize: '' } }));
         setNewMemorySize('');
     };
 
@@ -185,6 +202,11 @@ const IPStockFormWithParams = () => {
             return next;
         });
         setNetbayPlanIds((prev) => {
+            const next = { ...prev };
+            delete next[size];
+            return next;
+        });
+        setRackatoPlans((prev) => {
             const next = { ...prev };
             delete next[size];
             return next;
@@ -245,6 +267,12 @@ const IPStockFormWithParams = () => {
         if (!companyId || companyId === 'none') return false;
         const c = companies.find((co) => co._id === companyId);
         return !!(c?.resellerApi?.enabled);
+    })();
+
+    const selectedCompanyHasRackato = (() => {
+        if (!companyId || companyId === 'none') return false;
+        const c = companies.find((co) => co._id === companyId);
+        return !!(c?.rackatoApi?.enabled);
     })();
 
     const selectedCompanyUsesResellerLiveStock = (() => {
@@ -313,6 +341,56 @@ const IPStockFormWithParams = () => {
         });
     };
 
+    const handleRackatoPlanChange = (size: string, field: keyof RackatoPlanRow, value: string) => {
+        setRackatoPlans((prev) => ({
+            ...prev,
+            [size]: {
+                productId: '',
+                appId: '',
+                diskSize: '',
+                ...(prev[size] || {}),
+                [field]: value,
+            },
+        }));
+    };
+
+    const selectRackatoCatalogProduct = (size: string, productId: string) => {
+        const product = rackatoCatalog.find((row) => String(row.id) === String(productId));
+        const firstApp = product?.apps?.[0];
+        setRackatoPlans((prev) => ({
+            ...prev,
+            [size]: {
+                productId,
+                appId: firstApp ? String(firstApp.id) : prev[size]?.appId || '',
+                diskSize: product?.diskSize != null ? String(product.diskSize) : prev[size]?.diskSize || '',
+            },
+        }));
+    };
+
+    useEffect(() => {
+        if (!selectedCompanyHasRackato || !companyId || companyId === 'none') {
+            setRackatoCatalog([]);
+            return;
+        }
+        let cancelled = false;
+        setRackatoCatalogLoading(true);
+        fetch(`/api/admin/companies/${companyId}/rackato-products`)
+            .then((r) => r.json())
+            .then((data) => {
+                if (cancelled) return;
+                setRackatoCatalog(Array.isArray(data.products) ? data.products : []);
+            })
+            .catch(() => {
+                if (!cancelled) setRackatoCatalog([]);
+            })
+            .finally(() => {
+                if (!cancelled) setRackatoCatalogLoading(false);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [companyId, selectedCompanyHasRackato]);
+
     const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
         event.preventDefault();
 
@@ -320,7 +398,7 @@ const IPStockFormWithParams = () => {
         const memoryOptions: Record<string, { price: number; hostycareProductId: string | null; hostycareProductName: string | null }> = {};
         for (const size of memorySizes) {
             const price = parseFloat(prices[size] || '0');
-            if (!price && !netbayPlanIds[size]?.trim()) continue;
+            if (!price && !netbayPlanIds[size]?.trim() && !rackatoPlans[size]?.productId?.trim()) continue;
             memoryOptions[size] = {
                 price: Number.isFinite(price) ? price : 0,
                 hostycareProductId: hostycareProductIds[size] || null,
@@ -329,8 +407,20 @@ const IPStockFormWithParams = () => {
         }
 
         if (Object.keys(memoryOptions).length === 0) {
-            toast.error('Add at least one RAM size with a price (or Netbay Plan ID)');
+            toast.error('Add at least one RAM size with a price (or a Rackato / Netbay plan)');
             return;
+        }
+
+        if (selectedCompanyHasRackato) {
+            const missing = memorySizes.filter((size) => {
+                if (!memoryOptions[size]) return false;
+                const row = rackatoPlans[size];
+                return !row?.productId?.trim() || !row?.appId?.trim();
+            });
+            if (missing.length) {
+                toast.error(`Rackato productId and appId required for ${missing.join(', ')}`);
+                return;
+            }
         }
 
         if (selectedCompanyHasResellerApi && resellerZoneIds.length === 0) {
@@ -384,6 +474,28 @@ const IPStockFormWithParams = () => {
         }
 
         const submitTags = [...tags];
+        if (selectedCompanyHasRackato) {
+            const byMemory: Record<string, { productId: string; appId: string; diskSize: number }> = {};
+            for (const size of Object.keys(memoryOptions)) {
+                const row = rackatoPlans[size];
+                if (!row?.productId?.trim() || !row?.appId?.trim()) continue;
+                byMemory[size] = {
+                    productId: row.productId.trim(),
+                    appId: row.appId.trim(),
+                    diskSize: Number(row.diskSize) || 50,
+                };
+            }
+            const first = byMemory[Object.keys(memoryOptions)[0]];
+            if (first) {
+                defaultConfigurations.rackato = {
+                    productId: first.productId,
+                    appId: first.appId,
+                    diskSize: first.diskSize,
+                    byMemory,
+                };
+                if (!submitTags.includes('rackato')) submitTags.push('rackato');
+            }
+        }
         if (selectedCompanyHasResellerApi) {
             defaultConfigurations.resellerApi = {
                 ...buildResellerZoneConfig(panelZones, resellerZoneIds),
@@ -444,6 +556,7 @@ const IPStockFormWithParams = () => {
             setNetbayPlanIds(memoryRecord(DEFAULT_MEMORY_SIZES));
             setNetbayDefaultOsLinux('');
             setNetbayDefaultOsWindows('');
+            setRackatoPlans(Object.fromEntries(DEFAULT_MEMORY_SIZES.map((size) => [size, { productId: '', appId: '', diskSize: '' }])));
             setResellerZoneIds([]);
             setResellerCoupon4gb('');
             setResellerCoupon8gb('');
@@ -519,7 +632,7 @@ const IPStockFormWithParams = () => {
                                 </Select>
                                 <p className="text-xs text-gray-500 mt-1">
                                     PrimeVPS: company select karo → regions sync → zone pick → price daalo → create.
-                                    Netbay: stock count + plan IDs neeche.
+                                    Netbay: stock count + plan IDs neeche. Rackato: company select karo, phir har RAM par productId aur appId daalo.
                                 </p>
                             </div>
 
@@ -543,6 +656,80 @@ const IPStockFormWithParams = () => {
                                     <p className="text-xs text-gray-500 mt-1">
                                         Manual mode — kitni baar sell kar sakte ho.
                                     </p>
+                                </div>
+                            )}
+
+                            {selectedCompanyHasRackato && (
+                                <div className="mb-6 border rounded-lg p-4 bg-cyan-50/40 dark:bg-cyan-950/10 border-cyan-200/60 dark:border-cyan-900/40 space-y-3">
+                                    <div className="flex items-center justify-between gap-3 flex-wrap">
+                                        <div>
+                                            <Label className="text-base font-semibold">Rackato plan</Label>
+                                            <p className="text-xs text-muted-foreground mt-0.5">
+                                                {rackatoCatalogLoading
+                                                    ? 'Saare Rackato products load ho rahe hain…'
+                                                    : rackatoCatalog.length
+                                                        ? `${rackatoCatalog.length} products loaded. Har RAM ke liye plan choose karo.`
+                                                        : 'Products nahi aaye. Companies → Rackato → Load products try karo.'}
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <div className="space-y-3">
+                                        {memorySizes.map((size) => {
+                                            const selected = rackatoCatalog.find((row) => String(row.id) === String(rackatoPlans[size]?.productId || ''));
+                                            const apps = selected?.apps || [];
+                                            return (
+                                                <div key={size} className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                                    <div className="sm:col-span-2">
+                                                        <Label className="text-xs">{size} Rackato plan</Label>
+                                                        <Select
+                                                            value={rackatoPlans[size]?.productId || ''}
+                                                            onValueChange={(value) => selectRackatoCatalogProduct(size, value)}
+                                                            disabled={rackatoCatalogLoading || rackatoCatalog.length === 0}
+                                                        >
+                                                            <SelectTrigger className="mt-1 h-9 text-xs">
+                                                                <SelectValue placeholder={rackatoCatalogLoading ? 'Loading…' : 'Select product'} />
+                                                            </SelectTrigger>
+                                                            <SelectContent>
+                                                                {rackatoCatalog.map((row) => (
+                                                                    <SelectItem key={String(row.id)} value={String(row.id)}>
+                                                                        {row.name || `Product ${row.id}`}{row.price != null ? ` · ₹${row.price}` : ''}
+                                                                    </SelectItem>
+                                                                ))}
+                                                            </SelectContent>
+                                                        </Select>
+                                                    </div>
+                                                    <div>
+                                                        <Label className="text-xs">{size} OS / app</Label>
+                                                        {apps.length ? (
+                                                            <Select
+                                                                value={rackatoPlans[size]?.appId || ''}
+                                                                onValueChange={(value) => handleRackatoPlanChange(size, 'appId', value)}
+                                                            >
+                                                                <SelectTrigger className="mt-1 h-9 text-xs">
+                                                                    <SelectValue placeholder="Select OS" />
+                                                                </SelectTrigger>
+                                                                <SelectContent>
+                                                                    {apps.map((app) => (
+                                                                        <SelectItem key={String(app.id)} value={String(app.id)}>
+                                                                            {app.name || `App ${app.id}`}
+                                                                        </SelectItem>
+                                                                    ))}
+                                                                </SelectContent>
+                                                            </Select>
+                                                        ) : (
+                                                            <Input
+                                                                type="text"
+                                                                className="mt-1 font-mono text-xs"
+                                                                placeholder="appId"
+                                                                value={rackatoPlans[size]?.appId || ''}
+                                                                onChange={(e) => handleRackatoPlanChange(size, 'appId', e.target.value)}
+                                                            />
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
                                 </div>
                             )}
 

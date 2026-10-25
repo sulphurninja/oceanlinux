@@ -1195,6 +1195,59 @@ export async function POST(request) {
       }
     }
 
+    // -------------------- Rackato branch --------------------
+    if (order.provider === 'rackato' || order.rackatoOrderId || order.rackatoNodeUid) {
+      const { resolveRackatoApiForOrder } = require('@/lib/companyRackatoApi');
+      const { parseRackatoOrder, parseRackatoNode, parseRackatoExpiry } = require('@/lib/rackatoOrder');
+      const RackatoApi = require('@/services/rackatoApi');
+      const { config: rackatoCfg } = await resolveRackatoApiForOrder(order, { Company, IPStock });
+      if (!rackatoCfg) {
+        return actionJson({ success: false, error: 'Rackato API is not configured for this server.' }, 400, action);
+      }
+      const supportedActions = new Set(['start', 'stop', 'restart', 'reboot', 'status', 'sync', 'reinstall']);
+      if (!supportedActions.has(action)) {
+        return actionJson({ success: false, error: `Action '${action}' is not available for this server.` }, 400, action);
+      }
+      const api = new RackatoApi(rackatoCfg);
+      let uid = String(order.rackatoNodeUid || '').trim();
+      if (!uid && order.rackatoOrderId) {
+        const parsed = parseRackatoOrder(await api.getOrder(order.rackatoOrderId));
+        uid = parsed.uid;
+        if (uid || parsed.ip) {
+          await Order.findByIdAndUpdate(orderId, {
+            rackatoNodeUid: uid || order.rackatoNodeUid,
+            ...(parsed.ip ? { ipAddress: parsed.ip, status: 'active', provisioningStatus: 'active', provisioningError: '' } : {}),
+          });
+        }
+      }
+      if (!uid && action !== 'status' && action !== 'sync') {
+        return actionJson({ success: false, error: 'This server is still being set up. Please try again shortly.' }, 409, action);
+      }
+      try {
+        if (action === 'status' || action === 'sync') {
+          const node = uid ? parseRackatoNode(await api.getNode(uid)) : parseRackatoOrder(await api.getOrder(order.rackatoOrderId));
+          const expiry = parseRackatoExpiry(node.expiresAt);
+          await Order.findByIdAndUpdate(orderId, {
+            ...(node.ip ? { ipAddress: node.ip } : {}),
+            ...(node.username ? { username: node.username } : {}),
+            ...(node.password ? { password: node.password } : {}),
+            ...(node.uid ? { rackatoNodeUid: node.uid } : {}),
+            ...(expiry ? { expiryDate: expiry } : {}),
+            lastSyncTime: new Date(),
+          });
+          return actionJson({ success: true, message: 'Server status updated', powerState: node.status || 'unknown' }, 200, action);
+        }
+        const rackatoAction = action === 'reboot' ? 'restart' : action;
+        await api.nodeAction(uid, rackatoAction);
+        return actionJson({ success: true, message: `${action} command sent` }, 200, action);
+      } catch (rackatoErr) {
+        return actionJson({
+          success: false,
+          error: rackatoErr.message || 'Rackato action failed',
+        }, typeof rackatoErr.status === 'number' ? rackatoErr.status : 500, action);
+      }
+    }
+
     // -------------------- HostDzire branch --------------------
     // POST https://hostdzire.com/api/vps/ — action + ip (start/stop/reboot/details/…)
     if (!isSmartVps && !isNetbay && !order.hostycareServiceId) {
@@ -1806,8 +1859,8 @@ export async function POST(request) {
             }
             case 'status':
             case 'sync': {
-              const { vpsid } = await findVps();
-              const { powerState, rawStatus, source } = await companyApi.resolveVpsPowerState(vpsid);
+              const found = await findVps();
+              const { powerState, rawStatus, source } = await companyApi.resolveVpsPowerState(found.vpsid, found.powerRaw);
               await Order.findByIdAndUpdate(orderId, { lastSyncTime: new Date() });
               return NextResponse.json({
                 success: true,
@@ -2882,7 +2935,8 @@ export async function GET(request) {
           }
 
           const vpsid = typeof found === 'object' ? found.vpsid : found;
-          const { powerState, rawStatus, source, vmRecord } = await companyApi.resolveVpsPowerState(vpsid);
+          const knownPower = typeof found === 'object' ? found.powerRaw : undefined;
+          const { powerState, rawStatus, source, vmRecord } = await companyApi.resolveVpsPowerState(vpsid, knownPower);
 
           await Order.findByIdAndUpdate(orderId, { lastSyncTime: new Date() });
 

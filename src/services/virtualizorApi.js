@@ -302,13 +302,33 @@ export class VirtualizorAPI {
       ...VirtualizorAPI._valToIps(vm?.ipv4),
     ].filter(Boolean);
 
-    return { vpsid, hostname, virt, ips: Array.from(new Set(ips)) };
+    const powerRaw = VirtualizorAPI.extractVpsPowerCandidate(vm);
+    return { vpsid, hostname, virt, ips: Array.from(new Set(ips)), powerRaw };
+  }
+
+  /**
+   * Ask the panel for one VPS when we already know the IP or id.
+   * A bare listvs returns every VM on the enduser login (100+ on reseller panels).
+   */
+  _listQuery(callOpts = {}) {
+    const parts = ['act=listvs', 'page=1'];
+    const vpsid = callOpts.vpsid ? String(callOpts.vpsid).trim() : '';
+    const vpsip = callOpts.vpsip ? String(callOpts.vpsip).trim() : '';
+    if (vpsid) {
+      parts.push('reslen=5', `vpsid=${encodeURIComponent(vpsid)}`);
+    } else if (vpsip) {
+      parts.push('reslen=5', `vpsip=${encodeURIComponent(vpsip)}`);
+    } else {
+      parts.push('reslen=1000');
+    }
+    return parts.join('&');
   }
 
   async _listMyVms(accountIndex, callOpts = {}) {
-    console.log(`[VirtualizorAPI][_listMyVms] Listing VMs for account ${accountIndex}`);
+    const filtered = !!(callOpts.vpsip || callOpts.vpsid);
+    console.log(`[VirtualizorAPI][_listMyVms] Listing VMs for account ${accountIndex}${filtered ? ' (filtered)' : ''}`);
     try {
-      const r = await this._call(accountIndex, `act=listvs&page=1&reslen=1000`, null, callOpts);
+      const r = await this._call(accountIndex, this._listQuery(callOpts), null, callOpts);
       const vsMap = r?.vps || r?.vs || (typeof r === "object" ? r : null);
 
       if (!vsMap || typeof vsMap !== "object") {
@@ -358,6 +378,7 @@ export class VirtualizorAPI {
    */
   async _scanPanelsForVps(indices, ipIn, hostIn, timeoutMs) {
     const listOpts = { timeoutMs, retries: 0 };
+    if (ipIn) listOpts.vpsip = ipIn;
     const timedOutIndices = [];
 
     const settled = await Promise.allSettled(
@@ -377,14 +398,21 @@ export class VirtualizorAPI {
         continue;
       }
 
-      const { i, acct, vms } = entry.value;
+      const { i, acct } = entry.value;
+      let { vms } = entry.value;
       console.log(`[VirtualizorAPI][findVpsId] Account ${i} (${acct.host}) returned ${vms.length} VMs`);
 
-      const matched = this._matchVpsInList(vms, ipIn, hostIn);
+      let matched = this._matchVpsInList(vms, ipIn, hostIn);
+      // Some panels ignore vpsip and still return the first page. Only then scan the full list.
+      if (!matched && ipIn && vms.length >= 5) {
+        console.log(`[VirtualizorAPI][findVpsId] IP filter ignored on account ${i}, scanning full list`);
+        vms = await this._listMyVms(i, { timeoutMs, retries: 0 });
+        matched = this._matchVpsInList(vms, ipIn, hostIn);
+      }
       if (matched?.vpsid) {
         console.log(`[VirtualizorAPI][findVpsId] Found VPS ${matched.vpsid} on account ${i}`);
         this._vpsAccountCache.set(matched.vpsid, i);
-        return { vpsid: matched.vpsid, virt: matched.virt || null };
+        return { vpsid: matched.vpsid, virt: matched.virt || null, powerRaw: matched.powerRaw ?? null };
       }
     }
 
@@ -495,7 +523,15 @@ export class VirtualizorAPI {
   /**
    * Resolve live VPS power from Virtualizor listvs — never uses ping.
    */
-  async resolveVpsPowerState(vpsid) {
+  async resolveVpsPowerState(vpsid, knownRaw = undefined) {
+    if (knownRaw !== undefined && knownRaw !== null && knownRaw !== '') {
+      return {
+        powerState: VirtualizorAPI.normalizeVpsPowerState(knownRaw),
+        rawStatus: knownRaw,
+        source: 'listvs',
+        vmRecord: null,
+      };
+    }
     const vmRecord = await this.getVpsRecord(vpsid);
     if (!vmRecord) {
       return { powerState: 'unknown', rawStatus: null, source: 'none', vmRecord: null };
@@ -516,7 +552,7 @@ export class VirtualizorAPI {
   async getVpsRecord(vpsid) {
     const idx = await this._resolveAccountIndexForVps(vpsid);
     try {
-      const r = await this._call(idx, `act=listvs&page=1&reslen=1000`);
+      const r = await this._call(idx, this._listQuery({ vpsid }));
       const vsMap = r?.vps || r?.vs || (typeof r === 'object' ? r : null);
       if (!vsMap || typeof vsMap !== 'object') return null;
       for (const [key, vm] of Object.entries(vsMap)) {
@@ -572,7 +608,7 @@ export class VirtualizorAPI {
 
     console.log(`[VirtualizorAPI][_resolveAccountIndexForVps] VPS ${vpsid} not in cache, searching accounts in parallel...`);
 
-    const listOpts = { timeoutMs: TIMEOUT_LIST_MS, retries: 0 };
+    const listOpts = { timeoutMs: TIMEOUT_LIST_MS, retries: 0, vpsid: String(vpsid) };
     const settled = await Promise.allSettled(
       this.accounts.map((_, i) =>
         this._listMyVms(i, listOpts).then(vms => ({ i, vms }))

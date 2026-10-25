@@ -73,6 +73,7 @@ interface CompanyOption {
     hostdzireApi?: { enabled?: boolean; useLiveStockApi?: boolean; apiKey?: string } | null;
     kurohostApi?: { enabled?: boolean; apiKey?: string } | null;
     resellerApi?: { enabled?: boolean; useLiveStockApi?: boolean } | null;
+    rackatoApi?: { enabled?: boolean } | null;
 }
 
 type HostdzireInventoryRow = {
@@ -294,6 +295,26 @@ function readHostdzireConfig(stock: IPStock | null): {
     };
 }
 
+function readRackatoConfig(stock: IPStock | null): {
+    productId: string;
+    appId: string;
+    diskSize: string;
+    byMemory: Record<string, { productId?: string; appId?: string; diskSize?: number }>;
+} {
+    const cfg: any = stock?.defaultConfigurations?.rackato || {};
+    const byMemory = (cfg?.byMemory && typeof cfg.byMemory === 'object')
+        ? { ...cfg.byMemory }
+        : (cfg?.productByMemory && typeof cfg.productByMemory === 'object')
+            ? { ...cfg.productByMemory }
+            : {};
+    return {
+        productId: String(cfg.productId || cfg.product_id || ''),
+        appId: String(cfg.appId || cfg.app_id || ''),
+        diskSize: cfg.diskSize != null || cfg.disk_size != null ? String(cfg.diskSize ?? cfg.disk_size) : '',
+        byMemory,
+    };
+}
+
 function readKurohostConfig(stock: IPStock | null): {
     cloudZoneId: string;
     zoneIds: string[];
@@ -333,6 +354,14 @@ const ManageIpStock = () => {
     const [panelZonesLoading, setPanelZonesLoading] = useState(false);
     const [kurohostZones, setKurohostZones] = useState<Array<{ id: string; name: string; code?: string }>>([]);
     const [kurohostZonesLoading, setKurohostZonesLoading] = useState(false);
+    const [rackatoCatalog, setRackatoCatalog] = useState<Array<{
+        id: string | number;
+        name: string;
+        price?: number | null;
+        diskSize?: number | null;
+        apps?: { id: string | number; name: string }[];
+    }>>([]);
+    const [rackatoCatalogLoading, setRackatoCatalogLoading] = useState(false);
     const [hostdzireInventory, setHostdzireInventory] = useState<HostdzireInventoryRow[]>([]);
     const [hostdzireInventoryLoading, setHostdzireInventoryLoading] = useState(false);
     const [refreshingLiveStock, setRefreshingLiveStock] = useState(false);
@@ -909,6 +938,50 @@ const ManageIpStock = () => {
         updateKurohostConfig({ flavorByMemory: next });
     };
 
+    const updateRackatoConfig = (patch: Partial<ReturnType<typeof readRackatoConfig>>) => {
+        if (!currentStock) return;
+        const merged = { ...readRackatoConfig(currentStock), ...patch };
+        const hasByMemory = Object.values(merged.byMemory || {}).some((row) => row?.productId && row?.appId);
+        const isEmpty = !merged.productId && !merged.appId && !hasByMemory;
+        const nextDefaults = { ...(currentStock.defaultConfigurations || {}) } as Record<string, any>;
+        if (isEmpty) {
+            delete nextDefaults.rackato;
+        } else {
+            nextDefaults.rackato = {
+                productId: merged.productId,
+                appId: merged.appId,
+                diskSize: Number(merged.diskSize) || 50,
+                byMemory: merged.byMemory,
+            };
+        }
+        const tags = currentStock.tags.includes('rackato')
+            ? currentStock.tags
+            : [...currentStock.tags, 'rackato'];
+        setCurrentStock({ ...currentStock, defaultConfigurations: nextDefaults, tags });
+    };
+
+    const handleRackatoPlanChange = (
+        size: string,
+        field: 'productId' | 'appId' | 'diskSize',
+        value: string
+    ) => {
+        const cfg = readRackatoConfig(currentStock);
+        const prev = cfg.byMemory[size] || {};
+        const nextRow = {
+            productId: field === 'productId' ? value.trim() : String(prev.productId || cfg.productId || ''),
+            appId: field === 'appId' ? value.trim() : String(prev.appId || cfg.appId || ''),
+            diskSize: field === 'diskSize' ? Number(value) || 0 : Number(prev.diskSize || cfg.diskSize || 50) || 50,
+        };
+        const nextByMemory = { ...cfg.byMemory, [size]: nextRow };
+        const firstFilled = Object.values(nextByMemory).find((row) => row.productId && row.appId);
+        updateRackatoConfig({
+            byMemory: nextByMemory,
+            productId: firstFilled?.productId || cfg.productId,
+            appId: firstFilled?.appId || cfg.appId,
+            diskSize: String(firstFilled?.diskSize || cfg.diskSize || ''),
+        });
+    };
+
     const handleKurohostOsTemplateChange = (size: string, value: string) => {
         const cfg = readKurohostConfig(currentStock);
         const next = { ...cfg.osTemplateByMemory };
@@ -1041,6 +1114,36 @@ const ManageIpStock = () => {
         const c = companies.find((co) => co._id === currentStock.company);
         return !!(c?.kurohostApi?.enabled);
     })();
+
+    const selectedCompanyHasRackato = (() => {
+        if (!currentStock?.company) return false;
+        const c = companies.find((co) => co._id === currentStock.company);
+        return !!(c?.rackatoApi?.enabled);
+    })();
+
+    useEffect(() => {
+        if (!selectedCompanyHasRackato || !currentStock?.company) {
+            setRackatoCatalog([]);
+            return;
+        }
+        let cancelled = false;
+        setRackatoCatalogLoading(true);
+        fetch(`/api/admin/companies/${currentStock.company}/rackato-products`)
+            .then((r) => r.json())
+            .then((data) => {
+                if (cancelled) return;
+                setRackatoCatalog(Array.isArray(data.products) ? data.products : []);
+            })
+            .catch(() => {
+                if (!cancelled) setRackatoCatalog([]);
+            })
+            .finally(() => {
+                if (!cancelled) setRackatoCatalogLoading(false);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [selectedCompanyHasRackato, currentStock?.company]);
 
     useEffect(() => {
         if (selectedCompanyHasHostdzire && currentStock?.company) {
@@ -1869,6 +1972,97 @@ const ManageIpStock = () => {
                                             <strong>Name</strong> or <strong>OS ID</strong> — purchase sends the name; ID is resolved from catalog.
                                             <code> Windows Server 2022</code> when blank.
                                         </p>
+                                    </div>
+                                )}
+
+                                {selectedCompanyHasRackato && (
+                                    <div className="mb-6 border rounded-lg p-4 bg-cyan-50/40 dark:bg-cyan-950/10 border-cyan-200/60 dark:border-cyan-900/40 space-y-3">
+                                        <div className="flex items-center justify-between gap-3 flex-wrap">
+                                            <div>
+                                                <Label className="text-base font-semibold">Rackato plan</Label>
+                                                <p className="text-xs text-muted-foreground mt-0.5">
+                                                    {rackatoCatalogLoading
+                                                        ? 'Saare Rackato products load ho rahe hain…'
+                                                        : rackatoCatalog.length
+                                                            ? `${rackatoCatalog.length} products loaded. Har RAM ke liye plan choose karo.`
+                                                            : 'Products nahi aaye.'}
+                                                </p>
+                                            </div>
+                                        </div>
+                                        {Object.keys(currentStock.memoryOptions).length === 0 ? (
+                                            <p className="text-xs text-muted-foreground">Pehle upar RAM option add karo.</p>
+                                        ) : (
+                                            <div className="space-y-3">
+                                                {Object.keys(currentStock.memoryOptions).map((size) => {
+                                                    const row = readRackatoConfig(currentStock).byMemory[size] || {};
+                                                    const fallback = readRackatoConfig(currentStock);
+                                                    const productId = String(row.productId || fallback.productId || '');
+                                                    const appId = String(row.appId || fallback.appId || '');
+                                                    const selected = rackatoCatalog.find((item) => String(item.id) === productId);
+                                                    const apps = selected?.apps || [];
+                                                    return (
+                                                        <div key={size} className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                                            <div>
+                                                                <Label className="text-xs">{size} Rackato plan</Label>
+                                                                <Select
+                                                                    value={productId}
+                                                                    onValueChange={(value) => {
+                                                                        const product = rackatoCatalog.find((item) => String(item.id) === value);
+                                                                        handleRackatoPlanChange(size, 'productId', value);
+                                                                        if (product?.diskSize != null) {
+                                                                            handleRackatoPlanChange(size, 'diskSize', String(product.diskSize));
+                                                                        }
+                                                                        if (product?.apps?.[0]?.id != null) {
+                                                                            handleRackatoPlanChange(size, 'appId', String(product.apps[0].id));
+                                                                        }
+                                                                    }}
+                                                                    disabled={rackatoCatalogLoading || rackatoCatalog.length === 0}
+                                                                >
+                                                                    <SelectTrigger className="mt-1 h-9 text-xs">
+                                                                        <SelectValue placeholder={rackatoCatalogLoading ? 'Loading…' : 'Select product'} />
+                                                                    </SelectTrigger>
+                                                                    <SelectContent>
+                                                                        {rackatoCatalog.map((item) => (
+                                                                            <SelectItem key={String(item.id)} value={String(item.id)}>
+                                                                                {item.name || `Product ${item.id}`}{item.price != null ? ` · ₹${item.price}` : ''}
+                                                                            </SelectItem>
+                                                                        ))}
+                                                                    </SelectContent>
+                                                                </Select>
+                                                            </div>
+                                                            <div>
+                                                                <Label className="text-xs">{size} OS / app</Label>
+                                                                {apps.length ? (
+                                                                    <Select
+                                                                        value={appId}
+                                                                        onValueChange={(value) => handleRackatoPlanChange(size, 'appId', value)}
+                                                                    >
+                                                                        <SelectTrigger className="mt-1 h-9 text-xs">
+                                                                            <SelectValue placeholder="Select OS" />
+                                                                        </SelectTrigger>
+                                                                        <SelectContent>
+                                                                            {apps.map((app) => (
+                                                                                <SelectItem key={String(app.id)} value={String(app.id)}>
+                                                                                    {app.name || `App ${app.id}`}
+                                                                                </SelectItem>
+                                                                            ))}
+                                                                        </SelectContent>
+                                                                    </Select>
+                                                                ) : (
+                                                                    <Input
+                                                                        type="text"
+                                                                        className="mt-1 font-mono text-xs"
+                                                                        placeholder="appId"
+                                                                        value={appId}
+                                                                        onChange={(e) => handleRackatoPlanChange(size, 'appId', e.target.value)}
+                                                                    />
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        )}
                                     </div>
                                 )}
 

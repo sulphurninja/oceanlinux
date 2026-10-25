@@ -40,6 +40,8 @@ const {
   getAdvpsRebuildUsage,
   getAdvpsRebuildLimitMessage,
   consumeAdvpsRebuildCredit,
+  consumeAdvpsRebuildCreditForTask,
+  settlePendingAdvpsRebuild,
 } = require('@/lib/advpsRebuildLimit');
 const {
   syncAdvpsOrderCredentials,
@@ -389,6 +391,7 @@ async function runAdvps(order, orderId, action, osType) {
     }
     case 'status': {
       const statusRes = await api.status(serviceId);
+      await settlePendingAdvpsRebuild(api, Order, order);
       const d = unwrapAdvpsEnvelope(statusRes) || {};
       const powerState = normalizeAdvpsPowerState(d);
       const sync = await syncAdvpsOrderCredentials(api, order, { statusPayload: statusRes, Order });
@@ -406,6 +409,7 @@ async function runAdvps(order, orderId, action, osType) {
     }
     case 'sync': {
       const statusRes = await api.status(serviceId);
+      await settlePendingAdvpsRebuild(api, Order, order);
       const sync = await syncAdvpsOrderCredentials(api, order, { statusPayload: statusRes, Order, tryGeneratePasswordFallback: true });
       await commitAdvpsOrderSync(order, sync);
       return { success: true, message: sync.credentialsUpdated ? `Synced — ${sync.changes.join(', ')}` : 'Status synced', data: { credentialsUpdated: sync.credentialsUpdated } };
@@ -420,24 +424,32 @@ async function runAdvps(order, orderId, action, osType) {
       }
       const rebuildRes = await api.rebuild(serviceId, os);
       const taskId = rebuildRes?.data?.taskId;
-      await Order.findByIdAndUpdate(orderId, { provisioningStatus: 'provisioning', lastAction: 'reinstall', lastActionTime: new Date() });
+      await Order.findByIdAndUpdate(orderId, {
+        provisioningStatus: 'provisioning',
+        lastAction: 'reinstall',
+        lastActionTime: new Date(),
+        ...(taskId ? { advpsRebuildTaskId: String(taskId) } : {}),
+      });
       if (taskId) {
         const rebuildOrderId = orderId;
         const rebuildServiceId = serviceId;
         (async () => {
-          const pollDelays = [10000, 15000, 20000, 30000, 60000, 60000];
+          const pollDelays = [10000, 15000, 20000, 30000, 60000, 60000, 60000, 60000];
           for (const delay of pollDelays) {
             await new Promise((r) => setTimeout(r, delay));
             try {
               const taskRes = await api.taskStatus(taskId);
               const taskStatus = String((taskRes?.data || taskRes)?.status || '').toUpperCase();
-              if (['COMPLETED', 'SUCCESS', 'DONE'].includes(taskStatus)) {
-                await consumeAdvpsRebuildCredit(Order, rebuildOrderId);
+              if (['COMPLETED', 'SUCCESS', 'DONE', 'COMPLETE', 'FINISHED'].includes(taskStatus)) {
+                await consumeAdvpsRebuildCreditForTask(Order, rebuildOrderId, taskId);
                 await runAdvpsPostRebuildGeneratePasswordFlow({ api, Order, rebuildOrderId, rebuildServiceId, logPrefix: '[RESELLER-MANAGE]' });
                 return;
               }
-              if (['FAILED', 'ERROR'].includes(taskStatus)) {
-                await Order.findByIdAndUpdate(rebuildOrderId, { provisioningStatus: 'failed', provisioningError: 'Rebuild failed' });
+              if (['FAILED', 'ERROR', 'CANCELLED', 'CANCELED'].includes(taskStatus)) {
+                await Order.updateOne(
+                  { _id: rebuildOrderId, advpsRebuildTaskId: String(taskId) },
+                  { $unset: { advpsRebuildTaskId: 1 }, $set: { provisioningStatus: 'failed', provisioningError: 'Rebuild failed' } }
+                );
                 return;
               }
             } catch (_) { /* poll */ }
@@ -1008,13 +1020,13 @@ async function runVirtualizor(order, orderId, action, osType, ipStock) {
     }
     case 'status':
     case 'sync': {
-      const { vpsid } = await findVirtualizorVps(api, order);
-      const { powerState, rawStatus, source } = await api.resolveVpsPowerState(vpsid);
+      const found = await findVirtualizorVps(api, order);
+      const { powerState, rawStatus, source } = await api.resolveVpsPowerState(found.vpsid, found.powerRaw);
       await Order.findByIdAndUpdate(orderId, { lastSyncTime: new Date() });
       return {
         success: true,
         message: 'Status retrieved',
-        data: { powerState, rawStatus, source, vpsId: vpsid },
+        data: { powerState, rawStatus, source, vpsId: found.vpsid },
       };
     }
     case 'reinstall': {

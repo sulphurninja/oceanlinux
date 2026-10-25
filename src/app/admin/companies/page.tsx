@@ -97,6 +97,16 @@ interface CompanyJoyApi {
   apiKey: string;
 }
 
+interface CompanyRackatoApi {
+  enabled: boolean;
+  label: string;
+  baseUrl: string;
+  keyId: string;
+  keySecret: string;
+  mode: 'sandbox' | 'production';
+  discountPercent?: number;
+}
+
 interface CompanyHostdzireApi {
   enabled: boolean;
   label: string;
@@ -122,6 +132,7 @@ interface Company {
   kurohostApi?: Partial<CompanyKurohostApi> | null;
   joyApi?: Partial<CompanyJoyApi> | null;
   hostdzireApi?: Partial<CompanyHostdzireApi> | null;
+  rackatoApi?: Partial<CompanyRackatoApi> | null;
 }
 
 const NEW_VIRT_ENTRY = (): CompanyVirtualizor => ({
@@ -160,6 +171,16 @@ const RESELLER_API_DIALOG_DEFAULTS: CompanyResellerApi = {
   couponCode: 'OCEAN199',
   couponByMemory: { '4GB': 'OCEAN199', '8GB': 'OCEAN199' },
 };
+
+const EMPTY_RACKATO_API = (): CompanyRackatoApi => ({
+  enabled: true,
+  label: 'Rackato',
+  baseUrl: 'https://www.rackato.com',
+  keyId: '',
+  keySecret: '',
+  mode: 'sandbox',
+  discountPercent: 40,
+});
 
 const EMPTY_NETBAY_API = (): CompanyNetbayApi => ({
   enabled: false,
@@ -346,6 +367,14 @@ export default function CompaniesPage() {
   const [hostdzireTesting, setHostdzireTesting] = useState(false);
   const [hostdzireTestResult, setHostdzireTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [showHostdzireKey, setShowHostdzireKey] = useState(false);
+
+  const [rackatoCompany, setRackatoCompany] = useState<Company | null>(null);
+  const [rackatoForm, setRackatoForm] = useState<CompanyRackatoApi>(EMPTY_RACKATO_API());
+  const [rackatoSaving, setRackatoSaving] = useState(false);
+  const [rackatoTesting, setRackatoTesting] = useState(false);
+  const [rackatoTestResult, setRackatoTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [showRackatoSecret, setShowRackatoSecret] = useState(false);
+  const [rackatoProducts, setRackatoProducts] = useState<string>('');
 
   const [stocksCompany, setStocksCompany] = useState<Company | null>(null);
   const [companyStocks, setCompanyStocks] = useState<CompanyStock[]>([]);
@@ -1191,6 +1220,106 @@ export default function CompaniesPage() {
     }
   };
 
+  const openRackatoDialog = (c: Company) => {
+    const r = c.rackatoApi || null;
+    setRackatoForm({
+      enabled: r?.enabled !== false,
+      label: r?.label || 'Rackato',
+      baseUrl: r?.baseUrl || 'https://www.rackato.com',
+      keyId: r?.keyId || '',
+      keySecret: '',
+      mode: r?.mode === 'production' ? 'production' : 'sandbox',
+      discountPercent: r?.discountPercent ?? 40,
+    });
+    setRackatoTestResult(null);
+    setRackatoProducts('');
+    setShowRackatoSecret(false);
+    setRackatoCompany(c);
+  };
+
+  const closeRackatoDialog = () => {
+    if (rackatoSaving || rackatoTesting) return;
+    setRackatoCompany(null);
+  };
+
+  const handleTestRackatoApi = async () => {
+    if (!rackatoCompany) return;
+    setRackatoTesting(true);
+    setRackatoTestResult(null);
+    try {
+      const res = await fetch(`/api/admin/companies/${rackatoCompany._id}/test-rackato-api`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rackatoApi: rackatoForm }),
+      });
+      const data = await res.json();
+      setRackatoTestResult({
+        success: !!(res.ok && data.success),
+        message: data.message || data.error || 'Connection failed',
+      });
+    } catch (err: any) {
+      setRackatoTestResult({ success: false, message: err?.message || 'Request failed' });
+    } finally {
+      setRackatoTesting(false);
+    }
+  };
+
+  const handleLoadRackatoProducts = async () => {
+    if (!rackatoCompany) return;
+    setRackatoTesting(true);
+    try {
+      const res = await fetch(`/api/admin/companies/${rackatoCompany._id}/rackato-products`);
+      const data = await res.json();
+      if (!res.ok) {
+        setRackatoTestResult({ success: false, message: data.error || 'Could not load products' });
+        return;
+      }
+      const lines = (data.products || []).map((p: any) => {
+        const apps = (p.apps || [])
+          .map((app: any) => `${app.name || 'OS'} = appId ${app.id}`)
+          .join(', ');
+        const price = p.price != null ? `₹${p.price}` : '';
+        return `productId ${p.id} ${p.name || ''} ${price}${apps ? ` | ${apps}` : ''}`;
+      });
+      setRackatoProducts(
+        `${data.count ?? (data.products || []).length} products\n${lines.join('\n') || 'No products returned'}`
+      );
+    } catch (err: any) {
+      setRackatoTestResult({ success: false, message: err?.message || 'Could not load products' });
+    } finally {
+      setRackatoTesting(false);
+    }
+  };
+
+  const handleSaveRackatoApi = async () => {
+    if (!rackatoCompany) return;
+    if (rackatoForm.enabled && !rackatoForm.keyId.trim() && !rackatoCompany.rackatoApi?.keyId) {
+      toast.error('Key id is required');
+      return;
+    }
+    setRackatoSaving(true);
+    try {
+      const res = await fetch(`/api/admin/companies/${rackatoCompany._id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rackatoApi: rackatoForm }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        const saved = data as Company;
+        setCompanies((prev) => prev.map((c) => (String(c._id) === String(saved._id) ? saved : c)));
+        openRackatoDialog(saved);
+        toast.success('Rackato config saved');
+      } else {
+        toast.error(data.error || 'Failed to save');
+      }
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to save');
+    } finally {
+      setRackatoSaving(false);
+    }
+  };
+
   const openHostdzireDialog = (c: Company) => {
     const r = c.hostdzireApi || null;
     setHostdzireForm({
@@ -1590,6 +1719,10 @@ export default function CompaniesPage() {
                       <Button variant="ghost" size="sm" className="h-8 gap-1.5" onClick={() => openJoyDialog(c)}>
                         <Sparkles className="h-3.5 w-3.5" />
                         Joy
+                      </Button>
+                      <Button variant="ghost" size="sm" className="h-8 gap-1.5" onClick={() => openRackatoDialog(c)}>
+                        <Cloud className="h-3.5 w-3.5" />
+                        Rackato
                       </Button>
                       <Button variant="ghost" size="sm" className="h-8 gap-1.5" onClick={() => openHostdzireDialog(c)}>
                         <Building2 className="h-3.5 w-3.5" />
@@ -2920,6 +3053,84 @@ export default function CompaniesPage() {
             </Button>
             <Button onClick={handleSaveJoyApi} disabled={joySaving}>
               {joySaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!rackatoCompany} onOpenChange={(open) => !open && closeRackatoDialog()}>
+        <DialogContent className="max-w-xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Cloud className="h-5 w-5" />
+              Rackato reseller API
+            </DialogTitle>
+          </DialogHeader>
+          {rackatoCompany && (
+            <div className="space-y-4">
+              <div className="rounded-md border p-3 text-sm">
+                <p className="font-medium">{rackatoCompany.name}</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Partner discount on Rackato is 40%. Sandbox does not debit their wallet.
+                  Production needs this server IP on the Rackato whitelist.
+                  On each IP stock set <code>defaultConfigurations.rackato</code> with <code>productId</code> and <code>appId</code>.
+                </p>
+              </div>
+              <div className="flex items-center justify-between rounded-md border p-2.5">
+                <p className="text-sm font-medium">Enabled</p>
+                <Switch checked={rackatoForm.enabled} onCheckedChange={(c) => setRackatoForm((prev) => ({ ...prev, enabled: c }))} />
+              </div>
+              <div>
+                <Label className="text-xs">Mode</Label>
+                <select
+                  className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm"
+                  value={rackatoForm.mode}
+                  onChange={(e) => setRackatoForm((prev) => ({ ...prev, mode: e.target.value === 'production' ? 'production' : 'sandbox' }))}
+                >
+                  <option value="sandbox">Sandbox</option>
+                  <option value="production">Production</option>
+                </select>
+              </div>
+              <div>
+                <Label className="text-xs">Base URL</Label>
+                <Input className="mt-1" value={rackatoForm.baseUrl} onChange={(e) => setRackatoForm((prev) => ({ ...prev, baseUrl: e.target.value }))} />
+              </div>
+              <div>
+                <Label className="text-xs">Key id</Label>
+                <Input className="mt-1 font-mono text-xs" value={rackatoForm.keyId} onChange={(e) => setRackatoForm((prev) => ({ ...prev, keyId: e.target.value }))} placeholder="rk_test_..." />
+              </div>
+              <div>
+                <Label className="text-xs">Key secret</Label>
+                <div className="relative mt-1">
+                  <Input
+                    type={showRackatoSecret ? 'text' : 'password'}
+                    className="font-mono text-xs"
+                    value={rackatoForm.keySecret}
+                    placeholder={rackatoCompany.rackatoApi?.keySecret ? 'Saved — leave blank to keep' : 'secret_...'}
+                    onChange={(e) => setRackatoForm((prev) => ({ ...prev, keySecret: e.target.value }))}
+                  />
+                  <button type="button" className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground" onClick={() => setShowRackatoSecret((s) => !s)}>
+                    {showRackatoSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+              {rackatoTestResult && (
+                <p className={`text-xs ${rackatoTestResult.success ? 'text-emerald-600' : 'text-red-600'}`}>{rackatoTestResult.message}</p>
+              )}
+              {rackatoProducts && (
+                <pre className="max-h-40 overflow-auto rounded-md border p-2 text-[11px] whitespace-pre-wrap">{rackatoProducts}</pre>
+              )}
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" variant="outline" size="sm" onClick={handleTestRackatoApi} disabled={rackatoTesting || rackatoSaving}>Test wallet</Button>
+                <Button type="button" variant="outline" size="sm" onClick={handleLoadRackatoProducts} disabled={rackatoTesting || rackatoSaving}>Load products</Button>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="ghost" onClick={closeRackatoDialog} disabled={rackatoSaving}>Cancel</Button>
+            <Button onClick={handleSaveRackatoApi} disabled={rackatoSaving}>
+              {rackatoSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
               Save
             </Button>
           </DialogFooter>

@@ -71,6 +71,7 @@ const orderSchema = new mongoose.Schema({
             'reseller-api',
             'joy',
             'hostdzire',
+            'rackato',
             'virtualizor',
             'oceanlinux',
         ],
@@ -93,6 +94,8 @@ const orderSchema = new mongoose.Schema({
     // ADVPS rebuild/format rate-limiting (max 15 per billing period; resets on renewal + calendar month)
     advpsRebuildCount: { type: Number, default: 0 },
     advpsRebuildCountMonth: { type: String, default: '' }, // "YYYY-MM" of the current window
+    /** Set while an ADVPS rebuild task is in flight. Cleared when that task completes or fails. */
+    advpsRebuildTaskId: { type: String, default: '' },
 
     // Netbay integration fields (https://api.netbayhosts.in)
     netbayServiceId: { type: String }, // returned by POST /services/purchase
@@ -108,6 +111,12 @@ const orderSchema = new mongoose.Schema({
     // HostDzire WHMCS VPS API (https://hostdzire.com/api/vps/)
     hostdzireOrderId: { type: String },
     hostdzireInventoryKey: { type: String },
+
+    // Rackato reseller API (https://www.rackato.com/api/v1/reseller)
+    rackatoOrderId: { type: String },
+    rackatoNodeUid: { type: String },
+    rackatoProductId: { type: String },
+    rackatoAppId: { type: String },
 
     // KuroHost Cloud Platform (https://kurohost.com/cloud/docs)
     kurohostInstanceId: { type: String },
@@ -241,8 +250,13 @@ orderSchema.index({ kurohostInstanceId: 1 });
 orderSchema.index({ lastSyncTime: -1 });
 orderSchema.index({ expiryDate: 1 });
 orderSchema.index({ provider: 1 });
+orderSchema.index({ rackatoOrderId: 1 });
 orderSchema.index({ 'pendingRenewal.renewalTxnId': 1 }); // For webhook lookup
 orderSchema.index({ 'renewalPayments.renewalTxnId': 1 }); // For idempotency check
 orderSchema.index({ panelUsername: 1 });
+
+if (mongoose.models.Order && !mongoose.models.Order.schema.paths.rackatoOrderId) {
+  delete mongoose.models.Order;
+}
 
 export default mongoose.models.Order || mongoose.model('Order', orderSchema);

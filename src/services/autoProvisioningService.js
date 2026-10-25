@@ -26,6 +26,10 @@ const {
 const HostdzireApi = require('./hostdzireApi');
 const { fetchHostdzireExpiry } = require('@/lib/hostdzireRenewal');
 const { getCompanyHostdzireApiConfig } = require('@/lib/companyHostdzireApi');
+const RackatoApi = require('./rackatoApi');
+const { getCompanyRackatoApiConfig } = require('@/lib/companyRackatoApi');
+const { resolveRackatoPlan } = require('@/lib/rackatoStockConfig');
+const { parseRackatoOrder, parseRackatoExpiry } = require('@/lib/rackatoOrder');
 const {
   readHostdzireStockConfig,
   resolveHostdzirePlaceOrderOs,
@@ -153,6 +157,24 @@ class AutoProvisioningService {
     });
 
     return isHostdzire;
+  }
+
+  async isRackatoStock(ipStock, order) {
+    const tags = Array.isArray(ipStock?.tags) ? ipStock.tags : [];
+    const provider = String(ipStock?.provider || '').toLowerCase();
+    const hasConfig = !!(ipStock?.defaultConfigurations?.rackato ||
+      ipStock?.defaultConfigurations?.get?.('rackato'));
+    const tagged = tags.some((t) => String(t).toLowerCase() === 'rackato');
+    const byProvider = provider === 'rackato';
+    const byOrder = !!order?.rackatoOrderId || order?.provider === 'rackato';
+    let byCompany = false;
+    if (!hasConfig && !tagged && !byProvider && !byOrder && ipStock?.company) {
+      const company = await Company.findById(ipStock.company).select('rackatoApi').lean();
+      byCompany = company?.rackatoApi?.enabled === true;
+    }
+    const isRackato = hasConfig || tagged || byProvider || byOrder || byCompany;
+    L.kv('Rackato detection', { hasConfig, tagged, byProvider, byOrder, byCompany, result: isRackato });
+    return isRackato;
   }
 
   async resolveKurohostConfigForStock(ipStock) {
@@ -1239,9 +1261,10 @@ class AutoProvisioningService {
       const netbay = !advps && this.isNetbayStock(ipStock, order);
       const hostdzire = !advps && !netbay && this.isHostdzireStock(ipStock, order);
       const kurohost = !advps && !netbay && !hostdzire && this.isKurohostStock(ipStock, order);
-      const resellerPanel = !advps && !netbay && !hostdzire && !kurohost && isResellerApiStock(ipStock, order);
-      const smartVps = !advps && !netbay && !hostdzire && !kurohost && !resellerPanel && this.isSmartVpsStock(ipStock, order);
-      const providerName = advps ? 'ADVPS' : netbay ? 'Netbay' : hostdzire ? 'HostDzire' : kurohost ? 'KuroHost' : resellerPanel ? 'ResellerPanel' : smartVps ? 'SmartVPS' : 'Hostycare';
+      const rackato = !advps && !netbay && !hostdzire && !kurohost && await this.isRackatoStock(ipStock, order);
+      const resellerPanel = !advps && !netbay && !hostdzire && !kurohost && !rackato && isResellerApiStock(ipStock, order);
+      const smartVps = !advps && !netbay && !hostdzire && !kurohost && !rackato && !resellerPanel && this.isSmartVpsStock(ipStock, order);
+      const providerName = advps ? 'ADVPS' : netbay ? 'Netbay' : hostdzire ? 'HostDzire' : kurohost ? 'KuroHost' : rackato ? 'Rackato' : resellerPanel ? 'ResellerPanel' : smartVps ? 'SmartVPS' : 'Hostycare';
       L.line(`➡ Provider route selected: ${providerName}`);
 
       // Branch
@@ -1253,6 +1276,8 @@ class AutoProvisioningService {
         return await this.provisionViaHostdzire(order, ipStock, startTime);
       } else if (kurohost) {
         return await this.provisionViaKurohost(order, ipStock, startTime);
+      } else if (rackato) {
+        return await this.provisionViaRackato(order, ipStock, startTime);
       } else if (resellerPanel) {
         return await this.provisionViaResellerApi(order, ipStock, startTime);
       } else if (smartVps) {
@@ -2209,6 +2234,110 @@ class AutoProvisioningService {
       productId: planId || null,
       totalTime,
       ...(fullyProvisioned ? {} : { error: `Netbay service ${netbayServiceId} pending IP/credentials` }),
+    };
+  }
+
+  // --- RACKATO PATH ----------------------------------------------------------
+  async provisionViaRackato(order, ipStock, startTime) {
+    L.head(`RACKATO PATH — order ${order._id}`);
+    const isWindows = this.isWindowsOrder(order, ipStock);
+    const orderOs = isWindows ? 'Windows 2022' : 'Ubuntu 22';
+    await Order.findByIdAndUpdate(order._id, {
+      provisioningStatus: 'provisioning',
+      provisioningError: '',
+      autoProvisioned: true,
+      lastProvisionAttempt: new Date(),
+      provider: 'rackato',
+      os: order.os || orderOs,
+    });
+
+    const company = await Company.findById(ipStock.company).select('rackatoApi name').lean();
+    const cfg = getCompanyRackatoApiConfig(company);
+    if (!cfg) {
+      throw new Error('Rackato API keys are missing. Open /admin/companies → Rackato and save the key id and secret.');
+    }
+
+    const plan = resolveRackatoPlan(ipStock, order.memory || order.ram || '');
+    if (!plan.productId || !plan.appId) {
+      throw new Error(
+        `Rackato product_id and app_id are missing for "${ipStock.name}" (${order.memory || 'no RAM'}). ` +
+        'Set defaultConfigurations.rackato on this IP stock.'
+      );
+    }
+
+    const api = new RackatoApi(cfg);
+    let rackatoOrderId = String(order.rackatoOrderId || '').trim();
+    const password = order.password || generateSecurePassword(12);
+    if (!rackatoOrderId) {
+      const reference = order.clientTxnId || String(order._id);
+      const created = await api.createOrder({
+        app_id: Number(plan.appId),
+        product_id: Number(plan.productId),
+        instance_label: `ol-${String(reference).replace(/[^a-z0-9]/gi, '').slice(-12).toLowerCase() || 'order'}`,
+        customer_reference_id: reference,
+        backup_enabled: plan.backupEnabled,
+        disk_size: plan.diskSize,
+        instance_count: 1,
+        app_config: isWindows
+          ? { admin_pass: password }
+          : { ssh_root_pass: password, ssh_user: 'rackato' },
+      });
+      const placed = parseRackatoOrder(created);
+      rackatoOrderId = placed.orderId;
+      if (!rackatoOrderId) {
+        throw new Error('Rackato accepted the request but did not return an order id');
+      }
+      await Order.findByIdAndUpdate(order._id, {
+        rackatoOrderId,
+        rackatoProductId: String(plan.productId),
+        rackatoAppId: String(plan.appId),
+        password,
+        username: isWindows ? 'Administrator' : 'rackato',
+      });
+    }
+
+    let parsed = parseRackatoOrder(null);
+    for (let attempt = 1; attempt <= 8; attempt++) {
+      const details = await api.getOrder(rackatoOrderId);
+      parsed = parseRackatoOrder(details);
+      if (parsed.ip && parsed.uid) break;
+      if (/fail|cancel|error/i.test(parsed.status || '')) {
+        throw new Error(`Rackato order ${rackatoOrderId} is ${parsed.status}`);
+      }
+      if (attempt < 8) await new Promise((resolve) => setTimeout(resolve, 5000));
+    }
+
+    const username = parsed.username || (isWindows ? 'Administrator' : 'rackato');
+    const loginPassword = parsed.password || password;
+    const updateData = {
+      status: parsed.ip ? 'active' : 'confirmed',
+      provisioningStatus: parsed.ip ? 'active' : 'provisioning',
+      provider: 'rackato',
+      username,
+      password: loginPassword,
+      os: parsed.os || order.os || orderOs,
+      rackatoOrderId,
+      rackatoNodeUid: parsed.uid || order.rackatoNodeUid || '',
+      rackatoProductId: String(plan.productId),
+      rackatoAppId: String(plan.appId),
+      autoProvisioned: true,
+      provisioningError: parsed.ip ? '' : `Rackato order ${rackatoOrderId} is still building. Sync again in a minute.`,
+      expiryDate: parseRackatoExpiry(parsed.expiresAt) || order.expiryDate,
+    };
+
+    if (parsed.ip) {
+      await finalizeIpAssignmentForOrder(order, parsed.ip, updateData);
+    } else {
+      await Order.findByIdAndUpdate(order._id, updateData);
+    }
+
+    return {
+      success: true,
+      pending: !parsed.ip,
+      ipAddress: parsed.ip || '',
+      credentials: { username, password: loginPassword },
+      orderId: rackatoOrderId,
+      totalTime: Date.now() - startTime,
     };
   }
 

@@ -16,6 +16,8 @@ const {
   getAdvpsRebuildUsage,
   getAdvpsRebuildLimitMessage,
   consumeAdvpsRebuildCredit,
+  consumeAdvpsRebuildCreditForTask,
+  settlePendingAdvpsRebuild,
 } = require('@/lib/advpsRebuildLimit');
 const {
   syncAdvpsOrderCredentials,
@@ -80,6 +82,12 @@ export async function GET(request) {
       return customerJson({ success: false, message: resolved.error, error: resolved.error, code: 'ADVPS_SERVICE_NOT_FOUND' }, resolved.status, 'sync');
     }
     const serviceId = resolved.serviceId;
+
+    try {
+      await settlePendingAdvpsRebuild(api, Order, order);
+    } catch (settleErr) {
+      console.warn('[ADVPS-ACTION][GET] Rebuild credit settle failed:', settleErr.message);
+    }
 
     let details = null;
     let statusRes = resolved.statusRes || null;
@@ -260,6 +268,7 @@ export async function POST(request) {
 
       case 'status': {
         try {
+          await settlePendingAdvpsRebuild(api, Order, order);
           const statusRes = await api.status(serviceId);
           const d = unwrapAdvpsEnvelope(statusRes) || {};
           const powerState = normalizeAdvpsPowerState(d);
@@ -377,6 +386,7 @@ export async function POST(request) {
           provisioningStatus: 'provisioning',
           lastAction: 'format',
           lastActionTime: new Date(),
+          ...(taskId ? { advpsRebuildTaskId: String(taskId) } : {}),
         });
 
         if (taskId) {
@@ -388,7 +398,7 @@ export async function POST(request) {
               await connectDB();
             } catch (_) { /* already connected */ }
 
-            const pollDelays = [10000, 15000, 20000, 30000, 60000, 60000];
+            const pollDelays = [10000, 15000, 20000, 30000, 60000, 60000, 60000, 60000];
             for (let i = 0; i < pollDelays.length; i++) {
               await new Promise(r => setTimeout(r, pollDelays[i]));
               try {
@@ -397,10 +407,10 @@ export async function POST(request) {
                 const taskStatus = (taskData.status || '').toUpperCase();
                 console.log(`[ADVPS-ACTION] Rebuild poll ${i + 1}: status=${taskStatus}, progress=${taskData.progress}`);
 
-                if (taskStatus === 'COMPLETED' || taskStatus === 'SUCCESS' || taskStatus === 'DONE') {
+                if (taskStatus === 'COMPLETED' || taskStatus === 'SUCCESS' || taskStatus === 'DONE' || taskStatus === 'COMPLETE' || taskStatus === 'FINISHED') {
                   console.log(`[ADVPS-ACTION] Rebuild task completed for ${rebuildServiceId}; consuming rebuild credit`);
 
-                  await consumeAdvpsRebuildCredit(Order, rebuildOrderId);
+                  await consumeAdvpsRebuildCreditForTask(Order, rebuildOrderId, taskId);
 
                   await runAdvpsPostRebuildGeneratePasswordFlow({
                     api,
@@ -411,9 +421,12 @@ export async function POST(request) {
                   });
                   return;
                 }
-                if (taskStatus === 'FAILED' || taskStatus === 'ERROR') {
+                if (taskStatus === 'FAILED' || taskStatus === 'ERROR' || taskStatus === 'CANCELLED' || taskStatus === 'CANCELED') {
                   console.error(`[ADVPS-ACTION] Rebuild task FAILED for ${rebuildServiceId} — rebuild credit not consumed`);
-                  await Order.findByIdAndUpdate(rebuildOrderId, { provisioningStatus: 'failed', provisioningError: 'Rebuild task failed' });
+                  await Order.updateOne(
+                    { _id: rebuildOrderId, advpsRebuildTaskId: String(taskId) },
+                    { $unset: { advpsRebuildTaskId: 1 }, $set: { provisioningStatus: 'failed', provisioningError: 'Rebuild task failed' } }
+                  );
                   return;
                 }
               } catch (pollErr) {
@@ -442,6 +455,7 @@ export async function POST(request) {
       case 'sync':
       case 'pullpassword': {
         try {
+          await settlePendingAdvpsRebuild(api, Order, order);
           const statusRes = await api.status(serviceId);
           const d = unwrapAdvpsEnvelope(statusRes) || {};
           const sync = await syncAdvpsOrderCredentials(api, order, {

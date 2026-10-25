@@ -117,6 +117,20 @@ const companyJoyApiSchema = new mongoose.Schema({
  * HostDzire WHMCS VPS API (https://hostdzire.com/api/vps/).
  * Form POST with api_key + action — manage by IP, optional place_order auto-buy.
  */
+/**
+ * Rackato reseller API (https://www.rackato.com/api/v1/reseller).
+ * Header auth. Sandbox keys do not debit the Rackato wallet or build real VMs.
+ */
+const companyRackatoApiSchema = new mongoose.Schema({
+  enabled: { type: Boolean, default: false },
+  label: { type: String, default: '' },
+  baseUrl: { type: String, default: '' },
+  keyId: { type: String, default: '' },
+  keySecret: { type: String, default: '' },
+  mode: { type: String, enum: ['sandbox', 'production'], default: 'sandbox' },
+  discountPercent: { type: Number, default: 40 },
+}, { _id: false });
+
 const companyHostdzireApiSchema = new mongoose.Schema({
   enabled: { type: Boolean, default: false },
   label: { type: String, default: '' },
@@ -141,6 +155,7 @@ const companySchema = new mongoose.Schema({
   kurohostApi: { type: companyKurohostApiSchema, default: null },
   joyApi: { type: companyJoyApiSchema, default: null },
   hostdzireApi: { type: companyHostdzireApiSchema, default: null },
+  rackatoApi: { type: companyRackatoApiSchema, default: null },
   /** Company portal: merge duplicate inventory IPs instead of blocking; can remove sold rows. */
   portalInventoryFullAccess: { type: Boolean, default: false },
 }, { timestamps: true });
@@ -158,6 +173,7 @@ if (
     !mongoose.models.Company.schema.paths['kurohostApi.apiKey'] ||
     !mongoose.models.Company.schema.paths['joyApi.apiToken'] ||
     !mongoose.models.Company.schema.paths['hostdzireApi.apiKey'] ||
+    !mongoose.models.Company.schema.paths['rackatoApi.keyId'] ||
     !mongoose.models.Company.schema.paths['resellerApi.useLiveStockApi'])
 ) {
   delete mongoose.models.Company;

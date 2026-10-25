@@ -100,6 +100,21 @@ function normalizeJoyApiEntry(v) {
   };
 }
 
+function normalizeRackatoApiEntry(v) {
+  if (v === null) return null;
+  const mode = v?.mode === 'production' ? 'production' : 'sandbox';
+  const discount = Number(v?.discountPercent);
+  return {
+    enabled: asBool(v?.enabled),
+    label: typeof v?.label === 'string' ? v.label.trim() : '',
+    baseUrl: typeof v?.baseUrl === 'string' ? v.baseUrl.trim().replace(/\/+$/, '') : '',
+    keyId: typeof v?.keyId === 'string' ? v.keyId.trim() : '',
+    keySecret: typeof v?.keySecret === 'string' ? v.keySecret.trim() : '',
+    mode,
+    discountPercent: Number.isFinite(discount) && discount >= 0 ? discount : 40,
+  };
+}
+
 function normalizeHostdzireApiEntry(v) {
   if (v === null) return null;
   const enabled = asBool(v?.enabled);
@@ -172,6 +187,12 @@ function pickAllowedUpdates(body) {
       : normalizeHostdzireApiEntry(body.hostdzireApi);
   }
 
+  if (Object.prototype.hasOwnProperty.call(body || {}, 'rackatoApi')) {
+    out.rackatoApi = body.rackatoApi === null
+      ? null
+      : normalizeRackatoApiEntry(body.rackatoApi);
+  }
+
   return out;
 }
 
@@ -231,6 +252,19 @@ export async function PUT(request, { params }) {
       { $set: { hostdzireApi: updates.hostdzireApi } }
     );
     delete updates.hostdzireApi;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(updates, 'rackatoApi')) {
+    const next = updates.rackatoApi;
+    if (next && company.rackatoApi) {
+      if (!next.keySecret) next.keySecret = company.rackatoApi.keySecret || '';
+      if (!next.keyId) next.keyId = company.rackatoApi.keyId || '';
+    }
+    await Company.collection.updateOne(
+      { _id: company._id },
+      { $set: { rackatoApi: next } }
+    );
+    delete updates.rackatoApi;
   }
 
   if (Object.keys(updates).length > 0) {

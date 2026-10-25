@@ -246,6 +246,16 @@ async function buildProviderFilterClause(provider: string) {
     };
   }
 
+  if (provider === 'rackato') {
+    return {
+      $or: [
+        { provider: 'rackato' },
+        { rackatoOrderId: { $exists: true, $nin: [null, ''] } },
+        { rackatoNodeUid: { $exists: true, $nin: [null, ''] } },
+      ],
+    };
+  }
+
   if (provider === 'hostdzire') {
     return {
       $or: [{ provider: 'hostdzire' }, { hostdzireOrderId: { $exists: true, $nin: [null, ''] } }],

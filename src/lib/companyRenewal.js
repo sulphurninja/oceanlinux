@@ -186,7 +186,10 @@ export function orderHasUpstreamAutomation(order) {
     order.netbayServiceId ||
     order.resellerVmId ||
     order.hostdzireOrderId ||
-    order.provider === 'hostdzire'
+    order.provider === 'hostdzire' ||
+    order.rackatoOrderId ||
+    order.rackatoNodeUid ||
+    order.provider === 'rackato'
   );
 }
 
@@ -200,6 +203,7 @@ export async function resolveRenewalProvider(order) {
   if (order.provider === 'advps' || order.advpsServiceId) return 'advps';
   if (order.provider === 'netbay' || order.netbayServiceId) return 'netbay';
   if (order.provider === 'hostdzire' || order.hostdzireOrderId) return 'hostdzire';
+  if (order.provider === 'rackato' || order.rackatoOrderId || order.rackatoNodeUid) return 'rackato';
   if (order.provider === 'reseller-api' || order.resellerVmId) return 'reseller-api';
   if (order.hostycareServiceId) return 'hostycare';
   if (order.smartvpsServiceId || order.provider === 'smartvps') return 'smartvps';
@@ -254,5 +258,6 @@ export function shouldUseCompanyValidityForRenewal(companyCheck, provider) {
   if (companyCheck?.isCompany) return true;
   if (provider === 'reseller-api') return true;
   if (provider === 'hostdzire') return true;
+  if (provider === 'rackato') return true;
   return false;
 }

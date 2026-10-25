@@ -34,6 +34,8 @@ export function getProviderDisplayLabel(order) {
     return 'netbay';
   }
 
+  if (provider === 'rackato' || filled(order.rackatoOrderId) || filled(order.rackatoNodeUid)) return 'Rackato';
+
   return '';
 }
 

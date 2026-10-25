@@ -37,6 +37,7 @@ const { executeAdvpsUpstreamRenewal } = require('@/lib/advpsRenewal');
 const { executeNetbayUpstreamRenewal } = require('@/lib/netbayRenewal');
 const { executeResellerPanelUpstreamRenewal } = require('@/lib/resellerPanelRenewal');
 const { executeHostdzireUpstreamRenewal } = require('@/lib/hostdzireRenewal');
+const { executeRackatoUpstreamRenewal } = require('@/lib/rackatoRenewal');
 const { resolveRenewalExpiryFromPanel } = require('@/lib/companyResellerInventorySync');
 const { acquireRenewalUpstream } = require('@/lib/renewalUpstreamClaim');
 
@@ -761,6 +762,24 @@ export async function handleRenewalWebhook(renewalTxnId, payment, webhookStartTi
       } catch (panelErr) {
         logger.setProviderApiResult('reseller-api', false, null, panelErr);
         providerRenewalResult = { error: panelErr.message };
+        providerRenewalSuccess = false;
+      }
+    } else if (provider === 'rackato') {
+      try {
+        const apiStart = Date.now();
+        const rackatoRenew = await executeRackatoUpstreamRenewal(order);
+        const apiDuration = Date.now() - apiStart;
+        providerRenewalResult = rackatoRenew.result || { error: rackatoRenew.error, uid: rackatoRenew.uid };
+        providerRenewalSuccess = rackatoRenew.success;
+        if (rackatoRenew.success) {
+          logger.setProviderApiResult('rackato', true, rackatoRenew.result, null, apiDuration);
+          if (rackatoRenew.newExpiryDate) newExpiryDate = rackatoRenew.newExpiryDate;
+        } else {
+          logger.setProviderApiResult('rackato', false, rackatoRenew.result, { message: rackatoRenew.error }, apiDuration);
+        }
+      } catch (rackatoErr) {
+        logger.setProviderApiResult('rackato', false, null, rackatoErr);
+        providerRenewalResult = { error: rackatoErr.message };
         providerRenewalSuccess = false;
       }
     } else if (provider === 'hostdzire') {

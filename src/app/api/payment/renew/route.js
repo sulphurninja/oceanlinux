@@ -148,6 +148,12 @@ export async function POST(request) {
       });
     }
 
+    if (provider === 'rackato' && !order.rackatoNodeUid) {
+      return NextResponse.json({
+        message: 'This server is still being set up. Please wait a few minutes and try again.',
+      }, { status: 400 });
+    }
+
     // 7c. HostDzire — require IP for pay_invoice_by_ip.
     if (provider === 'hostdzire' && !companyCheck.isCompany) {
       const ip = String(order.ipAddress || '').split(':')[0].trim();
