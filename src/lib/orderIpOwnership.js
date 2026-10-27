@@ -6,6 +6,14 @@ function cleanOrderIp(ipAddress) {
   return String(ipAddress || '').split(':')[0].trim();
 }
 
+/** Keep host:port for proxies. Conflict checks still use the host only. */
+function displayOrderIp(ipAddress) {
+  const raw = String(ipAddress || '').trim();
+  const match = raw.match(/^([^:\s]+):(\d+)$/);
+  if (match) return `${match[1]}:${match[2]}`;
+  return cleanOrderIp(raw);
+}
+
 function expiryMs(value) {
   if (!value) return null;
   const ms = new Date(value).getTime();
@@ -376,6 +384,7 @@ async function commitPanelSyncToOrder(orderOrId, updates = {}) {
 async function finalizeIpAssignmentForOrder(order, ipAddress, updateData = {}) {
   const Order = require('@/models/orderModel').default;
   const cleanIp = cleanOrderIp(ipAddress || updateData.ipAddress);
+  const storedIp = displayOrderIp(updateData.ipAddress || ipAddress);
   if (!cleanIp) {
     await Order.findByIdAndUpdate(order._id, updateData);
     return { ipAddress: '', detached: 0 };
@@ -396,7 +405,7 @@ async function finalizeIpAssignmentForOrder(order, ipAddress, updateData = {}) {
     throw new Error(msg);
   }
 
-  await Order.findByIdAndUpdate(order._id, { ...updateData, ipAddress: cleanIp });
+  await Order.findByIdAndUpdate(order._id, { ...updateData, ipAddress: storedIp || cleanIp });
 
   const detach = await detachSupersededIpOrders({
     ipStockId: order.ipStockId,

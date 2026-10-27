@@ -102,7 +102,7 @@ function GetStartedPage({ className, ...props }: React.ComponentPropsWithoutRef<
   const [mounted, setMounted] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { ref, offset } = useHeroParallax<HTMLDivElement>(10);
+  const { ref } = useHeroParallax<HTMLDivElement>(10);
   const passwordChecks = getPasswordChecks(formData.password);
   const passwordsMatch =
     formData.confirmPassword.length > 0 && formData.confirmPassword === formData.password;
@@ -197,12 +197,12 @@ function GetStartedPage({ className, ...props }: React.ComponentPropsWithoutRef<
     <div
       ref={ref}
       className={cn(
-        "premium-auth-shell premium-auth-shell--signup hero-premium-bg premium-auth-shell--centered flex-1 min-h-0 w-full max-w-full",
+        "premium-auth-shell premium-auth-shell--signup hero-premium-bg hero-parallax-root premium-auth-shell--centered flex-1 min-h-0 w-full max-w-full",
         className
       )}
       {...props}
     >
-      <PremiumAuthBackground parallaxX={offset.x} parallaxY={offset.y} />
+      <PremiumAuthBackground />
 
       <div
         className={cn(

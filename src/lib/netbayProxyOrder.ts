@@ -28,11 +28,23 @@ export function isNetbayProxyIpStock(stock: NetbayProxyStockLike | null | undefi
 }
 
 /** True for Netbay-backed proxy stock orders — not manual Slot IP packages. */
+function isNexaDedicatedOrder(
+  order: NetbayProxyOrderLike | null | undefined,
+  stock?: NetbayProxyStockLike | null
+): boolean {
+  if (order?.provider === 'nexa') return true;
+  const tags = (stock?.tags || []).map((tag) => String(tag).toLowerCase());
+  if (tags.includes('nexa')) return true;
+  const nexa = (stock?.defaultConfigurations as { nexa?: { planId?: unknown; poolId?: unknown } } | undefined)?.nexa;
+  return !!(nexa && (nexa.planId || nexa.poolId));
+}
+
 export function isNetbayProxyOrder(
   order: NetbayProxyOrderLike | null | undefined,
   stock?: NetbayProxyStockLike | null
 ): boolean {
   if (!order) return false;
+  if (isNexaDedicatedOrder(order, stock)) return false;
   if (order.slotIpPackageId || order.provider === 'slotip') return false;
   if (String(order.netbayProductKind || '').toLowerCase() === 'proxy') return true;
   return isNetbayProxyIpStock(stock);

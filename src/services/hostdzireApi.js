@@ -184,6 +184,9 @@ class HostdzireApi {
     const status = String(data?.status || '').toLowerCase();
     if (status === 'active' || status === 'running' || status === 'online') return 'running';
     if (status === 'suspended' || status === 'stopped' || status === 'offline') return 'stopped';
+    if (['processing', 'pending', 'starting', 'stopping', 'rebooting', 'reinstalling', 'installing'].includes(status)) {
+      return 'busy';
+    }
     return 'unknown';
   }
 

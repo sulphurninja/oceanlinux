@@ -26,10 +26,17 @@ export async function GET(request) {
       });
     }
 
-    const user = await User.findById(userId).select('_id createdAt').lean();
+    const user = await User.findById(userId).select('_id createdAt userType').lean();
     if (!user) {
       return new Response(JSON.stringify({ message: 'User not found' }), {
         status: 404,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
+    if (user.userType === 'reseller') {
+      return new Response(JSON.stringify({ popup: null }), {
+        status: 200,
         headers: { 'Content-Type': 'application/json' }
       });
     }

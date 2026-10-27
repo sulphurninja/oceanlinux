@@ -99,7 +99,14 @@ class AutoProvisioningService {
    * Netbay enabled while still hosting non-Netbay IP stocks. The presence
    * of a `defaultConfigurations.netbay` block is the canonical signal.
    */
+  isNexaStock(ipStock, order) {
+    const { isNexaDedicatedIpStock } = require('@/lib/netbayGroupTags');
+    if (isNexaDedicatedIpStock(ipStock)) return true;
+    return order?.provider === 'nexa' || !!order?.nexaOrderId;
+  }
+
   isNetbayStock(ipStock, order) {
+    if (this.isNexaStock(ipStock)) return false;
     const tags = Array.isArray(ipStock?.tags) ? ipStock.tags : [];
     const provider = (ipStock?.provider || '').toString().toLowerCase();
 
@@ -1258,18 +1265,21 @@ class AutoProvisioningService {
       L.kv('IPStock snapshot', snapshot);
 
       const advps = this.isAdvpsStock(ipStock, order);
-      const netbay = !advps && this.isNetbayStock(ipStock, order);
+      const nexa = !advps && this.isNexaStock(ipStock, order);
+      const netbay = !advps && !nexa && this.isNetbayStock(ipStock, order);
       const hostdzire = !advps && !netbay && this.isHostdzireStock(ipStock, order);
       const kurohost = !advps && !netbay && !hostdzire && this.isKurohostStock(ipStock, order);
       const rackato = !advps && !netbay && !hostdzire && !kurohost && await this.isRackatoStock(ipStock, order);
       const resellerPanel = !advps && !netbay && !hostdzire && !kurohost && !rackato && isResellerApiStock(ipStock, order);
       const smartVps = !advps && !netbay && !hostdzire && !kurohost && !rackato && !resellerPanel && this.isSmartVpsStock(ipStock, order);
-      const providerName = advps ? 'ADVPS' : netbay ? 'Netbay' : hostdzire ? 'HostDzire' : kurohost ? 'KuroHost' : rackato ? 'Rackato' : resellerPanel ? 'ResellerPanel' : smartVps ? 'SmartVPS' : 'Hostycare';
+      const providerName = advps ? 'ADVPS' : nexa ? 'Nexa' : netbay ? 'Netbay' : hostdzire ? 'HostDzire' : kurohost ? 'KuroHost' : rackato ? 'Rackato' : resellerPanel ? 'ResellerPanel' : smartVps ? 'SmartVPS' : 'Hostycare';
       L.line(`➡ Provider route selected: ${providerName}`);
 
       // Branch
       if (advps) {
         return await this.provisionViaAdvps(order, ipStock, startTime);
+      } else if (nexa) {
+        return await this.provisionViaNexa(order, ipStock, startTime);
       } else if (netbay) {
         return await this.provisionViaNetbay(order, ipStock, startTime);
       } else if (hostdzire) {
@@ -1738,6 +1748,94 @@ class AutoProvisioningService {
       `Purchase aborted to avoid full-price charge. Last error: ${lastErr?.message || 'unknown'}`;
     await persistCouponAudit('', msg);
     throw new Error(msg);
+  }
+
+  async provisionViaNexa(order, ipStock, startTime) {
+    L.head(`NEXA PATH — order ${order._id}`);
+    const { getCompanyNexaApiConfig } = require('@/lib/companyNexaApi');
+    const NexaApi = require('@/services/nexaApi');
+
+    const company = ipStock?.company
+      ? await Company.findById(ipStock.company).select('nexaApi name').lean()
+      : null;
+    const cfg = getCompanyNexaApiConfig(company);
+    if (!cfg) {
+      throw new Error(
+        `Nexa API not configured for IPStock "${ipStock?.name}". ` +
+        `Enable the Nexa API key on that company in /admin/companies.`
+      );
+    }
+
+    const nexaCfg = ipStock?.defaultConfigurations?.get?.('nexa') || ipStock?.defaultConfigurations?.nexa || {};
+    const planId = Number(nexaCfg.planId);
+    const poolId = nexaCfg.poolId != null && nexaCfg.poolId !== '' ? Number(nexaCfg.poolId) : 0;
+    const protocol = String(nexaCfg.protocol || 'SOCKS5');
+    if (!planId) {
+      throw new Error(`Nexa plan id is missing on IPStock "${ipStock?.name}". Add the product again from the Nexa company dialog.`);
+    }
+
+    await Order.findByIdAndUpdate(order._id, {
+      provisioningStatus: 'provisioning',
+      provisioningError: '',
+      autoProvisioned: true,
+      lastProvisionAttempt: new Date(),
+      provider: 'nexa',
+      netbayProductKind: '',
+    });
+
+    const api = new NexaApi(cfg);
+    L.line(`[NEXA] POST action=order plan ${planId} pool ${poolId} protocol ${protocol}`);
+    const result = await api.purchase({ planId, poolId, quantity: 1, protocol });
+    const delivered = NexaApi.extractPurchaseDelivery(result);
+    const nexaOrderId = delivered.orderId;
+    const host = delivered.ip;
+    const port = delivered.port;
+    const username = delivered.username || order.username || '';
+    const password = delivered.password || '';
+    const displayIp = host ? (port && !host.includes(':') ? `${host}:${port}` : host) : '';
+
+    let expiryDate = null;
+    if (delivered.expiry) {
+      const parsed = new Date(delivered.expiry);
+      if (!Number.isNaN(parsed.getTime())) expiryDate = parsed;
+    }
+    if (!expiryDate) {
+      const { calculateCompanyExpiryDate } = await import('@/lib/expiryHelper');
+      expiryDate = calculateCompanyExpiryDate();
+    }
+
+    const fullyProvisioned = !!(displayIp && nexaOrderId);
+    const updateData = {
+      status: fullyProvisioned ? 'active' : 'confirmed',
+      provisioningStatus: fullyProvisioned ? 'active' : 'provisioning',
+      provisioningError: fullyProvisioned
+        ? ''
+        : 'PENDING: Nexa accepted the order but did not return an IP yet.',
+      provider: 'nexa',
+      nexaOrderId: nexaOrderId || undefined,
+      netbayProductKind: '',
+      username: username || undefined,
+      password: password || order.password || '',
+      ipAddress: displayIp,
+      autoProvisioned: true,
+      os: order.os || 'Ubuntu 22',
+      expiryDate,
+    };
+
+    if (fullyProvisioned) {
+      await finalizeIpAssignmentForOrder(order, displayIp, updateData);
+    } else {
+      await Order.findByIdAndUpdate(order._id, updateData);
+    }
+
+    L.line(`[NEXA] order ${nexaOrderId || '(none)'} ip ${displayIp || '(none)'}`);
+    return {
+      success: fullyProvisioned,
+      ipAddress: displayIp || null,
+      credentials: { username, password },
+      totalTime: Date.now() - startTime,
+      ...(fullyProvisioned ? {} : { error: updateData.provisioningError }),
+    };
   }
 
   async provisionViaNetbayProxy(order, ipStock, startTime) {

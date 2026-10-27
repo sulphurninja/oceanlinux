@@ -11,11 +11,6 @@ const {
   mergeDefaultConfigurationsPlain,
 } = require('@/lib/advpsLiveStock');
 const { applySmartVpsAdminLockedPricesOnSave } = require('@/lib/smartvpsPackageRam');
-const { getCompanyVirtualizorAccounts } = require('@/lib/companyVirtualizor');
-const { getCompanyResellerApiConfig } = require('@/lib/companyResellerApi');
-const { getCompanyNetbayApiConfig } = require('@/lib/companyNetbayApi');
-const { getCompanyKurohostApiConfig } = require('@/lib/companyKurohostApi');
-const { getCompanyJoyApiConfig } = require('@/lib/companyJoyApi');
 
 function stripSensitiveIpStockFields(doc, { isAdmin = false } = {}) {
   if (!doc || isAdmin) return doc;
@@ -84,58 +79,10 @@ export async function GET(request, { params }) {
         if (ipStock.company) {
             try {
                 const company = await Company.findById(ipStock.company)
-                    .select('virtualizors virtualizor resellerApi netbayApi kurohostApi joyApi name')
+                    .select('virtualizors virtualizor resellerApi netbayApi kurohostApi joyApi hostdzireApi rackatoApi nexaApi name')
                     .lean();
-                const accounts = getCompanyVirtualizorAccounts(company);
-                if (accounts.length > 0) {
-                    companyAutomation = {
-                        provider: 'virtualizor',
-                        enabled: true,
-                        panelCount: accounts.length,
-                        companyName: company?.name,
-                    };
-                } else {
-                    const reseller = getCompanyResellerApiConfig(company);
-                    if (reseller) {
-                        companyAutomation = {
-                            provider: 'reseller-api',
-                            enabled: true,
-                            companyName: company?.name,
-                            label: reseller.label || null,
-                        };
-                    } else {
-                        const netbay = getCompanyNetbayApiConfig(company);
-                        if (netbay) {
-                            companyAutomation = {
-                                provider: 'netbay',
-                                enabled: true,
-                                companyName: company?.name,
-                                label: netbay.label || null,
-                            };
-                        } else {
-                            const kurohost = getCompanyKurohostApiConfig(company);
-                            if (kurohost) {
-                                companyAutomation = {
-                                    provider: 'kurohost',
-                                    enabled: true,
-                                    companyName: company?.name,
-                                    label: kurohost.label || null,
-                                };
-                            } else {
-                                // Joy Services — manage-only (power actions + status).
-                                const joy = getCompanyJoyApiConfig(company);
-                                if (joy) {
-                                    companyAutomation = {
-                                        provider: 'joy',
-                                        enabled: true,
-                                        companyName: company?.name,
-                                        label: joy.label || null,
-                                    };
-                                }
-                            }
-                        }
-                    }
-                }
+                const { buildCompanyAutomationMeta } = require('@/lib/companyAutomationMeta');
+                companyAutomation = buildCompanyAutomationMeta(company);
             } catch (lookupErr) {
                 console.warn('[IPSTOCK-ID][GET] Company automation lookup failed:', lookupErr.message);
             }

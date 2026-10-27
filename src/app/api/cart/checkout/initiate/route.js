@@ -232,9 +232,11 @@ export async function POST(request) {
           if (snap.netbayGroupTag) orderData.netbayGroupTag = snap.netbayGroupTag;
           try {
             const IPStock = require('@/models/ipStockModel');
-            const { isNetbayProxyStock } = require('@/lib/netbayGroupTags');
-            const stock = await IPStock.findById(snap.ipStockId).select('defaultConfigurations serverType').lean();
-            if (isNetbayProxyStock(stock)) {
+            const { isNetbayProxyStock, isNexaDedicatedIpStock } = require('@/lib/netbayGroupTags');
+            const stock = await IPStock.findById(snap.ipStockId).select('defaultConfigurations serverType tags').lean();
+            if (isNexaDedicatedIpStock(stock)) {
+              orderData.provider = 'nexa';
+            } else if (isNetbayProxyStock(stock)) {
               orderData.netbayProductKind = 'proxy';
               orderData.provider = 'netbay';
             }

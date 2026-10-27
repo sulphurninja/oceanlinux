@@ -114,6 +114,8 @@ const orderSchema = new mongoose.Schema({
 
     // Rackato reseller API (https://www.rackato.com/api/v1/reseller)
     rackatoOrderId: { type: String },
+    /** Nexa dedicated-ip order id from POST action=order / orders list. */
+    nexaOrderId: { type: String },
     rackatoNodeUid: { type: String },
     rackatoProductId: { type: String },
     rackatoAppId: { type: String },
@@ -255,7 +257,7 @@ orderSchema.index({ 'pendingRenewal.renewalTxnId': 1 }); // For webhook lookup
 orderSchema.index({ 'renewalPayments.renewalTxnId': 1 }); // For idempotency check
 orderSchema.index({ panelUsername: 1 });
 
-if (mongoose.models.Order && !mongoose.models.Order.schema.paths.rackatoOrderId) {
+if (mongoose.models.Order && (!mongoose.models.Order.schema.paths.rackatoOrderId || !mongoose.models.Order.schema.paths.nexaOrderId)) {
   delete mongoose.models.Order;
 }
 

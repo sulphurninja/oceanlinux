@@ -33,14 +33,14 @@ function AuthShell({
   children: React.ReactNode;
   mounted: boolean;
 }) {
-  const { ref, offset } = useHeroParallax<HTMLDivElement>(10);
+  const { ref } = useHeroParallax<HTMLDivElement>(10);
 
   return (
     <div
       ref={ref}
-      className="premium-auth-shell hero-premium-bg premium-auth-shell--centered flex-1 min-h-0 w-full max-w-full"
+      className="premium-auth-shell hero-premium-bg hero-parallax-root premium-auth-shell--centered flex-1 min-h-0 w-full max-w-full"
     >
-      <PremiumAuthBackground parallaxX={offset.x} parallaxY={offset.y} />
+      <PremiumAuthBackground />
 
       <Link href="/" className="premium-auth-back">
         <ArrowLeft className="w-3.5 h-3.5 shrink-0" />

@@ -79,6 +79,15 @@ function slimDefaultConfigurationsForStore(defaultConfigurations) {
         };
     }
 
+    if (dc.nexa && typeof dc.nexa === 'object') {
+        slim.nexa = {
+            planId: dc.nexa.planId != null ? dc.nexa.planId : null,
+            poolId: dc.nexa.poolId != null ? dc.nexa.poolId : null,
+            subnet: dc.nexa.subnet ? String(dc.nexa.subnet) : '',
+            protocol: dc.nexa.protocol ? String(dc.nexa.protocol) : '',
+        };
+    }
+
     if (dc.hostdzire && typeof dc.hostdzire === 'object') {
         const inventoryByMemory = {};
         for (const [memory, slot] of Object.entries(toPlainMap(dc.hostdzire.inventoryByMemory))) {
@@ -256,15 +265,18 @@ export async function POST(request) {
         });
     }
 }
+function customerCatalogStore() {
+    if (!global.__oceanIpStockCatalog) global.__oceanIpStockCatalog = new Map();
+    return global.__oceanIpStockCatalog;
+}
+
 // GET method - fetch all IP stocks
 export async function GET(request) {
-    console.log('[IPSTOCK-API] GET request received');
-
     try {
         await connectDB();
-        console.log('[IPSTOCK-API] Database connected');
 
         const { searchParams } = new URL(request.url);
+        const fresh = searchParams.get('fresh') === '1';
         const includeHidden =
             searchParams.get('includeHidden') === '1' ||
             searchParams.get('includeHidden') === 'true';
@@ -277,6 +289,60 @@ export async function GET(request) {
                 query = {};
                 customerView = false;
             }
+        }
+
+        // Nexa rows stay hidden in the shared database so the live site does not
+        // list them. Local dev still returns them so a buy can be tested here.
+        const showHiddenNexaLocally = customerView && process.env.NODE_ENV !== 'production';
+        if (showHiddenNexaLocally) {
+            query = {
+                $or: [
+                    { hiddenFromStore: { $ne: true } },
+                    { tags: 'nexa' },
+                ],
+            };
+        }
+
+        if (customerView) {
+            try {
+                const { syncNexaStoreAvailability } = require('@/lib/nexaStoreStock');
+                const nexaChanged = await syncNexaStoreAvailability({ Company, IPStock });
+                if (nexaChanged > 0) {
+                    customerCatalogStore().clear();
+                }
+            } catch (nexaStockErr) {
+                console.warn('[IPSTOCK-API] Nexa stock sync failed:', nexaStockErr.message);
+            }
+        }
+
+        const catalogKey = customerView
+            ? (request.cookies.get('token')?.value || 'anon')
+            : '';
+        if (customerView && !fresh) {
+            const hit = customerCatalogStore().get(catalogKey);
+            if (hit?.body && Date.now() - hit.at < 20000) {
+                return new Response(hit.body, {
+                    status: 200,
+                    headers: { 'Content-Type': 'application/json' },
+                });
+            }
+            if (hit?.promise) {
+                const shared = await hit.promise;
+                return new Response(shared, {
+                    status: 200,
+                    headers: { 'Content-Type': 'application/json' },
+                });
+            }
+        }
+
+        let resolveCatalog;
+        let rejectCatalog;
+        if (customerView) {
+            const promise = new Promise((resolve, reject) => {
+                resolveCatalog = resolve;
+                rejectCatalog = reject;
+            });
+            customerCatalogStore().set(catalogKey, { promise, reject: rejectCatalog, at: 0, body: null });
         }
 
         if (customerView) {
@@ -293,11 +359,11 @@ export async function GET(request) {
             // Inventory rows hold credentials and can be huge. Load counts
             // only for company plans that actually have inventory, and never
             // send the rows themselves.
-            ipStocks = await IPStock.find(query)
+            const stocksPromise = IPStock.find(query)
                 .select('-inventoryItems')
                 .lean()
                 .maxTimeMS(10000);
-            const countRows = await IPStock.aggregate([
+            const countRowsPromise = IPStock.aggregate([
                 {
                     $match: {
                         ...query,
@@ -320,6 +386,8 @@ export async function GET(request) {
                     },
                 },
             ]).option({ maxTimeMS: 8000 });
+            const [stockRows, countRows] = await Promise.all([stocksPromise, countRowsPromise]);
+            ipStocks = stockRows;
             const countById = new Map(countRows.map((row) => [String(row._id), row]));
             for (const stock of ipStocks) {
                 const counts = countById.get(String(stock._id));
@@ -330,29 +398,46 @@ export async function GET(request) {
         } else {
             ipStocks = await IPStock.find(query).lean().maxTimeMS(10000);
         }
-        console.log(`[IPSTOCK-API] Found ${ipStocks?.length || 0} IP stocks`);
-
+        if (showHiddenNexaLocally) {
+            for (const stock of ipStocks) {
+                const tags = Array.isArray(stock.tags) ? stock.tags : [];
+                if (tags.includes('nexa')) stock.hiddenFromStore = false;
+            }
+        }
         if (!ipStocks) {
-            console.log('[IPSTOCK-API] No IP stocks found (null result)');
-            return new Response(JSON.stringify([]), {
+            const empty = JSON.stringify([]);
+            if (customerView) {
+                customerCatalogStore().set(catalogKey, { at: Date.now(), body: empty, promise: null });
+                resolveCatalog(empty);
+            }
+            return new Response(empty, {
                 status: 200,
                 headers: { 'Content-Type': 'application/json' }
             });
         }
 
-        const enriched = customerView
-            ? enrichIpStocksForStore(await enrichIpStocksWithProviderModes(ipStocks))
-            : await enrichIpStocksWithProviderModes(ipStocks);
+        const resellerPromise = customerView
+            ? import('@/lib/resellerStorePricing').then(async (mod) => ({
+                mod,
+                reseller: await mod.getResellerFromRequest(request),
+            }))
+            : null;
+        resellerPromise?.catch(() => {});
+
+        const withModes = await enrichIpStocksWithProviderModes(ipStocks);
+        const enriched = customerView ? enrichIpStocksForStore(withModes) : withModes;
 
         let payload = enriched;
-        if (customerView) {
-            const { getResellerFromRequest, applyResellerPricingToStocks } = await import('@/lib/resellerStorePricing');
-            const reseller = await getResellerFromRequest(request);
-            if (reseller) payload = applyResellerPricingToStocks(enriched, reseller);
+        if (resellerPromise) {
+            const { mod, reseller } = await resellerPromise;
+            if (reseller) payload = mod.applyResellerPricingToStocks(enriched, reseller);
         }
 
         const jsonResponse = JSON.stringify(payload);
-        console.log(`[IPSTOCK-API] Response size: ${jsonResponse.length} bytes`);
+        if (customerView) {
+            customerCatalogStore().set(catalogKey, { at: Date.now(), body: jsonResponse, promise: null });
+            resolveCatalog(jsonResponse);
+        }
 
         return new Response(jsonResponse, {
             status: 200,
@@ -363,7 +448,16 @@ export async function GET(request) {
         });
     } catch (error) {
         console.error('[IPSTOCK-API] Error fetching IP stocks:', error.message);
-        console.error('[IPSTOCK-API] Error stack:', error.stack);
+        try {
+            const token = request.cookies.get('token')?.value || 'anon';
+            const pending = customerCatalogStore().get(token);
+            if (pending?.reject) {
+                customerCatalogStore().delete(token);
+                pending.reject(error);
+            }
+        } catch {
+            /* ignore */
+        }
         return new Response(JSON.stringify({ error: 'Failed to fetch IP Stocks', details: error.message }), {
             status: 500,
             headers: { 'Content-Type': 'application/json' }

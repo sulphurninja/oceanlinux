@@ -273,10 +273,8 @@ function trialPanelManageNoRouteError(order, ipAddress) {
  */
 function resolveJoyPowerState(machineInfo) {
   const raw = String(machineInfo?.Current?.status || machineInfo?.status || '').toLowerCase().trim();
-  if (['running', 'online', 'active', 'started', 'on'].includes(raw)) return 'running';
-  if (['stopped', 'offline', 'off', 'shutdown', 'down'].includes(raw)) return 'stopped';
-  if (['paused', 'suspended', 'hibernated'].includes(raw)) return 'suspended';
-  return raw || 'unknown';
+  const { normalizeReportedPowerState } = require('@/lib/panelPowerState');
+  return normalizeReportedPowerState(raw) || 'unknown';
 }
 
 /**
@@ -1235,7 +1233,9 @@ export async function POST(request) {
             ...(expiry ? { expiryDate: expiry } : {}),
             lastSyncTime: new Date(),
           });
-          return actionJson({ success: true, message: 'Server status updated', powerState: node.status || 'unknown' }, 200, action);
+          const { normalizeReportedPowerState } = require('@/lib/panelPowerState');
+          const powerState = normalizeReportedPowerState(node.status) || 'unknown';
+          return actionJson({ success: true, message: 'Server status updated', powerState }, 200, action);
         }
         const rackatoAction = action === 'reboot' ? 'restart' : action;
         await api.nodeAction(uid, rackatoAction);
@@ -1245,6 +1245,113 @@ export async function POST(request) {
           success: false,
           error: rackatoErr.message || 'Rackato action failed',
         }, typeof rackatoErr.status === 'number' ? rackatoErr.status : 500, action);
+      }
+    }
+
+    // -------------------- Nexa Dedicated IP branch --------------------
+    if (!isSmartVps && !isNetbay && !order.hostycareServiceId) {
+      const { resolveNexaApiForOrder } = require('@/lib/companyNexaApi');
+      const NexaApi = require('@/services/nexaApi');
+      const nexaMatch = await resolveNexaApiForOrder(order, { Company, IPStock });
+      const primaryNexa = await resolvePrimaryCompanyAutomationProvider(order);
+      if (nexaMatch.config && (order.provider === 'nexa' || order.nexaOrderId || primaryNexa === 'nexa')) {
+        const supportedActions = new Set(['start', 'stop', 'restart', 'reboot', 'status', 'sync', 'reinstall', 'changepassword']);
+        if (!supportedActions.has(action)) {
+          return actionJson({
+            success: false,
+            error: `Action '${action}' is not available for this server.`,
+          }, 400, action);
+        }
+        let nexaApi;
+        try {
+          nexaApi = new NexaApi(nexaMatch.config);
+        } catch (apiErr) {
+          return actionJson({ success: false, error: apiErr.message || 'Server management is temporarily unavailable.' }, 500, action);
+        }
+        try {
+          let nexaOrderId = String(order.nexaOrderId || '').trim();
+          if (!nexaOrderId && ipAddress) {
+            const found = await nexaApi.findOrderByIp(ipAddress);
+            nexaOrderId = NexaApi.extractOrderId(found);
+            if (nexaOrderId) {
+              await Order.findByIdAndUpdate(orderId, { nexaOrderId });
+            }
+          }
+          if (!nexaOrderId) {
+            return actionJson({
+              success: false,
+              error: 'This IP is not on the Nexa account yet.',
+            }, 404, action);
+          }
+          const command = action === 'restart' || action === 'reboot'
+            ? 'reboot'
+            : action === 'changepassword'
+              ? 'change_credentials'
+              : action === 'sync' || action === 'status'
+                ? 'status'
+                : action;
+          if (command === 'status') {
+            const apiRes = await nexaApi.control(nexaOrderId, 'status');
+            const powerState = NexaApi.normalizePowerState(apiRes);
+            const delivered = NexaApi.extractPurchaseDelivery(apiRes);
+            const { updates: credUpdates, changes } = NexaApi.deliveryUpdates(order, delivered);
+            const updates = { ...credUpdates, lastSyncTime: new Date(), nexaOrderId };
+            await Order.findByIdAndUpdate(orderId, updates);
+            const credentialsUpdated = changes.includes('username') || changes.includes('password');
+            return NextResponse.json({
+              success: true,
+              powerState,
+              provider: 'nexa',
+              credentialsUpdated,
+              syncResult: {
+                credentialsUpdated,
+                changes,
+                lastSyncTime: updates.lastSyncTime.toISOString(),
+              },
+              result: { success: true, message: 'Status retrieved' },
+            });
+          }
+          const extra = {};
+          if (command === 'change_credentials') {
+            extra.username = body?.username || payload?.username || order.username;
+            extra.password = newPassword || payload?.password || body?.password || body?.newPassword;
+            if (!extra.password) {
+              return actionJson({ success: false, error: 'A new password is required.' }, 400, action);
+            }
+          }
+          const apiRes = await nexaApi.control(nexaOrderId, command, extra);
+          const powerState = NexaApi.normalizePowerState(apiRes);
+          const delivered = NexaApi.extractPurchaseDelivery(apiRes);
+          const { updates: credUpdates, changes } = NexaApi.deliveryUpdates(order, delivered);
+          const updates = {
+            ...credUpdates,
+            lastAction: action === 'reboot' ? 'restart' : action,
+            lastActionTime: new Date(),
+            nexaOrderId,
+          };
+          if (extra.password) updates.password = extra.password;
+          if (extra.username) updates.username = extra.username;
+          if (extra.password && !changes.includes('password')) changes.push('password');
+          if (extra.username && !changes.includes('username')) changes.push('username');
+          await Order.findByIdAndUpdate(orderId, updates);
+          const credentialsUpdated = changes.includes('username') || changes.includes('password');
+          return NextResponse.json({
+            success: true,
+            powerState,
+            credentialsUpdated,
+            syncResult: {
+              credentialsUpdated,
+              changes,
+              lastSyncTime: updates.lastActionTime.toISOString(),
+            },
+            result: { success: true, message: apiRes?.message || `${action} command sent` },
+          });
+        } catch (nexaErr) {
+          return actionJson({
+            success: false,
+            error: nexaErr.message || 'Nexa action failed',
+          }, typeof nexaErr.status === 'number' ? nexaErr.status : 500, action);
+        }
       }
     }
 
@@ -2095,10 +2202,11 @@ export async function POST(request) {
 
             if (statusVal) {
               const sl = String(statusVal).toLowerCase().trim();
-              if (['online', 'running', 'active', 'started', 'on', '1'].includes(sl)) powerState = 'running';
-              else if (['offline', 'stopped', 'inactive', 'off', '0', 'shutdown'].includes(sl)) powerState = 'stopped';
-              else if (['suspended', 'paused'].includes(sl)) powerState = 'suspended';
-              else powerState = sl;
+              const { normalizeReportedPowerState } = require('@/lib/panelPowerState');
+              powerState = normalizeReportedPowerState(sl)
+                || (['active'].includes(sl) ? 'running' : '')
+                || (['inactive'].includes(sl) ? 'stopped' : '')
+                || 'unknown';
             }
 
             console.log('[STATUS] SmartVPS power state:', powerState);
@@ -2164,17 +2272,11 @@ export async function POST(request) {
 
             if (rawStatus) {
               const statusLower = String(rawStatus).toLowerCase().trim();
-              if (['online', 'running', 'active', 'started', 'on', '1', 'true'].includes(statusLower)) {
-                powerState = 'running';
-              } else if (['offline', 'stopped', 'inactive', 'off', '0', 'false', 'shutdown', 'terminated', 'down'].includes(statusLower)) {
-                powerState = 'stopped';
-              } else if (['suspended', 'paused', 'cancelled'].includes(statusLower)) {
-                powerState = 'suspended';
-              } else if (['installing', 'provisioning', 'building', 'creating', 'starting', 'stopping', 'rebooting'].includes(statusLower)) {
-                powerState = 'busy';
-              } else {
-                powerState = statusLower;
-              }
+              const { normalizeReportedPowerState } = require('@/lib/panelPowerState');
+              powerState = normalizeReportedPowerState(statusLower)
+                || (['active'].includes(statusLower) ? 'running' : '')
+                || (['inactive'].includes(statusLower) ? 'stopped' : '')
+                || 'unknown';
             } else if (ipAddress) {
               const cleanIp = ipAddress.split(':')[0];
               console.log(`[STATUS] Hostycare API returned no status, pinging ${cleanIp}...`);
@@ -2296,9 +2398,11 @@ export async function POST(request) {
             let powerState = 'unknown';
             if (statusVal) {
               const sl = String(statusVal).toLowerCase().trim();
-              if (['online', 'running', 'active'].includes(sl)) powerState = 'running';
-              else if (['offline', 'stopped', 'inactive'].includes(sl)) powerState = 'stopped';
-              else powerState = sl;
+              const { normalizeReportedPowerState } = require('@/lib/panelPowerState');
+              powerState = normalizeReportedPowerState(sl)
+                || (sl === 'active' ? 'running' : '')
+                || (sl === 'inactive' ? 'stopped' : '')
+                || 'unknown';
             }
 
             const freshOrder = await Order.findById(orderId).select('ipAddress username password os provisioningStatus status lastSyncTime').lean();
@@ -2616,6 +2720,52 @@ export async function GET(request) {
     }
 
     console.log(`[SERVICE-ACTION][GET] Loading service details for order: ${orderId}`);
+
+    if (order.provider === 'nexa' || order.nexaOrderId) {
+      const { resolveNexaApiForOrder } = require('@/lib/companyNexaApi');
+      const NexaApi = require('@/services/nexaApi');
+      const nexaMatch = await resolveNexaApiForOrder(order, { Company, IPStock });
+      if (!nexaMatch.config) {
+        return actionJson({ success: false, error: 'Nexa API is not configured for this server.' }, 400, 'sync');
+      }
+      try {
+        const nexaApi = new NexaApi(nexaMatch.config);
+        let nexaOrderId = String(order.nexaOrderId || '').trim();
+        const currentIp = order.ipAddress || '';
+        if (!nexaOrderId && currentIp) {
+          const found = await nexaApi.findOrderByIp(currentIp);
+          nexaOrderId = NexaApi.extractOrderId(found);
+          if (nexaOrderId) await Order.findByIdAndUpdate(orderId, { nexaOrderId });
+        }
+        if (!nexaOrderId) {
+          return actionJson({ success: false, error: 'This IP is not on the Nexa account yet.' }, 404, 'sync');
+        }
+        const apiRes = await nexaApi.control(nexaOrderId, 'status');
+        const powerState = NexaApi.normalizePowerState(apiRes);
+        const delivered = NexaApi.extractPurchaseDelivery(apiRes);
+        const { updates: credUpdates, changes } = NexaApi.deliveryUpdates(order, delivered);
+        const updates = { ...credUpdates, lastSyncTime: new Date(), nexaOrderId };
+        await Order.findByIdAndUpdate(orderId, updates);
+        const credentialsUpdated = changes.includes('username') || changes.includes('password');
+        return NextResponse.json({
+          success: true,
+          provider: 'nexa',
+          powerState,
+          ip: updates.ipAddress || currentIp || null,
+          credentialsUpdated,
+          syncResult: {
+            credentialsUpdated,
+            changes,
+            lastSyncTime: updates.lastSyncTime.toISOString(),
+          },
+        });
+      } catch (nexaErr) {
+        return actionJson({
+          success: false,
+          error: nexaErr.message || 'Could not load server status',
+        }, typeof nexaErr.status === 'number' ? nexaErr.status : 500, 'sync');
+      }
+    }
 
     // Resolve IP from common locations on the order document.
     let ipAddress = order.ipAddress
@@ -3004,6 +3154,91 @@ export async function GET(request) {
         return actionJson({
           success: false,
           error: err.message || 'Could not load server status',
+        }, 500, 'sync');
+      }
+    }
+
+    if (order.provider === 'rackato' || order.rackatoOrderId || order.rackatoNodeUid) {
+      const { resolveRackatoApiForOrder } = require('@/lib/companyRackatoApi');
+      const { parseRackatoOrder, parseRackatoNode, parseRackatoExpiry } = require('@/lib/rackatoOrder');
+      const RackatoApi = require('@/services/rackatoApi');
+      const { normalizeReportedPowerState } = require('@/lib/panelPowerState');
+      const { config: rackatoCfg } = await resolveRackatoApiForOrder(order, { Company, IPStock });
+      if (rackatoCfg) {
+        try {
+          const api = new RackatoApi(rackatoCfg);
+          let uid = String(order.rackatoNodeUid || '').trim();
+          const node = uid
+            ? parseRackatoNode(await api.getNode(uid))
+            : parseRackatoOrder(order.rackatoOrderId ? await api.getOrder(order.rackatoOrderId) : null);
+          const expiry = parseRackatoExpiry(node.expiresAt);
+          const powerState = normalizeReportedPowerState(node.status) || 'unknown';
+          await Order.findByIdAndUpdate(orderId, {
+            ...(node.ip ? { ipAddress: node.ip } : {}),
+            ...(node.uid ? { rackatoNodeUid: node.uid } : {}),
+            ...(expiry ? { expiryDate: expiry } : {}),
+            lastSyncTime: new Date(),
+          });
+          return NextResponse.json({
+            success: true,
+            provider: 'rackato',
+            powerState,
+            ip: node.ip || ipAddress || null,
+          });
+        } catch (rackatoGetErr) {
+          return actionJson({
+            success: false,
+            error: rackatoGetErr.message || 'Could not load server status',
+          }, typeof rackatoGetErr.status === 'number' ? rackatoGetErr.status : 500, 'sync');
+        }
+      }
+    }
+
+    const primaryHostdzireGet = await resolvePrimaryCompanyAutomationProvider(order);
+    if (primaryHostdzireGet === 'hostdzire' && ipAddress) {
+      const { config: hostdzireCfg } = await resolveCompanyHostdzireApi(order);
+      if (hostdzireCfg) {
+        try {
+          const hostdzireApi = new HostdzireApi(hostdzireCfg);
+          const detailsRes = await hostdzireApi.getDetails(ipAddress);
+          const powerState = HostdzireApi.resolvePowerState(detailsRes);
+          await Order.findByIdAndUpdate(orderId, { lastSyncTime: new Date() });
+          return NextResponse.json({
+            success: true,
+            provider: 'hostdzire',
+            powerState,
+            ip: ipAddress,
+          });
+        } catch (hostdzireGetErr) {
+          return actionJson({
+            success: false,
+            error: hostdzireGetErr.message || 'Could not load server status',
+          }, typeof hostdzireGetErr.status === 'number' ? hostdzireGetErr.status : 500, 'sync');
+        }
+      }
+    }
+
+    if ((order.provider === 'smartvps' || order.smartvpsDetails?.ip) && ipAddress) {
+      try {
+        const smartvpsApi = new SmartVpsAPI();
+        const apiRes = await smartvpsApi.status(ipAddress);
+        const statusVal = apiRes?.PowerStatus || apiRes?.powerStatus || apiRes?.MachineStatus || apiRes?.status;
+        const { normalizeReportedPowerState } = require('@/lib/panelPowerState');
+        const sl = String(statusVal || '').toLowerCase().trim();
+        const powerState = normalizeReportedPowerState(sl)
+          || (sl === 'active' ? 'running' : '')
+          || (sl === 'inactive' ? 'stopped' : '')
+          || 'unknown';
+        return NextResponse.json({
+          success: true,
+          provider: 'smartvps',
+          powerState,
+          ip: ipAddress,
+        });
+      } catch (smartvpsGetErr) {
+        return actionJson({
+          success: false,
+          error: smartvpsGetErr.message || 'Could not load server status',
         }, 500, 'sync');
       }
     }

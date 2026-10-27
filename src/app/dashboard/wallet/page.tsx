@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { dashboardFetch } from '@/lib/dashboardFetch';
+import { fetchCurrentUser } from '@/lib/currentUserRequest';
 import { readDashboardCache, writeDashboardCache, DASHBOARD_CACHE_KEYS } from '@/lib/dashboardCache';
 import { cn } from '@/lib/utils';
 import { broadcastWallet } from '@/lib/walletClient';
@@ -116,10 +117,9 @@ export default function WalletPage() {
       router.replace('/dashboard/reseller-wallet');
       return;
     }
-    dashboardFetch('/api/users/me', { cache: 'no-store' })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((u) => {
-        if (u?.userType === 'reseller') router.replace('/dashboard/reseller-wallet');
+    fetchCurrentUser()
+      .then(({ ok, data }) => {
+        if (ok && data?.userType === 'reseller') router.replace('/dashboard/reseller-wallet');
       })
       .catch(() => { /* ignore */ });
   }, [router]);
@@ -146,7 +146,7 @@ export default function WalletPage() {
     }
   };
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const cached = readDashboardCache(DASHBOARD_CACHE_KEYS.wallet);
     if (cached) {
       setWallet(cached as typeof wallet);

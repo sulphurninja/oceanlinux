@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useEffect, useState, useMemo } from 'react'
+import React, { useEffect, useLayoutEffect, useState, useMemo } from 'react'
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -52,6 +52,7 @@ import { useTheme } from 'next-themes';
 import { toast } from "sonner";
 import { dashboardFetch } from '@/lib/dashboardFetch';
 import { readDashboardCache, writeDashboardCache, DASHBOARD_CACHE_KEYS } from '@/lib/dashboardCache';
+import PageLoader from '@/components/dashboard/DashboardPageSkeleton';
 import {
   AreaChart,
   Area,
@@ -85,11 +86,26 @@ interface DashboardStats {
   };
 }
 
+const statsRequests = new Map<string, Promise<DashboardStats>>();
+
+function loadDashboardStats(timeframe: string) {
+  const existing = statsRequests.get(timeframe);
+  if (existing) return existing;
+  const request = dashboardFetch(`/api/dashboard/stats?timeframe=${timeframe}`)
+    .then((response) => response.json())
+    .finally(() => {
+      statsRequests.delete(timeframe);
+    });
+  statsRequests.set(timeframe, request);
+  return request;
+}
+
 export default function Dashboard() {
   const { user } = useAuth();
   const router = useRouter();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [knownUser, setKnownUser] = useState<{ name?: string; email?: string; createdAt?: string } | null>(null);
   const [timeframe, setTimeframe] = useState('30d');
 
   const [showInvoiceDialog, setShowInvoiceDialog] = useState(false);
@@ -106,9 +122,18 @@ export default function Dashboard() {
   });
   const [isUpdatingSettings, setIsUpdatingSettings] = useState(false);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    if (user?.name) {
+      setKnownUser(user);
+      return;
+    }
+    const cached = readDashboardCache(DASHBOARD_CACHE_KEYS.currentUser) as { name?: string; email?: string; createdAt?: string } | null;
+    if (cached?.name) setKnownUser(cached);
+  }, [user]);
+
+  useLayoutEffect(() => {
     const key = DASHBOARD_CACHE_KEYS.dashboardStats(timeframe);
-    const cached = readDashboardCache(key);
+    const cached = readDashboardCache(key, 24 * 60 * 60 * 1000);
     if (cached) {
       setStats(cached as typeof stats);
       setIsLoading(false);
@@ -131,8 +156,8 @@ export default function Dashboard() {
   const fetchDashboardData = async (silent = false) => {
     try {
       if (!silent) setIsLoading(true);
-      const response = await dashboardFetch(`/api/dashboard/stats?timeframe=${timeframe}`);
-      const data = await response.json();
+      const data = await loadDashboardStats(timeframe);
+      if (data?.error) throw new Error(data.error);
       writeDashboardCache(DASHBOARD_CACHE_KEYS.dashboardStats(timeframe), data);
       setStats(data);
     } catch (error) {
@@ -297,51 +322,9 @@ export default function Dashboard() {
   };
 
   // ── Skeleton loader ────────────────────────────────────────────────
-  if (isLoading) {
-    return (
-      <div className="min-h-screen relative">
-        <div className="pointer-events-none fixed inset-0 overflow-hidden -z-10">
-          <div className="absolute -top-32 right-0 w-[420px] h-[420px] bg-gradient-to-bl from-emerald-500/8 via-emerald-500/4 to-transparent rounded-full blur-3xl" />
-        </div>
-        <div className="premium-dashboard-home w-full min-w-0 px-3 sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-5">
-          <div className="premium-dashboard-card p-4 sm:p-6">
-            <div className="flex items-start gap-3">
-              <div className="h-11 w-11 rounded-xl bg-white/5 animate-pulse shrink-0" />
-              <div className="flex-1 space-y-2.5">
-                <div className="h-3 w-20 bg-white/10 rounded animate-pulse" />
-                <div className="h-7 w-40 bg-white/10 rounded-md animate-pulse" />
-                <div className="h-3 w-56 bg-white/5 rounded animate-pulse" />
-              </div>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 xl:grid-cols-4 gap-2.5 sm:gap-3">
-            {[...Array(4)].map((_, i) => (
-              <div key={i} className="premium-dashboard-card p-3.5 sm:p-4">
-                <div className="flex items-center gap-2 mb-3">
-                  <div className="h-7 w-7 bg-white/5 rounded-lg animate-pulse" />
-                  <div className="h-3 w-14 bg-white/5 rounded animate-pulse" />
-                </div>
-                <div className="h-6 w-16 bg-white/5 rounded animate-pulse mb-2" />
-                <div className="h-2.5 w-20 bg-white/5 rounded animate-pulse" />
-              </div>
-            ))}
-          </div>
-          <div className="grid grid-cols-1 xl:grid-cols-3 gap-3 sm:gap-4">
-            <div className="lg:col-span-2 premium-dashboard-card p-4 sm:p-5">
-              <div className="h-4 w-36 bg-white/5 rounded animate-pulse mb-4" />
-              <div className="h-[200px] sm:h-[220px] bg-white/[0.03] rounded-xl animate-pulse" />
-            </div>
-            <div className="premium-dashboard-card p-4 sm:p-5">
-              <div className="h-4 w-28 bg-white/5 rounded animate-pulse mb-4" />
-              <div className="h-[160px] sm:h-[180px] bg-white/[0.03] rounded-xl animate-pulse mx-auto max-w-[180px]" />
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  const firstName = user?.name?.split(' ')[0] || user?.name || 'there';
+  const account = user?.name ? user : knownUser;
+  const firstName = account?.name?.split(' ')[0] || account?.name || '';
+  const waiting = isLoading && !stats;
   const greeting = (() => {
     const h = new Date().getHours();
     if (h < 12) return 'Good morning';
@@ -351,30 +334,25 @@ export default function Dashboard() {
 
   const totalDistribution = orderDistributionData.reduce((s, d) => s + d.value, 0);
 
+  if (waiting) {
+    return <PageLoader />;
+  }
+
   const softCard = "premium-dashboard-card";
   const statIconBox = "premium-dashboard-stat-icon";
 
-  const userInitials = user?.name
-    ? user.name.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2)
-    : 'U';
+  const userInitials = account?.name
+    ? account.name.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2)
+    : '';
 
   return (
     <div className="min-h-screen relative">
-      <div className="pointer-events-none fixed inset-0 overflow-hidden -z-10">
-        <div className="absolute -top-32 right-0 w-[420px] h-[420px] bg-gradient-to-bl from-emerald-500/8 via-emerald-500/4 to-transparent rounded-full blur-3xl" />
-        <div className="absolute bottom-0 -left-24 w-80 h-80 bg-gradient-to-tr from-emerald-600/5 to-transparent rounded-full blur-3xl" />
-      </div>
-
       <div className="premium-dashboard-home w-full min-w-0 px-3 sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-5">
 
         {/* ════════════════════════════════════════════════════════════════
             WELCOME BANNER
         ════════════════════════════════════════════════════════════════ */}
         <div className="premium-dashboard-welcome">
-          <div className="absolute inset-0 pointer-events-none overflow-hidden">
-            <div className="absolute -right-16 -top-16 w-72 h-72 bg-gradient-to-br from-emerald-500/10 via-emerald-500/5 to-transparent rounded-full blur-3xl" />
-          </div>
-
           <div className="relative p-4 sm:p-6">
             <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
               <div className="flex items-start gap-3 sm:gap-4 min-w-0 flex-1">
@@ -382,14 +360,16 @@ export default function Dashboard() {
                   {userInitials}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="text-[10px] sm:text-[11px] premium-greeting-label tracking-widest uppercase mb-0.5">
-                    {greeting}
-                  </p>
+                  {firstName ? (
+                    <p className="text-[10px] sm:text-[11px] premium-greeting-label tracking-widest uppercase mb-0.5">
+                      {greeting}
+                    </p>
+                  ) : null}
                   <p className="text-xl sm:text-2xl lg:text-3xl font-bold tracking-tight premium-dashboard-title">
-                    {firstName}
+                    {firstName || greeting}
                   </p>
                   <p className="premium-dashboard-subtitle mt-1 text-xs sm:text-sm">
-                    {stats?.activeServices ? (
+                    {waiting ? '\u00a0' : stats?.activeServices ? (
                       <>
                         <span className="font-medium text-foreground">{stats.activeServices}</span> active service{stats.activeServices !== 1 ? 's' : ''}
                         {(stats?.pendingOrders || 0) > 0 && (
@@ -465,7 +445,7 @@ export default function Dashboard() {
                 </div>
                 <p className="premium-dashboard-stat-label">Orders</p>
               </div>
-              <p className="premium-dashboard-stat-value">{stats?.totalOrders || 0}</p>
+              <p className="premium-dashboard-stat-value">{waiting ? '—' : (stats?.totalOrders || 0)}</p>
               <p className="premium-dashboard-stat-sub">All time</p>
             </CardContent>
           </Card>
@@ -479,7 +459,7 @@ export default function Dashboard() {
                 <p className="premium-dashboard-stat-label">Active</p>
               </div>
               <div className="flex items-baseline gap-2">
-                <p className="premium-dashboard-stat-value">{stats?.activeServices || 0}</p>
+                <p className="premium-dashboard-stat-value">{waiting ? '—' : (stats?.activeServices || 0)}</p>
                 {(stats?.activeServices || 0) > 0 && (
                   <span className={cn("inline-flex items-center gap-1 text-[9px] font-semibold px-1.5 py-0.5 rounded-full premium-badge", premiumBadge.success)}>
                     <span className="relative flex h-1.5 w-1.5">
@@ -502,7 +482,7 @@ export default function Dashboard() {
                 </div>
                 <p className="premium-dashboard-stat-label">Spent</p>
               </div>
-              <p className="premium-dashboard-stat-value">{formatCurrency(stats?.totalSpent || 0)}</p>
+              <p className="premium-dashboard-stat-value">{waiting ? '—' : formatCurrency(stats?.totalSpent || 0)}</p>
               <div className="flex items-center gap-1 mt-1 flex-wrap">
                 {spendingTrend !== 0 ? (
                   <span className={cn(
@@ -566,7 +546,7 @@ export default function Dashboard() {
               </div>
             </CardHeader>
             <CardContent className="pt-1 pb-3 px-2 sm:px-4">
-              {spendingChartData.length > 0 && spendingChartData.some(d => d.amount > 0) ? (
+              {!waiting && spendingChartData.length > 0 && spendingChartData.some(d => d.amount > 0) ? (
                 <ResponsiveContainer width="100%" height={220}>
                   <AreaChart data={spendingChartData} margin={{ top: 5, right: 10, left: -15, bottom: 0 }}>
                     <defs>
@@ -600,7 +580,7 @@ export default function Dashboard() {
                     />
                   </AreaChart>
                 </ResponsiveContainer>
-              ) : (
+              ) : waiting ? null : (
                 <div className="h-[220px] flex flex-col items-center justify-center premium-dashboard-subtitle">
                   <TrendingUp className="h-8 w-8 mb-2 opacity-50 text-emerald-600 dark:text-emerald-400" />
                   <p className="text-xs">No spending data yet</p>
@@ -671,7 +651,7 @@ export default function Dashboard() {
                     ))}
                   </div>
                 </div>
-              ) : (
+              ) : waiting ? null : (
                 <div className="h-[200px] flex flex-col items-center justify-center premium-dashboard-subtitle">
                   <Package className="h-8 w-8 mb-2 opacity-50 text-amber-600 dark:text-amber-400" />
                   <p className="text-xs">No orders yet</p>
@@ -753,7 +733,7 @@ export default function Dashboard() {
                       </Link>
                     ))}
                   </div>
-                ) : (
+                ) : waiting ? null : (
                   <div className="text-center py-10 sm:py-12">
                     <div className="h-12 w-12 rounded-2xl bg-emerald-500/15 border border-emerald-400/25 flex items-center justify-center mx-auto mb-3 shadow-sm">
                       <Package className="h-5 w-5 text-emerald-300" />
@@ -786,15 +766,15 @@ export default function Dashboard() {
               <CardContent className="pt-0 px-4 sm:px-5 pb-4">
                 <dl className="premium-account-facts">
                   {[
-                    { label: 'Name', value: user?.name },
-                    { label: 'Email', value: user?.email },
+                    { label: 'Name', value: account?.name || '' },
+                    { label: 'Email', value: account?.email || '' },
                     {
                       label: 'Member since',
-                      value: user?.createdAt
-                        ? new Date(user.createdAt).toLocaleDateString('en-IN', { year: 'numeric', month: 'short' })
-                        : 'N/A',
+                      value: account?.createdAt
+                        ? new Date(account.createdAt).toLocaleDateString('en-IN', { year: 'numeric', month: 'short' })
+                        : '',
                     },
-                  ].map((row) => (
+                  ].filter((row) => row.value).map((row) => (
                     <div key={row.label} className="premium-account-fact">
                       <dt className="premium-dashboard-stat-label">{row.label}</dt>
                       <dd className="text-xs sm:text-sm font-medium text-foreground truncate">{row.value}</dd>

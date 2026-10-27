@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useState, Suspense, useMemo, memo, useCallback, useRef } from "react";
+import { useEffect, useLayoutEffect, useState, Suspense, useMemo, memo, useCallback, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { dashboardFetch } from '@/lib/dashboardFetch';
+import { fetchCurrentUser } from '@/lib/currentUserRequest';
+import { PlanListSkeleton } from '@/components/dashboard/DashboardPageSkeleton';
 import {
   readDashboardCache,
   writeDashboardCache,
@@ -115,6 +117,20 @@ declare global {
 
 /** Catalog paints from Mongo. Provider sync runs only when the user hits Refresh. */
 const LIVE_SYNC_TIMEOUT_MS = 12_000;
+const ipStockRequests = new Map<string, Promise<{ ok: boolean; status: number; data: unknown }>>();
+
+function fetchIpStockCatalog(url: string) {
+  const existing = ipStockRequests.get(url);
+  if (existing) return existing;
+  const request = dashboardFetch(url, { cache: 'no-store' })
+    .then(async (res) => ({ ok: res.ok, status: res.status, data: await res.json() }))
+    .finally(() => {
+      ipStockRequests.delete(url);
+    });
+  ipStockRequests.set(url, request);
+  return request;
+}
+
 const LIVE_STOCK_SYNC_ENDPOINTS = [
   '/api/advps/refresh-stock',
   '/api/reseller-panel/refresh-stock',
@@ -517,6 +533,70 @@ function isServerPlanRowVisible(stock: IPStock, categoryTab: string) {
 
 const PLAN_ROW_ACTION = 'h-10 px-3 shrink-0';
 
+function nexaGroupKey(stock: IPStock): string | null {
+  const tags = (stock.tags || []).map((tag) => String(tag).toLowerCase());
+  const nexa = stock.defaultConfigurations?.nexa;
+  const isNexa = tags.includes('nexa') || nexa?.planId || nexa?.poolId;
+  if (!isNexa) return null;
+  if (nexa?.planId != null && String(nexa.planId) !== '') return `plan:${nexa.planId}`;
+  const parts = String(stock.name || '').split(' — ');
+  if (parts.length > 1) return `name:${parts.slice(0, -1).join(' — ').trim().toLowerCase()}`;
+  return null;
+}
+
+function nexaPlanLabel(stock: IPStock) {
+  const parts = String(stock.name || '').split(' — ');
+  return parts.length > 1 ? parts.slice(0, -1).join(' — ').trim() : stock.name;
+}
+
+function nexaSubnetLabel(stock: IPStock) {
+  const subnet = String(stock.defaultConfigurations?.nexa?.subnet || '').trim();
+  if (subnet) return subnet;
+  const parts = String(stock.name || '').split(' — ');
+  return parts.length > 1 ? parts[parts.length - 1].trim() : stock.name;
+}
+
+function stockStartingPrice(stock: IPStock) {
+  const prices = Object.values(stock.memoryOptions || {})
+    .map((option) => Number(option?.price) || 0)
+    .filter((price) => price > 0);
+  return prices.length ? Math.min(...prices) : 0;
+}
+
+type ProxyCatalogRow =
+  | { kind: 'stock'; stock: IPStock }
+  | { kind: 'nexa'; key: string; planName: string; stocks: IPStock[] };
+
+function groupProxyCatalogRows(stocks: IPStock[]): ProxyCatalogRow[] {
+  const byPlan = new Map<string, IPStock[]>();
+  for (const stock of stocks) {
+    const key = nexaGroupKey(stock);
+    if (!key) continue;
+    const list = byPlan.get(key) || [];
+    list.push(stock);
+    byPlan.set(key, list);
+  }
+  const emitted = new Set<string>();
+  const rows: ProxyCatalogRow[] = [];
+  for (const stock of stocks) {
+    const key = nexaGroupKey(stock);
+    const siblings = key ? byPlan.get(key) || [] : [];
+    if (!key || siblings.length < 2) {
+      rows.push({ kind: 'stock', stock });
+      continue;
+    }
+    if (emitted.has(key)) continue;
+    emitted.add(key);
+    rows.push({
+      kind: 'nexa',
+      key,
+      planName: nexaPlanLabel(siblings[0]),
+      stocks: [...siblings].sort((a, b) => nexaSubnetLabel(a).localeCompare(nexaSubnetLabel(b))),
+    });
+  }
+  return rows;
+}
+
 /** HTTP proxy IPStock (Netbay Applications) — show with Slot IP under Premium IP Proxies. */
 function isPremiumProxyPlan(stock: IPStock) {
   const server = String(stock.serverType || '').toLowerCase();
@@ -674,7 +754,7 @@ function groupStocksByTags(stocks: IPStock[]) {
 
 export default function IPStockPage() {
   return (
-    <Suspense>
+    <Suspense fallback={<PlanListSkeleton />}>
       <IPStockContent />
     </Suspense>
   );
@@ -737,9 +817,8 @@ function IPStockContent() {
       setIsReseller(true);
       return;
     }
-    dashboardFetch('/api/users/me', { cache: 'no-store' })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((u) => { if (u?.userType === 'reseller') setIsReseller(true); })
+    fetchCurrentUser()
+      .then(({ ok, data }) => { if (ok && data?.userType === 'reseller') setIsReseller(true); })
       .catch(() => { /* ignore */ });
   }, []);
 
@@ -801,32 +880,40 @@ function IPStockContent() {
       setTrialPackages(trialRows);
     };
 
-    const fetchFullCatalog = async (signal?: AbortSignal) => {
-      const [ipRes, slotRes, trialRes] = await Promise.all([
-        dashboardFetch("/api/ipstock", { cache: "no-store", signal }),
-        dashboardFetch("/api/slot-ips?view=customer", { cache: "no-store", signal }),
-        dashboardFetch("/api/trial-vps", { cache: "no-store", signal }),
-      ]);
+    const fetchFullCatalog = async (signal?: AbortSignal, fresh = false) => {
+      const ipUrl = fresh ? "/api/ipstock?fresh=1" : "/api/ipstock";
+      const ipResult = await fetchIpStockCatalog(ipUrl);
+      const ipRows = parseIpStockRows(ipResult.data);
 
-      const ipData = await ipRes.json();
-      const slotData = await slotRes.json();
-      const trialData = await trialRes.json();
-      const ipRows = parseIpStockRows(ipData);
-
-      if (!ipRes.ok) {
-        console.warn("[IP Stock] /api/ipstock HTTP", ipRes.status, ipData);
+      if (!ipResult.ok) {
+        console.warn("[IP Stock] /api/ipstock HTTP", ipResult.status, ipResult.data);
       }
 
+      if (!signal?.aborted) {
+        writeDashboardCache(DASHBOARD_CACHE_KEYS.ipStock, ipRows);
+        setIpStocks(ipRows);
+        setIsLoading(false);
+      }
+
+      const [slotData, trialData] = await Promise.all([
+        dashboardFetch("/api/slot-ips?view=customer", { cache: "no-store", signal })
+          .then((res) => res.json())
+          .catch(() => []),
+        dashboardFetch("/api/trial-vps", { cache: "no-store", signal })
+          .then((res) => res.json())
+          .catch(() => []),
+      ]);
+      if (signal?.aborted) return ipResult.ok;
+
       applyCatalogPayload(ipRows, slotData, trialData);
-      return ipRes.ok;
+      return ipResult.ok;
     };
 
     const reloadIpStocks = async (signal?: AbortSignal) => {
       if (signal?.aborted) return;
-      const ipRes = await dashboardFetch("/api/ipstock", { cache: "no-store", signal });
-      if (!ipRes.ok || signal?.aborted) return;
-      const ipData = await ipRes.json();
-      const rows = parseIpStockRows(ipData);
+      const ipResult = await fetchIpStockCatalog("/api/ipstock?fresh=1");
+      if (!ipResult.ok || signal?.aborted) return;
+      const rows = parseIpStockRows(ipResult.data);
       writeDashboardCache(DASHBOARD_CACHE_KEYS.ipStock, rows);
       setIpStocks(rows);
     };
@@ -898,7 +985,7 @@ function IPStockContent() {
       await syncLiveStock(ac.signal, generation);
       if (!ac.signal.aborted) {
         try {
-          await fetchFullCatalog(ac.signal);
+          await fetchFullCatalog(ac.signal, true);
         } catch (e) {
           console.warn("[IP Stock] catalog reload after sync failed", e);
         }
@@ -935,10 +1022,11 @@ function IPStockContent() {
 
   // Paint from the database. Provider stock sync stays on the Refresh button
   // and the server cron — running it on every visit stalled the whole site.
-  useEffect(() => {
-    const cachedStocks = readDashboardCache(DASHBOARD_CACHE_KEYS.ipStock) as IPStock[] | null;
-    const cachedSlots = readDashboardCache(DASHBOARD_CACHE_KEYS.slotIps) as SlotIPPackage[] | null;
-    const cachedTrials = readDashboardCache(DASHBOARD_CACHE_KEYS.trialVps) as TrialVpsPackage[] | null;
+  useLayoutEffect(() => {
+    const cacheFor = 24 * 60 * 60 * 1000;
+    const cachedStocks = readDashboardCache(DASHBOARD_CACHE_KEYS.ipStock, cacheFor) as IPStock[] | null;
+    const cachedSlots = readDashboardCache(DASHBOARD_CACHE_KEYS.slotIps, cacheFor) as SlotIPPackage[] | null;
+    const cachedTrials = readDashboardCache(DASHBOARD_CACHE_KEYS.trialVps, cacheFor) as TrialVpsPackage[] | null;
     const hasCache = Array.isArray(cachedStocks) && cachedStocks.length > 0;
 
     if (hasCache) {
@@ -1028,6 +1116,11 @@ function IPStockContent() {
     [filteredIpStocks]
   );
 
+  const proxyCatalogRows = useMemo(
+    () => groupProxyCatalogRows(proxyIpStocks),
+    [proxyIpStocks]
+  );
+
   const serverIpStocks = useMemo(
     () => filteredIpStocks.filter((stock) => !isPremiumProxyPlan(stock)),
     [filteredIpStocks]
@@ -1055,7 +1148,9 @@ function IPStockContent() {
     const vps = visibleStocks.filter(
       (stock) => matchesCategoryTab(stock, 'VPS') && isServerPlanRowVisible(stock, 'VPS')
     ).length;
-    const proxyPlans = visibleStocks.filter((stock) => isPremiumProxyPlan(stock)).length;
+    const proxyPlans = groupProxyCatalogRows(
+      visibleStocks.filter((stock) => isPremiumProxyPlan(stock))
+    ).length;
     const slot = slotPackages.length + proxyPlans;
     const trial = trialPackages.length;
     const listableServerAll = visibleStocks.filter(
@@ -1805,10 +1900,7 @@ function IPStockContent() {
 
       <div className="w-full max-w-[96rem] mx-auto px-3 sm:px-6 lg:px-8 py-3 sm:py-4 min-w-0 box-border">
         {isLoading ? (
-          <div className="flex flex-col items-center justify-center py-16">
-            <Loader2 className="h-8 w-8 animate-spin text-emerald-400 mb-4" />
-            <p className="premium-dashboard-subtitle">Loading server plans...</p>
-          </div>
+          <PlanListSkeleton />
         ) : (
           <div>
             {/* Category tabs — scroll on phone, grid on large screens */}
@@ -1987,7 +2079,7 @@ function IPStockContent() {
                     <div className="w-1 h-6 bg-orange-500 rounded-full"></div>
                     <h2 className="text-base sm:text-lg font-semibold leading-snug premium-dashboard-title">Premium IP Proxies</h2>
                     <Badge variant="outline" className="text-[10px] premium-badge premium-badge--warning h-5 px-2">
-                      {slotPackages.length + proxyIpStocks.length} {(slotPackages.length + proxyIpStocks.length) === 1 ? 'package' : 'packages'}
+                      {slotPackages.length + proxyCatalogRows.length} {(slotPackages.length + proxyCatalogRows.length) === 1 ? 'package' : 'packages'}
                     </Badge>
                   </div>
                   <div className="space-y-2">
@@ -2073,14 +2165,24 @@ function IPStockContent() {
                         </div>
                       </div>
                     ))}
-                    {proxyIpStocks.map((stock) => (
-                      <CompactServerPlanRow
-                        key={stock._id}
-                        stock={stock}
-                        categoryTab={activeTab}
-                        onBuyNow={handleBuyNow}
-                        verifyingPurchaseKey={verifyingPurchaseKey}
-                      />
+                    {proxyCatalogRows.map((row) => (
+                      row.kind === 'nexa' ? (
+                        <NexaPlanGroupRow
+                          key={row.key}
+                          planName={row.planName}
+                          stocks={row.stocks}
+                          onBuyNow={handleBuyNow}
+                          verifyingPurchaseKey={verifyingPurchaseKey}
+                        />
+                      ) : (
+                        <CompactServerPlanRow
+                          key={row.stock._id}
+                          stock={row.stock}
+                          categoryTab={activeTab}
+                          onBuyNow={handleBuyNow}
+                          verifyingPurchaseKey={verifyingPurchaseKey}
+                        />
+                      )
                     ))}
                   </div>
                 </div>
@@ -2740,6 +2842,183 @@ const TrialVpsPlanRow = memo(function TrialVpsPlanRow({
                 </Button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+});
+
+const NexaPlanGroupRow = memo(function NexaPlanGroupRow({
+  planName,
+  stocks,
+  onBuyNow,
+  verifyingPurchaseKey,
+}: {
+  planName: string;
+  stocks: IPStock[];
+  onBuyNow: (name: string, memory: string, price: number, id: string, slotIpPackageId?: string, stockAvailable?: boolean, netbayGroupTag?: string) => void | Promise<void>;
+  verifyingPurchaseKey?: string | null;
+}) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const rows = stocks.map((stock) => {
+    const memory = Object.keys(stock.memoryOptions || {}).find((key) => Number(stock.memoryOptions[key]?.price) > 0) || 'IP';
+    const price = Number(stock.memoryOptions?.[memory]?.price) || stockStartingPrice(stock);
+    return {
+      stock,
+      memory,
+      price,
+      label: nexaSubnetLabel(stock),
+      inStock: price > 0 && isStockPurchasable(stock, memory),
+    };
+  });
+  const openRows = rows.filter((row) => row.inStock);
+  const inStock = openRows.length > 0;
+  const priced = rows.map((row) => row.price).filter((price) => price > 0);
+  const startingPrice = priced.length ? Math.min(...priced) : 0;
+  const primary = openRows[0] || rows[0];
+  const primaryVerifyKey = primary ? `${primary.stock._id}:${primary.memory}:` : null;
+
+  return (
+    <div className={cn(
+      "premium-dashboard-card rounded-lg transition-all overflow-hidden border-l-4",
+      inStock
+        ? "border-l-emerald-400 hover:border-emerald-400/40"
+        : "border-l-red-500 premium-ipstock-row-sold-out"
+    )}>
+      <div
+        className={cn(
+          "p-3 grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_auto] gap-2.5 sm:gap-3 sm:items-center",
+          inStock ? "cursor-pointer" : "cursor-default"
+        )}
+        onClick={() => inStock && setIsExpanded(!isExpanded)}
+      >
+        <div className="flex items-start gap-2.5 min-w-0 flex-1 sm:gap-3">
+          <div className={cn('premium-ipstock-plan-icon flex-shrink-0', !inStock && 'premium-ipstock-plan-icon--muted')} data-server-type="Proxy">
+            {inStock ? <Zap className="h-4 w-4" aria-hidden /> : <XCircle className="h-4 w-4" aria-hidden />}
+          </div>
+          <div className="flex-1 min-w-0">
+            <h3 className={cn(
+              "font-semibold text-sm md:text-base min-w-0",
+              inStock ? "premium-dashboard-title break-words sm:truncate" : "premium-dashboard-subtitle line-through"
+            )}>
+              {planName}
+            </h3>
+            <div className="flex items-center gap-2 flex-wrap mt-1">
+              <Badge variant="outline" className={cn(inStock ? premiumBadge.success : premiumBadge.error, "text-[10px] gap-1 px-2 py-0 h-5 font-semibold")}>
+                {inStock ? <CheckCircle2 className="h-3 w-3" aria-hidden /> : <XCircle className="h-3 w-3" aria-hidden />}
+                {inStock ? `${openRows.length} IP range${openRows.length === 1 ? '' : 's'}` : 'Out of stock'}
+              </Badge>
+            </div>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-3 border-t border-white/10 pt-2.5 sm:border-0 sm:pt-0 sm:justify-end min-w-0">
+          <p className="flex items-baseline gap-1.5 min-w-0 leading-none">
+            <span className="text-xs premium-dashboard-subtitle shrink-0">From</span>
+            <span className={cn("font-bold text-lg truncate premium-price-accent", !inStock && "opacity-60")}>
+              {startingPrice > 0 ? `₹${startingPrice}` : '—'}
+            </span>
+          </p>
+          <div className="flex items-center gap-2 flex-1 sm:flex-none justify-end" onClick={(e) => e.stopPropagation()}>
+            {inStock && primary ? (
+              <>
+                <AddToCartButton
+                  kind="ipstock"
+                  ipStockId={primary.stock._id}
+                  memory={primary.memory}
+                  size="sm"
+                  variant="outline"
+                  iconOnly
+                  className={cn(PLAN_ROW_ACTION, 'w-10 px-0')}
+                  label="Add to cart"
+                />
+                <Button
+                  size="sm"
+                  className={cn(PLAN_ROW_ACTION, 'w-[7.25rem] gap-1.5 premium-btn-primary border-0')}
+                  disabled={verifyingPurchaseKey === primaryVerifyKey}
+                  onClick={() => onBuyNow(primary.stock.name, primary.memory, primary.price, primary.stock._id, undefined, true)}
+                >
+                  {verifyingPurchaseKey === primaryVerifyKey ? <Loader2 className="h-3 w-3 animate-spin" /> : <Zap className="h-3 w-3" aria-hidden />}
+                  Buy Now
+                </Button>
+              </>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => inStock && setIsExpanded(!isExpanded)}
+              disabled={!inStock}
+              aria-expanded={inStock ? isExpanded : undefined}
+              aria-label={isExpanded ? 'Hide IP ranges' : 'Show IP ranges'}
+              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md premium-dashboard-subtitle hover:bg-white/[0.06] disabled:opacity-40"
+            >
+              <ChevronDown className={cn("h-4 w-4 transition-transform", isExpanded && "rotate-180")} aria-hidden />
+            </button>
+          </div>
+        </div>
+      </div>
+      {isExpanded && (
+        <div className="border-t border-white/10 bg-white/[0.02]">
+          <div className="p-3 space-y-2">
+            <p className="text-xs font-medium premium-dashboard-subtitle uppercase tracking-wide">IP ranges</p>
+            {rows.map((row) => {
+              const verifyKey = `${row.stock._id}:${row.memory}:`;
+              return (
+                <div
+                  key={row.stock._id}
+                  className={cn(
+                    "flex flex-col gap-2 p-2.5 rounded-md border transition-colors sm:flex-row sm:items-center sm:justify-between sm:gap-3",
+                    row.inStock
+                      ? "bg-white/[0.04] border-white/10 hover:border-emerald-400/35"
+                      : "bg-white/[0.02] border-red-400/10 opacity-80"
+                  )}
+                >
+                  <div className="flex items-center justify-between gap-2 min-w-0 sm:flex-1">
+                    <span className={cn("text-sm font-medium font-mono tracking-wide truncate", row.inStock ? "premium-dashboard-title" : "premium-dashboard-subtitle")}>
+                      {row.label}
+                    </span>
+                    <span className={cn("font-bold text-base shrink-0 sm:hidden", row.inStock ? "premium-price-accent" : "premium-dashboard-subtitle")}>
+                      {row.price > 0 ? `₹${row.price}` : '—'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 w-full sm:w-auto sm:shrink-0">
+                    <span className={cn("hidden sm:inline font-bold text-base", row.inStock ? "premium-price-accent" : "premium-dashboard-subtitle")}>
+                      {row.price > 0 ? `₹${row.price}` : 'Price N/A'}
+                    </span>
+                    {row.inStock ? (
+                      <>
+                        <AddToCartButton
+                          kind="ipstock"
+                          ipStockId={row.stock._id}
+                          memory={row.memory}
+                          size="sm"
+                          variant="outline"
+                          iconOnly
+                          className={cn(PLAN_ROW_ACTION, 'w-10 px-0')}
+                          label="Add to cart"
+                        />
+                        <Button
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onBuyNow(row.stock.name, row.memory, row.price, row.stock._id, undefined, true);
+                          }}
+                          disabled={verifyingPurchaseKey === verifyKey}
+                          className={cn(PLAN_ROW_ACTION, 'flex-1 sm:flex-none gap-1.5 premium-btn-primary border-0')}
+                        >
+                          {verifyingPurchaseKey === verifyKey ? <Loader2 className="h-3 w-3 animate-spin" /> : <Zap className="h-3 w-3" />}
+                          {verifyingPurchaseKey === verifyKey ? 'Checking…' : 'Buy Now'}
+                        </Button>
+                      </>
+                    ) : (
+                      <span className="premium-ipstock-status-label">
+                        <XCircle className="h-3.5 w-3.5" aria-hidden />
+                        Sold out
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}

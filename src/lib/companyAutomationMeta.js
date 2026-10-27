@@ -5,6 +5,7 @@ const { getCompanyKurohostApiConfig } = require('@/lib/companyKurohostApi');
 const { getCompanyJoyApiConfig } = require('@/lib/companyJoyApi');
 const { getCompanyHostdzireApiConfig } = require('@/lib/companyHostdzireApi');
 const { getCompanyRackatoApiConfig } = require('@/lib/companyRackatoApi');
+const { getCompanyNexaApiConfig } = require('@/lib/companyNexaApi');
 
 function providerUsableForOrder(provider, order) {
   if (!order) return true;
@@ -85,6 +86,16 @@ function collectCompanyAutomationCandidates(company) {
       enabled: true,
       companyName: company.name,
       label: hostdzire.label || null,
+    });
+  }
+
+  const nexa = getCompanyNexaApiConfig(company);
+  if (nexa) {
+    out.push({
+      provider: 'nexa',
+      enabled: true,
+      companyName: company.name,
+      label: nexa.label || null,
     });
   }
 

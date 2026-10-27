@@ -79,13 +79,15 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
   useEffect(() => {
     if (user?.userType === 'reseller' || user?.userType === 'admin') return;
     let cancelled = false;
-    fetchCart()
-      .then((snap) => { if (!cancelled) setCartCount(snap.itemCount || 0); })
-      .catch(() => { /* unauthenticated — ignore */ });
+    const timer = window.setTimeout(() => {
+      fetchCart()
+        .then((snap) => { if (!cancelled) setCartCount(snap.itemCount || 0); })
+        .catch(() => { /* unauthenticated — ignore */ });
+    }, 1500);
     const unsub = subscribeCart((snap: CartSnapshot | null) => {
       if (snap) setCartCount(snap.itemCount || 0);
     });
-    return () => { cancelled = true; unsub(); };
+    return () => { cancelled = true; window.clearTimeout(timer); unsub(); };
   }, [user?.userType]);
 
   const fetchTicketUnreadCount = React.useCallback(async () => {
@@ -104,8 +106,13 @@ const ResponsiveSidebar = ({ user }: { user?: any }) => {
 
   useEffect(() => {
     if (!user) return;
-    fetchTicketUnreadCount();
-  }, [user, pathname, fetchTicketUnreadCount]);
+    const timer = window.setTimeout(fetchTicketUnreadCount, 1500);
+    const interval = window.setInterval(fetchTicketUnreadCount, 60000);
+    return () => {
+      window.clearTimeout(timer);
+      window.clearInterval(interval);
+    };
+  }, [user, fetchTicketUnreadCount]);
 
   useEffect(() => {
     if (!user) return;

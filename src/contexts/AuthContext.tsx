@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { useSessionAlert } from '@/components/session-alert';
 import { redirectToLogin } from '@/lib/redirectToLogin';
 import { clearDashboardCache } from '@/lib/dashboardCache';
+import { fetchCurrentUser } from '@/lib/currentUserRequest';
 
 // Define a type for the user state
 type User = {
@@ -43,21 +44,17 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     const fetchUser = useCallback(async () => {
         try {
             setIsLoading(true);
-            const res = await fetch('/api/users/me', {
-                credentials: 'include'
-            });
-            
-            if (res.ok) {
-                const userData = await res.json();
+            const { ok, status, data: userData } = await fetchCurrentUser();
+
+            if (ok) {
                 setUser(userData);
                 return;
             }
 
-            // Handle different error statuses
-            const errorData = await res.json().catch(() => ({}));
+            const errorData = userData || {};
             const errorCode = errorData.code || '';
-            
-            if (res.status === 401) {
+
+            if (status === 401) {
                 // Don't redirect or show alert if already on login page
                 if (pathname === '/login' || pathname === '/signup') {
                     setUser(null);
@@ -118,25 +115,25 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 
     useEffect(() => {
         fetchUser();
-    }, [fetchUser]);
+        // Session check runs once. Route changes must not hit /api/users/me again.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     // Periodic token check (every 5 minutes)
     useEffect(() => {
         const checkInterval = setInterval(() => {
-            if (user) {
-                // Silently check if session is still valid
-                fetch('/api/users/me', { credentials: 'include' })
-                    .then(res => {
-                        if (res.status === 401) {
-                            showAlert('session_expired');
-                            setUser(null);
-                        }
-                    })
-                    .catch(() => {
-                        // Ignore network errors in background check
-                    });
-            }
-        }, 5 * 60 * 1000); // 5 minutes
+            if (!user) return;
+            fetchCurrentUser()
+                .then(({ status }) => {
+                    if (status === 401) {
+                        showAlert('session_expired');
+                        setUser(null);
+                    }
+                })
+                .catch(() => {
+                    // Ignore network errors in background check
+                });
+        }, 5 * 60 * 1000);
 
         return () => clearInterval(checkInterval);
     }, [user, showAlert]);

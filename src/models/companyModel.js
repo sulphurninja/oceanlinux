@@ -131,6 +131,18 @@ const companyRackatoApiSchema = new mongoose.Schema({
   discountPercent: { type: Number, default: 40 },
 }, { _id: false });
 
+/**
+ * Nexa Dedicated IP API (https://nexahostvps.com/api/v1/dedicated-ips).
+ * Header X-API-Key. Plans, instant order, and control (start/stop/reboot/
+ * reinstall/credentials) for diamond and standard dedicated IPs.
+ */
+const companyNexaApiSchema = new mongoose.Schema({
+  enabled: { type: Boolean, default: false },
+  label: { type: String, default: '' },
+  baseUrl: { type: String, default: '' },
+  apiKey: { type: String, default: '' },
+}, { _id: false });
+
 const companyHostdzireApiSchema = new mongoose.Schema({
   enabled: { type: Boolean, default: false },
   label: { type: String, default: '' },
@@ -156,6 +168,7 @@ const companySchema = new mongoose.Schema({
   joyApi: { type: companyJoyApiSchema, default: null },
   hostdzireApi: { type: companyHostdzireApiSchema, default: null },
   rackatoApi: { type: companyRackatoApiSchema, default: null },
+  nexaApi: { type: companyNexaApiSchema, default: null },
   /** Company portal: merge duplicate inventory IPs instead of blocking; can remove sold rows. */
   portalInventoryFullAccess: { type: Boolean, default: false },
 }, { timestamps: true });
@@ -174,6 +187,7 @@ if (
     !mongoose.models.Company.schema.paths['joyApi.apiToken'] ||
     !mongoose.models.Company.schema.paths['hostdzireApi.apiKey'] ||
     !mongoose.models.Company.schema.paths['rackatoApi.keyId'] ||
+    !mongoose.models.Company.schema.paths['nexaApi.apiKey'] ||
     !mongoose.models.Company.schema.paths['resellerApi.useLiveStockApi'])
 ) {
   delete mongoose.models.Company;

@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useMemo } from 'react';
+import PageLoader from '@/components/dashboard/DashboardPageSkeleton';
 import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -236,7 +237,7 @@ export default function ResellerWalletPage() {
         [],
     );
 
-    useEffect(() => {
+    useLayoutEffect(() => {
         const cached = readDashboardCache(DASHBOARD_CACHE_KEYS.resellerInfo) as ResellerInfo | null;
         if (cached) {
             setData(cached);
@@ -377,7 +378,15 @@ export default function ResellerWalletPage() {
 
     const fetchWalletData = async (silent = false) => {
         try {
-            if (!silent) setLoading(true);
+            if (!silent) {
+                const liteRes = await dashboardFetch('/api/user/reseller-info?lite=1');
+                const liteBody = await liteRes.json();
+                if (liteBody.success) {
+                    setData((current) => current || liteBody.data);
+                    setLoading(false);
+                }
+            }
+
             const res = await dashboardFetch('/api/user/reseller-info');
             const responseData = await res.json();
 
@@ -450,22 +459,7 @@ export default function ResellerWalletPage() {
     };
 
     if (loading) {
-        return (
-            <div className="premium-dashboard-page">
-                <div className="premium-dashboard-page-inner space-y-5">
-                    <div className="premium-reseller-hero h-48 animate-pulse" />
-                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                        {[0, 1, 2, 3].map((i) => (
-                            <div key={i} className="premium-dashboard-card h-24 animate-pulse" />
-                        ))}
-                    </div>
-                    <div className="flex items-center justify-center gap-2 py-6 text-sm premium-dashboard-subtitle">
-                        <Loader2 className="h-4 w-4 animate-spin text-emerald-600 dark:text-emerald-400" />
-                        Loading reseller console…
-                    </div>
-                </div>
-            </div>
-        );
+        return <PageLoader />;
     }
 
     if (!data) {

@@ -24,8 +24,18 @@ function resolveNetbayGroupTag(stock, requested) {
   return String(netbayCfgFromStock(stock).groupTag || '').trim();
 }
 
+/** Nexa dedicated-IP plans are also serverType Proxy. They are not Netbay products. */
+function isNexaDedicatedIpStock(stock) {
+  if (!stock) return false;
+  const tags = Array.isArray(stock.tags) ? stock.tags : [];
+  if (tags.some((tag) => String(tag).toLowerCase() === 'nexa')) return true;
+  const nexa = stock.defaultConfigurations?.get?.('nexa') || stock.defaultConfigurations?.nexa;
+  return !!(nexa && (nexa.planId || nexa.poolId));
+}
+
 /** HTTP proxy Applications product (Netbay GET/POST /api/v1/proxy/*). */
 function isNetbayProxyStock(stock) {
+  if (isNexaDedicatedIpStock(stock)) return false;
   const cfg = netbayCfgFromStock(stock);
   const type = String(cfg.productType || '').toLowerCase();
   const tmpl = String(cfg.proxyTemplate || '').toUpperCase();
@@ -102,6 +112,7 @@ module.exports = {
   netbayCfgFromStock,
   listNetbayGroupTags,
   resolveNetbayGroupTag,
+  isNexaDedicatedIpStock,
   isNetbayProxyStock,
   isNetbayProxyOrder,
   resolveNetbayCouponProductKind,

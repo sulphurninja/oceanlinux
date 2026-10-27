@@ -1,5 +1,9 @@
 // v2: older cookies were issued with password only. They no longer open the panel.
-const GATE_SALT = 'oceanlinux-admin-gate-v2';
+// Local dev uses its own salt so a password-only cookie cannot skip a new authenticator enrollment.
+const GATE_SALT =
+  process.env.NODE_ENV === 'production'
+    ? 'oceanlinux-admin-gate-v2'
+    : 'oceanlinux-admin-gate-v2-local-totp';
 export const ADMIN_GATE_COOKIE = 'admin_gate';
 /** 12 hours */
 export const ADMIN_GATE_MAX_AGE = 60 * 60 * 12;

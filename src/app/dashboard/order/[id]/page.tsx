@@ -109,7 +109,7 @@ interface IPStock {
    *                      (Hostheaven / SomaniOne pattern)
    */
   companyAutomation?: {
-    provider: 'virtualizor' | 'reseller-api' | 'netbay' | 'kurohost' | 'joy';
+    provider: 'virtualizor' | 'reseller-api' | 'netbay' | 'kurohost' | 'joy' | 'hostdzire' | 'rackato' | 'nexa';
     enabled: boolean;
     companyName?: string;
     label?: string;
@@ -209,7 +209,8 @@ interface Order {
   password?: string;
   expiryDate?: Date;
   createdAt?: Date;
-  provider?: 'hostycare' | 'smartvps' | 'oceanlinux' | 'slotip' | 'advps' | 'netbay' | 'kurohost' | 'trialvps';
+  provider?: 'hostycare' | 'smartvps' | 'oceanlinux' | 'slotip' | 'advps' | 'netbay' | 'kurohost' | 'trialvps' | 'nexa';
+  nexaOrderId?: string;
   hostycareServiceId?: string;
   smartvpsServiceId?: string;
   advpsServiceId?: string;
@@ -484,6 +485,7 @@ const OrderDetails = () => {
   const isPowerActionBusy = (busy: string | null) => !!busy && POWER_ACTIONS.has(busy);
   const [powerStateLoading, setPowerStateLoading] = useState(false);
   const powerFetchInFlight = useRef(false);
+  const lastSyncCredentials = useRef(false);
 
   // Payment method for renewals
   const paymentConfig = usePaymentConfig();
@@ -688,6 +690,7 @@ const OrderDetails = () => {
         provider: orderData.provider
       });
       setOrder(orderData);
+      if (!opts?.silent) setLoading(false);
 
       // Fetch IPStock data if ipStockId exists
       if (orderData.ipStockId) {
@@ -1058,6 +1061,9 @@ const OrderDetails = () => {
     if (provider === 'advps' && order.advpsServiceId) return true;
     if (provider === 'netbay' && order.netbayServiceId) return true;
     if (provider === 'kurohost' && order.kurohostInstanceId) return true;
+    if ((order.provider === 'nexa' || hasCompanyNexaAutomation(ipStock)) && (order.nexaOrderId || order.ipAddress)) {
+      return true;
+    }
 
     // Fall back to per-company automation (Virtualizor or reseller HTTP API).
     // This kicks in for:
@@ -1113,6 +1119,14 @@ const OrderDetails = () => {
     return !!(stock?.companyAutomation?.enabled && stock?.companyAutomation?.provider === 'hostdzire');
   };
 
+  const hasCompanyNexaAutomation = (stock: IPStock | null): boolean => {
+    return !!(stock?.companyAutomation?.enabled && stock?.companyAutomation?.provider === 'nexa');
+  };
+
+  const hasCompanyRackatoAutomation = (stock: IPStock | null): boolean => {
+    return !!(stock?.companyAutomation?.enabled && stock?.companyAutomation?.provider === 'rackato');
+  };
+
   /**
    * True when the order's company has ANY automation configured (Virtualizor,
    * reseller API, or Netbay). Use this anywhere the difference between the
@@ -1125,7 +1139,9 @@ const OrderDetails = () => {
       hasCompanyNetbayAutomation(stock) ||
       hasCompanyJoyAutomation(stock) ||
       hasCompanyKurohostAutomation(stock) ||
-      hasCompanyHostdzireAutomation(stock)
+      hasCompanyHostdzireAutomation(stock) ||
+      hasCompanyRackatoAutomation(stock) ||
+      hasCompanyNexaAutomation(stock)
     );
   };
 
@@ -1184,19 +1200,25 @@ const OrderDetails = () => {
     if (powerStatus === 'online' || powerStatus === 'on') return 'running';
     if (powerStatus === 'offline' || powerStatus === 'off') return 'stopped';
 
+    const ps = String(data.powerState || '').toLowerCase();
+    if (ps === 'running' || ps === 'stopped' || ps === 'suspended') return ps;
+    // A panel "processing" word is the command, not the machine. Keep polling.
+    if (['busy', 'processing', 'pending', 'starting', 'stopping', 'rebooting', 'reinstalling', 'installing', 'provisioning'].includes(ps)) {
+      return null;
+    }
+
     const raw = String(
-      data.rawStatus || data.status || data.details?.status || ''
+      typeof data.rawStatus === 'string' ? data.rawStatus : data.status || data.details?.status || ''
     ).toLowerCase().trim();
+    if (['processing', 'pending', 'starting', 'stopping', 'rebooting', 'reinstalling', 'installing', 'provisioning', 'busy'].includes(raw)) {
+      return null;
+    }
     if (['online', 'running', 'active', 'started', 'on', 'up'].includes(raw)) return 'running';
     if (['offline', 'stopped', 'inactive', 'off', 'shutdown', 'down'].includes(raw)) return 'stopped';
     if (['suspended', 'paused'].includes(raw)) return 'suspended';
 
-    const ps = data.powerState;
-    // Never persist API "busy" — it can stick while ActionStatus=processing
-    if (ps === 'busy') return null;
-    if (ps === 'running' || ps === 'stopped' || ps === 'suspended') return ps;
     if (ps === 'unknown') return 'unknown';
-    return ps ? (ps as typeof serverPowerState) : null;
+    return null;
   };
 
   const fetchServerPowerState = async (opts?: { force?: boolean }): Promise<typeof serverPowerState | null> => {
@@ -1236,6 +1258,9 @@ const OrderDetails = () => {
       });
       const data = await res.json();
 
+      lastSyncCredentials.current = !!(
+        data.credentialsUpdated || data.syncResult?.credentialsUpdated
+      );
       const nextState = resolvePowerStateFromStatusResponse(data);
       if (nextState) {
         console.log('[ORDER-DETAILS] Server power state:', nextState);
@@ -1253,7 +1278,7 @@ const OrderDetails = () => {
         (Array.isArray(data.syncResult?.changes) && data.syncResult.changes.length > 0)
       ) {
         await fetchOrder({ silent: true });
-        if (provider === 'netbay' && (data.credentialsUpdated || data.syncResult?.credentialsUpdated)) {
+        if (data.syncResult?.changes?.includes('password') || data.syncResult?.changes?.includes('username')) {
           setShowPassword(true);
         }
       } else if (data.syncResult?.expiryUpdated) {
@@ -1506,10 +1531,21 @@ const OrderDetails = () => {
               : 'Reinstall started. Waiting for server to finish…',
             { duration: 4000 }
           );
-          await pollForServerUpdates({
-            expectedTemplateId: payload?.templateId,
-            useOsDialog: false,
-          });
+          if (order.provider === 'nexa') {
+            lastSyncCredentials.current = false;
+            await pollPowerStateAfterAction('restart', provider);
+            for (let i = 0; i < 10 && !lastSyncCredentials.current; i++) {
+              await new Promise((resolve) => setTimeout(resolve, 3000));
+              await fetchServerPowerState({ force: true });
+            }
+          } else if (isOrderCompanyAutomated(order, ipStock)) {
+            await pollPowerStateAfterAction('restart', provider);
+          } else {
+            await pollForServerUpdates({
+              expectedTemplateId: payload?.templateId,
+              useOsDialog: false,
+            });
+          }
         } else if (action === 'generatepassword') {
           const newPass = data.result?.password;
           if (newPass) {
@@ -1660,6 +1696,11 @@ const OrderDetails = () => {
 
     const provider = getProviderFromOrder(order, ipStock);
     const actionLabel = action === 'format' ? 'Format' : 'Reinstall OS';
+    const nexaManaged = order.provider === 'nexa' || hasCompanyNexaAutomation(ipStock);
+    if (nexaManaged && action === 'reinstall') {
+      await runServiceAction('reinstall');
+      return;
+    }
 
     if ((provider === 'smartvps' && action === 'format') ||
       (provider === 'advps' && action === 'format') ||
@@ -2593,7 +2634,8 @@ const OrderDetails = () => {
   const slotIpOnlyOrder = isSlotIpOrder(order);
   const inventoryDetailsOnly = isNonRenewablePackageOrder(order);
   const netbayProxyOrder = isNetbayProxyOrder(order, ipStock);
-  const proxyStyleOrder = slotIpOnlyOrder || netbayProxyOrder || trialProxyOrder;
+  const nexaProxyOrder = order.provider === 'nexa' || hasCompanyNexaAutomation(ipStock);
+  const proxyStyleOrder = slotIpOnlyOrder || netbayProxyOrder || trialProxyOrder || nexaProxyOrder;
   const trialDisplayIp = (order.ipAddress || '').split(':')[0].trim();
   const slotIpConnection = proxyStyleOrder ? parseSlotIpConnection(order) : null;
   const hasConnectionDetails = proxyStyleOrder
@@ -2602,7 +2644,7 @@ const OrderDetails = () => {
       ? !!(trialDisplayIp && order.username)
       : !!(order.ipAddress && order.username);
   const usesLivePowerUi =
-    !proxyStyleOrder &&
+    (!proxyStyleOrder || nexaProxyOrder) &&
     ((trialPanelManage && canManageServer) ||
       provider === 'hostycare' ||
       provider === 'smartvps' ||
@@ -3182,7 +3224,9 @@ const OrderDetails = () => {
                           ? 'HTTP proxy credentials for your trial period'
                           : trialServerOrder
                             ? 'RDP/SSH login — no panel start/stop or renewal'
-                            : proxyStyleOrder
+                            : nexaProxyOrder
+                              ? 'IP, port, username and password for this proxy'
+                              : proxyStyleOrder
                               ? 'Use these credentials to connect to your HTTP proxy'
                               : 'Use these credentials to connect to your server'}
                       </CardDescription>
@@ -3583,7 +3627,7 @@ const OrderDetails = () => {
                 )}
 
                 {/* Netbay proxy — Manage System (visible above fold, left column) */}
-                {netbayProxyOrder && canManageServer && (
+                {netbayProxyOrder && !nexaProxyOrder && canManageServer && (
                   <Card className="border-primary/30 bg-primary/5 hover:shadow-md transition-shadow">
                     <CardHeader className="pb-3">
                       <CardTitle className="flex items-center gap-2 text-base lg:text-lg">
@@ -3960,17 +4004,19 @@ const OrderDetails = () => {
               {/* Right Column - Management & Billing */}
               <div className="space-y-4 lg:space-y-6">
                 {/* Server Management - Only show if provider supports management */}
-                {canManageServer && !netbayProxyOrder ? (
+                {canManageServer && (!netbayProxyOrder || nexaProxyOrder) ? (
                   <Card className="border-border hover:shadow-md transition-shadow">
                     <CardHeader className="pb-3">
                       <CardTitle className="flex items-center gap-2 text-base lg:text-lg">
                         <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
                           <Settings2 className="h-4 w-4 text-primary" />
                         </div>
-                        {netbayProxyOrder ? 'Proxy Management' : 'Server Control'}
+                        {nexaProxyOrder ? 'Manage System' : netbayProxyOrder ? 'Proxy Management' : 'Server Control'}
                       </CardTitle>
                       <CardDescription className="text-xs lg:text-sm">
-                        {netbayProxyOrder
+                        {nexaProxyOrder
+                          ? 'Start, stop, restart and reinstall through the Nexa API'
+                          : netbayProxyOrder
                           ? 'Sync connection details — host, port, username and password'
                           : 'Manage your server\'s power state and configuration'}
                       </CardDescription>
@@ -4003,16 +4049,19 @@ const OrderDetails = () => {
                       ) : (
                       <>
                       {/* Server Power State Indicator */}
-                      {usesLivePowerUi && (
+                      {usesLivePowerUi && (() => {
+                        const powerKnown = serverPowerState === 'running' || serverPowerState === 'stopped' || serverPowerState === 'suspended';
+                        const waiting = (powerStateLoading || isPowerActionBusy(actionBusy)) && !powerKnown;
+                        return (
                         <div className={cn(
                           "flex items-center gap-3 p-3 rounded-lg border transition-colors",
-                          (powerStateLoading || isPowerActionBusy(actionBusy)) && "bg-sky-500/10 border-sky-400/25",
-                          !powerStateLoading && !isPowerActionBusy(actionBusy) && serverPowerState === 'running' && "bg-emerald-500/10 border-emerald-400/25",
-                          !powerStateLoading && !isPowerActionBusy(actionBusy) && serverPowerState === 'stopped' && "bg-red-500/10 border-red-400/25",
-                          !powerStateLoading && !isPowerActionBusy(actionBusy) && serverPowerState === 'suspended' && "bg-red-500/10 border-red-400/25",
-                          !powerStateLoading && !isPowerActionBusy(actionBusy) && serverPowerState === 'unknown' && "bg-red-500/10 border-red-400/25"
+                          waiting && "bg-sky-500/10 border-sky-400/25",
+                          !waiting && serverPowerState === 'running' && "bg-emerald-500/10 border-emerald-400/25",
+                          !waiting && serverPowerState === 'stopped' && "bg-red-500/10 border-red-400/25",
+                          !waiting && serverPowerState === 'suspended' && "bg-red-500/10 border-red-400/25",
+                          !waiting && serverPowerState === 'unknown' && "bg-red-500/10 border-red-400/25"
                         )}>
-                          {powerStateLoading || isPowerActionBusy(actionBusy) ? (
+                          {waiting ? (
                             <>
                               <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
                               <div className="flex-1">
@@ -4073,7 +4122,8 @@ const OrderDetails = () => {
                             </>
                           )}
                         </div>
-                      )}
+                        );
+                      })()}
 
                       {/* Power Controls — Start, Stop, and Restart stay available in every state */}
                       <div className="grid grid-cols-1 gap-2">

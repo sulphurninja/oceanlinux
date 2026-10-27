@@ -95,7 +95,8 @@ export async function POST(request) {
     console.log(`[CreateOrder] Server-validated price: originalPrice=${originalPrice}, discount=${promoDiscount}, finalPrice=${price}`);
 
     // 5. Create a new order with server-validated price
-    const { resolveNetbayGroupTag, isNetbayProxyStock } = require('@/lib/netbayGroupTags');
+    const { resolveNetbayGroupTag, isNetbayProxyStock, isNexaDedicatedIpStock } = require('@/lib/netbayGroupTags');
+    const nexaStock = isNexaDedicatedIpStock(ipStock);
     const newOrder = await Order.create({
       user: userId,
       productName,
@@ -106,8 +107,9 @@ export async function POST(request) {
       promoDiscount: promoDiscount,
       os: defaultOsForProduct(productName),
       ipStockId: ipStockId,
-      netbayGroupTag: resolveNetbayGroupTag(ipStock, netbayGroupTag) || undefined,
-      netbayProductKind: isNetbayProxyStock(ipStock) ? 'proxy' : undefined,
+      provider: nexaStock ? 'nexa' : undefined,
+      netbayGroupTag: nexaStock ? undefined : (resolveNetbayGroupTag(ipStock, netbayGroupTag) || undefined),
+      netbayProductKind: !nexaStock && isNetbayProxyStock(ipStock) ? 'proxy' : undefined,
       transactionId,      // Store user-entered transaction reference
       status: 'pending',   // Pending until admin verifies
     });

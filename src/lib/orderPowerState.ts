@@ -5,7 +5,7 @@ export type PowerState = 'running' | 'stopped' | 'suspended' | 'busy' | 'unknown
 export type IPStockLike = {
   tags?: string[];
   companyAutomation?: {
-    provider: 'virtualizor' | 'reseller-api' | 'netbay' | 'kurohost' | 'joy';
+    provider: 'virtualizor' | 'reseller-api' | 'netbay' | 'kurohost' | 'joy' | 'hostdzire' | 'rackato' | 'nexa';
     enabled: boolean;
   } | null;
 };
@@ -76,7 +76,10 @@ export function hasCompanyAnyAutomation(stock: IPStockLike | null): boolean {
       stock.companyAutomation.provider === 'reseller-api' ||
       stock.companyAutomation.provider === 'netbay' ||
       stock.companyAutomation.provider === 'kurohost' ||
-      stock.companyAutomation.provider === 'joy')
+      stock.companyAutomation.provider === 'joy' ||
+      stock.companyAutomation.provider === 'hostdzire' ||
+      stock.companyAutomation.provider === 'rackato' ||
+      stock.companyAutomation.provider === 'nexa')
   );
 }
 

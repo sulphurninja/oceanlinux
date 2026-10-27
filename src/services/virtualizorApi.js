@@ -513,7 +513,7 @@ export class VirtualizorAPI {
       if (['1', 'running', 'on', 'online', 'started', 'powered_on'].includes(s)) return 'running';
       if (['0', 'stopped', 'off', 'offline', 'shutdown', 'shutoff', 'powered_off'].includes(s)) return 'stopped';
       if (['suspended', 'paused'].includes(s)) return 'suspended';
-      if (['installing', 'rebooting', 'starting', 'stopping', 'busy'].includes(s)) return 'busy';
+      if (['installing', 'rebooting', 'starting', 'stopping', 'busy', 'processing', 'pending', 'reinstalling'].includes(s)) return 'busy';
       return 'unknown';
     }
     if (typeof raw === 'number') return raw === 1 ? 'running' : 'stopped';

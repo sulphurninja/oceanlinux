@@ -485,12 +485,16 @@ export async function POST(request) {
     } else {
       orderData.ipStockId = ipStockId;
       const ipStockDoc = await IPStock.findById(ipStockId).lean();
-      const { resolveNetbayGroupTag, isNetbayProxyStock } = require('@/lib/netbayGroupTags');
-      const tag = resolveNetbayGroupTag(ipStockDoc, netbayGroupTag);
-      if (tag) orderData.netbayGroupTag = tag;
-      if (isNetbayProxyStock(ipStockDoc)) {
-        orderData.netbayProductKind = 'proxy';
-        orderData.provider = 'netbay';
+      const { resolveNetbayGroupTag, isNetbayProxyStock, isNexaDedicatedIpStock } = require('@/lib/netbayGroupTags');
+      if (isNexaDedicatedIpStock(ipStockDoc)) {
+        orderData.provider = 'nexa';
+      } else {
+        const tag = resolveNetbayGroupTag(ipStockDoc, netbayGroupTag);
+        if (tag) orderData.netbayGroupTag = tag;
+        if (isNetbayProxyStock(ipStockDoc)) {
+          orderData.netbayProductKind = 'proxy';
+          orderData.provider = 'netbay';
+        }
       }
     }
     

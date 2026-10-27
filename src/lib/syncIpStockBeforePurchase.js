@@ -214,6 +214,8 @@ export async function refreshAndVerifyIpStockPurchase(ipStockId, memory) {
   let company = await loadCompanyForStock(stock);
   const { resolveNetbayBillingMemory } = require('@/lib/netbayGroupTags');
   const checkMemory = resolveNetbayBillingMemory(stock, memory) || memory;
+  const { isNexaDedicatedIpStock } = require('@/lib/netbayGroupTags');
+  const nexaLive = isNexaDedicatedIpStock(stock);
   const netbayLive = isNetbayIpStock(stock) && usesNetbayLiveStock(stock, company);
   const hostdzireLive = isHostdzireIpStock(stock) && usesHostdzireLiveStock(stock, company);
   const kurohostLive = isKurohostIpStock(stock) && usesKurohostLiveStock(stock, company);
@@ -232,6 +234,9 @@ export async function refreshAndVerifyIpStockPurchase(ipStockId, memory) {
       stock = await syncKurohostIpStockRow(stock, { force: true, memoryOnly: memory || null });
     } else if (resellerLive) {
       stock = await syncResellerIpStockRow(stock, { force: true, memoryOnly: memory || null });
+    } else if (nexaLive) {
+      const { refreshNexaStockForPurchase } = require('@/lib/nexaStoreStock');
+      stock = await refreshNexaStockForPurchase(stock, { Company, IPStock });
     } else {
       stock = await IPStock.findById(ipStockId);
     }
@@ -392,7 +397,7 @@ export async function refreshAndVerifyIpStockPurchase(ipStockId, memory) {
     ok: true,
     message: 'In stock',
     stock: stock.toObject?.() || stock,
-    synced: isAdvpsPlan(stock) || isSmartVpsPlan(stock) || netbayLive || hostdzireLive || kurohostLive || resellerLive,
+    synced: isAdvpsPlan(stock) || isSmartVpsPlan(stock) || netbayLive || hostdzireLive || kurohostLive || resellerLive || nexaLive,
   };
 }
 

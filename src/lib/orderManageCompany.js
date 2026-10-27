@@ -6,7 +6,7 @@ function getCompanyModel() {
 }
 
 const COMPANY_SELECT =
-  'virtualizors virtualizor resellerApi netbayApi kurohostApi joyApi hostdzireApi name';
+  'virtualizors virtualizor resellerApi netbayApi kurohostApi joyApi hostdzireApi nexaApi name';
 
 async function getManageCompanyIdForOrder(order) {
   if (!order) return null;

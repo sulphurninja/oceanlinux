@@ -26,31 +26,37 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const timeframe = searchParams.get('timeframe') || '30d';
 
+    const cacheKey = `${userId}:${timeframe}`;
+    const g = global as typeof globalThis & {
+      __oceanDashboardStats?: Map<string, { at: number; stats: unknown }>;
+    };
+    const statsCache = g.__oceanDashboardStats || (g.__oceanDashboardStats = new Map());
+    const cachedStats = statsCache.get(cacheKey);
+    if (cachedStats && Date.now() - cachedStats.at < 20000) {
+      return NextResponse.json(cachedStats.stats);
+    }
+
     // Calculate date range based on timeframe
     const now = new Date();
     const daysAgo = timeframe === '7d' ? 7 : timeframe === '30d' ? 30 : 90;
     const startDate = new Date(now.getTime() - (daysAgo * 24 * 60 * 60 * 1000));
 
-    // Get user's orders using the userId from token
-    const allOrders = await Order.find({ user: userId })
-      .sort({ createdAt: -1 })
-      .lean();
+    const [allOrders, user] = await Promise.all([
+      Order.find({ user: userId })
+        .select('productName memory price status provisioningStatus createdAt')
+        .lean()
+        .maxTimeMS(8000),
+      User.findById(userId).select('userType resellerId').lean().maxTimeMS(4000),
+    ]);
 
-    const recentOrders = await Order.find({
-      user: userId,
-      createdAt: { $gte: startDate }
-    })
-      .sort({ createdAt: -1 })
-      .limit(10)
-      .limit(10)
-      .lean();
+    const recentOrders = allOrders
+      .filter((order) => new Date(order.createdAt) >= startDate)
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .slice(0, 10);
 
-    // Check for reseller status
-    const user = await User.findById(userId);
     let resellerInfo = null;
-
     if (user?.userType === 'reseller' && user?.resellerId) {
-      const reseller = await Reseller.findById(user.resellerId);
+      const reseller = await Reseller.findById(user.resellerId).select('wallet stats').lean();
       if (reseller) {
         resellerInfo = {
           balance: reseller.wallet?.balance || 0,
@@ -61,7 +67,6 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Calculate stats
     const totalOrders = allOrders.length;
     const activeServices = allOrders.filter(order =>
       order.status === 'completed' || order.provisioningStatus === 'active'
@@ -70,25 +75,22 @@ export async function GET(request: NextRequest) {
     const totalSpent = allOrders.reduce((sum, order) => sum + (order.price || 0), 0);
     const pendingOrders = allOrders.filter(order => order.status === 'pending').length;
 
-    // Order status breakdown
     const orderStatusBreakdown = {
       completed: allOrders.filter(order => order.status === 'completed').length,
-      pending: allOrders.filter(order => order.status === 'pending').length,
+      pending: pendingOrders,
       failed: allOrders.filter(order => order.status === 'failed').length,
     };
 
-    // Monthly spending (last 6 months)
     const monthlySpending = [];
     for (let i = 0; i < 6; i++) {
       const monthStart = new Date(now.getFullYear(), now.getMonth() - i, 1);
       const monthEnd = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
-
-      const monthOrders = allOrders.filter(order => {
-        const orderDate = new Date(order.createdAt);
-        return orderDate >= monthStart && orderDate <= monthEnd;
-      });
-
-      const monthTotal = monthOrders.reduce((sum, order) => sum + (order.price || 0), 0);
+      const monthTotal = allOrders
+        .filter(order => {
+          const orderDate = new Date(order.createdAt);
+          return orderDate >= monthStart && orderDate <= monthEnd;
+        })
+        .reduce((sum, order) => sum + (order.price || 0), 0);
       monthlySpending.push(monthTotal);
     }
 
@@ -111,6 +113,7 @@ export async function GET(request: NextRequest) {
       resellerWallet: resellerInfo,
     };
 
+    statsCache.set(cacheKey, { at: Date.now(), stats });
     return NextResponse.json(stats);
   } catch (error) {
     console.error('Dashboard stats error:', error);

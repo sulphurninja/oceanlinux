@@ -24,16 +24,22 @@ export default function WalletBadge({
   useEffect(() => {
     if (hidden) return;
     let cancelled = false;
-    fetchWalletSummary().then((w) => {
-      if (!cancelled) {
-        setWallet(w);
-        setHydrated(true);
-      }
-    });
     const unsub = subscribeWallet((w) => {
       if (w) setWallet(w);
     });
-    return () => { cancelled = true; unsub(); };
+    const timer = window.setTimeout(() => {
+      fetchWalletSummary().then((w) => {
+        if (!cancelled) {
+          setWallet(w);
+          setHydrated(true);
+        }
+      });
+    }, 1500);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+      unsub();
+    };
   }, [hidden]);
 
   if (hidden || !hydrated || !wallet) return null;

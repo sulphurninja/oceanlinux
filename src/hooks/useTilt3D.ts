@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useRef, type RefObject } from "react";
 
 type GlareTone = "light" | "emerald" | "none";
 
@@ -111,7 +111,6 @@ export function useTilt3D(
 
 export function useHeroParallax<T extends HTMLElement = HTMLElement>(intensity = 18) {
   const ref = useRef<T>(null);
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
   const rafRef = useRef<number | null>(null);
   const pendingRef = useRef({ x: 0, y: 0 });
 
@@ -124,11 +123,15 @@ export function useHeroParallax<T extends HTMLElement = HTMLElement>(intensity =
     if (reduced || coarse) return;
 
     const flush = () => {
-      setOffset(pendingRef.current);
+      const el = ref.current;
+      if (!el) return;
+      el.style.setProperty("--px", pendingRef.current.x.toFixed(2));
+      el.style.setProperty("--py", pendingRef.current.y.toFixed(2));
     };
 
     const onMove = (e: MouseEvent) => {
       const rect = section.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return;
       const px = (e.clientX - rect.left) / rect.width - 0.5;
       const py = (e.clientY - rect.top) / rect.height - 0.5;
       pendingRef.current = { x: px * intensity, y: py * intensity };
@@ -149,5 +152,5 @@ export function useHeroParallax<T extends HTMLElement = HTMLElement>(intensity =
     };
   }, [intensity]);
 
-  return { ref, offset };
+  return { ref };
 }

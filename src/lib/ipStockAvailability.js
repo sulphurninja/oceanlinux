@@ -133,6 +133,11 @@ export function getIpStockRemaining(stock, company) {
 }
 
 export function isIpStockHiddenFromStore(stock) {
+  // Local buy tests can see Nexa plans. The database flag stays set so the live site does not list them.
+  if (process.env.NODE_ENV !== 'production') {
+    const tags = Array.isArray(stock?.tags) ? stock.tags : [];
+    if (tags.some((tag) => String(tag).toLowerCase() === 'nexa')) return false;
+  }
   return !!stock?.hiddenFromStore;
 }
 

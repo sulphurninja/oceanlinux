@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
     ArrowLeft,
@@ -136,7 +136,7 @@ const ViewLinux = () => {
     const router = useRouter();
     const { showAlert } = useSessionAlert();
 
-    useEffect(() => {
+    useLayoutEffect(() => {
         const cached = readDashboardCache(DASHBOARD_CACHE_KEYS.ordersMe) as Order[] | null;
         if (Array.isArray(cached) && cached.length > 0) {
             setOrders(cached);

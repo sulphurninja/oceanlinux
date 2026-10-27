@@ -55,6 +55,7 @@ import { performLogoutWithCelebration } from '@/lib/logoutWithCelebration';
 import { ThemeToggle } from '@/components/ui/theme-toggle';
 import { cn } from '@/lib/utils';
 import { dashboardFetch } from '@/lib/dashboardFetch';
+import { fetchCurrentUser } from '@/lib/currentUserRequest';
 import { readDashboardCache, writeDashboardCache, DASHBOARD_CACHE_KEYS } from '@/lib/dashboardCache';
 import {
     Dialog,
@@ -200,9 +201,8 @@ export default function DashboardLayout({
 
     const fetchUserData = async () => {
         try {
-            const response = await dashboardFetch('/api/users/me');
-            if (response.ok) {
-                const userData = await response.json();
+            const { ok, data: userData } = await fetchCurrentUser();
+            if (ok) {
                 writeDashboardCache(DASHBOARD_CACHE_KEYS.currentUser, userData);
                 setUser(userData);
 

@@ -135,8 +135,16 @@ function otpauthUrl(secret) {
 
 function beginAdminTotpSetup() {
   if (isAdminTotpEnabled()) return null;
-  const secret = base32Encode(crypto.randomBytes(20));
   const store = readStore();
+  if (store.pending) {
+    try {
+      const existing = decrypt(store.pending);
+      if (existing) return { secret: existing, otpauthUrl: otpauthUrl(existing) };
+    } catch {
+      // Pending secret cannot be read. Mint a new one below.
+    }
+  }
+  const secret = base32Encode(crypto.randomBytes(20));
   store.pending = encrypt(secret);
   writeStore(store);
   return { secret, otpauthUrl: otpauthUrl(secret) };

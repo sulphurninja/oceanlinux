@@ -861,7 +861,7 @@ class ResellerApi {
     if (['running', 'on', 'online', 'started', '1', 'powered_on', 'poweron'].includes(s)) return 'running';
     if (['stopped', 'off', 'offline', 'shutdown', 'shutoff', '0', 'powered_off', 'poweroff', 'unreachable'].includes(s)) return 'stopped';
     if (['suspended', 'paused'].includes(s)) return 'suspended';
-    if (['installing', 'rebooting', 'starting', 'stopping', 'busy'].includes(s)) return 'busy';
+    if (['installing', 'rebooting', 'starting', 'stopping', 'busy', 'processing', 'pending', 'reinstalling'].includes(s)) return 'busy';
     return 'unknown';
   }
 

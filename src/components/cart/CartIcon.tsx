@@ -25,26 +25,31 @@ export default function CartIcon({
   useEffect(() => {
     if (hidden) return;
     let cancelled = false;
-    (async () => {
-      try {
-        const cart = await fetchCart();
-        if (!cancelled) {
-          setCount(cart.itemCount || 0);
-          setAvailable(true);
-        }
-      } catch {
-        // unauthenticated
-      } finally {
-        if (!cancelled) setHydrated(true);
-      }
-    })();
     const unsub = subscribeCart((snap: CartSnapshot | null) => {
       if (snap) {
         setCount(snap.itemCount || 0);
         setAvailable(true);
       }
     });
-    return () => { cancelled = true; unsub(); };
+    const timer = window.setTimeout(() => {
+      fetchCart()
+        .then((cart) => {
+          if (cancelled) return;
+          setCount(cart.itemCount || 0);
+          setAvailable(true);
+        })
+        .catch(() => {
+          // unauthenticated
+        })
+        .finally(() => {
+          if (!cancelled) setHydrated(true);
+        });
+    }, 1500);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+      unsub();
+    };
   }, [hidden]);
 
   if (hidden || !hydrated || !available) return null;

@@ -115,6 +115,16 @@ function normalizeRackatoApiEntry(v) {
   };
 }
 
+function normalizeNexaApiEntry(v) {
+  if (v === null) return null;
+  return {
+    enabled: asBool(v?.enabled),
+    label: typeof v?.label === 'string' ? v.label.trim() : '',
+    baseUrl: typeof v?.baseUrl === 'string' ? v.baseUrl.trim().replace(/\/+$/, '') : '',
+    apiKey: typeof v?.apiKey === 'string' ? v.apiKey.trim() : '',
+  };
+}
+
 function normalizeHostdzireApiEntry(v) {
   if (v === null) return null;
   const enabled = asBool(v?.enabled);
@@ -193,6 +203,12 @@ function pickAllowedUpdates(body) {
       : normalizeRackatoApiEntry(body.rackatoApi);
   }
 
+  if (Object.prototype.hasOwnProperty.call(body || {}, 'nexaApi')) {
+    out.nexaApi = body.nexaApi === null
+      ? null
+      : normalizeNexaApiEntry(body.nexaApi);
+  }
+
   return out;
 }
 
@@ -265,6 +281,18 @@ export async function PUT(request, { params }) {
       { $set: { rackatoApi: next } }
     );
     delete updates.rackatoApi;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(updates, 'nexaApi')) {
+    const next = updates.nexaApi;
+    if (next && company.nexaApi && !next.apiKey) {
+      next.apiKey = company.nexaApi.apiKey || '';
+    }
+    await Company.collection.updateOne(
+      { _id: company._id },
+      { $set: { nexaApi: next } }
+    );
+    delete updates.nexaApi;
   }
 
   if (Object.keys(updates).length > 0) {

@@ -55,35 +55,41 @@ export default function Hero() {
   const marqueePlans =
     popularPlans.length > 1 ? [...popularPlans, ...popularPlans] : popularPlans;
 
-  const { ref: heroRef, offset } = useHeroParallax(22);
+  const { ref: heroRef } = useHeroParallax(22);
 
   return (
     <>
     <section
       ref={heroRef}
-      className="hero-premium-bg relative overflow-hidden min-w-0 w-full pt-8 pb-10 sm:pt-12 sm:pb-14 lg:pt-16 lg:pb-20"
+      className="hero-premium-bg hero-parallax-root relative overflow-hidden min-w-0 w-full pt-8 pb-10 sm:pt-12 sm:pb-14 lg:pt-16 lg:pb-20"
     >
-      <Hero3DScene parallaxX={offset.x} parallaxY={offset.y} />
+      <Hero3DScene />
 
       {/* Animated background */}
       <div className="absolute inset-0 opacity-10 pointer-events-none">
         <div
-          className="absolute inset-0 bg-[url('/grid-pattern.svg')] bg-center transition-transform duration-300 ease-out"
-          style={{ transform: `translate3d(${offset.x * 0.15}px, ${offset.y * 0.15}px, 0)` }}
+          className="hero-shift absolute inset-0 bg-[url('/grid-pattern.svg')] bg-center"
+          style={{ ["--sx" as string]: "0.15", ["--sy" as string]: "0.15" }}
         />
       </div>
       <div
-        className="absolute -top-24 -left-24 w-48 h-48 sm:w-72 sm:h-72 bg-primary/30 rounded-full blur-3xl animate-hero-glow pointer-events-none transition-transform duration-300 hidden sm:block"
-        style={{ transform: `translate3d(${offset.x * 1.8}px, ${offset.y * 1.8}px, 0)` }}
-      />
+        className="hero-shift absolute -top-24 -left-24 w-48 h-48 sm:w-72 sm:h-72 pointer-events-none hidden sm:block"
+        style={{ ["--sx" as string]: "1.8", ["--sy" as string]: "1.8" }}
+      >
+        <div className="h-full w-full rounded-full bg-primary/30 blur-2xl animate-hero-glow" />
+      </div>
       <div
-        className="absolute top-1/3 -right-32 w-64 h-64 md:w-96 md:h-96 bg-emerald-500/20 rounded-full blur-3xl animate-hero-glow pointer-events-none [animation-delay:1.5s] transition-transform duration-300 hidden md:block"
-        style={{ transform: `translate3d(${offset.x * -1.2}px, ${offset.y * 1.2}px, 0)` }}
-      />
+        className="hero-shift absolute top-1/3 -right-32 w-64 h-64 md:w-96 md:h-96 pointer-events-none hidden md:block"
+        style={{ ["--sx" as string]: "-1.2", ["--sy" as string]: "1.2" }}
+      >
+        <div className="h-full w-full rounded-full bg-emerald-500/20 blur-2xl animate-hero-glow [animation-delay:1.5s]" />
+      </div>
       <div
-        className="absolute bottom-0 left-1/3 w-64 h-64 bg-teal-400/15 rounded-full blur-3xl animate-pulse pointer-events-none transition-transform duration-300"
-        style={{ transform: `translate3d(${offset.x}px, ${offset.y * -0.8}px, 0)` }}
-      />
+        className="hero-shift absolute bottom-0 left-1/3 w-64 h-64 pointer-events-none"
+        style={{ ["--sx" as string]: "1", ["--sy" as string]: "-0.8" }}
+      >
+        <div className="h-full w-full rounded-full bg-teal-400/15 blur-2xl animate-pulse" />
+      </div>
 
       <div className="container mx-auto container-padding relative z-10 min-w-0">
         <div className="grid gap-8 md:grid-cols-2 md:gap-10 lg:gap-14 xl:gap-16 md:items-center">

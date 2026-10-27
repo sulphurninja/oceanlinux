@@ -65,7 +65,7 @@ function LoginPage({ className, ...props }: React.ComponentPropsWithoutRef<"div"
   const router = useRouter();
   const searchParams = useSearchParams();
   const returnTo = searchParams.get('returnTo');
-  const { ref, offset } = useHeroParallax<HTMLDivElement>(10);
+  const { ref } = useHeroParallax<HTMLDivElement>(10);
 
   useEffect(() => {
     setMounted(true);
@@ -132,12 +132,12 @@ function LoginPage({ className, ...props }: React.ComponentPropsWithoutRef<"div"
     <div
       ref={ref}
       className={cn(
-        "premium-auth-shell hero-premium-bg premium-auth-shell--centered flex-1 min-h-0 w-full max-w-full",
+        "premium-auth-shell hero-premium-bg hero-parallax-root premium-auth-shell--centered flex-1 min-h-0 w-full max-w-full",
         className
       )}
       {...props}
     >
-      <PremiumAuthBackground parallaxX={offset.x} parallaxY={offset.y} />
+      <PremiumAuthBackground />
 
       <Link href="/" className="premium-auth-back">
         <ArrowLeft className="w-3.5 h-3.5 shrink-0" />

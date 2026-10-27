@@ -6,7 +6,7 @@ import { readDashboardCache, writeDashboardCache, DASHBOARD_CACHE_KEYS } from '@
 import { getCustomerProviderDisplayNameFromOrder } from '@/lib/customerProviderDisplay';
 import { OsIcon, humanizeOsLabel } from '@/components/os/OsIcon';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
     ArrowLeft,
@@ -159,7 +159,7 @@ const OrderHistory = () => {
     const router = useRouter();
     const { showAlert } = useSessionAlert();
 
-    useEffect(() => {
+    useLayoutEffect(() => {
         const cached = readDashboardCache(DASHBOARD_CACHE_KEYS.ordersMe) as Order[] | null;
         if (Array.isArray(cached) && cached.length > 0) {
             setOrders(cached);

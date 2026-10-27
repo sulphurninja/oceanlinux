@@ -23,32 +23,35 @@ export function usePaymentConfig(): PaymentConfig {
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch('/api/payment/config', {
-          credentials: 'include',
-          cache: 'no-store',
-        });
-        const data = await res.json();
-        if (cancelled || !res.ok || !data.success) return;
-        setConfig({
-          primaryGateway: data.primaryGateway === 'razorpay' ? 'razorpay' : 'upi',
-          methodsToTry:
-            Array.isArray(data.methodsToTry) && data.methodsToTry.length > 0
-              ? data.methodsToTry.filter((m: string) => m === 'upi' || m === 'razorpay')
-              : DEFAULT_CONFIG.methodsToTry,
-          gateways: {
-            upi: data.gateways?.upi !== false,
-            razorpay: data.gateways?.razorpay !== false,
-          },
-          loaded: true,
-        });
-      } catch {
-        /* keep loaded:false so checkout does not assume UPI-first on fetch failure */
-      }
-    })();
+    const timer = window.setTimeout(() => {
+      (async () => {
+        try {
+          const res = await fetch('/api/payment/config', {
+            credentials: 'include',
+            cache: 'no-store',
+          });
+          const data = await res.json();
+          if (cancelled || !res.ok || !data.success) return;
+          setConfig({
+            primaryGateway: data.primaryGateway === 'razorpay' ? 'razorpay' : 'upi',
+            methodsToTry:
+              Array.isArray(data.methodsToTry) && data.methodsToTry.length > 0
+                ? data.methodsToTry.filter((m: string) => m === 'upi' || m === 'razorpay')
+                : DEFAULT_CONFIG.methodsToTry,
+            gateways: {
+              upi: data.gateways?.upi !== false,
+              razorpay: data.gateways?.razorpay !== false,
+            },
+            loaded: true,
+          });
+        } catch {
+          /* keep loaded:false so checkout does not assume UPI-first on fetch failure */
+        }
+      })();
+    }, 1200);
     return () => {
       cancelled = true;
+      window.clearTimeout(timer);
     };
   }, []);
 

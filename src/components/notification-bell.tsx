@@ -39,9 +39,12 @@ const NotificationBell = () => {
     const router = useRouter();
 
     useEffect(() => {
-        fetchNotifications();
+        const first = window.setTimeout(fetchNotifications, 1500);
         const interval = setInterval(fetchNotifications, 30000);
-        return () => clearInterval(interval);
+        return () => {
+            window.clearTimeout(first);
+            clearInterval(interval);
+        };
     }, []);
 
     const fetchNotifications = async () => {

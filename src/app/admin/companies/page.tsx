@@ -117,6 +117,13 @@ interface CompanyHostdzireApi {
   useLiveStockApi?: boolean;
 }
 
+interface CompanyNexaApi {
+  enabled: boolean;
+  label: string;
+  baseUrl: string;
+  apiKey: string;
+}
+
 interface Company {
   _id: string;
   name: string;
@@ -133,6 +140,7 @@ interface Company {
   joyApi?: Partial<CompanyJoyApi> | null;
   hostdzireApi?: Partial<CompanyHostdzireApi> | null;
   rackatoApi?: Partial<CompanyRackatoApi> | null;
+  nexaApi?: Partial<CompanyNexaApi> | null;
 }
 
 const NEW_VIRT_ENTRY = (): CompanyVirtualizor => ({
@@ -278,6 +286,20 @@ const HOSTDZIRE_API_DIALOG_DEFAULTS: CompanyHostdzireApi = {
   useLiveStockApi: false,
 };
 
+const EMPTY_NEXA_API = (): CompanyNexaApi => ({
+  enabled: false,
+  label: '',
+  baseUrl: '',
+  apiKey: '',
+});
+
+const NEXA_API_DIALOG_DEFAULTS: CompanyNexaApi = {
+  enabled: true,
+  label: 'Nexa',
+  baseUrl: 'https://nexahostvps.com/api/v1/dedicated-ips',
+  apiKey: '',
+};
+
 interface VirtTestState {
   loading: boolean;
   result: { success: boolean; message: string } | null;
@@ -367,6 +389,16 @@ export default function CompaniesPage() {
   const [hostdzireTesting, setHostdzireTesting] = useState(false);
   const [hostdzireTestResult, setHostdzireTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [showHostdzireKey, setShowHostdzireKey] = useState(false);
+
+  const [nexaCompany, setNexaCompany] = useState<Company | null>(null);
+  const [nexaForm, setNexaForm] = useState<CompanyNexaApi>(EMPTY_NEXA_API());
+  const [nexaSaving, setNexaSaving] = useState(false);
+  const [nexaTesting, setNexaTesting] = useState(false);
+  const [nexaTestResult, setNexaTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [nexaProducts, setNexaProducts] = useState('');
+  const [nexaPlanList, setNexaPlanList] = useState<any[]>([]);
+  const [nexaAdding, setNexaAdding] = useState('');
+  const [showNexaKey, setShowNexaKey] = useState(false);
 
   const [rackatoCompany, setRackatoCompany] = useState<Company | null>(null);
   const [rackatoForm, setRackatoForm] = useState<CompanyRackatoApi>(EMPTY_RACKATO_API());
@@ -1344,6 +1376,147 @@ export default function CompaniesPage() {
     setShowHostdzireKey(false);
   };
 
+  const openNexaDialog = (c: Company) => {
+    const r = c.nexaApi || null;
+    setNexaForm({
+      enabled: r?.enabled === true,
+      label: r?.label || NEXA_API_DIALOG_DEFAULTS.label,
+      baseUrl: r?.baseUrl || NEXA_API_DIALOG_DEFAULTS.baseUrl,
+      apiKey: r?.apiKey || '',
+    });
+    setNexaTestResult(null);
+    setNexaProducts('');
+    setNexaPlanList([]);
+    setShowNexaKey(false);
+    setNexaCompany(c);
+  };
+
+  const closeNexaDialog = () => {
+    if (nexaSaving || nexaTesting) return;
+    setNexaCompany(null);
+    setNexaForm(EMPTY_NEXA_API());
+    setNexaTestResult(null);
+    setNexaProducts('');
+    setNexaPlanList([]);
+    setShowNexaKey(false);
+  };
+
+  const handleLoadNexaProducts = async () => {
+    if (!nexaCompany) return;
+    setNexaTesting(true);
+    setNexaTestResult(null);
+    try {
+      const res = await fetch(`/api/admin/companies/${nexaCompany._id}/nexa-products`);
+      const data = await res.json();
+      if (!res.ok) {
+        setNexaProducts('');
+        setNexaPlanList([]);
+        setNexaTestResult({ success: false, message: data.error || 'Could not load products' });
+        return;
+      }
+      setNexaPlanList(Array.isArray(data.plans) ? data.plans : []);
+      const lines = (data.plans || []).map((plan: any) => {
+        const pools = (plan.pools || [])
+          .map((pool: any) => `pool ${pool.poolId} ${pool.subnet || pool.name} stock ${pool.stock ?? 0} api ₹${pool.apiPrice ?? '-'}`)
+          .join('; ');
+        return `plan ${plan.planId} ${plan.name} [${plan.tier || plan.controlMode}] stock ${plan.stock ?? 0} api ₹${plan.apiPrice ?? '-'} sell ₹${plan.regularPrice ?? '-'}${pools ? ` | ${pools}` : ''}`;
+      });
+      setNexaProducts(
+        `${data.count ?? lines.length} plans, ${data.poolCount ?? 0} pools\n${lines.join('\n') || 'No products returned'}`
+      );
+    } catch (err: any) {
+      setNexaProducts('');
+      setNexaPlanList([]);
+      setNexaTestResult({ success: false, message: err?.message || 'Could not load products' });
+    } finally {
+      setNexaTesting(false);
+    }
+  };
+
+  const handleAddNexaToStock = async (planId?: number | null, poolId?: number | null) => {
+    if (!nexaCompany) return;
+    const key = planId == null ? 'all' : `${planId}:${poolId ?? ''}`;
+    setNexaAdding(key);
+    try {
+      const res = await fetch(`/api/admin/companies/${nexaCompany._id}/nexa-products`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(planId == null ? {} : { planId, poolId: poolId ?? null }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || 'Could not add to IP stock');
+        return;
+      }
+      const created = Array.isArray(data.created) ? data.created.length : 0;
+      const skipped = Array.isArray(data.skipped) ? data.skipped.length : 0;
+      if (!created && skipped) {
+        toast('Already in IP stock');
+        return;
+      }
+      toast.success(
+        created
+          ? `${created} added to IP stock. Hidden from the store — open Manage IP Stock to set the price and unhide.`
+          : 'Nothing new to add'
+      );
+    } catch (err: any) {
+      toast.error(err?.message || 'Could not add to IP stock');
+    } finally {
+      setNexaAdding('');
+    }
+  };
+
+  const handleTestNexaApi = async () => {
+    if (!nexaCompany) return;
+    setNexaTesting(true);
+    setNexaTestResult(null);
+    try {
+      const res = await fetch(`/api/admin/companies/${nexaCompany._id}/test-nexa-api`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nexaApi: nexaForm }),
+      });
+      const data = await res.json();
+      setNexaTestResult({
+        success: !!(res.ok && data.success),
+        message: data.message || data.error || 'Connection failed',
+      });
+    } catch (err: any) {
+      setNexaTestResult({ success: false, message: err?.message || 'Request failed' });
+    } finally {
+      setNexaTesting(false);
+    }
+  };
+
+  const handleSaveNexaApi = async () => {
+    if (!nexaCompany) return;
+    if (nexaForm.enabled && !nexaForm.apiKey.trim() && !nexaCompany.nexaApi?.apiKey) {
+      toast.error('API key is required when Nexa is enabled');
+      return;
+    }
+    setNexaSaving(true);
+    try {
+      const res = await fetch(`/api/admin/companies/${nexaCompany._id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nexaApi: nexaForm }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        const saved = data as Company;
+        setCompanies((prev) => prev.map((c) => (String(c._id) === String(saved._id) ? saved : c)));
+        openNexaDialog(saved);
+        toast.success('Nexa config saved');
+      } else {
+        toast.error(data.error || 'Failed to save');
+      }
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to save');
+    } finally {
+      setNexaSaving(false);
+    }
+  };
+
   const updateHostdzireField = <K extends keyof CompanyHostdzireApi>(key: K, value: CompanyHostdzireApi[K]) => {
     setHostdzireForm(prev => ({ ...prev, [key]: value }));
     setHostdzireTestResult(null);
@@ -1683,6 +1856,17 @@ export default function CompaniesPage() {
                           </Badge>
                         );
                       }
+                      const nx = c.nexaApi;
+                      if (nx?.enabled) {
+                        let host = 'nexahostvps.com';
+                        try { if (nx.baseUrl) host = new URL(nx.baseUrl).host; } catch { /* keep as-is */ }
+                        return (
+                          <Badge variant="outline" className="gap-1 text-emerald-700 border-emerald-200">
+                            <Building2 className="h-3 w-3" />
+                            Nexa: {host}
+                          </Badge>
+                        );
+                      }
                       return (
                         <Badge variant="outline" className="gap-1 text-muted-foreground">
                           <ShieldAlert className="h-3 w-3" />
@@ -1727,6 +1911,10 @@ export default function CompaniesPage() {
                       <Button variant="ghost" size="sm" className="h-8 gap-1.5" onClick={() => openHostdzireDialog(c)}>
                         <Building2 className="h-3.5 w-3.5" />
                         HostDzire
+                      </Button>
+                      <Button variant="ghost" size="sm" className="h-8 gap-1.5" onClick={() => openNexaDialog(c)}>
+                        <Building2 className="h-3.5 w-3.5" />
+                        Nexa
                       </Button>
                       {c.netbayApi?.enabled && (
                         <Button variant="ghost" size="sm" className="h-8 gap-1.5" asChild>
@@ -3134,6 +3322,128 @@ export default function CompaniesPage() {
               Save
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!nexaCompany} onOpenChange={(open) => !open && closeNexaDialog()}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Building2 className="h-5 w-5" />
+              Nexa Dedicated IP API
+            </DialogTitle>
+          </DialogHeader>
+          {nexaCompany && (
+            <div className="space-y-4">
+              <div className="rounded-md border p-3 text-sm">
+                <p className="font-medium">{nexaCompany.name}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Header <code>X-API-Key</code>. Plans, order, and control
+                  (start, stop, reboot, reinstall, change credentials, status).
+                </p>
+              </div>
+              <div className="flex items-center justify-between rounded-md border p-2.5">
+                <div className="text-sm">
+                  <p className="font-medium">Enabled</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className={`text-xs font-bold uppercase ${nexaForm.enabled ? 'text-emerald-600' : 'text-muted-foreground'}`}>
+                    {nexaForm.enabled ? 'ON' : 'OFF'}
+                  </span>
+                  <Switch
+                    checked={!!nexaForm.enabled}
+                    onCheckedChange={(checked) => setNexaForm((prev) => ({ ...prev, enabled: checked }))}
+                  />
+                </div>
+              </div>
+              <Input
+                placeholder="Label"
+                value={nexaForm.label}
+                onChange={(e) => setNexaForm((prev) => ({ ...prev, label: e.target.value }))}
+              />
+              <Input
+                placeholder="Base URL"
+                value={nexaForm.baseUrl}
+                onChange={(e) => setNexaForm((prev) => ({ ...prev, baseUrl: e.target.value }))}
+              />
+              <Input
+                type={showNexaKey ? 'text' : 'password'}
+                placeholder={nexaCompany.nexaApi?.apiKey ? 'Saved — leave blank to keep' : 'nxip_live_...'}
+                value={nexaForm.apiKey}
+                onChange={(e) => setNexaForm((prev) => ({ ...prev, apiKey: e.target.value }))}
+              />
+              <div className="flex items-center gap-2">
+                <Button type="button" variant="outline" size="sm" onClick={() => setShowNexaKey((v) => !v)}>
+                  {showNexaKey ? 'Hide key' : 'Show key'}
+                </Button>
+              </div>
+              {nexaTestResult && (
+                <p className={`text-sm ${nexaTestResult.success ? 'text-emerald-600' : 'text-destructive'}`}>
+                  {nexaTestResult.message}
+                </p>
+              )}
+              {nexaPlanList.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs text-muted-foreground">{nexaProducts.split('\n')[0]}</p>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={!!nexaAdding}
+                      onClick={() => handleAddNexaToStock()}
+                    >
+                      {nexaAdding === 'all' ? 'Adding…' : 'Add all to IP stock'}
+                    </Button>
+                  </div>
+                  <div className="max-h-64 space-y-2 overflow-auto rounded-md border p-2">
+                    {nexaPlanList.flatMap((plan) => {
+                      const pools = Array.isArray(plan.pools) && plan.pools.length ? plan.pools : [null];
+                      return pools.map((pool: any) => {
+                        const rowKey = `${plan.planId}:${pool?.poolId ?? ''}`;
+                        const title = [plan.name, pool?.subnet || pool?.name].filter(Boolean).join(' — ');
+                        const price = pool?.regularPrice ?? plan.regularPrice ?? pool?.apiPrice ?? plan.apiPrice ?? '-';
+                        return (
+                          <div key={rowKey} className="flex items-center justify-between gap-2 rounded border px-2 py-1.5">
+                            <div className="min-w-0 text-xs">
+                              <p className="truncate font-medium">{title}</p>
+                              <p className="text-muted-foreground">
+                                plan {plan.planId}
+                                {pool?.poolId != null ? ` · pool ${pool.poolId}` : ''}
+                                {' · '}stock {pool?.stock ?? plan.stock ?? 0}
+                                {' · '}sell ₹{price}
+                              </p>
+                            </div>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="shrink-0"
+                              disabled={!!nexaAdding}
+                              onClick={() => handleAddNexaToStock(plan.planId, pool?.poolId ?? null)}
+                            >
+                              {nexaAdding === rowKey ? 'Adding…' : 'Add'}
+                            </Button>
+                          </div>
+                        );
+                      });
+                    })}
+                  </div>
+                </div>
+              )}
+              <div className="flex justify-end gap-2">
+                <Button type="button" variant="outline" onClick={handleLoadNexaProducts} disabled={nexaTesting || nexaSaving}>
+                  {nexaTesting ? 'Loading…' : 'Fetch products'}
+                </Button>
+                <Button type="button" variant="outline" onClick={handleTestNexaApi} disabled={nexaTesting || nexaSaving}>
+                  {nexaTesting ? 'Testing…' : 'Test connection'}
+                </Button>
+                <Button type="button" onClick={handleSaveNexaApi} disabled={nexaSaving || nexaTesting}>
+                  {nexaSaving ? 'Saving…' : 'Save'}
+                </Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 
