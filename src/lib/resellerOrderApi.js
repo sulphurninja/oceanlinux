@@ -138,10 +138,13 @@ export function formatResellerProduct(stock, reseller) {
   const options = memoryOptionsToObject(obj.memoryOptions);
   const {
     isNetbayProxyStock,
+    isNexaDedicatedIpStock,
     listNetbayGroupTags,
     pickPricedMemoryKey,
   } = require('@/lib/netbayGroupTags');
   const proxy = isNetbayProxyStock(obj);
+  const publicTags = (obj.tags || []).filter((tag) => String(tag).toLowerCase() !== 'nexa');
+  const publicDescription = isNexaDedicatedIpStock(obj) ? '' : (obj.description || '');
 
   if (proxy) {
     const billingKey = pickPricedMemoryKey(options);
@@ -166,9 +169,9 @@ export function formatResellerProduct(stock, reseller) {
       id: String(obj._id),
       productType: 'proxy',
       name: obj.name,
-      description: obj.description || '',
+      description: publicDescription,
       serverType: obj.serverType || 'Proxy',
-      tags: obj.tags || [],
+      tags: publicTags,
       available: !!obj.available,
       inStock: !!obj.available,
       os: 'PROXY',
@@ -192,9 +195,9 @@ export function formatResellerProduct(stock, reseller) {
     id: String(obj._id),
     productType: 'vps',
     name: obj.name,
-    description: obj.description || '',
+    description: publicDescription,
     serverType: obj.serverType,
-    tags: obj.tags || [],
+    tags: publicTags,
     available: !!obj.available,
     inStock: !!obj.available,
     memoryOptions,

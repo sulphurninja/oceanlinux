@@ -183,13 +183,7 @@ export async function POST(request, { params }) {
       );
       const doc = await IPStock.create({
         name: label || `Nexa plan ${planId}`,
-        description: [
-          'Nexa dedicated IP',
-          plan.tierLabel || plan.tier || '',
-          protocol,
-          pool?.location || plan.location || '',
-          `API ₹${pool?.apiPrice ?? plan.apiPrice ?? '-'}`,
-        ].filter(Boolean).join(' · '),
+        description: '',
         available: units > 0,
         stockCount: units,
         hiddenFromStore: false,

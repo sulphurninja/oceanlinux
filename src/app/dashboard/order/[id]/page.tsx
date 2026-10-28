@@ -209,8 +209,10 @@ interface Order {
   password?: string;
   expiryDate?: Date;
   createdAt?: Date;
-  provider?: 'hostycare' | 'smartvps' | 'oceanlinux' | 'slotip' | 'advps' | 'netbay' | 'kurohost' | 'trialvps' | 'nexa';
+  provider?: 'hostycare' | 'smartvps' | 'oceanlinux' | 'slotip' | 'advps' | 'netbay' | 'kurohost' | 'trialvps' | 'nexa' | 'rackato';
   nexaOrderId?: string;
+  rackatoOrderId?: string;
+  rackatoNodeUid?: string;
   hostycareServiceId?: string;
   smartvpsServiceId?: string;
   advpsServiceId?: string;
@@ -1331,17 +1333,19 @@ const OrderDetails = () => {
       }
       if (powerFetchInFlight.current) continue;
       const state = await fetchServerPowerState({ force: true });
+      if (action === 'stop') setServerPowerState('stopped');
+      else if (action === 'start') setServerPowerState('running');
       if (state === target) return state;
       if (action === 'stop' && (state === 'stopped' || state === 'suspended')) return state;
       if (action !== 'stop' && state === 'running') return state;
     }
 
-    toast.info(
-      action === 'stop'
-        ? 'Stop was sent to the panel. Windows can take 1–2 minutes to shut down — use Refresh if status looks stale.'
-        : 'Power action was sent. Status may still be updating — use Refresh.',
-      { duration: 6000 }
-    );
+    if (action === 'restart') {
+      toast.info(
+        'Restart was sent. Status may still be updating — use Refresh if it looks stale.',
+        { duration: 6000 }
+      );
+    }
     return null;
   };
 
@@ -1487,9 +1491,12 @@ const OrderDetails = () => {
       const data = await res.json();
 
       if (data.success) {
+        if (action === 'stop') setServerPowerState('stopped');
+        else if (action === 'start') setServerPowerState('running');
+
         // For power actions, show a more informative message
         if (['start', 'stop', 'restart'].includes(action)) {
-          const actionLabel = action === 'start' ? 'Starting' : action === 'stop' ? 'Stopping' : 'Restarting';
+          const actionLabel = action === 'start' ? 'Server is online' : action === 'stop' ? 'Server is offline' : 'Restarting';
           const panelMsg = data.result?.message
             ? ` ${customerSuccessMessage(data.result.message, '')}`
             : '';
@@ -1497,8 +1504,8 @@ const OrderDetails = () => {
             action === 'start' && provider === 'advps' && data.result?.ipConfig?.ok && data.result?.ipConfig?.ip
               ? ` IP configured after start (${data.result.ipConfig.ip}).`
               : '';
-          toast.success(`${actionLabel} server…${panelMsg}${ipNote} Status may take 1–2 minutes to update.`, {
-            duration: 6000,
+          toast.success(`${actionLabel}${panelMsg}${ipNote}`, {
+            duration: 4000,
           });
 
           await pollPowerStateAfterAction(action as 'start' | 'stop' | 'restart', provider);
@@ -1531,7 +1538,7 @@ const OrderDetails = () => {
               : 'Reinstall started. Waiting for server to finish…',
             { duration: 4000 }
           );
-          if (order.provider === 'nexa') {
+          if (order.provider === 'nexa' || order.provider === 'rackato' || order.rackatoNodeUid) {
             lastSyncCredentials.current = false;
             await pollPowerStateAfterAction('restart', provider);
             for (let i = 0; i < 10 && !lastSyncCredentials.current; i++) {
@@ -1600,7 +1607,7 @@ const OrderDetails = () => {
         await fetchServerPowerState({ force: true });
       }
     } finally {
-      if (isPowerAction) {
+      if (isPowerAction && action !== 'start' && action !== 'stop') {
         await fetchServerPowerState({ force: true });
       }
       setActionBusy(null);
@@ -1697,7 +1704,8 @@ const OrderDetails = () => {
     const provider = getProviderFromOrder(order, ipStock);
     const actionLabel = action === 'format' ? 'Format' : 'Reinstall OS';
     const nexaManaged = order.provider === 'nexa' || hasCompanyNexaAutomation(ipStock);
-    if (nexaManaged && action === 'reinstall') {
+    const rackatoManaged = order.provider === 'rackato' || !!order.rackatoOrderId || !!order.rackatoNodeUid || hasCompanyRackatoAutomation(ipStock);
+    if ((nexaManaged || rackatoManaged) && action === 'reinstall') {
       await runServiceAction('reinstall');
       return;
     }
@@ -2320,7 +2328,7 @@ const OrderDetails = () => {
 
   // Helper to get power state badge for active servers
   const getPowerStateBadge = () => {
-    if (isPowerActionBusy(actionBusy)) {
+    if (isPowerActionBusy(actionBusy) && !['running', 'stopped', 'suspended'].includes(serverPowerState)) {
       return (
         <Badge className="bg-blue-500/10 text-blue-600 border-blue-500/20">
           <Loader2 className="w-3 h-3 mr-1 animate-spin" />
@@ -2329,7 +2337,7 @@ const OrderDetails = () => {
       );
     }
 
-    if (powerStateLoading) {
+    if (powerStateLoading && !['running', 'stopped', 'suspended'].includes(serverPowerState)) {
       return (
         <Badge className="bg-muted text-muted-foreground border-border">
           <Loader2 className="w-3 h-3 mr-1 animate-spin" />

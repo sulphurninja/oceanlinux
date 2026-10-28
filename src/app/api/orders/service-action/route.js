@@ -1239,7 +1239,16 @@ export async function POST(request) {
         }
         const rackatoAction = action === 'reboot' ? 'restart' : action;
         await api.nodeAction(uid, rackatoAction);
-        return actionJson({ success: true, message: `${action} command sent` }, 200, action);
+        const fallbackPower = action === 'stop' ? 'stopped' : action === 'reinstall' ? 'busy' : 'running';
+        let powerState = fallbackPower;
+        try {
+          const node = parseRackatoNode(await api.getNode(uid));
+          const { normalizeReportedPowerState } = require('@/lib/panelPowerState');
+          powerState = normalizeReportedPowerState(node.status) || fallbackPower;
+        } catch (_) {
+          powerState = fallbackPower;
+        }
+        return actionJson({ success: true, message: `${action} command sent`, powerState }, 200, action);
       } catch (rackatoErr) {
         return actionJson({
           success: false,
@@ -3168,14 +3177,31 @@ export async function GET(request) {
         try {
           const api = new RackatoApi(rackatoCfg);
           let uid = String(order.rackatoNodeUid || '').trim();
-          const node = uid
+          let node = uid
             ? parseRackatoNode(await api.getNode(uid))
             : parseRackatoOrder(order.rackatoOrderId ? await api.getOrder(order.rackatoOrderId) : null);
+          if (!uid && node.uid) uid = node.uid;
+          if (uid && (!node.ip || !node.password)) {
+            const full = parseRackatoNode(await api.getNode(uid));
+            node = {
+              ...node,
+              uid: node.uid || full.uid,
+              ip: node.ip || full.ip,
+              username: node.username || full.username,
+              password: node.password || full.password,
+              os: node.os || full.os,
+              status: full.status || node.status,
+              expiresAt: node.expiresAt || full.expiresAt,
+            };
+          }
           const expiry = parseRackatoExpiry(node.expiresAt);
           const powerState = normalizeReportedPowerState(node.status) || 'unknown';
           await Order.findByIdAndUpdate(orderId, {
-            ...(node.ip ? { ipAddress: node.ip } : {}),
+            ...(node.ip ? { ipAddress: node.ip, status: 'active', provisioningStatus: 'active', provisioningError: '' } : {}),
             ...(node.uid ? { rackatoNodeUid: node.uid } : {}),
+            ...(node.username ? { username: node.username } : {}),
+            ...(node.password ? { password: node.password } : {}),
+            ...(node.os ? { os: node.os } : {}),
             ...(expiry ? { expiryDate: expiry } : {}),
             lastSyncTime: new Date(),
           });

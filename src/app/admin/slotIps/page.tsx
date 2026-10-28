@@ -1,10 +1,10 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Plus, Package, Trash2, Edit, Loader2, Upload, Tag, Eye, EyeOff,
   ChevronDown, ChevronRight, Server, AlertCircle, CheckCircle, RefreshCw,
-  Sparkles, Info
+  Sparkles, Info, Search
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -68,6 +68,7 @@ export default function AdminSlotIpsPage() {
   const [selectedPackage, setSelectedPackage] = useState<SlotIPPackage | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [purgingExpired, setPurgingExpired] = useState(false);
+  const [nameSearch, setNameSearch] = useState('');
 
   // Create form
   const [name, setName] = useState('');
@@ -384,6 +385,11 @@ export default function AdminSlotIpsPage() {
 
   const ipLineCount = bulkIps.split('\n').filter(l => l.trim()).length;
   const addIpLineCount = addIpsBulk.split('\n').filter(l => l.trim()).length;
+  const nameQuery = nameSearch.trim().toLowerCase();
+  const filteredPackages = useMemo(
+    () => packages.filter((pkg) => !nameQuery || pkg.name.toLowerCase().includes(nameQuery)),
+    [packages, nameQuery]
+  );
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6">
@@ -418,6 +424,16 @@ export default function AdminSlotIpsPage() {
             Create Package
           </Button>
         </div>
+      </div>
+
+      <div className="relative max-w-xl">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+        <Input
+          value={nameSearch}
+          onChange={(e) => setNameSearch(e.target.value)}
+          placeholder="Search product name"
+          className="pl-9"
+        />
       </div>
 
       {/* Stats */}
@@ -473,9 +489,15 @@ export default function AdminSlotIpsPage() {
             </Button>
           </CardContent>
         </Card>
+      ) : filteredPackages.length === 0 ? (
+        <Card className="text-center py-16">
+          <CardContent>
+            <p className="text-sm text-muted-foreground">No packages match this name.</p>
+          </CardContent>
+        </Card>
       ) : (
         <div className="space-y-4">
-          {packages.map((pkg) => (
+          {filteredPackages.map((pkg) => (
             <PackageRow
               key={pkg._id}
               pkg={pkg}

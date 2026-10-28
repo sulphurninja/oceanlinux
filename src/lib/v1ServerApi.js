@@ -20,6 +20,8 @@ export function memoryOptionsToObject(memoryOptions) {
 
 export function formatServerProduct(stock) {
   const obj = stock.toObject ? stock.toObject() : stock;
+  const { isNexaDedicatedIpStock } = require('@/lib/netbayGroupTags');
+  const nexa = isNexaDedicatedIpStock(obj);
   const options = memoryOptionsToObject(obj.memoryOptions);
   const plans = Object.entries(options).map(([memory, details]) => ({
     memory,
@@ -32,9 +34,9 @@ export function formatServerProduct(stock) {
   return {
     id: String(obj._id),
     name: obj.name,
-    description: obj.description || '',
+    description: nexa ? '' : (obj.description || ''),
     serverType: obj.serverType,
-    tags: obj.tags || [],
+    tags: (obj.tags || []).filter((tag) => String(tag).toLowerCase() !== 'nexa'),
     available: !!obj.available,
     plans,
     minPrice: prices.length ? Math.min(...prices) : null,

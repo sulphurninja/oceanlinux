@@ -89,6 +89,7 @@ function findClaimRow(rows, order, stock, taken) {
   for (const row of rows) {
     const nexaId = String(NexaApi.extractOrderId(row) || '');
     if (!nexaId || taken.has(nexaId)) continue;
+    if (isNexaDeadStatus(row.status)) continue;
     if (Number(row.plan_id) !== planId) continue;
     const nexaTime = parseNexaTime(row.created_at);
     if (!nexaTime) continue;
@@ -238,7 +239,7 @@ async function syncNexaPendingOrders({ limit = 40 } = {}) {
 
   for (const row of rows) {
     const nexaId = String(NexaApi.extractOrderId(row) || '');
-    if (!nexaId || taken.has(nexaId)) continue;
+    if (!nexaId || taken.has(nexaId) || isNexaDeadStatus(row.status)) continue;
     let best = null;
     let bestDelta = Infinity;
     for (const order of candidates) {

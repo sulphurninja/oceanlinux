@@ -17,6 +17,7 @@ import {
   Server,
   Info,
   Clock,
+  Search,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -494,6 +495,7 @@ export default function AdminTrialVpsPage() {
   const [expiredItems, setExpiredItems] = useState<ExpiredTrialRow[]>([]);
   const [expiredLoading, setExpiredLoading] = useState(true);
   const [expiredClearing, setExpiredClearing] = useState(false);
+  const [nameSearch, setNameSearch] = useState('');
 
   const fetchPackages = async () => {
     setLoading(true);
@@ -835,6 +837,11 @@ export default function AdminTrialVpsPage() {
 
   const bulkLineCount = bulkVps.split('\n').filter((l) => l.trim()).length;
   const addVpsLineCount = addVpsBulk.split('\n').filter((l) => l.trim()).length;
+  const nameQuery = nameSearch.trim().toLowerCase();
+  const filteredPackages = useMemo(
+    () => packages.filter((pkg) => !nameQuery || pkg.name.toLowerCase().includes(nameQuery)),
+    [packages, nameQuery]
+  );
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6">
@@ -861,6 +868,16 @@ export default function AdminTrialVpsPage() {
             Create Package
           </Button>
         </div>
+      </div>
+
+      <div className="relative max-w-xl">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+        <Input
+          value={nameSearch}
+          onChange={(e) => setNameSearch(e.target.value)}
+          placeholder="Search product name"
+          className="pl-9"
+        />
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -906,9 +923,15 @@ export default function AdminTrialVpsPage() {
             </Button>
           </CardContent>
         </Card>
+      ) : filteredPackages.length === 0 ? (
+        <Card className="text-center py-16">
+          <CardContent>
+            <p className="text-sm text-muted-foreground">No packages match this name.</p>
+          </CardContent>
+        </Card>
       ) : (
         <div className="space-y-4">
-          {packages.map((pkg) => (
+          {filteredPackages.map((pkg) => (
             <TrialPackageRow
               key={pkg._id}
               pkg={pkg}

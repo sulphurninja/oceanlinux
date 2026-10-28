@@ -29,7 +29,7 @@ const { getCompanyHostdzireApiConfig } = require('@/lib/companyHostdzireApi');
 const RackatoApi = require('./rackatoApi');
 const { getCompanyRackatoApiConfig } = require('@/lib/companyRackatoApi');
 const { resolveRackatoPlan } = require('@/lib/rackatoStockConfig');
-const { parseRackatoOrder, parseRackatoExpiry } = require('@/lib/rackatoOrder');
+const { parseRackatoOrder, parseRackatoExpiry, mergeRackatoDelivery } = require('@/lib/rackatoOrder');
 const {
   readHostdzireStockConfig,
   resolveHostdzirePlaceOrderOs,
@@ -1791,12 +1791,20 @@ class AutoProvisioningService {
       totalTime: Date.now() - startTime,
     });
 
+    let claimOrder = order;
     if (isNexaHeldOrder(order)) {
-      L.line('[NEXA] order already accepted — poll only, no second purchase');
-      return asResumeResult(await resumeNexaOrder(order, ipStock, { holdIfMissing: true }));
+      const resumed = await resumeNexaOrder(order, ipStock, { holdIfMissing: true });
+      if (!(resumed.dead && resumed.action === 'failed' && !order.ipAddress)) {
+        L.line('[NEXA] order already accepted — poll only, no second purchase');
+        return asResumeResult(resumed);
+      }
+      L.line(`[NEXA] order ${resumed.nexaOrderId || order.nexaOrderId} was cancelled — manual provision will buy again`);
+      await Order.findByIdAndUpdate(order._id, { $unset: { nexaOrderId: '' }, $set: { provisioningError: '' } });
+      const plain = typeof order.toObject === 'function' ? order.toObject() : { ...order };
+      claimOrder = { ...plain, nexaOrderId: '', provisioningError: '' };
     }
 
-    const claimed = await resumeNexaOrder(order, ipStock, { holdIfMissing: false });
+    const claimed = await resumeNexaOrder(claimOrder, ipStock, { holdIfMissing: false });
     if (claimed.action !== 'none') {
       L.line(`[NEXA] linked existing order ${claimed.nexaOrderId || ''} (${claimed.action})`);
       return asResumeResult(claimed);
@@ -2436,11 +2444,25 @@ class AutoProvisioningService {
     }
 
     let parsed = parseRackatoOrder(null);
+    const reference = order.clientTxnId || String(order._id);
     for (let attempt = 1; attempt <= 8; attempt++) {
       const details = await api.getOrder(rackatoOrderId);
       parsed = parseRackatoOrder(details);
+      if (!parsed.ip || !parsed.password || !parsed.username) {
+        try {
+          const nodes = await api.listNodes({
+            order_id: rackatoOrderId,
+            customer_reference_id: reference,
+            page: 1,
+            limit: 20,
+          });
+          parsed = mergeRackatoDelivery(parsed, parseRackatoOrder(nodes));
+        } catch (err) {
+          L.line(`[RACKATO] node list not ready: ${err.message}`);
+        }
+      }
       if (parsed.ip && parsed.uid) break;
-      if (/fail|cancel|error/i.test(parsed.status || '')) {
+      if (/fail|cancel|error/i.test(parsed.status || '') && !parsed.ip) {
         throw new Error(`Rackato order ${rackatoOrderId} is ${parsed.status}`);
       }
       if (attempt < 8) await new Promise((resolve) => setTimeout(resolve, 5000));
@@ -2471,7 +2493,7 @@ class AutoProvisioningService {
     }
 
     return {
-      success: true,
+      success: !!parsed.ip,
       pending: !parsed.ip,
       ipAddress: parsed.ip || '',
       credentials: { username, password: loginPassword },

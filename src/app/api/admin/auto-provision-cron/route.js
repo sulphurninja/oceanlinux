@@ -158,6 +158,16 @@ async function validateOrderConfiguration(order) {
                 isSmartVps: true,
             };
         }
+
+        if (order.provider === 'rackato' || order.rackatoOrderId) {
+            console.log(`[VALIDATION] ✅ Rackato stock — product id lives on the Rackato config, not Hostycare`);
+            return {
+                valid: true,
+                productId: 'rackato',
+                ipStock: ipStock.name,
+                isRackato: true,
+            };
+        }
         
         // STEP 2: Parse memory options from IPStock
         let memoryOptions = {};
@@ -378,6 +388,11 @@ async function acquireDatabaseLock() {
                                 { autoProvisioned: true },
                                 { provisioningStatus: 'failed' }
                             ]
+                        },
+                        {
+                            provider: 'rackato',
+                            rackatoOrderId: { $nin: [null, ''] },
+                            ipAddress: { $in: [null, ''] },
                         }
                     ]
                 },
@@ -391,6 +406,11 @@ async function acquireDatabaseLock() {
                                 { provisioningStatus: 'provisioning' },
                                 { updatedAt: { $lt: new Date(Date.now() - CONFIG.lockTimeoutMs) } }
                             ]
+                        },
+                        {
+                            provider: 'rackato',
+                            rackatoOrderId: { $nin: [null, ''] },
+                            ipAddress: { $in: [null, ''] },
                         }
                     ]
                 }
@@ -439,8 +459,8 @@ async function acquireDatabaseLock() {
                 const isSmartVpsLike =
                     candidate.provider === 'smartvps' ||
                     String(candidate.productName || '').includes('🌊');
-                if (isSmartVpsLike) {
-                    console.log(`[LOCK] ⏭️ Not marking SmartVPS order as CONFIG-failed — will retry next run`);
+                if (isSmartVpsLike || candidate.provider === 'rackato' || candidate.rackatoOrderId) {
+                    console.log(`[LOCK] ⏭️ Not marking ${candidate.provider || 'provider'} order as CONFIG-failed — will retry next run`);
                     continue;
                 }
                 if (candidate.trialVpsPackageId || candidate.slotIpPackageId) {
@@ -484,6 +504,11 @@ async function acquireDatabaseLock() {
                                         { provisioningStatus: 'provisioning' },
                                         { updatedAt: { $lt: new Date(Date.now() - CONFIG.lockTimeoutMs) } }
                                     ]
+                                },
+                                {
+                                    provider: 'rackato',
+                                    rackatoOrderId: { $nin: [null, ''] },
+                                    ipAddress: { $in: [null, ''] },
                                 }
                             ]
                         }
@@ -632,10 +657,10 @@ export async function POST(request) {
 
                 const provisionResult = await provisioningService.provisionServer(lockedOrder._id.toString());
 
-                if (provisionResult.nexaPending || provisionResult.alreadyProvisioning) {
+                if (provisionResult.nexaPending || provisionResult.pending || provisionResult.alreadyProvisioning) {
                     success = true;
                     const orderTime = Date.now() - orderStartTime;
-                    console.log(`[CRON-${cronId}] Nexa order stays provisioning until the IP is delivered`);
+                    console.log(`[CRON-${cronId}] Order stays provisioning until the IP is delivered`);
                     result = {
                         orderId: lockedOrder._id.toString(),
                         success: true,
