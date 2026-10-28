@@ -109,7 +109,9 @@ export async function POST(request) {
 
       return NextResponse.json({
         success: result.success,
-        message: result.success ? 'Server provisioned successfully' : 'Provisioning failed',
+        message: result.nexaPending
+          ? 'Nexa is still provisioning this IP. It stays locked and will be assigned when Nexa delivers it.'
+          : result.success ? 'Server provisioned successfully' : 'Provisioning failed',
         details: result
       });
 

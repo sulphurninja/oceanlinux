@@ -39,6 +39,12 @@ function shouldSkipAutoRetry(order) {
     if (order.provisioningStatus === 'active' && order.ipAddress) {
         return { skip: true, reason: 'already_active' };
     }
+    if (order.provider === 'nexa' || order.nexaOrderId) {
+        const err = String(order.provisioningError || '');
+        if (order.nexaOrderId || err.startsWith('PENDING:') || /unable to process order transaction/i.test(err)) {
+            return { skip: true, reason: 'nexa_waiting_delivery' };
+        }
+    }
     if (order.trialVpsPackageId) {
         if (order.trialVpsSlotId && order.ipAddress) {
             return { skip: true, reason: 'trial_vps_fulfilled' };
@@ -546,6 +552,16 @@ export async function POST(request) {
         console.log(`[CRON-${cronId}] ✅ Database connected`);
 
         try {
+            const { syncNexaPendingOrders } = require('@/lib/nexaPendingSync');
+            const nexaSync = await syncNexaPendingOrders({ limit: 40 });
+            if (nexaSync.length) {
+                console.log(`[CRON-${cronId}] Nexa pending sync:`, JSON.stringify(nexaSync));
+            }
+        } catch (nexaSyncErr) {
+            console.warn(`[CRON-${cronId}] Nexa pending sync skipped:`, nexaSyncErr.message);
+        }
+
+        try {
             const { syncStuckResellerPendingOrders } = require('@/lib/resellerApiOrderSync');
             const resellerSync = await syncStuckResellerPendingOrders({ limit: 25 });
             if (resellerSync.length) {
@@ -615,6 +631,21 @@ export async function POST(request) {
                 console.log(`[CRON-${cronId}] 🚀 Attempt ${attempt}/${CONFIG.maxRetries}`);
 
                 const provisionResult = await provisioningService.provisionServer(lockedOrder._id.toString());
+
+                if (provisionResult.nexaPending || provisionResult.alreadyProvisioning) {
+                    success = true;
+                    const orderTime = Date.now() - orderStartTime;
+                    console.log(`[CRON-${cronId}] Nexa order stays provisioning until the IP is delivered`);
+                    result = {
+                        orderId: lockedOrder._id.toString(),
+                        success: true,
+                        nexaPending: true,
+                        attempts: attempt,
+                        processingTime: orderTime,
+                        productId: lockedOrder._validationInfo.productId
+                    };
+                    break;
+                }
 
                 if (provisionResult.success) {
                     success = true;

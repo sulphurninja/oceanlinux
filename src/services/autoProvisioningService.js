@@ -1135,10 +1135,13 @@ class AutoProvisioningService {
           $or: [
             // Order not yet provisioned or provisioning
             { provisioningStatus: { $nin: ['provisioning', 'active'] } },
-            // OR stale provisioning lock (older than 5 minutes)
+            // OR stale provisioning lock (older than 5 minutes).
+            // A Nexa order that is already accepted stays locked so a later pass cannot buy it again.
             {
               provisioningStatus: 'provisioning',
-              lastProvisionAttempt: { $lt: fiveMinutesAgo }
+              lastProvisionAttempt: { $lt: fiveMinutesAgo },
+              nexaOrderId: { $in: [null, ''] },
+              provisioningError: { $not: /^PENDING:/ }
             }
           ],
           // Extra safety: Don't provision if already has IP address
@@ -1774,6 +1777,31 @@ class AutoProvisioningService {
       throw new Error(`Nexa plan id is missing on IPStock "${ipStock?.name}". Add the product again from the Nexa company dialog.`);
     }
 
+    const {
+      isNexaDeferredPurchaseError,
+      isNexaHeldOrder,
+      resumeNexaOrder,
+      NEXA_PENDING_ERROR,
+    } = require('@/lib/nexaPendingSync');
+
+    const asResumeResult = (resumed) => ({
+      success: resumed.action === 'assigned',
+      nexaPending: resumed.action === 'pending',
+      error: resumed.action === 'pending' ? NEXA_PENDING_ERROR : (resumed.action === 'failed' ? 'Nexa order failed.' : undefined),
+      totalTime: Date.now() - startTime,
+    });
+
+    if (isNexaHeldOrder(order)) {
+      L.line('[NEXA] order already accepted — poll only, no second purchase');
+      return asResumeResult(await resumeNexaOrder(order, ipStock, { holdIfMissing: true }));
+    }
+
+    const claimed = await resumeNexaOrder(order, ipStock, { holdIfMissing: false });
+    if (claimed.action !== 'none') {
+      L.line(`[NEXA] linked existing order ${claimed.nexaOrderId || ''} (${claimed.action})`);
+      return asResumeResult(claimed);
+    }
+
     await Order.findByIdAndUpdate(order._id, {
       provisioningStatus: 'provisioning',
       provisioningError: '',
@@ -1785,7 +1813,20 @@ class AutoProvisioningService {
 
     const api = new NexaApi(cfg);
     L.line(`[NEXA] POST action=order plan ${planId} pool ${poolId} protocol ${protocol}`);
-    const result = await api.purchase({ planId, poolId, quantity: 1, protocol });
+    let result;
+    try {
+      result = await api.purchase({ planId, poolId, quantity: 1, protocol });
+    } catch (err) {
+      if (!isNexaDeferredPurchaseError(err.message)) throw err;
+      L.line('[NEXA] purchase deferred — lock the order and wait for the Nexa order');
+      const orderSnapshot = typeof order.toObject === 'function' ? order.toObject() : order;
+      const resumed = await resumeNexaOrder(
+        { ...orderSnapshot, provisioningError: err.message },
+        ipStock,
+        { holdIfMissing: true }
+      );
+      return asResumeResult(resumed);
+    }
     const delivered = NexaApi.extractPurchaseDelivery(result);
     const nexaOrderId = delivered.orderId;
     const host = delivered.ip;
