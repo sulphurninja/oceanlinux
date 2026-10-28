@@ -74,6 +74,7 @@ const orderSchema = new mongoose.Schema({
             'rackato',
             'virtualizor',
             'oceanlinux',
+            'nexa',
         ],
         default: 'hostycare'
     },
@@ -257,7 +258,16 @@ orderSchema.index({ 'pendingRenewal.renewalTxnId': 1 }); // For webhook lookup
 orderSchema.index({ 'renewalPayments.renewalTxnId': 1 }); // For idempotency check
 orderSchema.index({ panelUsername: 1 });
 
-if (mongoose.models.Order && (!mongoose.models.Order.schema.paths.rackatoOrderId || !mongoose.models.Order.schema.paths.nexaOrderId)) {
+const existingOrderModel = mongoose.models.Order;
+const providerEnum = existingOrderModel?.schema?.path('provider')?.enumValues || [];
+if (
+  existingOrderModel &&
+  (
+    !existingOrderModel.schema.paths.rackatoOrderId ||
+    !existingOrderModel.schema.paths.nexaOrderId ||
+    !providerEnum.includes('nexa')
+  )
+) {
   delete mongoose.models.Order;
 }
 
