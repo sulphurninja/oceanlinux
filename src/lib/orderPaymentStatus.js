@@ -699,9 +699,22 @@ async function verifyOrderPaymentProof(order) {
 
 
 
-  // Pure wallet
+  // Pure wallet. Cart checkout debits once on the session; child orders
+  // often have no walletDeduction row of their own.
 
   if (method === 'wallet' || pd.walletOnly === true) {
+
+    if (order.walletDeduction?.deducted === true) {
+
+      return verifyWalletDebitForOrder(order);
+
+    }
+
+    if (pd.confirmedViaCheckout === true) {
+
+      return verifyCheckoutSessionWalletDebit(order);
+
+    }
 
     return verifyWalletDebitForOrder(order);
 

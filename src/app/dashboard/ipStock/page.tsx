@@ -2876,20 +2876,18 @@ const NexaPlanGroupRow = memo(function NexaPlanGroupRow({
   const inStock = openRows.length > 0;
   const priced = rows.map((row) => row.price).filter((price) => price > 0);
   const startingPrice = priced.length ? Math.min(...priced) : 0;
-  const primary = openRows[0] || rows[0];
-  const primaryVerifyKey = primary ? `${primary.stock._id}:${primary.memory}:` : null;
 
   return (
     <div className={cn(
-      "premium-dashboard-card rounded-lg transition-all overflow-hidden border-l-4",
+      'premium-dashboard-card rounded-lg transition-all overflow-hidden border-l-4',
       inStock
-        ? "border-l-emerald-400 hover:border-emerald-400/40"
-        : "border-l-red-500 premium-ipstock-row-sold-out"
+        ? 'border-l-emerald-400 hover:border-emerald-400/40'
+        : 'border-l-red-500 premium-ipstock-row-sold-out'
     )}>
       <div
         className={cn(
-          "p-3 grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_auto] gap-2.5 sm:gap-3 sm:items-center",
-          inStock ? "cursor-pointer" : "cursor-default"
+          'p-3 grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_auto] gap-2.5 sm:gap-3 sm:items-center',
+          inStock ? 'cursor-pointer' : 'cursor-default'
         )}
         onClick={() => inStock && setIsExpanded(!isExpanded)}
       >
@@ -2899,15 +2897,19 @@ const NexaPlanGroupRow = memo(function NexaPlanGroupRow({
           </div>
           <div className="flex-1 min-w-0">
             <h3 className={cn(
-              "font-semibold text-sm md:text-base min-w-0",
-              inStock ? "premium-dashboard-title break-words sm:truncate" : "premium-dashboard-subtitle line-through"
+              'font-semibold text-sm md:text-base min-w-0',
+              inStock ? 'premium-dashboard-title break-words sm:truncate' : 'premium-dashboard-subtitle line-through'
             )}>
               {planName}
             </h3>
             <div className="flex items-center gap-2 flex-wrap mt-1">
-              <Badge variant="outline" className={cn(inStock ? premiumBadge.success : premiumBadge.error, "text-[10px] gap-1 px-2 py-0 h-5 font-semibold")}>
+              <Badge variant="outline" className={cn(inStock ? premiumBadge.success : premiumBadge.error, 'text-[10px] gap-1 px-2 py-0 h-5 font-semibold')}>
                 {inStock ? <CheckCircle2 className="h-3 w-3" aria-hidden /> : <XCircle className="h-3 w-3" aria-hidden />}
-                {inStock ? `${openRows.length} IP range${openRows.length === 1 ? '' : 's'}` : 'Out of stock'}
+                {inStock
+                  ? (openRows.length === rows.length
+                    ? `${rows.length} IP range${rows.length === 1 ? '' : 's'}`
+                    : `${openRows.length} of ${rows.length} in stock`)
+                  : 'Out of stock'}
               </Badge>
             </div>
           </div>
@@ -2915,61 +2917,43 @@ const NexaPlanGroupRow = memo(function NexaPlanGroupRow({
         <div className="flex flex-wrap items-center gap-3 border-t border-white/10 pt-2.5 sm:border-0 sm:pt-0 sm:justify-end min-w-0">
           <p className="flex items-baseline gap-1.5 min-w-0 leading-none">
             <span className="text-xs premium-dashboard-subtitle shrink-0">From</span>
-            <span className={cn("font-bold text-lg truncate premium-price-accent", !inStock && "opacity-60")}>
+            <span className={cn('font-bold text-lg truncate premium-price-accent', !inStock && 'opacity-60')}>
               {startingPrice > 0 ? `₹${startingPrice}` : '—'}
             </span>
           </p>
           <div className="flex items-center gap-2 flex-1 sm:flex-none justify-end" onClick={(e) => e.stopPropagation()}>
-            {inStock && primary ? (
-              <>
-                <AddToCartButton
-                  kind="ipstock"
-                  ipStockId={primary.stock._id}
-                  memory={primary.memory}
-                  size="sm"
-                  variant="outline"
-                  iconOnly
-                  className={cn(PLAN_ROW_ACTION, 'w-10 px-0')}
-                  label="Add to cart"
-                />
-                <Button
-                  size="sm"
-                  className={cn(PLAN_ROW_ACTION, 'w-[7.25rem] gap-1.5 premium-btn-primary border-0')}
-                  disabled={verifyingPurchaseKey === primaryVerifyKey}
-                  onClick={() => onBuyNow(primary.stock.name, primary.memory, primary.price, primary.stock._id, undefined, true)}
-                >
-                  {verifyingPurchaseKey === primaryVerifyKey ? <Loader2 className="h-3 w-3 animate-spin" /> : <Zap className="h-3 w-3" aria-hidden />}
-                  Buy Now
-                </Button>
-              </>
-            ) : null}
-            <button
-              type="button"
-              onClick={() => inStock && setIsExpanded(!isExpanded)}
-              disabled={!inStock}
-              aria-expanded={inStock ? isExpanded : undefined}
-              aria-label={isExpanded ? 'Hide IP ranges' : 'Show IP ranges'}
-              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md premium-dashboard-subtitle hover:bg-white/[0.06] disabled:opacity-40"
-            >
-              <ChevronDown className={cn("h-4 w-4 transition-transform", isExpanded && "rotate-180")} aria-hidden />
-            </button>
+            {inStock ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                aria-expanded={isExpanded}
+                className={cn(PLAN_ROW_ACTION, 'premium-ipstock-range-toggle gap-1.5')}
+                onClick={() => setIsExpanded(!isExpanded)}
+              >
+                {isExpanded ? 'Hide ranges' : 'Select IP range'}
+                <ChevronDown className={cn('h-4 w-4 transition-transform', isExpanded && 'rotate-180')} aria-hidden />
+              </Button>
+            ) : (
+              <Button type="button" variant="outline" size="sm" disabled className={cn(PLAN_ROW_ACTION, 'w-[7.25rem]')}>
+                Sold out
+              </Button>
+            )}
           </div>
         </div>
       </div>
       {isExpanded && (
-        <div className="border-t border-white/10 bg-white/[0.02]">
+        <div className="premium-ipstock-range-panel">
           <div className="p-3 space-y-2">
-            <p className="text-xs font-medium premium-dashboard-subtitle uppercase tracking-wide">IP ranges</p>
+            <p className="text-xs font-medium premium-dashboard-subtitle">IP ranges</p>
             {rows.map((row) => {
               const verifyKey = `${row.stock._id}:${row.memory}:`;
               return (
                 <div
                   key={row.stock._id}
                   className={cn(
-                    "flex flex-col gap-2 p-2.5 rounded-md border transition-colors sm:flex-row sm:items-center sm:justify-between sm:gap-3",
-                    row.inStock
-                      ? "bg-white/[0.04] border-white/10 hover:border-emerald-400/35"
-                      : "bg-white/[0.02] border-red-400/10 opacity-80"
+                    "premium-ipstock-range-row flex flex-col gap-2 p-2.5 rounded-md sm:flex-row sm:items-center sm:justify-between sm:gap-3",
+                    !row.inStock && "premium-ipstock-range-row--out"
                   )}
                 >
                   <div className="flex items-center justify-between gap-2 min-w-0 sm:flex-1">
@@ -3118,19 +3102,19 @@ const CompactServerPlanRow = memo(function CompactServerPlanRow({
   const primaryVerifyKey = primaryRow
     ? `${stock._id}:${primaryRow.memory}:${primaryRow.tag || ''}`
     : null;
+  const pickRangeFirst = isProxyProduct && netbayGroupTags.length > 1;
 
   return (
     <div className={cn(
-      "premium-dashboard-card rounded-lg transition-all overflow-hidden border-l-4",
+      'premium-dashboard-card rounded-lg transition-all overflow-hidden border-l-4',
       inStock
-        ? "border-l-emerald-400 hover:border-emerald-400/40"
-        : "border-l-red-500 premium-ipstock-row-sold-out"
+        ? 'border-l-emerald-400 hover:border-emerald-400/40'
+        : 'border-l-red-500 premium-ipstock-row-sold-out'
     )}>
-      {/* Main Row - Always Visible */}
-      <div 
+      <div
         className={cn(
-          "p-3 grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_auto] gap-2.5 sm:gap-3 sm:items-center",
-          inStock ? "cursor-pointer" : "cursor-default"
+          'p-3 grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_auto] gap-2.5 sm:gap-3 sm:items-center',
+          inStock ? 'cursor-pointer' : 'cursor-default'
         )}
         onClick={() => inStock && setIsExpanded(!isExpanded)}
       >
@@ -3200,7 +3184,7 @@ const CompactServerPlanRow = memo(function CompactServerPlanRow({
             className="flex items-center gap-2 flex-1 sm:flex-none justify-end"
             onClick={(e) => e.stopPropagation()}
           >
-            {inStock && primaryRow ? (
+            {inStock && primaryRow && !pickRangeFirst ? (
               <>
                 <AddToCartButton
                   kind="ipstock"
@@ -3237,6 +3221,18 @@ const CompactServerPlanRow = memo(function CompactServerPlanRow({
                   Buy Now
                 </Button>
               </>
+            ) : inStock && pickRangeFirst ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                aria-expanded={isExpanded}
+                className={cn(PLAN_ROW_ACTION, 'premium-ipstock-range-toggle gap-1.5')}
+                onClick={() => setIsExpanded(!isExpanded)}
+              >
+                {isExpanded ? 'Hide ranges' : 'Select IP range'}
+                <ChevronDown className={cn('h-4 w-4 transition-transform', isExpanded && 'rotate-180')} aria-hidden />
+              </Button>
             ) : (
               <>
                 <Button
@@ -3260,7 +3256,10 @@ const CompactServerPlanRow = memo(function CompactServerPlanRow({
                 </Button>
               </>
             )}
+            {!pickRangeFirst && (
             <span className="h-6 w-px bg-white/10 mx-0.5 hidden sm:block" aria-hidden />
+            )}
+            {!pickRangeFirst && (
             <button
               type="button"
               onClick={() => inStock && setIsExpanded(!isExpanded)}
@@ -3271,14 +3270,16 @@ const CompactServerPlanRow = memo(function CompactServerPlanRow({
             >
               <ChevronDown className={cn("h-4 w-4 transition-transform", isExpanded && "rotate-180")} aria-hidden />
             </button>
+            )}
           </div>
         </div>
       </div>
 
       {/* Expanded Section - Configurations */}
       {isExpanded && (
-        <div className="border-t border-white/10 bg-white/[0.02]">
+        <div className={pickRangeFirst ? 'premium-ipstock-range-panel' : 'border-t border-white/10 bg-white/[0.02]'}>
           <div className="p-3 space-y-2">
+            {!pickRangeFirst && (
             <div className="flex flex-wrap items-center gap-2 pb-2">
               <Badge variant="outline" className={cn(premiumBadge.neutral, 'text-[10px] px-1.5 py-0 h-5')}>
                 {stock.serverType}
@@ -3293,10 +3294,11 @@ const CompactServerPlanRow = memo(function CompactServerPlanRow({
                 {configRows.length} configuration{configRows.length !== 1 ? 's' : ''}
               </span>
             </div>
+            )}
             {configRows.length > 0 ? (
               <>
-                <p className="text-xs font-medium premium-dashboard-subtitle uppercase tracking-wide mb-3">
-                  {isProxyProduct || netbayGroupTags.length > 1 ? 'IP ranges' : 'Select Configuration'}
+                <p className="text-xs font-medium premium-dashboard-subtitle mb-3">
+                  {pickRangeFirst ? 'IP ranges' : (isProxyProduct || netbayGroupTags.length > 1 ? 'IP ranges' : 'Select configuration')}
                 </p>
                 <div className="space-y-2">
                   {configRows.map((row) => {
@@ -3308,10 +3310,15 @@ const CompactServerPlanRow = memo(function CompactServerPlanRow({
                     <div
                       key={key}
                       className={cn(
-                        "flex flex-col gap-2 p-2.5 rounded-md border transition-colors sm:flex-row sm:items-center sm:justify-between sm:gap-3",
-                        memoryInStock
-                          ? "bg-white/[0.04] border-white/10 hover:border-emerald-400/35"
-                          : "bg-white/[0.02] border-red-400/10 opacity-80"
+                        "flex flex-col gap-2 p-2.5 rounded-md sm:flex-row sm:items-center sm:justify-between sm:gap-3",
+                        pickRangeFirst
+                          ? cn('premium-ipstock-range-row', !memoryInStock && 'premium-ipstock-range-row--out')
+                          : cn(
+                              'border transition-colors',
+                              memoryInStock
+                                ? 'bg-white/[0.04] border-white/10 hover:border-emerald-400/35'
+                                : 'bg-white/[0.02] border-red-400/10 opacity-80'
+                            )
                       )}
                     >
                       <div className="flex items-center justify-between gap-2 min-w-0 sm:flex-1">

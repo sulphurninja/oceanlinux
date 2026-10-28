@@ -639,6 +639,19 @@ export async function confirmCheckoutFromWebhook(session, { paymentMethod, trans
       confirmedAt: order.paymentDetails?.confirmedAt || new Date(),
       ...(Number(session.gatewayAmount) > 0 ? { gatewayAmount: Number(session.gatewayAmount) } : {}),
     };
+    if (
+      session.walletTxnId &&
+      Number(session.walletAmount) > 0 &&
+      order.walletDeduction?.refunded !== true &&
+      order.walletDeduction?.deducted !== true
+    ) {
+      order.walletDeduction = {
+        deducted: true,
+        amount: Number(session.walletAmount),
+        transactionId: String(session.walletTxnId),
+        timestamp: new Date(),
+      };
+    }
     await order.save();
   }
 

@@ -161,7 +161,16 @@ export async function POST(request, { params }) {
       const planId = Number(plan.planId);
       const poolKey = pool?.poolId != null ? Number(pool.poolId) : '';
       const key = `${planId}:${poolKey}`;
-      const label = [plan.name, pool?.subnet || pool?.name].filter(Boolean).join(' — ');
+      const rawLabel = [plan.name, pool?.subnet || pool?.name].filter(Boolean).join(' — ');
+      const planEmoji = {
+        'Diamond IPs': '💎',
+        Broadcast: '📡',
+        'Premium Native IPs': '⭐',
+        'Web Login': '🔐',
+      }[String(plan.name || '').trim()];
+      const label = planEmoji && !String(rawLabel).startsWith(planEmoji)
+        ? rawLabel.replace(String(plan.name).trim(), `${planEmoji} ${String(plan.name).trim()}`)
+        : rawLabel;
       if (existingKeys.has(key)) {
         skipped.push(label);
         continue;
@@ -183,7 +192,7 @@ export async function POST(request, { params }) {
         ].filter(Boolean).join(' · '),
         available: units > 0,
         stockCount: units,
-        hiddenFromStore: true,
+        hiddenFromStore: false,
         company: company._id,
         serverType: 'Proxy',
         tags: ['nexa'],

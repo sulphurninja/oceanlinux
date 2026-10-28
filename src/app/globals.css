@@ -1004,6 +1004,54 @@ html {
     color: var(--pd-subtitle);
   }
 
+  html.premium-dashboard-active:not(.dark) .premium-ipstock-range-toggle {
+    background: rgba(255, 255, 255, 0.82) !important;
+    color: hsl(160 30% 14%) !important;
+    border-color: rgba(5, 150, 105, 0.45) !important;
+    box-shadow: none !important;
+  }
+
+  html.premium-dashboard-active:not(.dark) .premium-ipstock-range-toggle:hover {
+    background: #fff !important;
+  }
+
+  html.premium-dashboard-active.dark .premium-ipstock-range-toggle {
+    background: rgba(255, 255, 255, 0.06) !important;
+    color: #ecfdf5 !important;
+    border-color: rgba(255, 255, 255, 0.16) !important;
+  }
+
+  html.premium-dashboard-active.dark .premium-ipstock-range-toggle:hover {
+    background: rgba(255, 255, 255, 0.1) !important;
+  }
+
+  .premium-ipstock-range-panel {
+    border-top: 1px solid rgba(15, 23, 42, 0.08);
+    background: rgba(255, 255, 255, 0.55);
+  }
+
+  html.premium-dashboard-active.dark .premium-ipstock-range-panel {
+    border-top-color: rgba(255, 255, 255, 0.08);
+    background: rgba(0, 0, 0, 0.16);
+  }
+
+  .premium-ipstock-range-row {
+    background: #fff;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    color: hsl(160 30% 12%);
+  }
+
+  html.premium-dashboard-active.dark .premium-ipstock-range-row {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(255, 255, 255, 0.1);
+    color: #f8fafc;
+  }
+
+  .premium-ipstock-range-row--out {
+    background: transparent;
+    color: var(--pd-subtitle);
+  }
+
   .premium-ipstock-section-jump-link[aria-current='true'] {
     color: var(--pd-nav-active-text);
     background: var(--pd-nav-active-bg);

@@ -1867,6 +1867,18 @@ export default function CompaniesPage() {
                           </Badge>
                         );
                       }
+                      const rk = c.rackatoApi;
+                      if (rk?.enabled && rk?.keyId) {
+                        let host = 'www.rackato.com';
+                        try { if (rk.baseUrl) host = new URL(rk.baseUrl).host; } catch { /* keep as-is */ }
+                        const liveLabel = rk.mode === 'production' ? 'Live' : 'Sandbox';
+                        return (
+                          <Badge variant="outline" className="gap-1 text-orange-700 border-orange-200">
+                            <Cloud className="h-3 w-3" />
+                            Rackato: {host} · {liveLabel}
+                          </Badge>
+                        );
+                      }
                       return (
                         <Badge variant="outline" className="gap-1 text-muted-foreground">
                           <ShieldAlert className="h-3 w-3" />
@@ -3302,6 +3314,11 @@ export default function CompaniesPage() {
                     {showRackatoSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
                 </div>
+                {rackatoCompany.rackatoApi?.keyId && rackatoCompany.rackatoApi?.keySecret ? (
+                  <p className="mt-1 text-xs text-emerald-600">
+                    Key and secret are saved. This box stays empty so the secret is not shown again. Leave it blank and Save keeps the same secret.
+                  </p>
+                ) : null}
               </div>
               {rackatoTestResult && (
                 <p className={`text-xs ${rackatoTestResult.success ? 'text-emerald-600' : 'text-red-600'}`}>{rackatoTestResult.message}</p>
