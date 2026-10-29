@@ -14,7 +14,7 @@ import {
 import { createPaytmDynamicQr } from '@/lib/paytmMerchant';
 import { createKwikUpiPayment } from '@/lib/kwikUpi';
 import { buildKwikUpiInlineQr } from '@/lib/kwikUpiQr';
-import { createUpiGatewayOrder } from '@/lib/upiGateway';
+import { createUpiGatewayOrder, getUpiGatewayRedirectUrl } from '@/lib/upiGateway';
 import QRCode from 'qrcode';
 import { enforcePaymentRateLimit } from '@/lib/rateLimit';
 
@@ -77,12 +77,12 @@ export async function POST(request) {
     const clientTxnId = buildClientTxnId('RRC');
     const expiresAt = new Date(Date.now() + REQUEST_TTL_HOURS * 60 * 60 * 1000);
 
-    // ---------- KaroPay ----------
+    // ---------- UPI Gateway (ekQR) ----------
     if (settings.provider === 'upigateway') {
       const gateway = getUpiGatewayCredentials(settings);
       if (!gateway) {
         return NextResponse.json(
-          { success: false, message: 'KaroPay is not connected. Ask admin to add the API key and secret first.' },
+          { success: false, message: 'UPI Gateway is not connected. Ask admin to add the API key first.' },
           { status: 400 }
         );
       }
@@ -91,11 +91,13 @@ export async function POST(request) {
       try {
         created = await createUpiGatewayOrder({
           apiKey: gateway.apiKey,
-          apiSecret: gateway.apiSecret,
           clientTxnId,
           amount,
           customerName: auth.reseller.businessName || auth.user.name,
+          customerEmail: auth.user.email || auth.reseller.email,
           customerMobile: auth.user.phone,
+          redirectUrl: getUpiGatewayRedirectUrl(clientTxnId, 'reseller-wallet'),
+          productInfo: 'Reseller wallet recharge',
         });
       } catch (err) {
         return NextResponse.json(

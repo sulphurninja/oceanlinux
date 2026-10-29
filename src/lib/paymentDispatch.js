@@ -12,6 +12,7 @@ const { resolveOrderExpiryOnPayment } = require('@/lib/advpsOrderExpiry');
 import {
   paymentAmountsMatch,
   upiVerificationAmountAcceptable,
+  upiPaidAmountCovers,
   expectedGatewayAmountFromSession,
 } from '@/lib/paymentAmountValidation';
 import { confirmResellerRechargeRequest } from '@/lib/resellerRechargeService';
@@ -82,7 +83,7 @@ export async function probeCheckoutSessionPayment(session) {
     if (!result.verified) {
       return { verified: false, gateway: 'upi', reason: result.error || 'not paid' };
     }
-    if (result.amount && !upiAmountMatches(result, session.gatewayAmount)) {
+    if (!upiPaidAmountCovers(result.amount, session.gatewayAmount) || !upiAmountMatches(result, session.gatewayAmount)) {
       return { verified: false, gateway: 'upi', reason: 'amount mismatch' };
     }
     return {
@@ -179,7 +180,7 @@ export async function probeWalletRechargePayment(recharge) {
     if (!result.verified) {
       return { verified: false, gateway: 'upi', reason: result.error || 'not paid' };
     }
-    if (result.amount && !upiAmountMatches(result, recharge.amount)) {
+    if (!upiPaidAmountCovers(result.amount, recharge.amount) || !upiAmountMatches(result, recharge.amount)) {
       return { verified: false, gateway: 'upi', reason: 'amount mismatch' };
     }
     return {

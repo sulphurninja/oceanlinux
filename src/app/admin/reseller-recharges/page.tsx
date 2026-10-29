@@ -90,7 +90,6 @@ export default function AdminResellerRechargesPage() {
 
   const [upiGatewayForm, setUpiGatewayForm] = useState({
     apiKey: '',
-    apiSecret: '',
     displayName: 'OceanLinux',
   });
 
@@ -171,8 +170,8 @@ export default function AdminResellerRechargesPage() {
   const connectUpiGateway = async () => {
     setConnecting(true);
     try {
-      await postAction({ action: 'connect_upigateway', ...upiGatewayForm }, 'KaroPay connected');
-      setUpiGatewayForm((f) => ({ ...f, apiKey: '', apiSecret: '' }));
+      await postAction({ action: 'connect_upigateway', ...upiGatewayForm }, 'UPI Gateway connected');
+      setUpiGatewayForm((f) => ({ ...f, apiKey: '' }));
       fetchData();
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Connect failed');
@@ -325,7 +324,7 @@ export default function AdminResellerRechargesPage() {
 
       <Tabs defaultValue="upigateway">
         <TabsList>
-          <TabsTrigger value="upigateway">KaroPay</TabsTrigger>
+          <TabsTrigger value="upigateway">UPI Gateway</TabsTrigger>
           <TabsTrigger value="paytm">Paytm Direct</TabsTrigger>
           <TabsTrigger value="history">Recharge history</TabsTrigger>
         </TabsList>
@@ -335,7 +334,7 @@ export default function AdminResellerRechargesPage() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Zap className="h-5 w-5 text-amber-500" />
-                KaroPay
+                UPI Gateway
                 {upiGatewayConnected && (
                   <Badge className="bg-emerald-600">
                     <CheckCircle2 className="h-3 w-3 mr-1" />
@@ -344,10 +343,10 @@ export default function AdminResellerRechargesPage() {
                 )}
               </CardTitle>
               <CardDescription>
-                www.karopay.in ke API Client se key aur secret. Naya reseller recharge isi se banega.
-                Wallet tabhi credit hota hai jab status PAID ho aur amount match kare.{' '}
-                <a href="https://www.karopay.in" target="_blank" rel="noreferrer" className="underline">
-                  karopay.in
+                merchant.upigateway.com ki API key. Naya reseller recharge isi se banega.
+                Wallet tabhi credit hota hai jab status success ho aur amount match kare.{' '}
+                <a href="https://merchant.upigateway.com" target="_blank" rel="noreferrer" className="underline">
+                  merchant.upigateway.com
                 </a>
               </CardDescription>
             </CardHeader>
@@ -363,15 +362,6 @@ export default function AdminResellerRechargesPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>API Secret</Label>
-                  <Input
-                    type="password"
-                    placeholder={settings?.upigateway?.hasApiSecret ? settings.upigateway.apiSecretMasked : 'API secret'}
-                    value={upiGatewayForm.apiSecret}
-                    onChange={(e) => setUpiGatewayForm({ ...upiGatewayForm, apiSecret: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
                   <Label>Display name</Label>
                   <Input
                     value={upiGatewayForm.displayName}
@@ -383,7 +373,7 @@ export default function AdminResellerRechargesPage() {
               <div className="flex flex-wrap gap-2">
                 <Button onClick={connectUpiGateway} disabled={connecting}>
                   {connecting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Link2 className="h-4 w-4 mr-2" />}
-                  {upiGatewayConnected ? 'Update & Reconnect' : 'Connect KaroPay'}
+                  {upiGatewayConnected ? 'Update & Reconnect' : 'Connect UPI Gateway'}
                 </Button>
                 {upiGatewayConnected && (
                   <>
@@ -401,7 +391,7 @@ export default function AdminResellerRechargesPage() {
 
               {upiGatewayWebhookUrl && (
                 <div className="rounded-lg border bg-muted/40 p-3 space-y-2">
-                  <Label>Webhook URL (KaroPay dashboard mein paste karo)</Label>
+                  <Label>Webhook URL (UPI Gateway dashboard mein paste karo)</Label>
                   <div className="flex gap-2">
                     <Input readOnly value={upiGatewayWebhookUrl} className="font-mono text-xs" />
                     <Button type="button" variant="outline" size="icon" onClick={() => copyWebhook(upiGatewayWebhookUrl)}>
@@ -430,7 +420,7 @@ export default function AdminResellerRechargesPage() {
                 )}
               </CardTitle>
               <CardDescription>
-                Isme <span className="font-medium">MID + Merchant Key dono</span> chahiye. Reseller recharge ke liye KaroPay use karo.{' '}
+                Isme <span className="font-medium">MID + Merchant Key dono</span> chahiye. Reseller recharge ke liye UPI Gateway use karo.{' '}
                 <a href="https://dashboard.paytmpayments.com" target="_blank" rel="noreferrer" className="underline">
                   Paytm Dashboard
                 </a>
@@ -554,7 +544,7 @@ export default function AdminResellerRechargesPage() {
                           <td className="py-3 pr-3">
                             <Badge variant="outline">
                               {item.method === 'upigateway'
-                                ? 'KaroPay'
+                                ? 'UPI Gateway'
                                 : item.method === 'kwikupi'
                                   ? 'KwikUPI'
                                   : item.method === 'vyapar'
@@ -590,7 +580,7 @@ export default function AdminResellerRechargesPage() {
             Active provider:{' '}
             <Badge variant="outline">
               {settings?.provider === 'upigateway'
-                ? 'KaroPay'
+                ? 'UPI Gateway'
                 : settings?.provider === 'paytm'
                   ? 'Paytm'
                   : 'KwikUPI'}
@@ -615,7 +605,7 @@ export default function AdminResellerRechargesPage() {
               value={provider}
               onChange={(e) => setProvider(e.target.value)}
             >
-              <option value="upigateway">KaroPay</option>
+              <option value="upigateway">UPI Gateway</option>
               <option value="paytm">Paytm Direct (MID + Merchant Key)</option>
             </select>
           </div>

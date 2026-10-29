@@ -67,7 +67,7 @@ function normalizeSettings(raw) {
   if (!upigateway.apiSecret && raw.upigateway?.apiSecret) {
     upigateway.apiSecret = raw.upigateway.apiSecret;
   }
-  upigateway.connected = !!(upigateway.apiKey && upigateway.apiSecret && upigateway.connected !== false);
+  upigateway.connected = !!(upigateway.apiKey && upigateway.connected !== false);
 
   const vyapar = {
     ...base.vyapar,
@@ -175,7 +175,7 @@ export function getPublicResellerRechargeSettings(settings) {
     provider,
     paytmConnected: !!(s.paytm.connected && s.paytm.mid),
     kwikUpiConnected: !!(s.kwikupi.connected && s.kwikupi.apiKey),
-    upiGatewayConnected: !!(s.upigateway.connected && s.upigateway.apiKey && s.upigateway.apiSecret),
+    upiGatewayConnected: !!(s.upigateway.connected && s.upigateway.apiKey),
     vyaparConnected: !!(s.vyapar.connected && s.vyapar.apiKey),
     paytmDisplayName: s.paytm.displayName || '',
     kwikUpiDisplayName: s.kwikupi.displayName || '',
@@ -261,10 +261,9 @@ export function getKwikUpiCredentials(settings) {
 
 export function getUpiGatewayCredentials(settings) {
   const s = normalizeSettings(settings);
-  if (!s.upigateway.connected || !s.upigateway.apiKey || !s.upigateway.apiSecret) return null;
+  if (!s.upigateway.connected || !s.upigateway.apiKey) return null;
   return {
     apiKey: s.upigateway.apiKey,
-    apiSecret: s.upigateway.apiSecret,
     displayName: s.upigateway.displayName || 'OceanLinux',
   };
 }
@@ -283,7 +282,7 @@ export async function updateUpiGatewayCredentials(partial, updatedBy = null) {
     next.apiSecret = current.upigateway.apiSecret;
   }
 
-  if (next.apiKey && next.apiSecret) {
+  if (next.apiKey) {
     next.connected = partial.connected !== false;
     if (next.connected && !current.upigateway.connectedAt) {
       next.connectedAt = new Date().toISOString();

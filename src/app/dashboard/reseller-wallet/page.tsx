@@ -1270,7 +1270,7 @@ export default function ResellerWalletPage() {
                                             className="w-48 h-48 rounded-lg border bg-white p-2"
                                         />
                                         <p className="text-xs text-muted-foreground text-center">
-                                            Scan the QR or open the KaroPay page. Wallet credits after payment is confirmed.
+                                            Scan the QR or open the payment page. Wallet credits after payment is confirmed.
                                         </p>
                                     </div>
                                 )}

@@ -165,7 +165,7 @@ async function checkUpiPayment(order) {
   const expectedAmount = expectedGatewayAmountFromOrder(activeOrder);
   const paidAmount = verification.amount;
 
-  if (expectedAmount > 0 && !upiVerificationAmountAcceptable(verification, expectedAmount)) {
+  if (!(expectedAmount > 0) || !upiVerificationAmountAcceptable(verification, expectedAmount)) {
     return {
       success: false,
       status: 'AMOUNT_MISMATCH',

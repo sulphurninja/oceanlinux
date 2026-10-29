@@ -85,8 +85,8 @@ export async function POST(request) {
       }
 
       const expected = expectedRenewalGatewayAmount(pendingOrder);
-      const paidAmount = verification.amount || amount;
-      if (expected > 0 && !paymentAmountsMatch(paidAmount, expected)) {
+      const paidAmount = Number(verification.amount);
+      if (!(expected > 0) || !Number.isFinite(paidAmount) || paidAmount <= 0 || !paymentAmountsMatch(paidAmount, expected)) {
         return NextResponse.json({ success: false, message: 'Amount mismatch' }, { status: 400 });
       }
 
@@ -114,8 +114,8 @@ export async function POST(request) {
         dispatch.kind === 'checkout'
           ? dispatch.doc.gatewayAmount
           : dispatch.doc.amount;
-      const paidAmount = verification.amount || amount;
-      if (expectedAmount && Math.abs(paidAmount - expectedAmount) > 1) {
+      const paidAmount = Number(verification.amount);
+      if (!Number.isFinite(paidAmount) || paidAmount <= 0 || !(Number(expectedAmount) > 0) || Math.abs(paidAmount - Number(expectedAmount)) > 1) {
         return NextResponse.json({ success: false, message: 'Amount mismatch' }, { status: 400 });
       }
 
@@ -172,8 +172,8 @@ export async function POST(request) {
     const expectedAmount =
       Number(order.paymentDetails?.gatewayAmount) ||
       Math.max(0, Number(order.price) - (Number(order.walletDeduction?.amount) || 0));
-    const paidAmount = verification.amount || amount;
-    if (expectedAmount > 0 && Math.abs(paidAmount - expectedAmount) > 1) {
+    const paidAmount = Number(verification.amount);
+    if (!Number.isFinite(paidAmount) || paidAmount <= 0 || !(expectedAmount > 0) || Math.abs(paidAmount - expectedAmount) > 1) {
       return NextResponse.json({ success: false, message: 'Amount mismatch' }, { status: 400 });
     }
 

@@ -13,7 +13,7 @@ import {
 } from '@/lib/resellerRechargeSettings';
 import { getVyaparOrderStatus } from '@/lib/vyaparGateway';
 import { getUpiGatewayOrderStatus } from '@/lib/upiGateway';
-import { upiVerificationAmountAcceptable } from '@/lib/paymentAmountValidation';
+import { upiPaidAmountCovers } from '@/lib/paymentAmountValidation';
 
 function amountsMatch(a, b) {
   return Math.abs(Number(a) - Number(b)) <= 1;
@@ -149,7 +149,7 @@ export async function probeAutoResellerRecharge(request) {
   if (!result.verified) {
     return { verified: false, reason: result.error || 'not paid' };
   }
-  if (result.amount && !amountsMatch(result.amount, request.amount)) {
+  if (!Number.isFinite(Number(result.amount)) || Number(result.amount) <= 0 || !amountsMatch(result.amount, request.amount)) {
     return { verified: false, reason: 'amount mismatch' };
   }
 
@@ -190,10 +190,7 @@ export async function probeVyaparResellerRecharge(request) {
     };
   }
 
-  if (
-    result.amount &&
-    !upiVerificationAmountAcceptable({ ...result, provider: 'vyapar', verified: true }, request.amount)
-  ) {
+  if (!upiPaidAmountCovers(result.amount, request.amount)) {
     return { verified: false, reason: 'amount mismatch' };
   }
 
@@ -222,7 +219,6 @@ export async function probeUpiGatewayResellerRecharge(request) {
 
   const result = await getUpiGatewayOrderStatus({
     apiKey: gateway.apiKey,
-    apiSecret: gateway.apiSecret,
     clientTxnId: request.clientTxnId,
     txnDate: request.createdAt,
     expectedAmount: request.amount,
@@ -277,7 +273,7 @@ export async function probeKwikUpiResellerRecharge(request) {
     note: 'reseller recharge status check',
   }).catch(() => {});
 
-  if (result.amount && !amountsMatch(result.amount, request.amount)) {
+  if (!Number.isFinite(Number(result.amount)) || Number(result.amount) <= 0 || !amountsMatch(result.amount, request.amount)) {
     return { verified: false, reason: 'amount mismatch' };
   }
 

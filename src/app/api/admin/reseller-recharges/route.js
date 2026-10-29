@@ -82,7 +82,7 @@ export async function POST(request) {
           minAmount: incoming.minAmount ?? current.minAmount,
           maxAmount: incoming.maxAmount ?? current.maxAmount,
           provider: ['paytm', 'upigateway', 'kwikupi'].includes(incoming.provider)
-            ? incoming.provider === 'upigateway' && !(current.upigateway?.apiKey && current.upigateway?.apiSecret && current.upigateway?.connected !== false)
+            ? incoming.provider === 'upigateway' && !(current.upigateway?.apiKey && current.upigateway?.connected !== false)
               ? current.provider
               : incoming.provider
             : current.provider,
@@ -150,15 +150,14 @@ export async function POST(request) {
     }
 
     if (action === 'connect_upigateway') {
-      const { apiKey, apiSecret, displayName } = body;
-      if (!apiKey || !apiSecret) {
-        return NextResponse.json({ success: false, message: 'API key and API secret are required' }, { status: 400 });
+      const { apiKey, displayName } = body;
+      if (!apiKey) {
+        return NextResponse.json({ success: false, message: 'API key is required' }, { status: 400 });
       }
 
       const settings = await updateUpiGatewayCredentials(
         {
           apiKey: String(apiKey).trim(),
-          apiSecret: String(apiSecret).trim(),
           displayName: String(displayName || 'OceanLinux').trim(),
           connected: true,
           connectedAt: new Date().toISOString(),
@@ -168,7 +167,7 @@ export async function POST(request) {
 
       return NextResponse.json({
         success: true,
-        message: 'KaroPay connected. New reseller recharges use this gateway.',
+        message: 'UPI Gateway connected. New reseller recharges use this gateway.',
         settings: getAdminPaytmSettings(settings),
         upiGatewayWebhookUrl: getUpiGatewayWebhookUrl(),
       });
@@ -176,22 +175,23 @@ export async function POST(request) {
 
     if (action === 'test_upigateway') {
       const settings = await getResellerRechargeSettings();
-      if (!settings.upigateway?.apiKey || !settings.upigateway?.apiSecret) {
-        return NextResponse.json({ success: false, message: 'Save the KaroPay API key and secret first' }, { status: 400 });
+      if (!settings.upigateway?.apiKey) {
+        return NextResponse.json({ success: false, message: 'Save the UPI Gateway API key first' }, { status: 400 });
       }
 
       try {
         const test = await createUpiGatewayOrder({
           apiKey: settings.upigateway.apiKey,
-          apiSecret: settings.upigateway.apiSecret,
           clientTxnId: `UGTEST_${Date.now()}`,
           amount: 1,
           customerName: 'Connection Test',
+          customerEmail: 'hello@oceanlinux.com',
           customerMobile: '9999999999',
+          productInfo: 'Connection test',
         });
         return NextResponse.json({
           success: true,
-          message: `KaroPay OK — test order ${test.orderId} created. Do not pay it.`,
+          message: `UPI Gateway OK — test order ${test.orderId} created. Do not pay it.`,
         });
       } catch (err) {
         return NextResponse.json({ success: false, message: err.message }, { status: 400 });
@@ -205,7 +205,7 @@ export async function POST(request) {
       );
       return NextResponse.json({
         success: true,
-        message: 'KaroPay disconnected',
+        message: 'UPI Gateway disconnected',
         settings: getAdminPaytmSettings(settings),
       });
     }

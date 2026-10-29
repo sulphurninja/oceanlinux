@@ -6,8 +6,8 @@ import { confirmResellerRechargeRequest, probeUpiGatewayResellerRecharge } from 
 export const runtime = 'nodejs';
 
 /**
- * Dashboard webhook. The body is not trusted. Credit only after
- * check_order_status says this client_txn_id was paid for the stored amount.
+ * ekQR webhook (application/x-www-form-urlencoded). The body is not trusted.
+ * Credit only after check_order_status says this client_txn_id was paid for the stored amount.
  */
 export async function POST(request) {
   await connectDB();

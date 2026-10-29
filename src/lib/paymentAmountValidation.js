@@ -25,6 +25,15 @@ export function upiVerificationAmountAcceptable(verification, expectedAmount) {
  * Compare gateway-reported amount (INR) with expected order/session amount.
  * Allows ₹1 tolerance for rounding.
  */
+/** UPI credit requires a real paid amount and a real expected price. A missing figure is not a match. */
+export function upiPaidAmountCovers(paid, expected) {
+  const paidNum = Number(paid);
+  const expectedNum = Number(expected);
+  if (!Number.isFinite(paidNum) || paidNum <= 0) return false;
+  if (!Number.isFinite(expectedNum) || expectedNum <= 0) return false;
+  return Math.abs(paidNum - expectedNum) <= 1;
+}
+
 export function paymentAmountsMatch(paid, expected, tolerance = 1) {
   const paidNum = Number(paid);
   const expectedNum = Number(expected);

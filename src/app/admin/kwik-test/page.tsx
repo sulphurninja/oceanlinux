@@ -109,7 +109,7 @@ export default function VyaparPartialPaymentTestPage() {
       if (!data.success) throw new Error(data.message || 'Failed to create test payment');
       setPayment(data);
       setStatusProbe(null);
-      toast.success(`VyaparGateway test created — pay ₹${data.chargedAmount} honestly or ₹${data.payAmount} via tampered QR`);
+      toast.success(`UPI Gateway test created — pay ₹${data.chargedAmount} honestly or ₹${data.payAmount} via tampered QR`);
       refresh({ paymentId: data.paymentId, clientTxnId: data.testOrderId });
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Failed to create test payment');
@@ -153,10 +153,10 @@ export default function VyaparPartialPaymentTestPage() {
   return (
     <div className="p-4 md:p-6 space-y-6 max-w-5xl">
       <div>
-        <h1 className="text-2xl font-bold">VyaparGateway partial payment test</h1>
+        <h1 className="text-2xl font-bold">UPI Gateway test</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Creates a real VyaparGateway payment (same API as production) plus a tampered ₹1 QR. Scan the
-          tampered one to confirm underpayment stays pending/expired and never marks success.
+          Creates a real merchant.upigateway.com QR (same API as reseller recharge). No wallet credit and no
+          VPS order. The red QR lowers only the amount, so you can see if an underpayment is marked paid.
         </p>
       </div>
 
@@ -164,7 +164,7 @@ export default function VyaparPartialPaymentTestPage() {
         <CardHeader>
           <CardTitle className="text-base">1 · Create test payment</CardTitle>
           <CardDescription>
-            No customer order is created. Uses your live VyaparGateway credentials.
+            No customer order is created. Uses the saved UPI Gateway API key.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -271,7 +271,7 @@ export default function VyaparPartialPaymentTestPage() {
       <Card>
         <CardHeader className="flex-row items-center justify-between space-y-0">
           <div>
-            <CardTitle className="text-base">2 · What VyaparGateway reports</CardTitle>
+            <CardTitle className="text-base">2 · What UPI Gateway reports</CardTitle>
             <CardDescription>Auto-refreshes every 5 seconds after a test is created.</CardDescription>
           </div>
           <Button
@@ -293,8 +293,7 @@ export default function VyaparPartialPaymentTestPage() {
             <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 flex gap-2 text-sm">
               <ShieldCheck className="h-5 w-5 shrink-0 text-emerald-600" />
               <p>
-                <strong>Fraud blocked.</strong> VyaparGateway did not mark the order as paid after the
-                underpayment. ₹{payAmount} fraud would not deliver a VPS in production.
+                <strong>Underpayment not accepted.</strong> UPI Gateway did not mark the order as paid.
               </p>
             </div>
           )}

@@ -2,31 +2,25 @@ import { NextResponse } from 'next/server';
 import QRCode from 'qrcode';
 import connectDB from '@/lib/db';
 import { enforceAdmin } from '@/lib/apiSecurity';
-import { getVyaparCredentials, getResellerRechargeSettings } from '@/lib/resellerRechargeSettings';
-import { createVyaparOrderWithUniqueAmount, getVyaparOrderStatus } from '@/lib/vyaparGateway';
-import { UPI_PROVIDER_VYAPAR } from '@/lib/paymentGateways';
+import { getUpiGatewayCredentials, getResellerRechargeSettings } from '@/lib/resellerRechargeSettings';
+import { createUpiGatewayOrder, getUpiGatewayOrderStatus, getUpiGatewayRedirectUrl } from '@/lib/upiGateway';
+import { UPI_PROVIDER_UPIGATEWAY } from '@/lib/paymentGateways';
 import { logKwikRaw } from '@/lib/kwikRawLog';
 import KwikRawLog from '@/models/kwikRawLogModel';
 
 export const dynamic = 'force-dynamic';
 
-const TEST_ORDER_PREFIX = 'VGTEST_';
+const TEST_ORDER_PREFIX = 'UITEST_';
 
 /**
- * VyaparGateway partial-payment diagnostics.
- *
- * Creates a throwaway payment through the same API production uses, plus a
- * tampered QR that pays less than the requested amount. VyaparGateway should
- * leave the order pending/expired on underpay — never mark it success.
+ * UPI Gateway (ekQR) payment test for the Vyapar UPI Test admin page.
+ * Creates a throwaway QR through the same API reseller recharge uses.
+ * No wallet credit and no VPS order.
  */
-
-async function vyaparCredentials() {
-  return getVyaparCredentials(await getResellerRechargeSettings());
-}
 
 function tamperUpiAmount(upiLink, payAmount) {
   if (!upiLink || !/[?&]am=/i.test(upiLink)) return '';
-  return upiLink.replace(/([?&]am=)[^&]*/i, `$1${payAmount.toFixed(2)}`);
+  return upiLink.replace(/([?&]am=)[^&]*/i, `$1${Number(payAmount).toFixed(2)}`);
 }
 
 export async function POST(request) {
@@ -40,57 +34,57 @@ export async function POST(request) {
     const amount = Math.max(2, Math.min(1000, Number(body?.amount) || 10));
     const payAmount = Math.max(1, Math.min(amount, Number(body?.payAmount) || 1));
 
-    const vyapar = await vyaparCredentials();
-    if (!vyapar) {
+    const gateway = getUpiGatewayCredentials(await getResellerRechargeSettings());
+    if (!gateway) {
       return NextResponse.json(
-        { success: false, message: 'VyaparGateway is not connected. Connect it in Reseller Recharges first.' },
+        { success: false, message: 'UPI Gateway is not connected. Add the API key on Reseller Recharges first.' },
         { status: 400 }
       );
     }
 
     const testOrderId = `${TEST_ORDER_PREFIX}${Date.now()}`;
-    const created = await createVyaparOrderWithUniqueAmount({
-      apiKey: vyapar.apiKey,
-      amount,
+    const created = await createUpiGatewayOrder({
+      apiKey: gateway.apiKey,
       clientTxnId: testOrderId,
-      customerName: 'Vyapar Diagnostic',
-      customerEmail: 'test@oceanlinux.com',
-      description: 'Partial payment test',
+      amount,
+      customerName: 'UPI Gateway Test',
+      customerEmail: 'hello@oceanlinux.com',
+      customerMobile: '9999999999',
+      redirectUrl: getUpiGatewayRedirectUrl(testOrderId),
+      productInfo: 'UPI test',
     });
 
-    const chargedAmount = created.chargedAmount;
     const upiLink = created.upiLink || '';
-    let qrImageUrl = created.qrImageUrl || '';
-    if (!qrImageUrl && upiLink) {
-      qrImageUrl = await QRCode.toDataURL(upiLink, { width: 320, margin: 1 }).catch(() => '');
-    }
+    const qrSource = upiLink || created.paymentUrl || '';
+    const qrImageUrl = qrSource
+      ? await QRCode.toDataURL(qrSource, { width: 320, margin: 1 }).catch(() => '')
+      : '';
 
     const tamperedUpiLink = tamperUpiAmount(upiLink, payAmount);
-    let tamperedQrImageUrl = '';
-    if (tamperedUpiLink) {
-      tamperedQrImageUrl = await QRCode.toDataURL(tamperedUpiLink, { width: 320, margin: 1 }).catch(() => '');
-    }
+    const tamperedQrImageUrl = tamperedUpiLink
+      ? await QRCode.toDataURL(tamperedUpiLink, { width: 320, margin: 1 }).catch(() => '')
+      : '';
 
     await logKwikRaw({
       source: 'create',
-      gateway: UPI_PROVIDER_VYAPAR,
+      gateway: UPI_PROVIDER_UPIGATEWAY,
       paymentId: created.orderId,
       orderId: testOrderId,
-      expectedAmount: chargedAmount,
-      raw: { paymentUrl: created.paymentUrl, upiLink, tamperedUpiLink, chargedAmount },
-      note: `Vyapar diagnostic — honest ₹${chargedAmount}, tampered to ₹${payAmount}`,
+      expectedAmount: amount,
+      raw: { paymentUrl: created.paymentUrl, hasUpiLink: !!upiLink },
+      note: `UPI Gateway test — honest ₹${amount}, tampered to ₹${payAmount}. Does not credit a wallet.`,
     });
 
     return NextResponse.json({
       success: true,
-      provider: UPI_PROVIDER_VYAPAR,
+      provider: UPI_PROVIDER_UPIGATEWAY,
       testOrderId,
       paymentId: created.orderId,
       requestedAmount: amount,
-      chargedAmount,
+      chargedAmount: amount,
       payAmount,
       paymentPage: created.paymentUrl,
-      expiresAt: created.expiresAt,
+      expiresAt: null,
       upiLink,
       qrImageUrl,
       tamperedUpiLink,
@@ -113,22 +107,26 @@ export async function GET(request) {
     const clientTxnId = searchParams.get('clientTxnId') || '';
 
     let statusProbe = null;
-    if (paymentId || clientTxnId) {
-      const vyapar = await vyaparCredentials();
-      if (vyapar) {
-        const result = await getVyaparOrderStatus({
-          apiKey: vyapar.apiKey,
-          orderId: paymentId || undefined,
-          clientTxnId: clientTxnId || undefined,
+    if (clientTxnId) {
+      const gateway = getUpiGatewayCredentials(await getResellerRechargeSettings());
+      const createdLog = await KwikRawLog.findOne({ orderId: clientTxnId, source: 'create' })
+        .sort({ createdAt: -1 })
+        .lean();
+      if (gateway) {
+        const result = await getUpiGatewayOrderStatus({
+          apiKey: gateway.apiKey,
+          clientTxnId,
+          txnDate: createdLog?.createdAt,
+          expectedAmount: createdLog?.expectedAmount,
         });
         statusProbe = {
           verified: !!result.verified,
           reason: result.reason || '',
           reportedAmount: result.amount ?? null,
           pending: !!result.pending,
-          expired: !!result.expired,
+          expired: false,
           failed: !!result.failed,
-          raw: result.raw ?? null,
+          raw: null,
         };
       }
     }

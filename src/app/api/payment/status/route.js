@@ -18,7 +18,7 @@ import CheckoutSession from '@/models/checkoutSessionModel';
 import WalletRecharge from '@/models/walletRechargeModel';
 import { getDataFromToken } from '@/helper/getDataFromToken';
 import { enforcePaymentRateLimit } from '@/lib/rateLimit';
-import { paymentAmountsMatch, expectedRenewalGatewayAmount, upiVerificationAmountAcceptable } from '@/lib/paymentAmountValidation';
+import { expectedRenewalGatewayAmount, upiPaidAmountCovers } from '@/lib/paymentAmountValidation';
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -170,22 +170,13 @@ export async function POST(request) {
           const upiCheck = await verifyUPIPayment(txnId, gatewayOrderId);
           if (upiCheck.verified) {
             const expected = expectedRenewalGatewayAmount(orderWithPending);
-            if (expected > 0 && !upiVerificationAmountAcceptable(upiCheck, expected)) {
+            if (!upiPaidAmountCovers(upiCheck.amount, expected)) {
               return NextResponse.json({
                 isRenewal: true,
                 renewalTxnId: txnId,
                 paymentStatus: 'AMOUNT_MISMATCH',
                 paymentMethod: rawPaymentMethod,
                 message: 'UPI renewal amount mismatch',
-              });
-            }
-            if (
-              upiCheck.amount > 0 &&
-              expected > 0 &&
-              Math.abs(upiCheck.amount - expected) > 0.001
-            ) {
-              await Order.findByIdAndUpdate(orderWithPending._id, {
-                $set: { 'pendingRenewal.gatewayAmount': upiCheck.amount },
               });
             }
             return respondRenewalPaidAndApply(txnId, orderWithPending, rawPaymentMethod, {

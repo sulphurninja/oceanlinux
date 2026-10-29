@@ -325,7 +325,8 @@ export async function POST(request) {
         );
       }
       const expectedGateway = expectedRenewalGatewayAmount(order);
-      if (!paymentAmountsMatch(upiCheck.amount, expectedGateway)) {
+      const paidGateway = Number(upiCheck.amount);
+      if (!(expectedGateway > 0) || !Number.isFinite(paidGateway) || paidGateway <= 0 || !paymentAmountsMatch(paidGateway, expectedGateway)) {
         await logger.finalize(false, null, 'UPI amount mismatch');
         return NextResponse.json(
           { success: false, message: 'Payment amount does not match renewal price.' },

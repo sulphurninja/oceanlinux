@@ -101,7 +101,9 @@ export async function POST(request) {
     if (!result.verified) {
       return NextResponse.json({ success: false, message: result.error || 'UPI verification failed' }, { status: 400 });
     }
-    if (result.amount && session.gatewayAmount && Math.abs(result.amount - session.gatewayAmount) > 1) {
+    const paid = Number(result.amount);
+    const expected = Number(session.gatewayAmount);
+    if (!Number.isFinite(paid) || paid <= 0 || !Number.isFinite(expected) || expected <= 0 || Math.abs(paid - expected) > 1) {
       return NextResponse.json({ success: false, message: 'UPI amount mismatch' }, { status: 400 });
     }
     transactionId = result.upi_txn_id || '';

@@ -21,10 +21,9 @@ import {
  *
  * Payment methods: razorpay | upi
  *
- * UPI runs on VyaparGateway when it is connected, because it reconciles the
- * amount that actually settled and therefore rejects partial payments. KwikUPI
- * remains as a fallback for installs that have not switched yet, but it cannot
- * detect underpayment — it reports back whatever amount was requested.
+ * UPI runs on UPI Gateway (api.ekqr.in) when its API key is saved. Wallet,
+ * buy, cart, and renew all use this same order. Vyapar and Kwik stay only so
+ * older payments can still be checked.
  */
 
 function getReturnUrl() {
@@ -171,11 +170,13 @@ export async function createGatewayOrder({
   async function createEkqrUpiOrder(gateway) {
     const created = await createUpiGatewayOrder({
       apiKey: gateway.apiKey,
-      apiSecret: gateway.apiSecret,
       clientTxnId,
       amount: Math.round(amount),
       customerName: customer.name,
+      customerEmail: customer.email,
       customerMobile: customer.phone,
+      redirectUrl: fullCallback,
+      productInfo: description || 'OceanLinux',
     });
 
     const qrSource = created.upiLink || created.paymentUrl;
@@ -205,13 +206,11 @@ export async function createGatewayOrder({
   }
 
   async function createUpiOrder() {
-    // Vyapar stays the customer UPI issuer while it is connected.
-    // UPI Gateway replaces Kwik for new checkouts once its API key is saved.
-    const vyapar = await getVyaparCreds();
-    if (vyapar) return createVyaparUpiOrder(vyapar);
-
     const upiGateway = await getUpiGatewayCreds();
     if (upiGateway) return createEkqrUpiOrder(upiGateway);
+
+    const vyapar = await getVyaparCreds();
+    if (vyapar) return createVyaparUpiOrder(vyapar);
 
     const kwikupi = await getKwikUpiCreds();
     if (kwikupi) return createKwikUpiOrder(kwikupi);
@@ -369,7 +368,6 @@ async function verifyViaVyapar(vyapar, clientTxnId, orderId) {
 async function verifyViaUpiGateway(gateway, clientTxnId) {
   const result = await getUpiGatewayOrderStatus({
     apiKey: gateway.apiKey,
-    apiSecret: gateway.apiSecret,
     clientTxnId,
   });
 

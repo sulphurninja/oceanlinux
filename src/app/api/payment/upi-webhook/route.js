@@ -118,11 +118,11 @@ export async function POST(request) {
         );
       }
 
-      const expectedAmount = dispatch.kind === 'checkout'
+      const expectedAmount = Number(dispatch.kind === 'checkout'
         ? dispatch.doc.gatewayAmount
-        : dispatch.doc.amount;
-      const paidAmount = verification.amount || parseFloat(webhookAmount);
-      if (Math.abs(paidAmount - expectedAmount) > 1) {
+        : dispatch.doc.amount);
+      const paidAmount = Number(verification.amount);
+      if (!Number.isFinite(paidAmount) || paidAmount <= 0 || !Number.isFinite(expectedAmount) || expectedAmount <= 0 || Math.abs(paidAmount - expectedAmount) > 1) {
         console.error('[UPI Webhook] Amount mismatch', { expectedAmount, paidAmount, kind: dispatch.kind });
         return NextResponse.json(
           { success: false, message: 'Payment amount mismatch' },
@@ -236,9 +236,9 @@ export async function POST(request) {
       const expectedAmount =
         Number(order.paymentDetails?.gatewayAmount) ||
         Math.max(0, Number(order.price) - (Number(order.walletDeduction?.amount) || 0));
-      const paidAmount = verification.amount || parseFloat(webhookAmount);
-      
-      if (Math.abs(paidAmount - expectedAmount) > 1) { // Allow ₹1 tolerance for rounding
+      const paidAmount = Number(verification.amount);
+
+      if (!Number.isFinite(paidAmount) || paidAmount <= 0 || !(expectedAmount > 0) || Math.abs(paidAmount - expectedAmount) > 1) {
         console.error(`[UPI Webhook] Amount mismatch! Expected: ${expectedAmount}, Paid: ${paidAmount}`);
         return NextResponse.json(
           { success: false, message: 'Payment amount mismatch' },
