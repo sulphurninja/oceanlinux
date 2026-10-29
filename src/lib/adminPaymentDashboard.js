@@ -183,11 +183,15 @@ function isRazorpaySource(source) {
   return false;
 }
 
-/** KwikUPI inline UPI — paymentMethod upi / wallet+upi or stored UPI txn metadata. */
+/** UPI Gateway, and older Kwik / Vyapar UPI. Not Razorpay. */
 function isUpiSource(source) {
   const method = String(source.paymentMethod || '').toLowerCase();
-  if (method.includes('upi') || method.includes('kwikupi')) return true;
+  if (method.includes('upi') || method.includes('kwikupi') || method.includes('vyapar')) return true;
   const pd = source.paymentDetails || {};
+  const provider = String(pd.upiProvider || source.upiProvider || '').toLowerCase();
+  if (provider === 'upigateway' || provider === 'vyapar' || provider === 'kwikupi' || provider === 'kwik') {
+    return true;
+  }
   if (pd.kwikUpiPaymentId || pd.upi_txn_id) return true;
   return false;
 }
@@ -589,7 +593,7 @@ async function buildAdminPaymentDashboard(Order, WalletRecharge, CheckoutSession
     notes: [
       'VPS Sold = total new orders (single + cart items). Cart ke liye gateway ek baar count hota hai, har item alag order.',
       'Razorpay = pay_* / order_* ya paymentMethod razorpay / wallet+razorpay — Razorpay dashboard se match karo.',
-      'UPI = paymentMethod upi / wallet+upi (KwikUPI) — buy, cart, renewal, wallet top-up sab count hote hain.',
+      'UPI Gateway = paymentMethod upi / wallet+upi — buy, cart, renewal, wallet top-up. Razorpay dashboard pe yeh amount nahi aata.',
       'All Gateway = Razorpay + UPI + legacy (purane Cashfree) unique captures.',
       'Wallet Used = orders + renewals paid from wallet balance (pehle top-up hua tha).',
     ],
@@ -677,14 +681,14 @@ async function buildAdminPaymentDayDetails(
     };
   }
 
-  if (channel === 'razorpay') {
+  if (channel === 'razorpay' || channel === 'upi') {
     for (const order of orders) {
       if (isCartChildOrder(order)) continue;
       const saleDay = vpsSaleDay(order);
       if (saleDay !== dayKey) continue;
       const amounts = computeStandaloneOrderAmounts(order);
       if (!(amounts.gateway > 0)) continue;
-      if (classifyPaymentGateway(order) !== 'razorpay') continue;
+      if (classifyPaymentGateway(order) !== channel) continue;
       pushItem({
         id: String(order._id),
         kind: 'vps_buy',
@@ -708,7 +712,7 @@ async function buildAdminPaymentDayDetails(
       if (istDayKey(when) !== dayKey) continue;
       const gatewayAmt = Number(session.gatewayAmount) || 0;
       if (!(gatewayAmt > 0)) continue;
-      if (classifyPaymentGateway(session) !== 'razorpay') continue;
+      if (classifyPaymentGateway(session) !== channel) continue;
       pushItem({
         id: String(session._id),
         kind: 'cart',
@@ -732,7 +736,7 @@ async function buildAdminPaymentDayDetails(
         if (!renewalPaidOnDay(renewal, dayKey)) continue;
         const renewalAmounts = computeRenewalAmounts(renewal);
         if (!(renewalAmounts.gateway > 0)) continue;
-        if (classifyPaymentGateway(renewal) !== 'razorpay') continue;
+        if (classifyPaymentGateway(renewal) !== channel) continue;
         pushItem({
           id: `${order._id}_${renewal.renewalTxnId || renewal.paymentId}`,
           kind: 'renew',
@@ -756,7 +760,7 @@ async function buildAdminPaymentDayDetails(
     for (const recharge of recharges) {
       const when = recharge.creditedAt || recharge.createdAt;
       if (istDayKey(when) !== dayKey) continue;
-      if (classifyPaymentGateway(recharge) !== 'razorpay') continue;
+      if (classifyPaymentGateway(recharge) !== channel) continue;
       const amt = Number(recharge.amount) || 0;
       if (!(amt > 0)) continue;
       pushItem({
@@ -848,7 +852,7 @@ async function buildAdminPaymentDayDetails(
       }
     }
   } else {
-    throw new Error('channel must be razorpay or wallet');
+    throw new Error('channel must be razorpay, upi, or wallet');
   }
 
   items.sort((a, b) => new Date(b.at || 0).getTime() - new Date(a.at || 0).getTime());

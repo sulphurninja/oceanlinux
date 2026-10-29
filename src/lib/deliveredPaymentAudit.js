@@ -13,7 +13,7 @@ const { verifyWalletCreditProof } = require('@/lib/walletCreditProof');
 const LIVE = ['confirmed', 'active', 'paid', 'completed'];
 const IST = 'Asia/Kolkata';
 
-const UNVERIFIED = new Set(['razorpay_api_error', 'razorpay_unconfigured', 'no_gateway_order_id']);
+const UNVERIFIED = new Set(['razorpay_api_error', 'razorpay_unconfigured', 'no_gateway_order_id', 'upi_gateway_api_error']);
 
 function istDayKey(date) {
   return new Date(date).toLocaleDateString('en-CA', { timeZone: IST });

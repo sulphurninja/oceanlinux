@@ -112,7 +112,7 @@ type DayDetailItem = {
 type DayDetailData = {
   date: string;
   label: string;
-  channel: 'razorpay' | 'wallet';
+  channel: 'razorpay' | 'upi' | 'wallet';
   count: number;
   totalAmount: number;
   items: DayDetailItem[];
@@ -272,16 +272,84 @@ function RazorpayLedger({
           <ol className="list-decimal space-y-1.5 pl-4 text-xs sm:text-sm">
             <li>Razorpay Dashboard → Payments → filter that day (IST)</li>
             <li>Captured amount ≈ <strong className="text-foreground">{formatInr(row.razorpayCollected)}</strong></li>
-            <li>Wallet-only and UPI-only payments are in the other sections</li>
+            <li>UPI Gateway is the next section. It does not show on the Razorpay dashboard.</li>
           </ol>
-          {row.upiCollected > 0 ? (
-            <p className="mt-3 border-t pt-3 text-xs">
-              UPI (KwikUPI) is separate: <strong className="text-foreground">{formatInr(row.upiCollected)}</strong> ·{' '}
-              {row.upiCaptures} captures. These do not appear on the Razorpay dashboard.
-            </p>
-          ) : null}
-          </div>
         </div>
+        </div>
+    </SectionShell>
+  );
+}
+
+function UpiLedger({
+  row,
+  dayLabel = 'Today',
+  onOpenList,
+}: {
+  row: DailyRow;
+  dayLabel?: string;
+  onOpenList?: () => void;
+}) {
+  return (
+    <SectionShell
+      title={`UPI Gateway — collected on ${dayLabel}`}
+      subtitle="Buy, cart, renew, and wallet top-up paid by UPI. This money is not on the Razorpay dashboard."
+      icon={IndianRupee}
+      accent="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+      action={
+        onOpenList ? (
+          <Button type="button" size="sm" className="mt-2" onClick={onOpenList}>
+            Live list — which orders?
+          </Button>
+        ) : null
+      }
+      hero={
+        <button
+          type="button"
+          onClick={onOpenList}
+          className="rounded-lg border border-emerald-500/25 bg-emerald-500/5 px-4 py-2 text-right transition hover:bg-emerald-500/10"
+        >
+          <p className="text-[10px] uppercase tracking-wider text-emerald-700/80 dark:text-emerald-400/80">
+            UPI · {dayLabel}
+          </p>
+          <p className="text-2xl font-bold tabular-nums tracking-tight text-emerald-700 dark:text-emerald-400">
+            {formatInr(row.upiCollected)}
+          </p>
+          <p className="text-[11px] text-muted-foreground">{row.upiCaptures} captures · open list</p>
+        </button>
+      }
+    >
+      <div className="grid gap-6 lg:grid-cols-2">
+        <div>
+          <p className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Line by line
+          </p>
+          <Line label="New VPS buy (single)" value={formatInr(row.upiVpsAmount)} tone="in" />
+          <Line label="Cart checkout" value={formatInr(row.upiCartAmount)} tone="in" />
+          <Line label="VPS renew" value={formatInr(row.upiRenewalAmount)} tone="in" />
+          <Line label="Wallet top-up" value={formatInr(row.upiTopupAmount)} tone="in" />
+          <Line
+            label="UPI grand total"
+            value={formatInr(row.upiCollected)}
+            count={`${row.upiCaptures} payments`}
+            tone="total"
+            strong
+          />
+        </div>
+        <div className="rounded-lg border bg-muted/20 p-4 text-sm leading-relaxed text-muted-foreground">
+          <p className="mb-2 font-medium text-foreground">Razorpay vs UPI</p>
+          <ol className="list-decimal space-y-1.5 pl-4 text-xs sm:text-sm">
+            <li>
+              Razorpay · {dayLabel}:{' '}
+              <strong className="text-[#0C6CF2]">{formatInr(row.razorpayCollected)}</strong>
+            </li>
+            <li>
+              UPI Gateway · {dayLabel}:{' '}
+              <strong className="text-foreground">{formatInr(row.upiCollected)}</strong>
+            </li>
+            <li>Wallet-only spend is in the wallet section. It is not added here again.</li>
+          </ol>
+        </div>
+      </div>
     </SectionShell>
   );
 }
@@ -489,36 +557,27 @@ function SalesLedger({ row, dayLabel = 'Today' }: { row: DailyRow; dayLabel?: st
 }
 
 function UpiStrip({ row }: { row: DailyRow }) {
-  if (!(row.upiCollected > 0 || row.otherGatewayCollected > 0)) return null;
+  if (!(row.otherGatewayCollected > 0)) return null;
   return (
     <Card className="border-border/70">
       <CardContent className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <p className="text-sm font-semibold">Other gateways (not Razorpay)</p>
-          <p className="text-xs text-muted-foreground">KwikUPI and legacy gateways. These do not appear on the Razorpay dashboard.</p>
-          </div>
-        <div className="flex flex-wrap gap-4 text-sm">
-          <div>
-            <p className="text-[10px] uppercase text-muted-foreground">UPI / KwikUPI</p>
-            <p className="font-semibold tabular-nums text-emerald-700 dark:text-emerald-400">
-              {formatInr(row.upiCollected)}
-              <span className="ml-1 text-xs font-normal text-muted-foreground">({row.upiCaptures})</span>
-            </p>
-          </div>
-          {row.otherGatewayCollected > 0 ? (
-            <div>
-              <p className="text-[10px] uppercase text-muted-foreground">Other</p>
-              <p className="font-semibold tabular-nums">
-                {formatInr(row.otherGatewayCollected)}
-                <span className="ml-1 text-xs font-normal text-muted-foreground">
-                  ({row.otherGatewayCaptures})
-                </span>
-              </p>
-          </div>
-          ) : null}
-          </div>
-        </CardContent>
-      </Card>
+          <p className="text-sm font-semibold">Older gateways</p>
+          <p className="text-xs text-muted-foreground">
+            Legacy captures that are neither Razorpay nor UPI Gateway.
+          </p>
+        </div>
+        <div className="text-sm">
+          <p className="text-[10px] uppercase text-muted-foreground">Other</p>
+          <p className="font-semibold tabular-nums">
+            {formatInr(row.otherGatewayCollected)}
+            <span className="ml-1 text-xs font-normal text-muted-foreground">
+              ({row.otherGatewayCaptures})
+            </span>
+          </p>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -528,7 +587,7 @@ export function PaymentDashboard() {
   const [days, setDays] = useState(30);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
-  const [detailChannel, setDetailChannel] = useState<'razorpay' | 'wallet'>('razorpay');
+  const [detailChannel, setDetailChannel] = useState<'razorpay' | 'upi' | 'wallet'>('razorpay');
   const [detailLoading, setDetailLoading] = useState(false);
   const [detail, setDetail] = useState<DayDetailData | null>(null);
 
@@ -574,7 +633,7 @@ export function PaymentDashboard() {
   }, [data, selectedDate]);
 
   const openDayList = useCallback(
-    async (channel: 'razorpay' | 'wallet') => {
+    async (channel: 'razorpay' | 'upi' | 'wallet') => {
       if (!selected?.date) return;
       setDetailChannel(channel);
       setDetailOpen(true);
@@ -701,7 +760,7 @@ export function PaymentDashboard() {
       </div>
 
       {/* Top snapshot */}
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <button
           type="button"
           onClick={() => void openDayList('razorpay')}
@@ -716,6 +775,23 @@ export function PaymentDashboard() {
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
               {selected.razorpayCaptures} captures · {dayTag}
+            </p>
+          </div>
+        </button>
+        <button
+          type="button"
+          onClick={() => void openDayList('upi')}
+          className="rounded-xl border border-emerald-500/25 bg-emerald-500/5 text-left transition hover:bg-emerald-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40"
+        >
+          <div className="p-5">
+            <p className="text-[11px] font-medium uppercase tracking-wider text-emerald-700/90 dark:text-emerald-400/90">
+              UPI collected · open list
+            </p>
+            <p className="mt-1 text-3xl font-bold tabular-nums tracking-tight text-emerald-700 dark:text-emerald-400">
+              {formatInr(selected.upiCollected)}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {selected.upiCaptures} captures · {dayTag}
             </p>
           </div>
         </button>
@@ -767,6 +843,7 @@ export function PaymentDashboard() {
       </div>
 
       <RazorpayLedger row={selected} dayLabel={dayTag} onOpenList={() => void openDayList('razorpay')} />
+      <UpiLedger row={selected} dayLabel={dayTag} onOpenList={() => void openDayList('upi')} />
       <WalletLedger row={selected} dayLabel={dayTag} onOpenList={() => void openDayList('wallet')} />
       <SalesLedger row={selected} dayLabel={dayTag} />
       <UpiStrip row={selected} />
@@ -775,14 +852,21 @@ export function PaymentDashboard() {
         <DialogContent className="flex max-h-[85vh] max-w-4xl flex-col overflow-hidden">
           <DialogHeader>
             <DialogTitle>
-              {detailChannel === 'razorpay' ? 'Razorpay' : 'Wallet'} live list · {selected.label}
+              {detailChannel === 'razorpay'
+                ? 'Razorpay'
+                : detailChannel === 'upi'
+                  ? 'UPI Gateway'
+                  : 'Wallet'}{' '}
+              live list · {selected.label}
             </DialogTitle>
             <DialogDescription asChild>
               <div>
                 <p>
                   {detailChannel === 'razorpay'
                     ? 'Payments collected on Razorpay that day — user and order details'
-                    : 'Wallet buys and renewals that day — user and history'}
+                    : detailChannel === 'upi'
+                      ? 'Payments collected on UPI Gateway that day — user and order details'
+                      : 'Wallet buys and renewals that day — user and history'}
                 </p>
                 {detail ? (
                   <p className="mt-1 font-medium text-foreground">
@@ -845,7 +929,7 @@ export function PaymentDashboard() {
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-right font-semibold tabular-nums">
                         {formatInr(item.amount)}
-                        {detailChannel === 'razorpay' && item.walletPart ? (
+                        {detailChannel !== 'wallet' && item.walletPart ? (
                           <p className="text-[10px] font-normal text-muted-foreground">
                             +wallet {formatInr(item.walletPart)}
                           </p>
@@ -977,7 +1061,9 @@ export function PaymentDashboard() {
                         : '—'}
                     </TableCell>
                     <TableCell className="text-right tabular-nums text-emerald-700 dark:text-emerald-400">
-                        {row.upiCollected > 0 ? formatInr(row.upiCollected) : '—'}
+                        {row.upiCollected > 0
+                          ? `${row.upiCaptures} · ${formatInr(row.upiCollected)}`
+                          : '—'}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {row.walletTopupAmount > 0 ? formatInr(row.walletTopupAmount) : '—'}

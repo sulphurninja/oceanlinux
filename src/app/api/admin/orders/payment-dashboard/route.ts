@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
     const channel = searchParams.get('channel');
     const date = searchParams.get('date');
 
-    if (channel === 'razorpay' || channel === 'wallet') {
+    if (channel === 'razorpay' || channel === 'upi' || channel === 'wallet') {
       const details = await buildAdminPaymentDayDetails(Order, WalletRecharge, CheckoutSession, {
         date: date || undefined,
         channel,

@@ -629,6 +629,106 @@ async function verifyResellerWalletDebitForOrder(order) {
 
 
 /**
+ * Live UPI Gateway proof. Mongo flags (confirmed, upi_txn_id) are not proof.
+ * Returns null when this order is not an ekQR payment, so Razorpay and older
+ * gateways keep their own checks.
+ */
+async function verifyEkqrUpiPayment(order, gatewayOrderId) {
+  const pd = order?.paymentDetails || {};
+  const provider = String(pd.upiProvider || '').toLowerCase();
+  const gw = String(gatewayOrderId || '').trim();
+  const numericGateway = /^\d{6,}$/.test(gw);
+  if (provider !== 'upigateway' && !numericGateway) return null;
+
+  const method = String(order.paymentMethod || '').toLowerCase();
+  const ekqrMethod = method === 'upi' || method.endsWith('+upi') || method === 'upigateway';
+  if (!ekqrMethod && provider !== 'upigateway') return null;
+
+  let clientTxnId = String(order.clientTxnId || '').trim();
+  let expected = Number(order.price) || 0;
+  let txnDate = order.createdAt || pd.confirmedAt || null;
+
+  if (method.startsWith('wallet+') && order.walletDeduction?.deducted === true) {
+    const walletPaid = Number(order.walletDeduction.amount) || 0;
+    expected = Math.round((expected - walletPaid) * 100) / 100;
+  }
+
+  if (pd.checkoutSessionId || pd.parentTxnId) {
+    try {
+      const CheckoutSession = require('@/models/checkoutSessionModel').default;
+      const session = pd.checkoutSessionId
+        ? await CheckoutSession.findById(pd.checkoutSessionId)
+            .select('gatewayOrderId gatewayAmount walletAmount status clientTxnId createdAt orderIds')
+            .lean()
+        : await CheckoutSession.findOne({ clientTxnId: pd.parentTxnId })
+            .select('gatewayOrderId gatewayAmount walletAmount status clientTxnId createdAt orderIds')
+            .lean();
+      const memberIds = (session?.orderIds || []).map((id) => String(id));
+      const sessionGw = String(session?.gatewayOrderId || '').trim();
+      if (
+        !session ||
+        session.status !== 'confirmed' ||
+        !memberIds.includes(String(order._id)) ||
+        (numericGateway && sessionGw && sessionGw !== gw)
+      ) {
+        return { ok: false, reason: 'upi_checkout_session_unconfirmed' };
+      }
+      const sessionAmount = Number(session.gatewayAmount) || 0;
+      const linePrice = Number(order.price) || 0;
+      const covered = sessionAmount + (Number(session.walletAmount) || 0);
+      if (!(sessionAmount > 0) || !(linePrice > 0) || covered + 1 < linePrice) {
+        return { ok: false, reason: 'upi_amount_mismatch' };
+      }
+      clientTxnId = String(session.clientTxnId || '').trim();
+      expected = sessionAmount;
+      txnDate = session.createdAt || txnDate;
+    } catch (err) {
+      console.error('[PAYMENT-PROOF] UPI checkout lookup failed:', err.message);
+      return { ok: false, reason: 'upi_gateway_api_error' };
+    }
+  }
+
+  if (!clientTxnId || !(expected > 0)) {
+    return { ok: false, reason: 'upi_amount_mismatch' };
+  }
+
+  try {
+    const { getUpiGatewayOrderStatus } = await import('@/lib/upiGateway');
+    const { getResellerRechargeSettings, getUpiGatewayCredentials } = await import(
+      '@/lib/resellerRechargeSettings'
+    );
+    const { upiPaidAmountCovers } = await import('@/lib/paymentAmountValidation');
+    const settings = await getResellerRechargeSettings();
+    const creds = getUpiGatewayCredentials(settings);
+    if (!creds?.apiKey) return { ok: false, reason: 'upi_gateway_not_connected' };
+
+    const result = await getUpiGatewayOrderStatus({
+      apiKey: creds.apiKey,
+      clientTxnId,
+      txnDate,
+      expectedAmount: expected,
+    });
+    if (!result.verified || !upiPaidAmountCovers(result.amount, expected)) {
+      const amountBad =
+        String(result.reason || '').includes('amount') ||
+        (result.verified && !upiPaidAmountCovers(result.amount, expected));
+      if (amountBad) return { ok: false, reason: 'upi_amount_mismatch' };
+      if (provider === 'upigateway') {
+        return { ok: false, reason: result.pending || result.failed ? 'upi_not_paid' : 'upi_gateway_api_error' };
+      }
+      return null;
+    }
+    if (numericGateway && result.orderId && String(result.orderId) !== gw) {
+      return { ok: false, reason: 'upi_gateway_order_mismatch' };
+    }
+    return { ok: true, reason: 'upi_gateway_live' };
+  } catch (err) {
+    console.error('[PAYMENT-PROOF] UPI Gateway status failed:', err.message);
+    return { ok: false, reason: 'upi_gateway_api_error' };
+  }
+}
+
+/**
 
  * Full async payment proof — use before provision / inventory fulfill.
 
@@ -762,6 +862,10 @@ async function verifyOrderPaymentProof(order) {
 
     }
 
+    const hybridUpi = await verifyEkqrUpiPayment(order, gatewayOrderId);
+    if (hybridUpi?.ok && walletPart.ok) return { ok: true, reason: 'hybrid_upi_gateway_live' };
+    if (hybridUpi && !hybridUpi.ok) return hybridUpi;
+
     return { ok: false, reason: 'hybrid_missing_gateway_or_wallet_proof' };
 
   }
@@ -789,6 +893,9 @@ async function verifyOrderPaymentProof(order) {
       return { ok: false, reason: live.reason || 'razorpay_not_captured' };
 
     }
+
+    const upiLive = await verifyEkqrUpiPayment(order, gatewayOrderId);
+    if (upiLive) return upiLive;
 
 
 

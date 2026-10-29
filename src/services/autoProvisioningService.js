@@ -1042,7 +1042,7 @@ class AutoProvisioningService {
         const proof = await verifyOrderPaymentProof(paymentCheckOrder);
         if (!proof.ok) {
           // Don't yank a live server if Razorpay API is temporarily down
-          if (alreadyDelivered && proof.reason === 'razorpay_api_error') {
+          if (alreadyDelivered && (proof.reason === 'razorpay_api_error' || proof.reason === 'upi_gateway_api_error')) {
             L.line('⚠️ Already-delivered order: gateway re-check failed (API); leaving as-is');
           } else {
             L.head('STEP 0: PAYMENT GUARD BLOCKED PROVISIONING');
