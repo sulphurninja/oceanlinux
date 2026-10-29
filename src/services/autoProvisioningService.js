@@ -1894,6 +1894,7 @@ class AutoProvisioningService {
     L.line(`[NEXA] order ${nexaOrderId || '(none)'} ip ${displayIp || '(none)'}`);
     return {
       success: fullyProvisioned,
+      nexaPending: !fullyProvisioned,
       ipAddress: displayIp || null,
       credentials: { username, password },
       totalTime: Date.now() - startTime,

@@ -58,9 +58,21 @@ export function calculateResellerPlanPrice(reseller, productId, memoryOption, ba
 async function refundUnfulfilledResellerOrder(order, reseller, amount, reason) {
   try {
     const fresh = await Order.findById(order._id).select(
-      'walletDeduction status ipAddress resellerVmId provisioningStatus'
+      'walletDeduction status ipAddress resellerVmId provisioningStatus provisioningError nexaOrderId'
     );
     if (!fresh || fresh.walletDeduction?.refunded) return;
+    // Nexa (and other providers) often accept the buy before the IP exists.
+    // Failing that order refunds the wallet, and the reseller client places another buy.
+    const waitingOnProvider =
+      String(fresh.provisioningError || '').startsWith('PENDING:')
+      || String(reason || '').startsWith('PENDING:')
+      || (fresh.nexaOrderId && fresh.provisioningStatus === 'provisioning');
+    if (waitingOnProvider) {
+      console.log(
+        `[RESELLER-ORDER] skip refund for ${order._id} — provider accepted the order and the IP is not in yet`
+      );
+      return;
+    }
     if (fresh.ipAddress || fresh.resellerVmId || fresh.provisioningStatus === 'active') {
       console.log(
         `[RESELLER-ORDER] skip refund for ${order._id} — panel VM already exists ` +
@@ -94,6 +106,12 @@ async function refundUnfulfilledResellerOrder(order, reseller, amount, reason) {
   } catch (err) {
     console.error('[RESELLER-ORDER] refund failed:', err.message);
   }
+}
+
+function resellerProvisionStillWaiting(result) {
+  if (!result) return false;
+  if (result.nexaPending || result.pending) return true;
+  return String(result.error || result.message || '').startsWith('PENDING:');
 }
 
 function countAvailableSlotIps(pkg) {
@@ -406,6 +424,11 @@ export async function createResellerOrder(reseller, body) {
     console.error('[RESELLER-ORDER] notification failed:', err.message);
   }
 
+  // Answer the API as provisioning before the provider returns an IP.
+  // lastProvisionAttempt stays empty so the provision lock can still take this order.
+  order.provisioningStatus = 'provisioning';
+  await Order.updateOne({ _id: order._id }, { $set: { provisioningStatus: 'provisioning' } });
+
   try {
     const provisioningService = new AutoProvisioningService();
     provisioningService
@@ -419,15 +442,17 @@ export async function createResellerOrder(reseller, body) {
           });
           return;
         }
+        // A late IP is not a failed order. Refunding it makes the reseller client buy again.
+        if (resellerProvisionStillWaiting(result) || result.alreadyProvisioning) return;
         // provisionServer resolves (not rejects) with success:false, so this is
         // the only place an upstream out-of-stock actually surfaces.
-        // alreadyProvisioning means another worker holds the lock — not a failure.
-        if (!result.success && !result.alreadyProvisioning) {
+        if (!result.success) {
           await refundUnfulfilledResellerOrder(order, reseller, finalPrice, result.error);
         }
       })
       .catch(async (err) => {
         console.error('[RESELLER-ORDER] provision failed:', err.message);
+        if (String(err.message || '').startsWith('PENDING:')) return;
         await refundUnfulfilledResellerOrder(order, reseller, finalPrice, err.message);
       });
   } catch (err) {
