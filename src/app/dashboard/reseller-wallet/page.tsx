@@ -172,6 +172,7 @@ interface RechargeConfig {
     provider: string;
     paytmConnected: boolean;
     kwikUpiConnected: boolean;
+    upiGatewayConnected?: boolean;
     vyaparConnected?: boolean;
     paytmDisplayName: string;
     kwikUpiDisplayName: string;
@@ -181,7 +182,7 @@ interface RechargeConfig {
 }
 
 function isRechargeProviderConnected(config: RechargeConfig | null) {
-    return !!(config?.vyaparConnected || config?.paytmConnected || config?.kwikUpiConnected);
+    return !!(config?.upiGatewayConnected || config?.vyaparConnected || config?.paytmConnected || config?.kwikUpiConnected);
 }
 
 interface ActiveRechargeRequest {
@@ -1269,9 +1270,17 @@ export default function ResellerWalletPage() {
                                             className="w-48 h-48 rounded-lg border bg-white p-2"
                                         />
                                         <p className="text-xs text-muted-foreground text-center">
-                                            Scan with any UPI app (GPay, PhonePe, or Paytm) to pay
+                                            Scan the QR or open the KaroPay page. Wallet credits after payment is confirmed.
                                         </p>
                                     </div>
+                                )}
+
+                                {activeRecharge.paymentUrl && (
+                                    <Button asChild variant="outline" className="w-full">
+                                        <a href={activeRecharge.paymentUrl} target="_blank" rel="noreferrer">
+                                            Open UPI payment page
+                                        </a>
+                                    </Button>
                                 )}
 
                                 {activeRecharge.status !== 'confirmed' && (

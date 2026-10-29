@@ -1142,6 +1142,20 @@ class AutoProvisioningService {
               lastProvisionAttempt: { $lt: fiveMinutesAgo },
               nexaOrderId: { $in: [null, ''] },
               provisioningError: { $not: /^PENDING:/ }
+            },
+            // Cron sets provisioning before this lock, without lastProvisionAttempt.
+            // That placeholder is not an in-flight buy. Take it so the order can proceed.
+            {
+              provisioningStatus: 'provisioning',
+              lastProvisionAttempt: null,
+              nexaOrderId: { $in: [null, ''] },
+              advpsOrderId: { $in: [null, ''] },
+              hostycareServiceId: { $in: [null, ''] },
+              smartvpsServiceId: { $in: [null, ''] },
+              rackatoOrderId: { $in: [null, ''] },
+              netbayServiceId: { $in: [null, ''] },
+              kurohostInstanceId: { $in: [null, ''] },
+              provisioningError: { $not: /^PENDING:/ }
             }
           ],
           // Extra safety: Don't provision if already has IP address

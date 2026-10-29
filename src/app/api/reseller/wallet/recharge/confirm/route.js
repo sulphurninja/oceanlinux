@@ -8,6 +8,7 @@ import {
   probePaytmResellerRecharge,
   probeKwikUpiResellerRecharge,
   probeVyaparResellerRecharge,
+  probeUpiGatewayResellerRecharge,
 } from '@/lib/resellerRechargeService';
 import ResellerWalletService from '@/services/resellerWalletService';
 import { enforcePaymentRateLimit } from '@/lib/rateLimit';
@@ -38,7 +39,7 @@ export async function POST(request) {
     const reqDoc = await ResellerRechargeRequest.findOne({
       clientTxnId,
       reseller: user.resellerId,
-      method: { $in: ['paytm_qr', 'kwikupi'] },
+      method: { $in: ['paytm_qr', 'kwikupi', 'upigateway'] },
     });
 
     if (!reqDoc) {
@@ -57,6 +58,7 @@ export async function POST(request) {
     const gatewayProbe = {
       vyapar: probeVyaparResellerRecharge,
       kwikupi: probeKwikUpiResellerRecharge,
+      upigateway: probeUpiGatewayResellerRecharge,
     }[reqDoc.method];
     const probe = await (gatewayProbe || probePaytmResellerRecharge)(reqDoc);
 

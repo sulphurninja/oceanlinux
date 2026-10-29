@@ -4,8 +4,10 @@ import { buildKwikUpiInlineQr } from '@/lib/kwikUpiQr';
 import {
   getKwikUpiCredentials,
   getVyaparCredentials,
+  getUpiGatewayCredentials,
   getResellerRechargeSettings,
 } from '@/lib/resellerRechargeSettings';
+import { createUpiGatewayOrder, getUpiGatewayOrderStatus } from '@/lib/upiGateway';
 import { logKwikRaw } from '@/lib/kwikRawLog';
 import {
   createVyaparOrderWithUniqueAmount,
@@ -44,8 +46,14 @@ async function getVyaparCreds() {
   return getVyaparCredentials(settings);
 }
 
+async function getUpiGatewayCreds() {
+  const settings = await getResellerRechargeSettings();
+  return getUpiGatewayCredentials(settings);
+}
+
 export const UPI_PROVIDER_VYAPAR = 'vyapar';
 export const UPI_PROVIDER_KWIKUPI = 'kwikupi';
+export const UPI_PROVIDER_UPIGATEWAY = 'upigateway';
 
 /**
  * Older records predate the stored provider field. The two gateways mint
@@ -160,12 +168,50 @@ export async function createGatewayOrder({
     };
   }
 
+  async function createEkqrUpiOrder(gateway) {
+    const created = await createUpiGatewayOrder({
+      apiKey: gateway.apiKey,
+      apiSecret: gateway.apiSecret,
+      clientTxnId,
+      amount: Math.round(amount),
+      customerName: customer.name,
+      customerMobile: customer.phone,
+    });
+
+    const qrSource = created.upiLink || created.paymentUrl;
+    let qrImageUrl = '';
+    if (qrSource) {
+      const QRCode = require('qrcode');
+      qrImageUrl = await QRCode.toDataURL(qrSource, { width: 320, margin: 1 }).catch(() => '');
+    }
+
+    return {
+      method: 'upi',
+      upiProvider: UPI_PROVIDER_UPIGATEWAY,
+      gatewayOrderId: created.orderId,
+      chargedAmount: Math.round(amount),
+      payload: {
+        upi: {
+          order_id: created.orderId,
+          payment_id: created.orderId,
+          payment_url: created.paymentUrl,
+          qrImageUrl,
+          amount: Math.round(amount),
+          provider: UPI_PROVIDER_UPIGATEWAY,
+          currency: 'INR',
+        },
+      },
+    };
+  }
+
   async function createUpiOrder() {
-    // Once VyaparGateway is configured it is the only UPI issuer. Falling back to
-    // KwikUPI when Vyapar has a bad minute would silently reopen the partial
-    // payment hole, so a failure here drops through to Razorpay instead.
+    // Vyapar stays the customer UPI issuer while it is connected.
+    // UPI Gateway replaces Kwik for new checkouts once its API key is saved.
     const vyapar = await getVyaparCreds();
     if (vyapar) return createVyaparUpiOrder(vyapar);
+
+    const upiGateway = await getUpiGatewayCreds();
+    if (upiGateway) return createEkqrUpiOrder(upiGateway);
 
     const kwikupi = await getKwikUpiCreds();
     if (kwikupi) return createKwikUpiOrder(kwikupi);
@@ -259,8 +305,18 @@ export function verifyRazorpaySignature({
 export async function verifyUPIPayment(clientTxnId, gatewayOrderId, provider) {
   const paymentId = gatewayOrderId || clientTxnId;
   const resolved = provider || inferUpiProvider(paymentId);
+  const ekqrOrder =
+    provider === UPI_PROVIDER_UPIGATEWAY ||
+    (!provider && /^\d+$/.test(String(gatewayOrderId || '')));
 
   try {
+    if (ekqrOrder) {
+      const gateway = await getUpiGatewayCreds();
+      if (gateway) {
+        return await verifyViaUpiGateway(gateway, clientTxnId);
+      }
+    }
+
     if (resolved !== UPI_PROVIDER_KWIKUPI) {
       const vyapar = await getVyaparCreds();
       if (vyapar) {
@@ -307,6 +363,32 @@ async function verifyViaVyapar(vyapar, clientTxnId, orderId) {
     order_id: result.clientTxnId || clientTxnId,
     provider: UPI_PROVIDER_VYAPAR,
     raw: result.raw,
+  };
+}
+
+async function verifyViaUpiGateway(gateway, clientTxnId) {
+  const result = await getUpiGatewayOrderStatus({
+    apiKey: gateway.apiKey,
+    apiSecret: gateway.apiSecret,
+    clientTxnId,
+  });
+
+  if (!result.verified) {
+    return {
+      verified: false,
+      error: result.reason || 'not paid',
+      pending: result.pending,
+      failed: result.failed,
+      provider: UPI_PROVIDER_UPIGATEWAY,
+    };
+  }
+
+  return {
+    verified: true,
+    amount: result.amount,
+    upi_txn_id: result.transactionId || clientTxnId,
+    order_id: clientTxnId,
+    provider: UPI_PROVIDER_UPIGATEWAY,
   };
 }
 

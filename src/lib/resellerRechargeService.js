@@ -8,9 +8,11 @@ import {
   getPaytmCredentials,
   getKwikUpiCredentials,
   getVyaparCredentials,
+  getUpiGatewayCredentials,
   getResellerRechargeSettings,
 } from '@/lib/resellerRechargeSettings';
 import { getVyaparOrderStatus } from '@/lib/vyaparGateway';
+import { getUpiGatewayOrderStatus } from '@/lib/upiGateway';
 import { upiVerificationAmountAcceptable } from '@/lib/paymentAmountValidation';
 
 function amountsMatch(a, b) {
@@ -67,7 +69,14 @@ export async function confirmResellerRechargeRequest(request, { transactionId, p
       claimed.amount,
       `Wallet recharge ₹${claimed.amount} (UPI auto)`,
       {
-        source: claimed.method === 'paytm_qr' ? 'reseller_paytm' : claimed.method === 'kwikupi' ? 'reseller_kwikupi' : 'reseller_manual_upi',
+        source:
+          claimed.method === 'paytm_qr'
+            ? 'reseller_paytm'
+            : claimed.method === 'kwikupi'
+              ? 'reseller_kwikupi'
+              : claimed.method === 'upigateway'
+                ? 'reseller_upigateway'
+                : 'reseller_manual_upi',
         rechargeRequestId: String(claimed._id),
         clientTxnId: claimed.clientTxnId,
         utr: claimed.utr || '',
@@ -194,6 +203,41 @@ export async function probeVyaparResellerRecharge(request) {
     paymentDetails: {
       upiProvider: 'vyapar',
       vyaparOrderId: request.gatewayOrderId,
+      upi_txn_id: result.transactionId,
+      verifiedAmount: result.amount,
+      confirmedAt: new Date(),
+    },
+  };
+}
+
+export async function probeUpiGatewayResellerRecharge(request) {
+  if (!request || request.method !== 'upigateway') {
+    return { verified: false, reason: 'not a UPI Gateway request' };
+  }
+
+  const gateway = getUpiGatewayCredentials(await getResellerRechargeSettings());
+  if (!gateway) {
+    return { verified: false, reason: 'UPI Gateway not connected' };
+  }
+
+  const result = await getUpiGatewayOrderStatus({
+    apiKey: gateway.apiKey,
+    apiSecret: gateway.apiSecret,
+    clientTxnId: request.clientTxnId,
+    txnDate: request.createdAt,
+    expectedAmount: request.amount,
+  });
+
+  if (!result.verified) {
+    return { verified: false, reason: result.reason || 'not paid', pending: result.pending, failed: result.failed };
+  }
+
+  return {
+    verified: true,
+    transactionId: result.transactionId || '',
+    paymentDetails: {
+      upiProvider: 'upigateway',
+      gatewayOrderId: request.gatewayOrderId,
       upi_txn_id: result.transactionId,
       verifiedAmount: result.amount,
       confirmedAt: new Date(),

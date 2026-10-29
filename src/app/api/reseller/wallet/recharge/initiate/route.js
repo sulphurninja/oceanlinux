@@ -9,12 +9,12 @@ import {
   getResellerRechargeSettings,
   getPaytmCredentials,
   getKwikUpiCredentials,
-  getVyaparCredentials,
+  getUpiGatewayCredentials,
 } from '@/lib/resellerRechargeSettings';
 import { createPaytmDynamicQr } from '@/lib/paytmMerchant';
 import { createKwikUpiPayment } from '@/lib/kwikUpi';
 import { buildKwikUpiInlineQr } from '@/lib/kwikUpiQr';
-import { createVyaparOrderWithUniqueAmount } from '@/lib/vyaparGateway';
+import { createUpiGatewayOrder } from '@/lib/upiGateway';
 import QRCode from 'qrcode';
 import { enforcePaymentRateLimit } from '@/lib/rateLimit';
 
@@ -77,29 +77,25 @@ export async function POST(request) {
     const clientTxnId = buildClientTxnId('RRC');
     const expiresAt = new Date(Date.now() + REQUEST_TTL_HOURS * 60 * 60 * 1000);
 
-    // ---------- VyaparGateway provider ----------
-    if (settings.provider === 'vyapar') {
-      const vyapar = getVyaparCredentials(settings);
-      if (!vyapar) {
+    // ---------- KaroPay ----------
+    if (settings.provider === 'upigateway') {
+      const gateway = getUpiGatewayCredentials(settings);
+      if (!gateway) {
         return NextResponse.json(
-          { success: false, message: 'VyaparGateway is not connected. Ask admin to connect it first.' },
+          { success: false, message: 'KaroPay is not connected. Ask admin to add the API key and secret first.' },
           { status: 400 }
         );
       }
 
-      const appUrl = (process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || '').replace(/\/$/, '');
       let created;
       try {
-        created = await createVyaparOrderWithUniqueAmount({
-          apiKey: vyapar.apiKey,
-          amount,
+        created = await createUpiGatewayOrder({
+          apiKey: gateway.apiKey,
+          apiSecret: gateway.apiSecret,
           clientTxnId,
-          customerName: auth.reseller.businessName || undefined,
-          customerEmail: auth.reseller.email || undefined,
-          redirectUrl: appUrl
-            ? `${appUrl}/payment/callback?type=reseller-wallet&client_txn_id=${encodeURIComponent(clientTxnId)}`
-            : undefined,
-          description: `Reseller wallet ${clientTxnId}`,
+          amount,
+          customerName: auth.reseller.businessName || auth.user.name,
+          customerMobile: auth.user.phone,
         });
       } catch (err) {
         return NextResponse.json(
@@ -108,26 +104,25 @@ export async function POST(request) {
         );
       }
 
-      let qrImageUrl = created.qrImageUrl || '';
-      if (!qrImageUrl && created.upiLink) {
-        qrImageUrl = await QRCode.toDataURL(created.upiLink, { width: 320, margin: 1 }).catch(() => '');
+      const qrSource = created.upiLink || created.paymentUrl;
+      let qrImageUrl = '';
+      if (qrSource) {
+        qrImageUrl = await QRCode.toDataURL(qrSource, { width: 320, margin: 1 }).catch(() => '');
       }
 
       const reqDoc = await ResellerRechargeRequest.create({
         reseller: auth.reseller._id,
         user: auth.user._id,
-        // The gateway may have nudged the paise to keep the amount unique, and
-        // that is the figure the reseller has to pay for it to reconcile.
-        amount: created.chargedAmount,
-        method: 'vyapar',
+        amount,
+        method: 'upigateway',
         clientTxnId,
         status: 'pending_payment',
-        payeeName: vyapar.displayName,
+        payeeName: gateway.displayName,
         paymentUrl: created.paymentUrl,
         upiPayload: created.upiLink,
         qrImageUrl,
         gatewayOrderId: created.orderId,
-        paymentMethod: 'vyapar',
+        paymentMethod: 'upigateway',
         expiresAt,
       });
 
@@ -141,13 +136,12 @@ export async function POST(request) {
           payeeName: reqDoc.payeeName,
           paymentUrl: reqDoc.paymentUrl,
           qrImageUrl: reqDoc.qrImageUrl,
-          qrData: '',
-          expiresAt: created.expiresAt,
+          qrData: created.upiLink || '',
         },
       });
     }
 
-    // ---------- KwikUPI provider ----------
+    // ---------- KwikUPI provider (older recharges only) ----------
     if (settings.provider === 'kwikupi') {
       const kwikupi = getKwikUpiCredentials(settings);
       if (!kwikupi) {

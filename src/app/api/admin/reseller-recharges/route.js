@@ -9,13 +9,12 @@ import {
   setResellerRechargeSettings,
   updatePaytmCredentials,
   updateKwikUpiCredentials,
-  updateVyaparCredentials,
+  updateUpiGatewayCredentials,
   getAdminPaytmSettings,
 } from '@/lib/resellerRechargeSettings';
 import { createPaytmDynamicQr, getPaytmWebhookUrl } from '@/lib/paytmMerchant';
 import { createKwikUpiPayment, getKwikUpiWebhookUrl } from '@/lib/kwikUpi';
-import { createVyaparOrderWithUniqueAmount } from '@/lib/vyaparGateway';
-import { getPlatformVyaparWebhookUrl } from '@/lib/paymentGateways';
+import { createUpiGatewayOrder, getUpiGatewayWebhookUrl } from '@/lib/upiGateway';
 
 export async function GET(request) {
   const denied = await enforceAdmin(request);
@@ -28,7 +27,7 @@ export async function GET(request) {
     const status = searchParams.get('status') || 'all';
     const limit = Math.min(parseInt(searchParams.get('limit') || '100', 10), 300);
 
-    const query = { method: { $in: ['paytm_qr', 'kwikupi'] } };
+    const query = { method: { $in: ['paytm_qr', 'kwikupi', 'upigateway', 'vyapar'] } };
     if (status !== 'all') query.status = status;
 
     const [requests, settings] = await Promise.all([
@@ -56,7 +55,7 @@ export async function GET(request) {
       settings: getAdminPaytmSettings(settings),
       webhookUrl: getPaytmWebhookUrl(),
       kwikUpiWebhookUrl: getKwikUpiWebhookUrl(),
-      vyaparWebhookUrl: getPlatformVyaparWebhookUrl(),
+      upiGatewayWebhookUrl: getUpiGatewayWebhookUrl(),
     });
   } catch (error) {
     return NextResponse.json({ success: false, message: error.message }, { status: 500 });
@@ -82,7 +81,11 @@ export async function POST(request) {
           ...current,
           minAmount: incoming.minAmount ?? current.minAmount,
           maxAmount: incoming.maxAmount ?? current.maxAmount,
-          provider: ['paytm', 'kwikupi'].includes(incoming.provider) ? incoming.provider : current.provider,
+          provider: ['paytm', 'upigateway', 'kwikupi'].includes(incoming.provider)
+            ? incoming.provider === 'upigateway' && !(current.upigateway?.apiKey && current.upigateway?.apiSecret && current.upigateway?.connected !== false)
+              ? current.provider
+              : incoming.provider
+            : current.provider,
         },
         adminUser?._id
       );
@@ -146,66 +149,63 @@ export async function POST(request) {
       });
     }
 
-    if (action === 'connect_vyapar') {
-      const { apiKey, webhookSecret, displayName } = body;
-      if (!apiKey) {
-        return NextResponse.json({ success: false, message: 'API Key is required' }, { status: 400 });
+    if (action === 'connect_upigateway') {
+      const { apiKey, apiSecret, displayName } = body;
+      if (!apiKey || !apiSecret) {
+        return NextResponse.json({ success: false, message: 'API key and API secret are required' }, { status: 400 });
       }
 
-      const settings = await updateVyaparCredentials(
+      const settings = await updateUpiGatewayCredentials(
         {
           apiKey: String(apiKey).trim(),
-          webhookSecret: String(webhookSecret || '').trim(),
-          displayName: displayName || 'OceanLinux',
+          apiSecret: String(apiSecret).trim(),
+          displayName: String(displayName || 'OceanLinux').trim(),
           connected: true,
+          connectedAt: new Date().toISOString(),
         },
-        adminUser?._id || null
+        adminUser?._id
       );
 
       return NextResponse.json({
         success: true,
-        message: 'VyaparGateway connected — UPI now verifies the settled amount',
+        message: 'KaroPay connected. New reseller recharges use this gateway.',
         settings: getAdminPaytmSettings(settings),
-        vyaparWebhookUrl: getPlatformVyaparWebhookUrl(),
+        upiGatewayWebhookUrl: getUpiGatewayWebhookUrl(),
       });
     }
 
-    if (action === 'test_vyapar') {
+    if (action === 'test_upigateway') {
       const settings = await getResellerRechargeSettings();
-      if (!settings.vyapar.apiKey) {
-        return NextResponse.json({ success: false, message: 'Save VyaparGateway credentials first' }, { status: 400 });
+      if (!settings.upigateway?.apiKey || !settings.upigateway?.apiSecret) {
+        return NextResponse.json({ success: false, message: 'Save the KaroPay API key and secret first' }, { status: 400 });
       }
 
       try {
-        const test = await createVyaparOrderWithUniqueAmount({
-          apiKey: settings.vyapar.apiKey,
+        const test = await createUpiGatewayOrder({
+          apiKey: settings.upigateway.apiKey,
+          apiSecret: settings.upigateway.apiSecret,
+          clientTxnId: `UGTEST_${Date.now()}`,
           amount: 1,
-          clientTxnId: `VGTEST_${Date.now()}`,
           customerName: 'Connection Test',
-          customerEmail: 'test@oceanlinux.com',
-          description: 'Connection test',
+          customerMobile: '9999999999',
         });
         return NextResponse.json({
           success: true,
-          message: `VyaparGateway OK — test order created for ₹${test.chargedAmount}. It will expire on its own; do not pay it.`,
+          message: `KaroPay OK — test order ${test.orderId} created. Do not pay it.`,
         });
       } catch (err) {
         return NextResponse.json({ success: false, message: err.message }, { status: 400 });
       }
     }
 
-    if (action === 'disconnect_vyapar') {
-      const settings = await updateVyaparCredentials(
-        {
-          connected: false,
-          apiKey: '',
-          webhookSecret: '',
-        },
-        adminUser?._id || null
+    if (action === 'disconnect_upigateway') {
+      const settings = await updateUpiGatewayCredentials(
+        { connected: false, apiKey: '', apiSecret: '' },
+        adminUser?._id
       );
       return NextResponse.json({
         success: true,
-        message: 'VyaparGateway disconnected',
+        message: 'KaroPay disconnected',
         settings: getAdminPaytmSettings(settings),
       });
     }

@@ -8,6 +8,7 @@ import {
   probePaytmResellerRecharge,
   probeKwikUpiResellerRecharge,
   probeVyaparResellerRecharge,
+  probeUpiGatewayResellerRecharge,
 } from '@/lib/resellerRechargeService';
 import ResellerWalletService from '@/services/resellerWalletService';
 import { enforcePaymentRateLimit } from '@/lib/rateLimit';
@@ -15,6 +16,7 @@ import { enforcePaymentRateLimit } from '@/lib/rateLimit';
 const RESELLER_PROBES = {
   vyapar: probeVyaparResellerRecharge,
   kwikupi: probeKwikUpiResellerRecharge,
+  upigateway: probeUpiGatewayResellerRecharge,
 };
 
 async function probeAndConfirm(reqDoc) {
@@ -93,7 +95,7 @@ export async function POST(request, { params }) {
     const reqDoc = await ResellerRechargeRequest.findOne({
       _id: id,
       reseller: user.resellerId,
-      method: { $in: ['paytm_qr', 'kwikupi'] },
+      method: { $in: ['paytm_qr', 'kwikupi', 'upigateway'] },
     });
 
     if (!reqDoc) {

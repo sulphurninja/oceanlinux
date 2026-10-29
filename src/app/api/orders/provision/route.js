@@ -60,8 +60,21 @@ export async function POST(request) {
         });
       }
 
+      // Cron writes "provisioning" before the real lock exists. That is not an in-flight buy.
+      const cronPlaceholder = order.provisioningStatus === 'provisioning'
+        && !order.lastProvisionAttempt
+        && !String(order.ipAddress || '').trim()
+        && !order.advpsOrderId
+        && !order.nexaOrderId
+        && !order.hostycareServiceId
+        && !order.smartvpsServiceId
+        && !order.rackatoOrderId
+        && !order.netbayServiceId
+        && !order.kurohostInstanceId
+        && !String(order.provisioningError || '').startsWith('PENDING:');
+
       // Check if currently being provisioned
-      if (order.provisioningStatus === 'provisioning') {
+      if (order.provisioningStatus === 'provisioning' && !cronPlaceholder) {
         console.log(`[PROVISION API] ⏳ Order is currently being provisioned`);
         return NextResponse.json({
           success: false,
@@ -71,7 +84,7 @@ export async function POST(request) {
       }
 
       // Check if order has failed and needs retry
-      const canRetry = order.provisioningStatus === 'failed' || !order.provisioningStatus;
+      const canRetry = order.provisioningStatus === 'failed' || !order.provisioningStatus || cronPlaceholder;
       
       if (!canRetry && order.provisioningStatus !== 'pending') {
         console.log(`[PROVISION API] ❌ Order cannot be provisioned (status: ${order.provisioningStatus})`);

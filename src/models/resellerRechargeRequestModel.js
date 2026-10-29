@@ -22,7 +22,7 @@ const resellerRechargeRequestSchema = new mongoose.Schema(
 
     method: {
       type: String,
-      enum: ['manual_upi', 'auto_upi', 'paytm_qr', 'kwikupi', 'vyapar'],
+      enum: ['manual_upi', 'auto_upi', 'paytm_qr', 'kwikupi', 'vyapar', 'upigateway'],
       required: true,
     },
     clientTxnId: { type: String, required: true, unique: true, index: true },

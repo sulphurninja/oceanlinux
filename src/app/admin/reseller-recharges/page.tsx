@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
-import { Loader2, RefreshCw, Link2, Unlink, Wallet, Copy, CheckCircle2, Zap, CreditCard, ShieldCheck } from 'lucide-react';
+import { Loader2, RefreshCw, Link2, Unlink, Wallet, Copy, CheckCircle2, Zap, CreditCard } from 'lucide-react';
 
 interface RechargeItem {
   _id: string;
@@ -40,11 +40,12 @@ interface KwikUpiSettings {
   connectedAt: string | null;
 }
 
-interface VyaparSettings {
+interface UpiGatewaySettings {
   connected: boolean;
-  apiKey: string;
-  webhookSecretMasked: string;
-  hasWebhookSecret: boolean;
+  apiKeyMasked: string;
+  hasApiKey: boolean;
+  apiSecretMasked: string;
+  hasApiSecret: boolean;
   displayName: string;
   connectedAt: string | null;
 }
@@ -53,7 +54,7 @@ interface SettingsPayload {
   provider: string;
   paytm: PaytmSettings;
   kwikupi: KwikUpiSettings;
-  vyapar: VyaparSettings;
+  upigateway?: UpiGatewaySettings;
   minAmount: number;
   maxAmount: number;
 }
@@ -71,11 +72,10 @@ export default function AdminResellerRechargesPage() {
   const [items, setItems] = useState<RechargeItem[]>([]);
   const [settings, setSettings] = useState<SettingsPayload | null>(null);
   const [webhookUrl, setWebhookUrl] = useState('');
-  const [kwikUpiWebhookUrl, setKwikUpiWebhookUrl] = useState('');
-  const [vyaparWebhookUrl, setVyaparWebhookUrl] = useState('');
+  const [upiGatewayWebhookUrl, setUpiGatewayWebhookUrl] = useState('');
   const [minAmount, setMinAmount] = useState(100);
   const [maxAmount, setMaxAmount] = useState(100000);
-  const [provider, setProvider] = useState('kwikupi');
+  const [provider, setProvider] = useState('upigateway');
   const [customerPrimaryGateway, setCustomerPrimaryGateway] = useState<'upi' | 'razorpay'>('upi');
   const [savedPrimaryGateway, setSavedPrimaryGateway] = useState<'upi' | 'razorpay' | null>(null);
   const [savingPrimaryGateway, setSavingPrimaryGateway] = useState(false);
@@ -88,15 +88,9 @@ export default function AdminResellerRechargesPage() {
     displayName: 'OceanLinux',
   });
 
-  const [kwikForm, setKwikForm] = useState({
+  const [upiGatewayForm, setUpiGatewayForm] = useState({
     apiKey: '',
     apiSecret: '',
-    displayName: 'OceanLinux',
-  });
-
-  const [vyaparForm, setVyaparForm] = useState({
-    apiKey: '',
-    webhookSecret: '',
     displayName: 'OceanLinux',
   });
 
@@ -111,7 +105,7 @@ export default function AdminResellerRechargesPage() {
       setItems(data.items || []);
       if (data.settings) {
         setSettings(data.settings);
-        setProvider(data.settings.provider || 'kwikupi');
+        setProvider(data.settings.provider === 'paytm' ? 'paytm' : 'upigateway');
         if (data.settings.paytm) {
           setPaytmForm((f) => ({
             ...f,
@@ -121,26 +115,17 @@ export default function AdminResellerRechargesPage() {
             displayName: data.settings.paytm.displayName || 'OceanLinux',
           }));
         }
-        if (data.settings.kwikupi) {
-          setKwikForm((f) => ({
+        if (data.settings.upigateway) {
+          setUpiGatewayForm((f) => ({
             ...f,
-            apiKey: data.settings.kwikupi.apiKey || '',
-            displayName: data.settings.kwikupi.displayName || 'OceanLinux',
-          }));
-        }
-        if (data.settings.vyapar) {
-          setVyaparForm((f) => ({
-            ...f,
-            apiKey: data.settings.vyapar.apiKey || '',
-            displayName: data.settings.vyapar.displayName || 'OceanLinux',
+            displayName: data.settings.upigateway?.displayName || 'OceanLinux',
           }));
         }
         setMinAmount(data.settings.minAmount ?? 100);
         setMaxAmount(data.settings.maxAmount ?? 100000);
       }
       setWebhookUrl(data.webhookUrl || '');
-      setKwikUpiWebhookUrl(data.kwikUpiWebhookUrl || '');
-      setVyaparWebhookUrl(data.vyaparWebhookUrl || '');
+      setUpiGatewayWebhookUrl(data.upiGatewayWebhookUrl || '');
       if (platformData?.success && platformData.primaryGateway) {
         const pg = platformData.primaryGateway === 'razorpay' ? 'razorpay' : 'upi';
         setCustomerPrimaryGateway(pg);
@@ -183,11 +168,11 @@ export default function AdminResellerRechargesPage() {
     }
   };
 
-  const connectKwikUpi = async () => {
+  const connectUpiGateway = async () => {
     setConnecting(true);
     try {
-      await postAction({ action: 'connect_kwikupi', ...kwikForm }, 'KwikUPI connected — auto verify ON');
-      setKwikForm((f) => ({ ...f, apiSecret: '' }));
+      await postAction({ action: 'connect_upigateway', ...upiGatewayForm }, 'KaroPay connected');
+      setUpiGatewayForm((f) => ({ ...f, apiKey: '', apiSecret: '' }));
       fetchData();
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Connect failed');
@@ -196,20 +181,7 @@ export default function AdminResellerRechargesPage() {
     }
   };
 
-  const connectVyapar = async () => {
-    setConnecting(true);
-    try {
-      await postAction({ action: 'connect_vyapar', ...vyaparForm }, 'VyaparGateway connected');
-      setVyaparForm((f) => ({ ...f, webhookSecret: '' }));
-      fetchData();
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Connect failed');
-    } finally {
-      setConnecting(false);
-    }
-  };
-
-  type Provider = 'paytm' | 'kwikupi' | 'vyapar';
+  type Provider = 'paytm' | 'upigateway';
 
   const testConnection = async (which: Provider) => {
     setTesting(true);
@@ -271,9 +243,8 @@ export default function AdminResellerRechargesPage() {
     toast.success('Webhook URL copied');
   };
 
-  const kwikConnected = settings?.kwikupi?.connected;
+  const upiGatewayConnected = settings?.upigateway?.connected;
   const paytmConnected = settings?.paytm?.connected;
-  const vyaparConnected = settings?.vyapar?.connected;
 
   return (
     <div className="p-6 space-y-6">
@@ -352,128 +323,20 @@ export default function AdminResellerRechargesPage() {
         </CardContent>
       </Card>
 
-      <Tabs defaultValue="vyapar">
+      <Tabs defaultValue="upigateway">
         <TabsList>
-          <TabsTrigger value="vyapar">VyaparGateway (recommended)</TabsTrigger>
-          <TabsTrigger value="kwikupi">KwikUPI (sirf API Key)</TabsTrigger>
+          <TabsTrigger value="upigateway">KaroPay</TabsTrigger>
           <TabsTrigger value="paytm">Paytm Direct</TabsTrigger>
           <TabsTrigger value="history">Recharge history</TabsTrigger>
         </TabsList>
 
-        {/* ==================== VyaparGateway ==================== */}
-        <TabsContent value="vyapar" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <ShieldCheck className="h-5 w-5 text-emerald-600" />
-                VyaparGateway Connect
-                {vyaparConnected && (
-                  <Badge className="bg-emerald-600">
-                    <CheckCircle2 className="h-3 w-3 mr-1" />
-                    Connected
-                  </Badge>
-                )}
-              </CardTitle>
-              <CardDescription>
-                <span className="font-medium text-foreground">
-                  Partial-payment fraud se surakshit.
-                </span>{' '}
-                Ye gateway sirf tab order paid karta hai jab poora amount aaye — kam paisa bhejne par
-                order pending rehke expire ho jaata hai. KwikUPI ye nahi kar paata.{' '}
-                <a href="https://vyapargateway.com" target="_blank" rel="noreferrer" className="underline">
-                  vyapargateway.com
-                </a>
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm">
-                <p className="font-medium">Do baatein yaad rakho</p>
-                <ul className="list-disc pl-5 mt-1 space-y-1 text-muted-foreground">
-                  <li>QR sirf ~2 minute chalta hai — customer ko dialog mein apne aap naya QR mil jaata hai.</li>
-                  <li>
-                    Ek waqt par ek hi order per amount ho sakta hai, isliye paise apne aap thoda badal
-                    sakte hain (max ₹0.99 zyada).
-                  </li>
-                </ul>
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>API Key</Label>
-                  <Input
-                    value={vyaparForm.apiKey}
-                    onChange={(e) => setVyaparForm((f) => ({ ...f, apiKey: e.target.value }))}
-                    placeholder="vg_live_..."
-                    className="font-mono text-xs"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Webhook Secret</Label>
-                  <Input
-                    type="password"
-                    value={vyaparForm.webhookSecret}
-                    onChange={(e) => setVyaparForm((f) => ({ ...f, webhookSecret: e.target.value }))}
-                    placeholder={
-                      settings?.vyapar?.hasWebhookSecret
-                        ? settings.vyapar.webhookSecretMasked
-                        : 'Enter webhook secret'
-                    }
-                    className="font-mono text-xs"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Iske bina webhook reject honge — payment tab bhi polling se confirm hoga, par der lagegi.
-                  </p>
-                </div>
-                <div className="space-y-2">
-                  <Label>Display name</Label>
-                  <Input
-                    value={vyaparForm.displayName}
-                    onChange={(e) => setVyaparForm((f) => ({ ...f, displayName: e.target.value }))}
-                  />
-                </div>
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                <Button onClick={connectVyapar} disabled={connecting}>
-                  {connecting && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                  {vyaparConnected ? 'Update & Reconnect' : 'Connect VyaparGateway'}
-                </Button>
-                {vyaparConnected && (
-                  <>
-                    <Button variant="outline" onClick={() => testConnection('vyapar')} disabled={testing}>
-                      {testing && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                      Test connection
-                    </Button>
-                    <Button variant="destructive" size="sm" onClick={() => disconnect('vyapar')}>
-                      Disconnect
-                    </Button>
-                  </>
-                )}
-              </div>
-
-              {vyaparWebhookUrl && (
-                <div className="space-y-2">
-                  <Label>Webhook URL (VyaparGateway dashboard mein paste karo)</Label>
-                  <div className="flex gap-2">
-                    <Input readOnly value={vyaparWebhookUrl} className="font-mono text-xs" />
-                    <Button type="button" variant="outline" size="icon" onClick={() => copyWebhook(vyaparWebhookUrl)}>
-                      <Copy className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* ==================== KwikUPI ==================== */}
-        <TabsContent value="kwikupi" className="space-y-4">
+        <TabsContent value="upigateway" className="space-y-4">
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Zap className="h-5 w-5 text-amber-500" />
-                KwikUPI Connect
-                {kwikConnected && (
+                KaroPay
+                {upiGatewayConnected && (
                   <Badge className="bg-emerald-600">
                     <CheckCircle2 className="h-3 w-3 mr-1" />
                     Connected
@@ -481,63 +344,54 @@ export default function AdminResellerRechargesPage() {
                 )}
               </CardTitle>
               <CardDescription>
-                <span className="font-medium text-foreground">Paytm Merchant Key ki zaroorat nahi.</span>{' '}
-                KwikUPI dashboard mein Paytm MID link karo, yahan sirf API Key + Secret daalo. Auto verify ON.{' '}
-                <a href="https://kwikupi.com" target="_blank" rel="noreferrer" className="underline">
-                  kwikupi.com
+                www.karopay.in ke API Client se key aur secret. Naya reseller recharge isi se banega.
+                Wallet tabhi credit hota hai jab status PAID ho aur amount match kare.{' '}
+                <a href="https://www.karopay.in" target="_blank" rel="noreferrer" className="underline">
+                  karopay.in
                 </a>
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-700 p-3 text-sm">
-                <p className="font-medium text-amber-800 dark:text-amber-300">Kaise setup karein:</p>
-                <ol className="list-decimal ml-5 mt-1 space-y-1 text-amber-700 dark:text-amber-400">
-                  <li>kwikupi.com pe account banao → <span className="font-medium">Merchant Dashboard</span></li>
-                  <li>Wahan apna <span className="font-medium">Paytm MID</span> link karo (secret key nahi chahiye)</li>
-                  <li>Dashboard se <span className="font-medium">API Key + API Secret</span> copy karo</li>
-                  <li>Niche paste karke <span className="font-medium">Connect</span> dabao</li>
-                </ol>
-              </div>
-
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label>API Key</Label>
                   <Input
-                    placeholder="kwik_live_xxxx"
-                    value={kwikForm.apiKey}
-                    onChange={(e) => setKwikForm({ ...kwikForm, apiKey: e.target.value })}
+                    type="password"
+                    placeholder={settings?.upigateway?.hasApiKey ? settings.upigateway.apiKeyMasked : 'API key'}
+                    value={upiGatewayForm.apiKey}
+                    onChange={(e) => setUpiGatewayForm({ ...upiGatewayForm, apiKey: e.target.value })}
                   />
                 </div>
                 <div className="space-y-2">
                   <Label>API Secret</Label>
                   <Input
                     type="password"
-                    placeholder={settings?.kwikupi?.hasApiSecret ? settings.kwikupi.apiSecretMasked : 'Enter API secret'}
-                    value={kwikForm.apiSecret}
-                    onChange={(e) => setKwikForm({ ...kwikForm, apiSecret: e.target.value })}
+                    placeholder={settings?.upigateway?.hasApiSecret ? settings.upigateway.apiSecretMasked : 'API secret'}
+                    value={upiGatewayForm.apiSecret}
+                    onChange={(e) => setUpiGatewayForm({ ...upiGatewayForm, apiSecret: e.target.value })}
                   />
                 </div>
-                <div className="space-y-2 md:col-span-2">
-                  <Label>Display name (QR / payment page pe dikhega)</Label>
+                <div className="space-y-2">
+                  <Label>Display name</Label>
                   <Input
-                    value={kwikForm.displayName}
-                    onChange={(e) => setKwikForm({ ...kwikForm, displayName: e.target.value })}
+                    value={upiGatewayForm.displayName}
+                    onChange={(e) => setUpiGatewayForm({ ...upiGatewayForm, displayName: e.target.value })}
                   />
                 </div>
               </div>
 
               <div className="flex flex-wrap gap-2">
-                <Button onClick={connectKwikUpi} disabled={connecting}>
+                <Button onClick={connectUpiGateway} disabled={connecting}>
                   {connecting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Link2 className="h-4 w-4 mr-2" />}
-                  {kwikConnected ? 'Update & Reconnect' : 'Connect KwikUPI'}
+                  {upiGatewayConnected ? 'Update & Reconnect' : 'Connect KaroPay'}
                 </Button>
-                {kwikConnected && (
+                {upiGatewayConnected && (
                   <>
-                    <Button variant="outline" onClick={() => testConnection('kwikupi')} disabled={testing}>
+                    <Button variant="outline" onClick={() => testConnection('upigateway')} disabled={testing}>
                       {testing ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
                       Test connection
                     </Button>
-                    <Button variant="destructive" size="sm" onClick={() => disconnect('kwikupi')}>
+                    <Button variant="destructive" size="sm" onClick={() => disconnect('upigateway')}>
                       <Unlink className="h-4 w-4 mr-2" />
                       Disconnect
                     </Button>
@@ -545,16 +399,16 @@ export default function AdminResellerRechargesPage() {
                 )}
               </div>
 
-              {kwikUpiWebhookUrl && (
+              {upiGatewayWebhookUrl && (
                 <div className="rounded-lg border bg-muted/40 p-3 space-y-2">
-                  <Label>Webhook URL (KwikUPI dashboard mein paste karo — instant credit)</Label>
+                  <Label>Webhook URL (KaroPay dashboard mein paste karo)</Label>
                   <div className="flex gap-2">
-                    <Input readOnly value={kwikUpiWebhookUrl} className="font-mono text-xs" />
-                    <Button type="button" variant="outline" size="icon" onClick={() => copyWebhook(kwikUpiWebhookUrl)}>
+                    <Input readOnly value={upiGatewayWebhookUrl} className="font-mono text-xs" />
+                    <Button type="button" variant="outline" size="icon" onClick={() => copyWebhook(upiGatewayWebhookUrl)}>
                       <Copy className="h-4 w-4" />
                     </Button>
                   </div>
-                  <p className="text-xs text-muted-foreground">Webhook na bhi daalo to polling se auto-credit ho jayega.</p>
+                  <p className="text-xs text-muted-foreground">Webhook na ho to bhi page payment status poll karke credit karega.</p>
                 </div>
               )}
             </CardContent>
@@ -576,7 +430,7 @@ export default function AdminResellerRechargesPage() {
                 )}
               </CardTitle>
               <CardDescription>
-                Isme <span className="font-medium">MID + Merchant Key dono</span> chahiye. Agar key nahi hai to KwikUPI use karo.{' '}
+                Isme <span className="font-medium">MID + Merchant Key dono</span> chahiye. Reseller recharge ke liye KaroPay use karo.{' '}
                 <a href="https://dashboard.paytmpayments.com" target="_blank" rel="noreferrer" className="underline">
                   Paytm Dashboard
                 </a>
@@ -698,7 +552,15 @@ export default function AdminResellerRechargesPage() {
                           </td>
                           <td className="py-3 pr-3 font-semibold">₹{item.amount.toLocaleString('en-IN')}</td>
                           <td className="py-3 pr-3">
-                            <Badge variant="outline">{item.method === 'kwikupi' ? 'KwikUPI' : 'Paytm'}</Badge>
+                            <Badge variant="outline">
+                              {item.method === 'upigateway'
+                                ? 'KaroPay'
+                                : item.method === 'kwikupi'
+                                  ? 'KwikUPI'
+                                  : item.method === 'vyapar'
+                                    ? 'Vyapar'
+                                    : 'Paytm'}
+                            </Badge>
                           </td>
                           <td className="py-3 pr-3 font-mono text-xs">{item.clientTxnId}</td>
                           <td className="py-3 pr-3">
@@ -724,7 +586,16 @@ export default function AdminResellerRechargesPage() {
       <Card>
         <CardHeader>
           <CardTitle>Recharge limits</CardTitle>
-          <CardDescription>Active provider: <Badge variant="outline">{provider === 'kwikupi' ? 'KwikUPI' : 'Paytm'}</Badge></CardDescription>
+          <CardDescription>
+            Active provider:{' '}
+            <Badge variant="outline">
+              {settings?.provider === 'upigateway'
+                ? 'KaroPay'
+                : settings?.provider === 'paytm'
+                  ? 'Paytm'
+                  : 'KwikUPI'}
+            </Badge>
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-4 md:grid-cols-2">
@@ -744,8 +615,7 @@ export default function AdminResellerRechargesPage() {
               value={provider}
               onChange={(e) => setProvider(e.target.value)}
             >
-              <option value="vyapar">VyaparGateway (partial payment se surakshit)</option>
-              <option value="kwikupi">KwikUPI (sirf API Key — key nahi chahiye)</option>
+              <option value="upigateway">KaroPay</option>
               <option value="paytm">Paytm Direct (MID + Merchant Key)</option>
             </select>
           </div>
