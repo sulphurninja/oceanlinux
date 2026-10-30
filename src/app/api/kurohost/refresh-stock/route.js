@@ -19,9 +19,22 @@ export async function GET(request) {
     if (force) {
       const cronDenied = enforceCronSecret(request);
       if (cronDenied) return cronDenied;
+      const { isIstPeakTrafficHour, istPeakSkipBody } = require('@/lib/istPeakTraffic');
+      if (isIstPeakTrafficHour()) {
+        return NextResponse.json(istPeakSkipBody(), {
+          headers: { 'Cache-Control': 'no-store' },
+        });
+      }
     } else {
       const authDenied = enforceCronOrLoggedInUser(request);
       if (authDenied) return authDenied;
+    }
+
+    const { isIstPeakTrafficHour: peakHour, istPeakSkipBody: peakBody } = require('@/lib/istPeakTraffic');
+    if (peakHour()) {
+      return NextResponse.json(peakBody(), {
+        headers: { 'Cache-Control': 'no-store' },
+      });
     }
 
     await connectDB();

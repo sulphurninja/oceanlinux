@@ -303,35 +303,53 @@ export async function GET(request) {
             };
         }
 
-        if (customerView) {
+        const catalogKey = customerView ? '__base' : '';
+        const personalizeCatalog = async (rows) => {
+            if (!customerView || !Array.isArray(rows)) return rows;
             try {
-                const { syncNexaStoreAvailability } = require('@/lib/nexaStoreStock');
-                const nexaChanged = await syncNexaStoreAvailability({ Company, IPStock });
-                if (nexaChanged > 0) {
-                    customerCatalogStore().clear();
-                }
-            } catch (nexaStockErr) {
-                console.warn('[IPSTOCK-API] Nexa stock sync failed:', nexaStockErr.message);
+                const mod = await import('@/lib/resellerStorePricing');
+                const reseller = await mod.getResellerFromRequest(request);
+                if (reseller) return mod.applyResellerPricingToStocks(rows, reseller);
+            } catch (priceErr) {
+                console.warn('[IPSTOCK-API] reseller price skipped:', priceErr.message);
             }
-        }
-
-        const catalogKey = customerView
-            ? (request.cookies.get('token')?.value || 'anon')
-            : '';
+            return rows;
+        };
+        const catalogResponse = async (rowsOrJson) => {
+            const rows = typeof rowsOrJson === 'string' ? JSON.parse(rowsOrJson) : rowsOrJson;
+            const payload = await personalizeCatalog(rows);
+            return new Response(JSON.stringify(payload), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' },
+            });
+        };
         if (customerView && !fresh) {
             const hit = customerCatalogStore().get(catalogKey);
             if (hit?.body && Date.now() - hit.at < 20000) {
-                return new Response(hit.body, {
-                    status: 200,
-                    headers: { 'Content-Type': 'application/json' },
-                });
+                return catalogResponse(hit.body);
             }
             if (hit?.promise) {
                 const shared = await hit.promise;
-                return new Response(shared, {
-                    status: 200,
-                    headers: { 'Content-Type': 'application/json' },
-                });
+                return catalogResponse(shared);
+            }
+        }
+
+        if (customerView) {
+            const { isIstPeakTrafficHour } = require('@/lib/istPeakTraffic');
+            // Do not hold the store or dashboard behind Nexa getPlans (20–45s).
+            // During 8–11 IST skip even the background call so Node stays free.
+            if (!isIstPeakTrafficHour()) {
+                void (async () => {
+                    try {
+                        const { syncNexaStoreAvailability } = require('@/lib/nexaStoreStock');
+                        const nexaChanged = await syncNexaStoreAvailability({ Company, IPStock });
+                        if (nexaChanged > 0) {
+                            customerCatalogStore().clear();
+                        }
+                    } catch (nexaStockErr) {
+                        console.warn('[IPSTOCK-API] Nexa stock sync failed:', nexaStockErr.message);
+                    }
+                })();
             }
         }
 
@@ -363,7 +381,10 @@ export async function GET(request) {
                 .select('-inventoryItems')
                 .lean()
                 .maxTimeMS(10000);
-            const countRowsPromise = IPStock.aggregate([
+            const { isIstPeakTrafficHour: peakNow } = require('@/lib/istPeakTraffic');
+            const countRowsPromise = peakNow()
+                ? Promise.resolve([])
+                : IPStock.aggregate([
                 {
                     $match: {
                         ...query,
@@ -416,43 +437,21 @@ export async function GET(request) {
             });
         }
 
-        const resellerPromise = customerView
-            ? import('@/lib/resellerStorePricing').then(async (mod) => ({
-                mod,
-                reseller: await mod.getResellerFromRequest(request),
-            }))
-            : null;
-        resellerPromise?.catch(() => {});
-
         const withModes = await enrichIpStocksWithProviderModes(ipStocks);
         const enriched = customerView ? enrichIpStocksForStore(withModes) : withModes;
-
-        let payload = enriched;
-        if (resellerPromise) {
-            const { mod, reseller } = await resellerPromise;
-            if (reseller) payload = mod.applyResellerPricingToStocks(enriched, reseller);
-        }
-
-        const jsonResponse = JSON.stringify(payload);
+        const baseJson = JSON.stringify(enriched);
         if (customerView) {
-            customerCatalogStore().set(catalogKey, { at: Date.now(), body: jsonResponse, promise: null });
-            resolveCatalog(jsonResponse);
+            customerCatalogStore().set(catalogKey, { at: Date.now(), body: baseJson, promise: null });
+            resolveCatalog(baseJson);
         }
 
-        return new Response(jsonResponse, {
-            status: 200,
-            headers: {
-                'Content-Type': 'application/json',
-                'Cache-Control': 'no-cache'
-            }
-        });
+        return catalogResponse(enriched);
     } catch (error) {
         console.error('[IPSTOCK-API] Error fetching IP stocks:', error.message);
         try {
-            const token = request.cookies.get('token')?.value || 'anon';
-            const pending = customerCatalogStore().get(token);
+            const pending = customerCatalogStore().get('__base');
             if (pending?.reject) {
-                customerCatalogStore().delete(token);
+                customerCatalogStore().delete('__base');
                 pending.reject(error);
             }
         } catch {

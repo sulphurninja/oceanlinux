@@ -1,6 +1,7 @@
 import connectDB from "@/lib/db";
 import User from "@/models/userModel";
 import Order from "@/models/orderModel";
+import Wallet from "@/models/walletModel";
 import { requireAdmin } from "@/lib/adminAuth";
 
 export async function GET(request) {
@@ -48,55 +49,53 @@ export async function GET(request) {
         }
 
         const skip = (page - 1) * limit;
+        const allowedSort = new Set(['createdAt', 'name', 'email', 'role', 'isVerified']);
+        const sortField = allowedSort.has(sortBy) ? sortBy : 'createdAt';
 
-        // Get users with order counts
-        const users = await User.aggregate([
-            { $match: query },
-            {
-                $lookup: {
-                    from: 'orders',
-                    localField: '_id',
-                    foreignField: 'user',
-                    as: 'orders'
-                }
-            },
-            {
-                $addFields: {
-                    orderCount: { $size: '$orders' },
-                    totalSpent: {
-                        $sum: {
-                            $map: {
-                                input: '$orders',
-                                as: 'order',
-                                in: { $toDouble: '$$order.price' }
-                            }
-                        }
-                    },
-                    lastOrderDate: { $max: '$orders.createdAt' }
-                }
-            },
-            {
-                $lookup: {
-                    from: 'wallets',
-                    localField: '_id',
-                    foreignField: 'userId',
-                    as: 'walletDoc'
-                }
-            },
-            {
-                $addFields: {
-                    walletBalance: {
-                        $ifNull: [{ $arrayElemAt: ['$walletDoc.balance', 0] }, 0]
-                    }
-                }
-            },
-            { $project: { password: 0, orders: 0, walletDoc: 0 } },
-            { $sort: { [sortBy]: sortOrder } },
-            { $skip: skip },
-            { $limit: limit }
+        const [pageUsers, totalUsers] = await Promise.all([
+            User.find(query)
+                .select('-password')
+                .sort({ [sortField]: sortOrder })
+                .skip(skip)
+                .limit(limit)
+                .lean()
+                .maxTimeMS(10000),
+            User.countDocuments(query).maxTimeMS(8000),
         ]);
 
-        const totalUsers = await User.countDocuments(query);
+        const userIds = pageUsers.map((u) => u._id);
+        const [orderStats, wallets] = await Promise.all([
+            userIds.length
+                ? Order.aggregate([
+                    { $match: { user: { $in: userIds } } },
+                    {
+                        $group: {
+                            _id: '$user',
+                            orderCount: { $sum: 1 },
+                            totalSpent: { $sum: { $toDouble: { $ifNull: ['$price', 0] } } },
+                            lastOrderDate: { $max: '$createdAt' },
+                        },
+                    },
+                ]).option({ maxTimeMS: 10000 })
+                : [],
+            userIds.length
+                ? Wallet.find({ userId: { $in: userIds } }).select('userId balance').lean().maxTimeMS(8000)
+                : [],
+        ]);
+
+        const statsByUser = new Map(orderStats.map((row) => [String(row._id), row]));
+        const walletByUser = new Map(wallets.map((w) => [String(w.userId), w.balance || 0]));
+        const users = pageUsers.map((u) => {
+            const stats = statsByUser.get(String(u._id));
+            return {
+                ...u,
+                orderCount: stats?.orderCount || 0,
+                totalSpent: stats?.totalSpent || 0,
+                lastOrderDate: stats?.lastOrderDate || null,
+                walletBalance: walletByUser.get(String(u._id)) || 0,
+            };
+        });
+
         const totalPages = Math.ceil(totalUsers / limit);
 
         return new Response(JSON.stringify({

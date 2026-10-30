@@ -23,6 +23,11 @@ export async function POST(request) {
   const cronDenied = enforceCronSecret(request);
   if (cronDenied) return cronDenied;
 
+  const { isIstPeakTrafficHour, istPeakSkipBody } = require('@/lib/istPeakTraffic');
+  if (isIstPeakTrafficHour()) {
+    return NextResponse.json(istPeakSkipBody());
+  }
+
   const startTime = Date.now();
   
   console.log("\n" + "🧹".repeat(40));

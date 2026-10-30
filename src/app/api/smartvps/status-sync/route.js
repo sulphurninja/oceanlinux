@@ -134,6 +134,11 @@ export async function POST(req) {
     const cronDenied = enforceCronSecret(req);
     if (cronDenied) return cronDenied;
 
+    const { isIstPeakTrafficHour, istPeakSkipBody } = require('@/lib/istPeakTraffic');
+    if (isIstPeakTrafficHour()) {
+      return NextResponse.json(istPeakSkipBody());
+    }
+
     // Ensure we are on Node runtime and can open a real DB socket
     await connectDB();
 

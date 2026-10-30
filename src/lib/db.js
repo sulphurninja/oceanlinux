@@ -45,7 +45,7 @@ async function connectDB() {
 
     cached.promise = mongoose.connect(MONGOOSE_URL, {
       bufferCommands: false, // Disable mongoose buffering for serverless
-      maxPoolSize: 10,
+      maxPoolSize: 25,
       serverSelectionTimeoutMS: 10000, // 10 second timeout for initial connection
       socketTimeoutMS: 45000, // 45 second timeout for socket operations
       family: 4,

@@ -24,6 +24,13 @@ export async function GET(request) {
       if (authDenied) return authDenied;
     }
 
+    const { isIstPeakTrafficHour, istPeakSkipBody } = require('@/lib/istPeakTraffic');
+    if (isIstPeakTrafficHour()) {
+      return NextResponse.json(istPeakSkipBody(), {
+        headers: { 'Cache-Control': 'no-store' },
+      });
+    }
+
     const result = await refreshAdvpsStockForCustomer({ force });
     return NextResponse.json(result, {
       headers: { 'Cache-Control': 'no-store' },

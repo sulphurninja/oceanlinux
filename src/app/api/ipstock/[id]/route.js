@@ -51,7 +51,10 @@ export async function GET(request, { params }) {
             return NextResponse.json({ message: 'IPStock ID is required' }, { status: 400 });
         }
 
-        const ipStock = await IPStock.findById(ipStockId).lean();
+        const ipStock = await IPStock.findById(ipStockId)
+            .select('-inventoryItems')
+            .lean()
+            .maxTimeMS(8000);
         console.log('[IPSTOCK-ID][GET] IPStock found:', ipStock ? {
             _id: ipStock._id,
             name: ipStock.name,

@@ -33,7 +33,10 @@ export async function GET(request) {
             });
         }
 
-        const rawOrders = await Order.find({ user: userId }).lean().sort({ createdAt: -1 });
+        const rawOrders = await Order.find({ user: userId })
+          .lean()
+          .sort({ createdAt: -1 })
+          .maxTimeMS(15000);
         const { attachProviderCompanyNames } = require('@/lib/attachProviderCompanyName');
         const orders = await attachProviderCompanyNames(rawOrders);
 

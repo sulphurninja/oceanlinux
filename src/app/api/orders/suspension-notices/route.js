@@ -23,17 +23,26 @@ export async function POST(request) {
   const cronDenied = enforceCronSecret(request);
   if (cronDenied) return cronDenied;
 
+  const { isIstPeakTrafficHour, istPeakSkipBody } = require('@/lib/istPeakTraffic');
+  if (isIstPeakTrafficHour()) {
+    return NextResponse.json(istPeakSkipBody());
+  }
+
   const startTime = Date.now();
 
   try {
     await connectDB();
 
+    const now = new Date();
+    const windowStart = new Date(now.getTime() - 4 * 24 * 60 * 60 * 1000);
+    const windowEnd = new Date(now.getTime() + 24 * 60 * 60 * 1000);
     const candidates = await Order.find({
-      expiryDate: { $exists: true, $ne: null },
+      expiryDate: { $gte: windowStart, $lte: windowEnd },
       status: { $in: ACTIVE_STATUSES },
     })
       .select('_id user productName ipAddress expiryDate status paymentDetails customerEmail customerName')
-      .lean();
+      .lean()
+      .maxTimeMS(20000);
 
     let sent = 0;
     let skipped = 0;

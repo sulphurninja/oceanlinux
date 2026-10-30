@@ -16,6 +16,11 @@ export async function GET(request) {
   const cronDenied = enforceCronSecret(request);
   if (cronDenied) return cronDenied;
 
+  const { isIstPeakTrafficHour, istPeakSkipBody } = require('@/lib/istPeakTraffic');
+  if (isIstPeakTrafficHour()) {
+    return NextResponse.json(istPeakSkipBody());
+  }
+
   try {
     await connectDB();
     const result = await syncAllNetbayOrdersFromApi();

@@ -576,6 +576,13 @@ export async function POST(request) {
         await connectDB();
         console.log(`[CRON-${cronId}] ✅ Database connected`);
 
+        const { isIstPeakTrafficHour } = require('@/lib/istPeakTraffic');
+        const peakTraffic = isIstPeakTrafficHour();
+        if (peakTraffic) {
+            console.log(`[CRON-${cronId}] 8–11 IST: skip bulk Nexa/reseller/slot sync, provision one order only`);
+        }
+
+        if (!peakTraffic) {
         try {
             const { syncNexaPendingOrders } = require('@/lib/nexaPendingSync');
             const nexaSync = await syncNexaPendingOrders({ limit: 40 });
@@ -595,9 +602,11 @@ export async function POST(request) {
         } catch (resellerSyncErr) {
             console.warn(`[CRON-${cronId}] Reseller pending sync skipped:`, resellerSyncErr.message);
         }
+        }
 
         // ADVPS "assignment pending" follow-up: /api/admin/advps-pending-cron (separate schedule; saves ADVPS rate limit)
 
+        if (!peakTraffic) {
         try {
             const { retryPendingSlotIpOrders } = require('@/lib/retryPendingSlotIpOrders');
             const slotRetry = await retryPendingSlotIpOrders({ limit: 25 });
@@ -606,6 +615,7 @@ export async function POST(request) {
             }
         } catch (slotRetryErr) {
             console.warn(`[CRON-${cronId}] Slot IP retry skipped:`, slotRetryErr.message);
+        }
         }
 
         // STEP 1: Try to acquire a database lock on a VALIDATED order

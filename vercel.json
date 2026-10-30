@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/orders/cleanup-old",
-      "schedule": "0 2 * * *"
+      "schedule": "50 21 * * *"
     },
     {
       "path": "/api/admin/auto-provision-cron",
@@ -14,11 +14,11 @@
     },
     {
       "path": "/api/smartvps/status-sync?limit=40",
-      "schedule": "0 */4 * * *"
+      "schedule": "15 22,7,13,19 * * *"
     },
     {
       "path": "/api/netbay/sync-orders",
-      "schedule": "0 */6 * * *"
+      "schedule": "15 0,7,13,19 * * *"
     },
     {
       "path": "/api/netbay/refresh-stock?force=1",
@@ -38,7 +38,7 @@
     },
     {
       "path": "/api/orders/expiry-reminders",
-      "schedule": "0 4 * * *"
+      "schedule": "0 23 * * *"
     },
     {
       "path": "/api/orders/expiry-reminders",
@@ -46,7 +46,7 @@
     },
     {
       "path": "/api/orders/suspension-notices",
-      "schedule": "0 5 * * *"
+      "schedule": "30 23 * * *"
     },
     {
       "path": "/api/orders/suspension-notices",
@@ -58,7 +58,7 @@
     },
     {
       "path": "/api/orders/cleanup-expired",
-      "schedule": "0 3 * * *"
+      "schedule": "30 21 * * *"
     },
     {
       "path": "/api/admin/paid-but-pending-cron?hours=72&limit=40",

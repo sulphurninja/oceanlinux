@@ -54,7 +54,7 @@ async function joyCompanyHasIp(config, companyId, ip) {
  * 1) ipStock → company (preferred)
  * 2) order IP appears on a Joy-enabled company's machine_list (manage-only join key)
  */
-async function resolveJoyApiForOrder(order, { Company, IPStock } = {}) {
+async function resolveJoyApiForOrder(order, { Company, IPStock, skipIpProbe = false } = {}) {
   if (!order) return { config: null, companyName: null, matchedBy: null };
 
   if (order.trialManageCompanyId && Company) {
@@ -85,7 +85,7 @@ async function resolveJoyApiForOrder(order, { Company, IPStock } = {}) {
   }
 
   const ip = getOrderIp(order);
-  if (!ip || !Company) return { config: null, companyName: null, matchedBy: null };
+  if (skipIpProbe || !ip || !Company) return { config: null, companyName: null, matchedBy: null };
 
   try {
     const companies = await Company.find({ 'joyApi.enabled': true }).select('joyApi name').lean();

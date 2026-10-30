@@ -911,7 +911,7 @@ function IPStockContent() {
 
     const reloadIpStocks = async (signal?: AbortSignal) => {
       if (signal?.aborted) return;
-      const ipResult = await fetchIpStockCatalog("/api/ipstock?fresh=1");
+      const ipResult = await fetchIpStockCatalog("/api/ipstock");
       if (!ipResult.ok || signal?.aborted) return;
       const rows = parseIpStockRows(ipResult.data);
       writeDashboardCache(DASHBOARD_CACHE_KEYS.ipStock, rows);

@@ -235,6 +235,10 @@ function customerSyncCache() {
 }
 
 async function runSyncForRequest(req: Request) {
+  const { isIstPeakTrafficHour, istPeakSkipBody } = require('@/lib/istPeakTraffic');
+  if (isIstPeakTrafficHour()) {
+    return NextResponse.json(istPeakSkipBody());
+  }
   if (isCronAuthorized(req as any)) return runSync(req);
   const cache = customerSyncCache();
   const now = Date.now();

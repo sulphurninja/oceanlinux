@@ -17,10 +17,24 @@ export async function GET(request) {
       if (cronDenied) {
         const adminDenied = await enforceAdmin(request);
         if (adminDenied) return adminDenied;
+      } else {
+        const { isIstPeakTrafficHour, istPeakSkipBody } = require('@/lib/istPeakTraffic');
+        if (isIstPeakTrafficHour()) {
+          return NextResponse.json(istPeakSkipBody(), {
+            headers: { 'Cache-Control': 'no-store' },
+          });
+        }
       }
     } else {
       const authDenied = enforceCronOrLoggedInUser(request);
       if (authDenied) return authDenied;
+    }
+
+    const { isIstPeakTrafficHour: peakHour, istPeakSkipBody: peakBody } = require('@/lib/istPeakTraffic');
+    if (peakHour()) {
+      return NextResponse.json(peakBody(), {
+        headers: { 'Cache-Control': 'no-store' },
+      });
     }
 
     await connectDB();

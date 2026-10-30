@@ -319,6 +319,14 @@ async function buildFilter(searchParams: URLSearchParams) {
 }
 
 async function fetchGlobalStats() {
+  const g = globalThis as typeof globalThis & {
+    __oceanAdminOrderStats?: { at: number; stats: unknown };
+  };
+  const cached = g.__oceanAdminOrderStats;
+  if (cached && Date.now() - cached.at < 30000) {
+    return cached.stats;
+  }
+
   const [rows] = await Order.aggregate([
     {
       $group: {
@@ -355,9 +363,9 @@ async function fetchGlobalStats() {
         },
       },
     },
-  ]);
+  ]).option({ maxTimeMS: 8000 });
 
-  return {
+  const stats = {
     total: rows?.total || 0,
     pending: rows?.pending || 0,
     confirmed: rows?.confirmed || 0,
@@ -365,6 +373,8 @@ async function fetchGlobalStats() {
     failed: rows?.failed || 0,
     totalRevenue: rows?.totalRevenue || 0,
   };
+  g.__oceanAdminOrderStats = { at: Date.now(), stats };
+  return stats;
 }
 
 export async function GET(request: NextRequest) {
