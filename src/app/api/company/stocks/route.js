@@ -460,7 +460,7 @@ const ResellerApi = require('@/services/resellerApi');
     applyResellerZonesToStockDocument(stock, ids, panelZones);
     await stock.save();
 
-    if (companyUsesResellerLiveStock(companyDoc) && stockHasResellerPanelPlans(stock)) {
+    if (stockHasResellerPanelPlans(stock)) {
       try {
         await syncResellerIpStockRow(stock, { force: true, zonesList });
       } catch (syncErr) {

@@ -220,11 +220,13 @@ async function syncResellerIpStockRow(stock, { force = false, memoryOnly = null,
   if (!ctx) return stock;
 
   const company = ctx.company;
-  if (!companyUsesResellerLiveStock(company)) return stock;
 
   const stockCfg = readResellerApiStockConfig(stock);
   const isZoneLiveStock =
     stockCfg.zoneId != null || (Array.isArray(stockCfg.zoneIds) && stockCfg.zoneIds.length > 0);
+
+  // Zone plans follow panel ACTIVE/INACTIVE even when wallet live-sync is off.
+  if (!companyUsesResellerLiveStock(company) && !isZoneLiveStock) return stock;
 
   // Zone-based PrimeVPS/Hostheaven stock must follow panel ACTIVE/INACTIVE — not manual units.
   if (isZoneLiveStock && stock.availabilityManual === true) {
@@ -253,7 +255,7 @@ async function syncResellerIpStockRow(stock, { force = false, memoryOnly = null,
     : [pickPrimaryMemory(stock, memories)].filter(Boolean);
 
   let resolvedZones = zonesList;
-  if (stockCfg.zoneId != null && !resolvedZones) {
+  if (isZoneLiveStock && !resolvedZones) {
     try {
       resolvedZones = await ctx.api.listZones();
     } catch (err) {
