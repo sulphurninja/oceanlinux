@@ -29,6 +29,7 @@ const { getCompanyHostdzireApiConfig } = require('@/lib/companyHostdzireApi');
 const RackatoApi = require('./rackatoApi');
 const { getCompanyRackatoApiConfig } = require('@/lib/companyRackatoApi');
 const { resolveRackatoPlan } = require('@/lib/rackatoStockConfig');
+const { resolveLiveRackatoPlan, buildRackatoCreateOrderBody } = require('@/lib/rackatoCatalogSync');
 const { parseRackatoOrder, parseRackatoExpiry, mergeRackatoDelivery } = require('@/lib/rackatoOrder');
 const {
   readHostdzireStockConfig,
@@ -2419,31 +2420,25 @@ class AutoProvisioningService {
       throw new Error('Rackato API keys are missing. Open /admin/companies → Rackato and save the key id and secret.');
     }
 
-    const plan = resolveRackatoPlan(ipStock, order.memory || order.ram || '');
-    if (!plan.productId || !plan.appId) {
+    const configuredPlan = resolveRackatoPlan(ipStock, order.memory || order.ram || '');
+    if (!configuredPlan.productId) {
       throw new Error(
-        `Rackato product_id and app_id are missing for "${ipStock.name}" (${order.memory || 'no RAM'}). ` +
+        `Rackato product_id is missing for "${ipStock.name}" (${order.memory || 'no RAM'}). ` +
         'Set defaultConfigurations.rackato on this IP stock.'
       );
     }
 
     const api = new RackatoApi(cfg);
+    const plan = await resolveLiveRackatoPlan(api, ipStock, order, configuredPlan);
     let rackatoOrderId = String(order.rackatoOrderId || '').trim();
     const password = order.password || generateSecurePassword(12);
     if (!rackatoOrderId) {
       const reference = order.clientTxnId || String(order._id);
-      const created = await api.createOrder({
-        app_id: Number(plan.appId),
-        product_id: Number(plan.productId),
-        instance_label: `ol-${String(reference).replace(/[^a-z0-9]/gi, '').slice(-12).toLowerCase() || 'order'}`,
-        customer_reference_id: reference,
-        backup_enabled: plan.backupEnabled,
-        disk_size: plan.diskSize,
-        instance_count: 1,
-        app_config: isWindows
-          ? { admin_pass: password }
-          : { ssh_root_pass: password, ssh_user: 'rackato' },
-      });
+      const created = await api.createOrder(buildRackatoCreateOrderBody(plan, {
+        reference,
+        password,
+        isWindows,
+      }));
       const placed = parseRackatoOrder(created);
       rackatoOrderId = placed.orderId;
       if (!rackatoOrderId) {
@@ -2907,7 +2902,9 @@ class AutoProvisioningService {
     const locationCtx = buildResellerLocationContext(ipStock, order);
     L.kv('[RESELLER-API] Expected zone', locationCtx.expectedZoneId ?? '(none)');
     if (locationCtx.expectedZoneIds?.length > 1) {
-      L.kv('[RESELLER-API] Fallback zones', locationCtx.expectedZoneIds.join(', '));
+      L.line(
+        `[RESELLER-API] Extra zones ${locationCtx.expectedZoneIds.slice(1).join(', ')} are ignored. Inactive primary zone does not buy another region.`
+      );
     }
     L.kv('[RESELLER-API] Expected IP prefix', locationCtx.expectedIpPrefix ?? '(none)');
 
@@ -2941,8 +2938,9 @@ class AutoProvisioningService {
       const zonesList = await api.listZones();
       const zoneCandidates = await resolveResellerZoneCandidatesForPurchase(api, stockCfg, { zonesList });
       if (!zoneCandidates.length) {
+        const zoneLabel = locationCtx.expectedZoneId != null ? `Zone ${locationCtx.expectedZoneId}` : 'This product zone';
         throw new Error(
-          'No live region available for this IP stock. Primary/fallback zones are inactive on panel — try another region or wait.'
+          `${zoneLabel} is inactive or missing on the panel. Purchase stopped. A different region was not bought.`
         );
       }
 
@@ -2972,9 +2970,8 @@ class AutoProvisioningService {
           null;
         zoneIsoId = configuredIsoId;
 
-        // ISO ids are per zone. A saved id from zone 1 (or a removed zone) must not
-        // be reused on the fallback zone — that returns "ISO/Zone mismatch" and
-        // kills the buy even though the fallback region is in stock.
+        // ISO ids belong to this zone. A missing ISO stops the buy.
+        // Do not switch to another region.
         try {
           const isos = await api.getZoneIsos(zoneId);
           const isoList = Array.isArray(isos) ? isos : (isos?.isos || isos?.content || isos?.data || []);
@@ -2993,17 +2990,16 @@ class AutoProvisioningService {
           }
         } catch (err) {
           if (zoneIsoId == null) {
-            lastPurchaseError = err;
-            L.line(`[RESELLER-API] ISO lookup failed for zone ${zoneId}: ${err.message}`);
-            continue;
+            throw new Error(
+              `ISO lookup failed for zone ${zoneId}. Not buying another region. ${err.message}`
+            );
           }
         }
 
         if (zoneIsoId == null) {
-          lastPurchaseError = new Error(
-            `Could not resolve ISO for zone ${zoneId}. Set zoneIsoId in IP Stock resellerApi config.`
+          throw new Error(
+            `Could not resolve ISO for zone ${zoneId}. Not buying another region.`
           );
-          continue;
         }
 
         const createBody = {
@@ -3086,7 +3082,7 @@ class AutoProvisioningService {
               excludeOrderId: order._id,
               order,
               expectedZoneId: locationCtx.expectedZoneId,
-              expectedZoneIds: locationCtx.expectedZoneIds,
+              expectedZoneIds: locationCtx.expectedZoneId != null ? [locationCtx.expectedZoneId] : [],
               expectedIpPrefix: locationCtx.expectedIpPrefix,
               maxWaitMs: 90_000,
               pollMs: 4000,
@@ -3122,13 +3118,15 @@ class AutoProvisioningService {
               `Panel create timed out and no new VM appeared. Not buying another region. ${err.message}`
             );
           }
-          L.line(`[RESELLER-API] Zone ${zoneId} purchase failed: ${err.message} — trying fallback`);
+          throw new Error(
+            `Zone ${zoneId} purchase failed. Not buying another region. ${err.message}`
+          );
         }
       }
 
       if (!createRes) {
         throw new Error(
-          `Panel VM purchase failed on all configured regions: ${lastPurchaseError?.message || 'unknown error'}`
+          `Panel VM was not purchased. Not buying another region. ${lastPurchaseError?.message || 'unknown error'}`
         );
       }
 
@@ -3225,9 +3223,7 @@ class AutoProvisioningService {
           excludeOrderId: order._id,
           order,
           expectedZoneId: locationCtx.expectedZoneId,
-          expectedZoneIds: locationCtx.expectedZoneIds,
-          expectedIpPrefix: locationCtx.expectedIpPrefix,
-          maxWaitMs: 180_000,
+          expectedZoneIds: locationCtx.expectedZoneId != null ? [locationCtx.expectedZoneId] : [],
           pollMs: 5000,
         });
       }

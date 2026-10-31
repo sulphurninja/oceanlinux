@@ -318,6 +318,7 @@ const ManageOrders = () => {
         confirmed: 0,
         active: 0,
         failed: 0,
+        provisioning: 0,
         totalRevenue: 0,
     });
     const [adminCompanies, setAdminCompanies] = useState<Array<{ _id: string; name?: string; slug?: string }>>([]);
@@ -1279,7 +1280,7 @@ const ManageOrders = () => {
                         </TabsList>
 
                         <TabsContent value="orders" className="mt-4 space-y-4 sm:mt-6 sm:space-y-6">
-                    <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 xl:grid-cols-6">
+                    <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 xl:grid-cols-7">
                         <Card>
                             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                                 <CardTitle className="text-sm font-medium">Total</CardTitle>
@@ -1318,6 +1319,35 @@ const ManageOrders = () => {
                             </CardHeader>
                             <CardContent>
                                 <div className="text-2xl font-bold text-red-600 dark:text-red-400">{stats.failed}</div>
+                            </CardContent>
+                        </Card>
+                        <Card
+                            role="button"
+                            tabIndex={0}
+                            title="In provisioning, IP not assigned yet"
+                            onClick={() => {
+                                setFilters((prev) => ({
+                                    ...prev,
+                                    provisioningStatus: prev.provisioningStatus === 'no_ip' ? '' : 'no_ip',
+                                }));
+                                setPagination((prev) => ({ ...prev, page: 1 }));
+                            }}
+                            onKeyDown={(event) => {
+                                if (event.key !== 'Enter' && event.key !== ' ') return;
+                                event.preventDefault();
+                                setFilters((prev) => ({
+                                    ...prev,
+                                    provisioningStatus: prev.provisioningStatus === 'no_ip' ? '' : 'no_ip',
+                                }));
+                                setPagination((prev) => ({ ...prev, page: 1 }));
+                            }}
+                            className={`cursor-pointer ${filters.provisioningStatus === 'no_ip' ? 'ring-2 ring-amber-500' : ''}`}
+                        >
+                            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                                <CardTitle className="text-sm font-medium">Provisioning</CardTitle>
+                            </CardHeader>
+                            <CardContent>
+                                <div className="text-2xl font-bold text-amber-600 dark:text-amber-400">{stats.provisioning}</div>
                             </CardContent>
                         </Card>
                         <Card>
@@ -1405,6 +1435,7 @@ const ManageOrders = () => {
                                                     <SelectItem value="All">All provisioning</SelectItem>
                                                     <SelectItem value="active">Auto-Active</SelectItem>
                                                     <SelectItem value="provisioning">Auto-Provisioning</SelectItem>
+                                                    <SelectItem value="no_ip">Provisioning, no IP</SelectItem>
                                                     <SelectItem value="failed">Auto-Failed</SelectItem>
                                                     <SelectItem value="manual_setup">Manual Setup</SelectItem>
                                                     <SelectItem value="not_provisioned">Not Provisioned</SelectItem>

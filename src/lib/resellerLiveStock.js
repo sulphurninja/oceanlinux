@@ -92,7 +92,8 @@ async function resolvePriceIds(api, stockCfg, memory, stock) {
 }
 
 /**
- * Zone-only stock: one plan ↔ one or more zoneIds (primary + fallback regions).
+ * Zone-only stock follows the product's primary zone only.
+ * Another region being live does not make this plan purchasable.
  */
 async function checkResellerZoneStock(api, { stockCfg, memory, zonesList = null }) {
   const zoneIds = stockCfg?.zoneIds?.length
@@ -100,28 +101,14 @@ async function checkResellerZoneStock(api, { stockCfg, memory, zonesList = null 
     : stockCfg?.zoneId != null
       ? [Number(stockCfg.zoneId)]
       : [];
+  const primaryId = zoneIds.length ? Number(zoneIds[0]) : null;
 
   const zones = zonesList || (await api.listZones());
-  const checked = [];
-  let firstLive = null;
+  const zone = primaryId == null ? null : zones.find((z) => Number(z.id) === primaryId);
+  const zoneOk = !!(zone && ResellerApi.isZoneStatusLive(zone.status));
+  const zoneLabel = zone?.name || (primaryId != null ? `zone ${primaryId}` : 'zone');
 
-  for (const zoneId of zoneIds) {
-    const zone = zones.find((z) => Number(z.id) === Number(zoneId));
-    if (!zone) {
-      checked.push({ zoneId, zoneOk: false, reason: `Region (zone ${zoneId}) not found on panel` });
-      continue;
-    }
-    const zoneOk = ResellerApi.isZoneStatusLive(zone.status);
-    checked.push({
-      zoneId: zone.id,
-      zoneName: zone.name,
-      zoneStatus: zone.status,
-      zoneOk,
-    });
-    if (zoneOk && !firstLive) firstLive = zone;
-  }
-
-  if (!zoneIds.length) {
+  if (primaryId == null) {
     return {
       memory,
       available: false,
@@ -135,31 +122,25 @@ async function checkResellerZoneStock(api, { stockCfg, memory, zonesList = null 
     };
   }
 
-  const zoneOk = !!firstLive;
-  const unavailableNames = checked
-    .filter((row) => !row.zoneOk)
-    .map((row) => row.zoneName || `zone ${row.zoneId}`)
-    .join(', ');
-
   return {
     memory,
     available: zoneOk,
     stockMode: 'zone',
-    zoneId: firstLive?.id ?? zoneIds[0],
-    zoneName: firstLive?.name || checked[0]?.zoneName || '',
-    zoneIds,
-    zoneStatus: firstLive?.status || checked[0]?.zoneStatus,
+    zoneId: primaryId,
+    zoneName: zone?.name || '',
+    zoneIds: [primaryId],
+    zoneStatus: zone?.status || null,
     zoneOk,
     unitsAvailable: zoneOk ? 1 : 0,
-    fallbackZones: checked,
-    reason: zoneOk
-      ? ''
-      : unavailableNames
-        ? `All configured regions unavailable (${unavailableNames})`
-        : 'Configured regions unavailable on panel',
+    fallbackZones: [
+      zone
+        ? { zoneId: zone.id, zoneName: zone.name, zoneStatus: zone.status, zoneOk }
+        : { zoneId: primaryId, zoneOk: false, reason: `Region (zone ${primaryId}) not found on panel` },
+    ],
+    reason: zoneOk ? '' : `${zoneLabel} is inactive or missing on the panel`,
     message: zoneOk
-      ? `In stock (${firstLive?.name || `zone ${firstLive?.id}`}${checked.length > 1 ? ', fallback ready' : ''})`
-      : 'Out of stock (all configured regions unavailable)',
+      ? `In stock (${zoneLabel})`
+      : `Out of stock (${zoneLabel} inactive)`,
     checkedAt: new Date().toISOString(),
   };
 }

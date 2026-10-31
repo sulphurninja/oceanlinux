@@ -128,7 +128,9 @@ function resolveExpectedZoneIds(ipStock) {
 }
 
 /**
- * Ordered live zones for auto-buy — primary first, then fallback when inactive.
+ * Auto-buy uses only the product's primary zone.
+ * A dead or missing zone must not fall through to another region — that
+ * bills a VM on the wrong IP range, and the customer will not accept it.
  */
 async function resolveResellerZoneCandidatesForPurchase(api, stockCfg, { zonesList = null } = {}) {
   const configured = stockCfg?.zoneIds?.length
@@ -136,23 +138,13 @@ async function resolveResellerZoneCandidatesForPurchase(api, stockCfg, { zonesLi
     : stockCfg?.zoneId != null
       ? [Number(stockCfg.zoneId)]
       : [];
+  const primaryId = configured.length ? Number(configured[0]) : null;
+  if (primaryId == null) return [];
 
   const zones = zonesList || (await api.listZones());
-
-  if (!configured.length) {
-    const active = zones.find((z) => ResellerApi.isZoneStatusLive(z.status)) || zones[0];
-    return active
-      ? [{ zoneId: Number(active.id), zone: active, live: ResellerApi.isZoneStatusLive(active.status) }]
-      : [];
-  }
-
-  const candidates = [];
-  for (const id of configured) {
-    const zone = zones.find((z) => Number(z.id) === Number(id));
-    if (!zone || !ResellerApi.isZoneStatusLive(zone.status)) continue;
-    candidates.push({ zoneId: Number(id), zone, live: true });
-  }
-  return candidates;
+  const zone = zones.find((z) => Number(z.id) === primaryId);
+  if (!zone || !ResellerApi.isZoneStatusLive(zone.status)) return [];
+  return [{ zoneId: primaryId, zone, live: true }];
 }
 
 function parseMemoryGb(memory) {

@@ -161,7 +161,10 @@ export async function POST(request, { params }) {
       const planId = Number(plan.planId);
       const poolKey = pool?.poolId != null ? Number(pool.poolId) : '';
       const key = `${planId}:${poolKey}`;
-      const rawLabel = [plan.name, pool?.subnet || pool?.name].filter(Boolean).join(' — ');
+      const planTitle = String(plan.name || '').trim() === 'Bcast App-login'
+        ? '📡 Broadcast Proxy'
+        : plan.name;
+      const rawLabel = [planTitle, pool?.subnet || pool?.name].filter(Boolean).join(' — ');
       const planEmoji = {
         'Diamond IPs': '💎',
         Broadcast: '📡',
@@ -191,6 +194,9 @@ export async function POST(request, { params }) {
         serverType: 'Proxy',
         tags: ['nexa'],
         memoryOptions: { IP: { price } },
+        promoCodes: [
+          { code: 'OCEAN50', discount: 50, discountType: 'fixed', isActive: true },
+        ],
         defaultConfigurations: {
           nexa: {
             planId,

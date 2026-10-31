@@ -124,8 +124,21 @@ function paymentFilterClause(value: string | null) {
   return null;
 }
 
+function provisioningWithoutIpClause() {
+  return {
+    provisioningStatus: 'provisioning',
+    $or: [
+      { ipAddress: { $exists: false } },
+      { ipAddress: null },
+      { ipAddress: '' },
+      { ipAddress: /^\s*$/ },
+    ],
+  };
+}
+
 function provisioningFilterClause(value: string | null) {
   if (!value) return null;
+  if (value === 'no_ip') return provisioningWithoutIpClause();
   if (value === 'not_provisioned') {
     return {
       autoProvisioned: { $ne: true },
@@ -320,14 +333,15 @@ async function buildFilter(searchParams: URLSearchParams) {
 
 async function fetchGlobalStats() {
   const g = globalThis as typeof globalThis & {
-    __oceanAdminOrderStats?: { at: number; stats: unknown };
+    __oceanAdminOrderStatsNoIp?: { at: number; stats: unknown };
   };
-  const cached = g.__oceanAdminOrderStats;
+  const cached = g.__oceanAdminOrderStatsNoIp;
   if (cached && Date.now() - cached.at < 30000) {
     return cached.stats;
   }
 
-  const [rows] = await Order.aggregate([
+  const [[rows], provisioningNoIp] = await Promise.all([
+    Order.aggregate([
     {
       $group: {
         _id: null,
@@ -363,7 +377,9 @@ async function fetchGlobalStats() {
         },
       },
     },
-  ]).option({ maxTimeMS: 8000 });
+  ]).option({ maxTimeMS: 8000 }),
+    Order.countDocuments(provisioningWithoutIpClause()).maxTimeMS(8000),
+  ]);
 
   const stats = {
     total: rows?.total || 0,
@@ -371,9 +387,10 @@ async function fetchGlobalStats() {
     confirmed: rows?.confirmed || 0,
     active: rows?.active || 0,
     failed: rows?.failed || 0,
+    provisioning: provisioningNoIp || 0,
     totalRevenue: rows?.totalRevenue || 0,
   };
-  g.__oceanAdminOrderStats = { at: Date.now(), stats };
+  g.__oceanAdminOrderStatsNoIp = { at: Date.now(), stats };
   return stats;
 }
 

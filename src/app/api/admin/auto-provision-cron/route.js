@@ -390,6 +390,13 @@ async function acquireDatabaseLock() {
                             ]
                         },
                         {
+                            autoProvisioned: true,
+                            provisioningStatus: 'provisioning',
+                            ipAddress: { $in: [null, ''] },
+                            rackatoOrderId: { $in: [null, ''] },
+                            nexaOrderId: { $in: [null, ''] },
+                        },
+                        {
                             provider: 'rackato',
                             rackatoOrderId: { $nin: [null, ''] },
                             ipAddress: { $in: [null, ''] },
