@@ -2903,7 +2903,7 @@ class AutoProvisioningService {
     L.kv('[RESELLER-API] Expected zone', locationCtx.expectedZoneId ?? '(none)');
     if (locationCtx.expectedZoneIds?.length > 1) {
       L.line(
-        `[RESELLER-API] Extra zones ${locationCtx.expectedZoneIds.slice(1).join(', ')} are ignored. Inactive primary zone does not buy another region.`
+        `[RESELLER-API] Region fallback order: ${locationCtx.expectedZoneIds.join(' → ')} (inactive/missing skips to next selected zone only)`
       );
     }
     L.kv('[RESELLER-API] Expected IP prefix', locationCtx.expectedIpPrefix ?? '(none)');
@@ -2938,9 +2938,12 @@ class AutoProvisioningService {
       const zonesList = await api.listZones();
       const zoneCandidates = await resolveResellerZoneCandidatesForPurchase(api, stockCfg, { zonesList });
       if (!zoneCandidates.length) {
-        const zoneLabel = locationCtx.expectedZoneId != null ? `Zone ${locationCtx.expectedZoneId}` : 'This product zone';
+        const priorityList =
+          locationCtx.expectedZoneIds?.length > 0
+            ? locationCtx.expectedZoneIds.join(' → ')
+            : String(locationCtx.expectedZoneId ?? 'none');
         throw new Error(
-          `${zoneLabel} is inactive or missing on the panel. Purchase stopped. A different region was not bought.`
+          `Selected panel regions are all inactive or missing (${priorityList}). Purchase stopped.`
         );
       }
 
@@ -2962,7 +2965,9 @@ class AutoProvisioningService {
       let createRes = null;
       let lastPurchaseError = null;
 
-      for (const candidate of zoneCandidates) {
+      for (let ci = 0; ci < zoneCandidates.length; ci++) {
+        const candidate = zoneCandidates[ci];
+        const hasNextZone = ci < zoneCandidates.length - 1;
         zoneId = candidate.zoneId;
         const configuredIsoId =
           priceIds.zoneIsoId ||
@@ -2970,8 +2975,6 @@ class AutoProvisioningService {
           null;
         zoneIsoId = configuredIsoId;
 
-        // ISO ids belong to this zone. A missing ISO stops the buy.
-        // Do not switch to another region.
         try {
           const isos = await api.getZoneIsos(zoneId);
           const isoList = Array.isArray(isos) ? isos : (isos?.isos || isos?.content || isos?.data || []);
@@ -2990,16 +2993,22 @@ class AutoProvisioningService {
           }
         } catch (err) {
           if (zoneIsoId == null) {
-            throw new Error(
-              `ISO lookup failed for zone ${zoneId}. Not buying another region. ${err.message}`
-            );
+            if (hasNextZone) {
+              L.line(
+                `[RESELLER-API] ISO lookup failed on zone ${zoneId} — trying next selected region (${err.message})`
+              );
+              continue;
+            }
+            throw new Error(`ISO lookup failed for zone ${zoneId}. ${err.message}`);
           }
         }
 
         if (zoneIsoId == null) {
-          throw new Error(
-            `Could not resolve ISO for zone ${zoneId}. Not buying another region.`
-          );
+          if (hasNextZone) {
+            L.line(`[RESELLER-API] No ISO for zone ${zoneId} — trying next selected region`);
+            continue;
+          }
+          throw new Error(`Could not resolve ISO for zone ${zoneId}.`);
         }
 
         const createBody = {
@@ -3082,7 +3091,7 @@ class AutoProvisioningService {
               excludeOrderId: order._id,
               order,
               expectedZoneId: locationCtx.expectedZoneId,
-              expectedZoneIds: locationCtx.expectedZoneId != null ? [locationCtx.expectedZoneId] : [],
+              expectedZoneIds: locationCtx.expectedZoneIds || [],
               expectedIpPrefix: locationCtx.expectedIpPrefix,
               maxWaitMs: 90_000,
               pollMs: 4000,
@@ -3114,19 +3123,29 @@ class AutoProvisioningService {
               );
               break;
             }
+            if (hasNextZone) {
+              L.line(
+                `[RESELLER-API] No VM after timeout on zone ${zoneId} — trying next selected region`
+              );
+              continue;
+            }
             throw new Error(
-              `Panel create timed out and no new VM appeared. Not buying another region. ${err.message}`
+              `Panel create timed out and no new VM appeared on zone ${zoneId}. ${err.message}`
             );
           }
-          throw new Error(
-            `Zone ${zoneId} purchase failed. Not buying another region. ${err.message}`
-          );
+          if (hasNextZone) {
+            L.line(
+              `[RESELLER-API] Zone ${zoneId} purchase failed (${err.message}) — trying next selected region`
+            );
+            continue;
+          }
+          throw new Error(`Zone ${zoneId} purchase failed. ${err.message}`);
         }
       }
 
       if (!createRes) {
         throw new Error(
-          `Panel VM was not purchased. Not buying another region. ${lastPurchaseError?.message || 'unknown error'}`
+          `Panel VM was not purchased on any selected region. ${lastPurchaseError?.message || 'unknown error'}`
         );
       }
 

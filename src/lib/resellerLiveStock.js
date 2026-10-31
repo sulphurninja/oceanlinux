@@ -19,6 +19,7 @@ const {
   autoResolveResellerPriceIds,
   resolveEffectiveResellerPlanType,
   isResellerApiStock,
+  resolveLiveResellerZonesInPriorityOrder,
 } = require('@/lib/resellerApiStockConfig');
 const { usesResellerLiveStock, usesResellerPanelLiveStock } = require('@/lib/ipStockAvailability');
 const { toPlainConfigurations, getIpStockMemoryKeys, sanitizeVariantStockMap } = require('@/lib/advpsLiveStock');
@@ -92,23 +93,14 @@ async function resolvePriceIds(api, stockCfg, memory, stock) {
 }
 
 /**
- * Zone-only stock follows the product's primary zone only.
- * Another region being live does not make this plan purchasable.
+ * Zone stock: in stock if any selected region (priority order) is live on the panel.
  */
 async function checkResellerZoneStock(api, { stockCfg, memory, zonesList = null }) {
-  const zoneIds = stockCfg?.zoneIds?.length
-    ? stockCfg.zoneIds
-    : stockCfg?.zoneId != null
-      ? [Number(stockCfg.zoneId)]
-      : [];
-  const primaryId = zoneIds.length ? Number(zoneIds[0]) : null;
-
   const zones = zonesList || (await api.listZones());
-  const zone = primaryId == null ? null : zones.find((z) => Number(z.id) === primaryId);
-  const zoneOk = !!(zone && ResellerApi.isZoneStatusLive(zone.status));
-  const zoneLabel = zone?.name || (primaryId != null ? `zone ${primaryId}` : 'zone');
+  const { configured, checked, live } = resolveLiveResellerZonesInPriorityOrder(stockCfg, zones);
+  const firstLive = live[0] || null;
 
-  if (primaryId == null) {
+  if (!configured.length) {
     return {
       memory,
       available: false,
@@ -122,25 +114,36 @@ async function checkResellerZoneStock(api, { stockCfg, memory, zonesList = null 
     };
   }
 
+  const primaryId = configured[0];
+  const activeEntry = firstLive
+    ? checked.find((c) => Number(c.zoneId) === Number(firstLive.zoneId))
+    : null;
+  const zoneOk = !!firstLive;
+  const zoneLabel =
+    firstLive?.zone?.name ||
+    activeEntry?.zoneName ||
+    (firstLive ? `zone ${firstLive.zoneId}` : `zone ${primaryId}`);
+
   return {
     memory,
     available: zoneOk,
     stockMode: 'zone',
-    zoneId: primaryId,
-    zoneName: zone?.name || '',
-    zoneIds: [primaryId],
-    zoneStatus: zone?.status || null,
+    zoneId: firstLive ? firstLive.zoneId : primaryId,
+    zoneName: firstLive?.zone?.name || activeEntry?.zoneName || '',
+    zoneIds: configured,
+    zoneStatus: firstLive?.zone?.status || null,
     zoneOk,
     unitsAvailable: zoneOk ? 1 : 0,
-    fallbackZones: [
-      zone
-        ? { zoneId: zone.id, zoneName: zone.name, zoneStatus: zone.status, zoneOk }
-        : { zoneId: primaryId, zoneOk: false, reason: `Region (zone ${primaryId}) not found on panel` },
-    ],
-    reason: zoneOk ? '' : `${zoneLabel} is inactive or missing on the panel`,
+    fallbackZones: checked,
+    reason: zoneOk
+      ? ''
+      : checked.map((c) => c.reason).filter(Boolean).join('; ') ||
+        'All selected regions inactive or missing on the panel',
     message: zoneOk
-      ? `In stock (${zoneLabel})`
-      : `Out of stock (${zoneLabel} inactive)`,
+      ? firstLive.zoneId === primaryId
+        ? `In stock (${zoneLabel})`
+        : `In stock (${zoneLabel} — priority ${configured.indexOf(firstLive.zoneId) + 1})`
+      : `Out of stock (selected regions unavailable)`,
     checkedAt: new Date().toISOString(),
   };
 }

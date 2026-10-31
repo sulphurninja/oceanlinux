@@ -127,24 +127,53 @@ function resolveExpectedZoneIds(ipStock) {
   return cfg.zoneIds.length ? cfg.zoneIds : (cfg.zoneId != null ? [cfg.zoneId] : []);
 }
 
+function resolveConfiguredZoneIdList(stockCfg = {}) {
+  if (Array.isArray(stockCfg?.zoneIds) && stockCfg.zoneIds.length) {
+    return stockCfg.zoneIds.map(Number).filter((n) => Number.isFinite(n));
+  }
+  if (stockCfg?.zoneId != null && Number.isFinite(Number(stockCfg.zoneId))) {
+    return [Number(stockCfg.zoneId)];
+  }
+  return [];
+}
+
 /**
- * Auto-buy uses only the product's primary zone.
- * A dead or missing zone must not fall through to another region — that
- * bills a VM on the wrong IP range, and the customer will not accept it.
+ * Selected regions in priority order — only those ACTIVE/AVAILABLE on the panel.
+ * Used for store stock (any live = in stock) and purchase (try in order).
+ */
+function resolveLiveResellerZonesInPriorityOrder(stockCfg, zonesList) {
+  const configured = resolveConfiguredZoneIdList(stockCfg);
+  const zones = Array.isArray(zonesList) ? zonesList : [];
+  const live = [];
+  const checked = [];
+
+  for (const id of configured) {
+    const zone = zones.find((z) => Number(z.id) === Number(id));
+    const zoneOk = !!(zone && ResellerApi.isZoneStatusLive(zone.status));
+    checked.push({
+      zoneId: id,
+      zoneName: zone?.name || '',
+      zoneStatus: zone?.status || null,
+      zoneOk,
+      reason: zoneOk
+        ? ''
+        : zone
+          ? `${zone.name || `zone ${id}`} is ${zone.status || 'inactive'}`
+          : `Region (zone ${id}) not found on panel`,
+    });
+    if (zoneOk) live.push({ zoneId: Number(id), zone, live: true });
+  }
+
+  return { configured, checked, live };
+}
+
+/**
+ * Auto-buy tries selected regions in priority order (1, 2, 3…).
+ * Only zones the owner selected on the IP stock — never random panel regions.
  */
 async function resolveResellerZoneCandidatesForPurchase(api, stockCfg, { zonesList = null } = {}) {
-  const configured = stockCfg?.zoneIds?.length
-    ? stockCfg.zoneIds
-    : stockCfg?.zoneId != null
-      ? [Number(stockCfg.zoneId)]
-      : [];
-  const primaryId = configured.length ? Number(configured[0]) : null;
-  if (primaryId == null) return [];
-
   const zones = zonesList || (await api.listZones());
-  const zone = zones.find((z) => Number(z.id) === primaryId);
-  if (!zone || !ResellerApi.isZoneStatusLive(zone.status)) return [];
-  return [{ zoneId: primaryId, zone, live: true }];
+  return resolveLiveResellerZonesInPriorityOrder(stockCfg, zones).live;
 }
 
 function parseMemoryGb(memory) {
@@ -410,6 +439,8 @@ module.exports = {
   readResellerApiStockConfig,
   normalizeResellerZoneIds,
   resolveExpectedZoneIds,
+  resolveConfiguredZoneIdList,
+  resolveLiveResellerZonesInPriorityOrder,
   resolveResellerZoneCandidatesForPurchase,
   parseMemoryGb,
   resolvePriceIdsForMemory,

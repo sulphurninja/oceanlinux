@@ -80,7 +80,7 @@ export function ResellerZonePicker({
           </Button>
         </div>
       )}
-      <Label className="text-sm">Regions (Priority 1 = store + buy — sirf panel list se)</Label>
+      <Label className="text-sm">Regions (priority 1 pehle — inactive ho to agla selected try hoga)</Label>
       <div className="rounded-md border divide-y max-h-[280px] overflow-y-auto bg-background/80">
         {zones.map((zone) => {
           const zoneId = Number(zone.id);
@@ -158,9 +158,9 @@ export function ResellerZonePicker({
         </p>
       )}
       <p className="text-[11px] text-muted-foreground">
-        Store aur auto-buy dono sirf Priority 1 (primary) region follow karte hain — doosra zone live hone se plan
-        available nahi hota. Neeche sirf wahi ID select karo jo panel list me dikhen.
-        Hotstar/Hostheaven par region ka naam alag subnet ho sakta hai; product title (103.109, 161.248, …) par trust karo.
+        Store in stock tab dikhega jab koi bhi selected region panel par live ho. Order pehle Priority 1 par banega;
+        wahan inactive / fail ho to sirf aapke select kiye 2, 3… region par try hoga — panel ke random zone par nahi.
+        Alag subnet wale regions ek hi product par mat jodo (galat IP range ka risk).
       </p>
     </div>
   );
