@@ -268,6 +268,12 @@ function trialPanelManageNoRouteError(order, ipAddress) {
   return `Could not manage this trial server${ip}. The IP must exist on the company panel linked in Admin → Trial VPS. Contact support if this continues.`;
 }
 
+function orderUsesRackatoPanel(order, ipStockLean) {
+  const { isRackatoManagedOrder } = require('@/lib/rackatoOrder');
+  const { isRackatoPanelStock } = require('@/lib/rackatoStockConfig');
+  return isRackatoManagedOrder(order) || isRackatoPanelStock(ipStockLean, order);
+}
+
 /**
  * Normalize a Joy `machine_info` payload into a simple power state string.
  */
@@ -701,9 +707,11 @@ export async function POST(request) {
     // Netbay actions are addressed by serviceId, not IP — so missing IP
     // shouldn't block the request. Every other provider in this route still
     // requires an IP for VM lookup.
+    const ipStockLean = order.ipStockId ? await IPStock.findById(order.ipStockId).lean() : null;
     const orderIsNetbay = order.provider === 'netbay' || !!order.netbayServiceId;
     const orderIsKurohost = order.provider === 'kurohost' || !!order.kurohostInstanceId;
-    if (!ipAddress && !orderIsNetbay && !orderIsKurohost) {
+    const orderIsRackato = orderUsesRackatoPanel(order, ipStockLean);
+    if (!ipAddress && !orderIsNetbay && !orderIsKurohost && !orderIsRackato) {
       return actionJson({
         success: false,
         error: 'No IP address found for this VPS order. Please contact support.',
@@ -1194,9 +1202,9 @@ export async function POST(request) {
     }
 
     // -------------------- Rackato branch --------------------
-    if (order.provider === 'rackato' || order.rackatoOrderId || order.rackatoNodeUid) {
+    if (orderIsRackato) {
       const { resolveRackatoApiForOrder } = require('@/lib/companyRackatoApi');
-      const { parseRackatoOrder, parseRackatoNode, parseRackatoExpiry } = require('@/lib/rackatoOrder');
+      const { parseRackatoOrder, parseRackatoNode, parseRackatoExpiry, resolveRackatoDeliveryRef } = require('@/lib/rackatoOrder');
       const RackatoApi = require('@/services/rackatoApi');
       const { config: rackatoCfg } = await resolveRackatoApiForOrder(order, { Company, IPStock });
       if (!rackatoCfg) {
@@ -1207,23 +1215,26 @@ export async function POST(request) {
         return actionJson({ success: false, error: `Action '${action}' is not available for this server.` }, 400, action);
       }
       const api = new RackatoApi(rackatoCfg);
-      let uid = String(order.rackatoNodeUid || '').trim();
-      if (!uid && order.rackatoOrderId) {
-        const parsed = parseRackatoOrder(await api.getOrder(order.rackatoOrderId));
-        uid = parsed.uid;
-        if (uid || parsed.ip) {
-          await Order.findByIdAndUpdate(orderId, {
-            rackatoNodeUid: uid || order.rackatoNodeUid,
-            ...(parsed.ip ? { ipAddress: parsed.ip, status: 'active', provisioningStatus: 'active', provisioningError: '' } : {}),
-          });
-        }
+      const resolved = await resolveRackatoDeliveryRef(api, order, ipAddress);
+      let uid = resolved.uid;
+      if (uid || resolved.node?.ip) {
+        await Order.findByIdAndUpdate(orderId, {
+          ...(uid ? { rackatoNodeUid: uid } : {}),
+          ...(resolved.rackatoOrderId ? { rackatoOrderId: resolved.rackatoOrderId } : {}),
+          ...(resolved.node?.ip ? { ipAddress: resolved.node.ip, status: 'active', provisioningStatus: 'active', provisioningError: '' } : {}),
+        });
       }
       if (!uid && action !== 'status' && action !== 'sync') {
         return actionJson({ success: false, error: 'This server is still being set up. Please try again shortly.' }, 409, action);
       }
       try {
         if (action === 'status' || action === 'sync') {
-          const node = uid ? parseRackatoNode(await api.getNode(uid)) : parseRackatoOrder(await api.getOrder(order.rackatoOrderId));
+          const node = uid
+            ? parseRackatoNode(await api.getNode(uid))
+            : resolved.node
+              || (order.rackatoOrderId
+                ? parseRackatoOrder(await api.getOrder(order.rackatoOrderId))
+                : parseRackatoNode(null));
           const expiry = parseRackatoExpiry(node.expiresAt);
           await Order.findByIdAndUpdate(orderId, {
             ...(node.ip ? { ipAddress: node.ip } : {}),
@@ -3167,20 +3178,24 @@ export async function GET(request) {
       }
     }
 
-    if (order.provider === 'rackato' || order.rackatoOrderId || order.rackatoNodeUid) {
+    const ipStockLeanGet = order.ipStockId ? await IPStock.findById(order.ipStockId).lean() : null;
+    if (orderUsesRackatoPanel(order, ipStockLeanGet)) {
       const { resolveRackatoApiForOrder } = require('@/lib/companyRackatoApi');
-      const { parseRackatoOrder, parseRackatoNode, parseRackatoExpiry } = require('@/lib/rackatoOrder');
+      const { parseRackatoOrder, parseRackatoNode, parseRackatoExpiry, resolveRackatoDeliveryRef } = require('@/lib/rackatoOrder');
       const RackatoApi = require('@/services/rackatoApi');
       const { normalizeReportedPowerState } = require('@/lib/panelPowerState');
       const { config: rackatoCfg } = await resolveRackatoApiForOrder(order, { Company, IPStock });
       if (rackatoCfg) {
         try {
           const api = new RackatoApi(rackatoCfg);
-          let uid = String(order.rackatoNodeUid || '').trim();
-          let node = uid
-            ? parseRackatoNode(await api.getNode(uid))
-            : parseRackatoOrder(order.rackatoOrderId ? await api.getOrder(order.rackatoOrderId) : null);
-          if (!uid && node.uid) uid = node.uid;
+          const resolved = await resolveRackatoDeliveryRef(api, order, ipAddress);
+          let uid = resolved.uid;
+          let node = resolved.node
+            || (uid ? parseRackatoNode(await api.getNode(uid)) : null)
+            || (order.rackatoOrderId
+              ? parseRackatoOrder(await api.getOrder(order.rackatoOrderId))
+              : parseRackatoNode(null));
+          if (!uid && node?.uid) uid = node.uid;
           if (uid && (!node.ip || !node.password)) {
             const full = parseRackatoNode(await api.getNode(uid));
             node = {

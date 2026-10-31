@@ -11,6 +11,13 @@ function providerUsableForOrder(provider, order) {
   if (!order) return true;
   if (provider === 'netbay') return !!order.netbayServiceId;
   if (provider === 'kurohost') return !!order.kurohostInstanceId;
+  if (provider === 'rackato') {
+    const { isRackatoManagedOrder } = require('@/lib/rackatoOrder');
+    return isRackatoManagedOrder(order);
+  }
+  if (provider === 'nexa') {
+    return order.provider === 'nexa' || !!String(order.nexaOrderId || '').trim();
+  }
   return true;
 }
 
@@ -113,6 +120,32 @@ function buildCompanyAutomationMeta(company) {
  * order has no service/instance id (trial bulk VPS, oceanlinux IP-manage orders).
  */
 function buildCompanyAutomationMetaForOrder(company, order) {
+  const { isRackatoManagedOrder } = require('@/lib/rackatoOrder');
+
+  if (isRackatoManagedOrder(order)) {
+    const rackato = getCompanyRackatoApiConfig(company);
+    if (rackato) {
+      return {
+        provider: 'rackato',
+        enabled: true,
+        companyName: company?.name,
+        label: rackato.label || null,
+      };
+    }
+  }
+
+  if (order?.provider === 'nexa' || String(order?.nexaOrderId || '').trim()) {
+    const nexa = getCompanyNexaApiConfig(company);
+    if (nexa) {
+      return {
+        provider: 'nexa',
+        enabled: true,
+        companyName: company?.name,
+        label: nexa.label || null,
+      };
+    }
+  }
+
   for (const meta of collectCompanyAutomationCandidates(company)) {
     if (providerUsableForOrder(meta.provider, order)) return meta;
   }

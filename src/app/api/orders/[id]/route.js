@@ -58,7 +58,7 @@ export async function GET(request, { params }) {
             try {
                 const { buildCompanyAutomationMetaForOrder } = require('@/lib/companyAutomationMeta');
                 const company = await Company.findById(order.trialManageCompanyId)
-                    .select('virtualizors virtualizor resellerApi netbayApi kurohostApi joyApi hostdzireApi name')
+                    .select('virtualizors virtualizor resellerApi netbayApi kurohostApi joyApi hostdzireApi rackatoApi nexaApi name')
                     .lean();
                 const meta = buildCompanyAutomationMetaForOrder(company, order);
                 if (meta) {

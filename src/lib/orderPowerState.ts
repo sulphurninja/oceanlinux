@@ -1,4 +1,5 @@
 import { isNonRenewablePackageOrder, isTrialVpsPanelManageOrder } from '@/lib/trialVpsOrder';
+import { isRackatoPanelStock } from '@/lib/rackatoStockConfig';
 
 export type PowerState = 'running' | 'stopped' | 'suspended' | 'busy' | 'unknown';
 
@@ -18,6 +19,8 @@ export type OrderPowerLike = {
   advpsServiceId?: string;
   netbayServiceId?: string;
   kurohostInstanceId?: string;
+  rackatoOrderId?: string;
+  rackatoNodeUid?: string;
   ipAddress?: string;
   ipStockId?: string;
   slotIpPackageId?: string;
@@ -39,6 +42,8 @@ export function getProviderFromOrder(
 
   if (order.provider === 'netbay') return 'netbay';
   if (order.provider === 'kurohost') return 'kurohost';
+  if (order.provider === 'rackato' || order.rackatoOrderId || order.rackatoNodeUid) return 'oceanlinux';
+  if (isRackatoPanelStock(ipStock, order)) return 'oceanlinux';
   if (order.provider === 'advps') return 'advps';
   if (order.provider === 'smartvps') return 'smartvps';
 
@@ -111,6 +116,7 @@ export function canShowLivePowerState(
   if (String(order.netbayProductKind || '').toLowerCase() === 'proxy') return false;
 
   const provider = getProviderFromOrder(order, ipStock);
+  const rackatoPanel = isRackatoPanelStock(ipStock, order);
   const hasAssignedIp = !!(order.ipAddress || '').trim();
   const currentStatus = (order.provisioningStatus || order.status || '').toLowerCase();
   const companyAutomated = isOrderCompanyAutomated(order, ipStock);
@@ -127,6 +133,8 @@ export function canShowLivePowerState(
     (provider === 'advps' && !!order.advpsServiceId) ||
     (provider === 'netbay' && !!order.netbayServiceId) ||
     (provider === 'kurohost' && !!order.kurohostInstanceId) ||
+    (rackatoPanel &&
+      !!(order.ipAddress || order.rackatoOrderId || order.rackatoNodeUid)) ||
     (companyAutomated && hasAssignedIp);
 
   return hasPowerApi && isActiveStatus;
@@ -137,6 +145,9 @@ export function orderNeedsIpStockForPowerState(order: OrderPowerLike): boolean {
   if (!order.ipStockId) return false;
   if (isNonRenewablePackageOrder(order) && !isTrialVpsPanelManageOrder(order)) return false;
   if (order.hostycareServiceId || order.smartvpsServiceId || order.advpsServiceId || order.netbayServiceId || order.kurohostInstanceId) {
+    return false;
+  }
+  if (order.rackatoOrderId || order.rackatoNodeUid || order.provider === 'rackato') {
     return false;
   }
   return true;

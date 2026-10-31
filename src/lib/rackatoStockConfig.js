@@ -34,8 +34,21 @@ function stockHasRackatoPlan(stock) {
   return !!(plan.productId && plan.appId);
 }
 
+/** True when manage actions should route to the Rackato reseller API. */
+function isRackatoPanelStock(stock, order) {
+  if (order?.provider === 'rackato') return true;
+  if (String(order?.rackatoOrderId || '').trim()) return true;
+  if (String(order?.rackatoNodeUid || '').trim()) return true;
+  if (!stock) return false;
+  const tags = (stock.tags || []).map((t) => String(t).toLowerCase());
+  if (tags.includes('rackato')) return true;
+  if (String(stock.provider || '').toLowerCase() === 'rackato') return true;
+  return stockHasRackatoPlan(stock);
+}
+
 module.exports = {
   readRackatoStockConfig,
   resolveRackatoPlan,
   stockHasRackatoPlan,
+  isRackatoPanelStock,
 };

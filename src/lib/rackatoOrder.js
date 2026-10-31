@@ -123,8 +123,72 @@ function parseRackatoExpiry(value) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+function isRackatoManagedOrder(order) {
+  if (!order) return false;
+  if (order.provider === 'rackato') return true;
+  if (String(order.rackatoOrderId || '').trim()) return true;
+  if (String(order.rackatoNodeUid || '').trim()) return true;
+  return false;
+}
+
+function nodeMatchesIp(node, ip) {
+  const target = String(ip || '').trim();
+  if (!target || !node?.ip) return false;
+  return String(node.ip).trim() === target;
+}
+
+/**
+ * Resolve Rackato node uid (and optional order id) from stored ids or panel IP search.
+ */
+async function resolveRackatoDeliveryRef(api, order, ipAddress) {
+  let rackatoOrderId = String(order?.rackatoOrderId || '').trim();
+  let uid = String(order?.rackatoNodeUid || '').trim();
+
+  if (uid) {
+    try {
+      const node = parseRackatoNode(await api.getNode(uid));
+      if (node.uid) {
+        return { uid: node.uid, rackatoOrderId, node };
+      }
+    } catch (_) {
+      /* fall through to order / IP lookup */
+    }
+  }
+
+  if (rackatoOrderId) {
+    const parsed = parseRackatoOrder(await api.getOrder(rackatoOrderId));
+    if (parsed.uid) {
+      return { uid: parsed.uid, rackatoOrderId, node: parsed };
+    }
+  }
+
+  const ip = String(ipAddress || order?.ipAddress || '').trim();
+  if (!ip) {
+    return { uid: '', rackatoOrderId, node: null };
+  }
+
+  const res = await api.listNodes({ page: 1, limit: 50, search: ip });
+  const list = res?.data?.nodes || res?.nodes || res?.data || [];
+  const rows = Array.isArray(list) ? list : [];
+  for (const row of rows) {
+    const node = parseRackatoNode(row);
+    if (nodeMatchesIp(node, ip) && node.uid) {
+      const parsed = parseRackatoOrder(row);
+      return {
+        uid: node.uid,
+        rackatoOrderId: rackatoOrderId || parsed.orderId || rackatoOrderId,
+        node,
+      };
+    }
+  }
+
+  return { uid: '', rackatoOrderId, node: null };
+}
+
 module.exports = {
   parseRackatoOrder,
   parseRackatoNode,
   parseRackatoExpiry,
+  isRackatoManagedOrder,
+  resolveRackatoDeliveryRef,
 };

@@ -135,6 +135,7 @@ import {
 import { isSlotIpOrder } from '@/lib/slotIpOrder';
 import { isNexaOrder } from '@/lib/nexaOrder';
 import { isNetbayProxyManageAvailable, isNetbayProxyOrder } from '@/lib/netbayProxyOrder';
+import { isRackatoPanelStock } from '@/lib/rackatoStockConfig';
 import { isOrderAwaitingDelivery, isOrderPaid, hasOrderBeenDelivered, shouldPollOrderForDelivery } from '@/lib/orderDeliveryStatus';
 import { openRazorpayModal } from '@/lib/razorpayCheckout';
 import { triggerRenewalSuccessBird } from '@/lib/oceanBirdFly';
@@ -574,11 +575,13 @@ const OrderDetails = () => {
 
     const autoStock = mergeAutomationStock(order, ipStock);
     const provider = getProviderFromOrder(order, ipStock);
+    const rackatoPanel = isRackatoPanelStock(ipStock, order);
     const hasNativeServiceId = (provider === 'hostycare' && order.hostycareServiceId) ||
       (provider === 'smartvps' && (order.smartvpsServiceId || order.ipAddress)) ||
       (provider === 'advps' && order.advpsServiceId) ||
       (provider === 'netbay' && order.netbayServiceId) ||
-      (provider === 'kurohost' && order.kurohostInstanceId);
+      (provider === 'kurohost' && order.kurohostInstanceId) ||
+      (rackatoPanel && !!(order.ipAddress || order.rackatoOrderId || order.rackatoNodeUid));
     const trialPanelManage = isTrialVpsPanelManageOrder(order);
     const isCompanyAutomated = hasOrderPanelAutomation(order, ipStock) &&
       (provider === 'oceanlinux' || provider === 'trialvps' || !hasNativeServiceId);
@@ -595,6 +598,9 @@ const OrderDetails = () => {
     order?.advpsServiceId,
     order?.netbayServiceId,
     order?.kurohostInstanceId,
+    order?.rackatoOrderId,
+    order?.rackatoNodeUid,
+    order?.provider,
     order?.ipAddress,
     order?.trialVpsPanelManage,
     order?.trialManageCompanyId,
@@ -776,6 +782,8 @@ const OrderDetails = () => {
 
     if (order.provider === 'netbay') return 'netbay';
     if (order.provider === 'kurohost') return 'kurohost';
+    if (order.provider === 'rackato' || order.rackatoOrderId || order.rackatoNodeUid) return 'oceanlinux';
+    if (isRackatoPanelStock(ipStock, order)) return 'oceanlinux';
     if (order.provider === 'advps') return 'advps';
     if (order.provider === 'smartvps') return 'smartvps';
 
@@ -1067,6 +1075,12 @@ const OrderDetails = () => {
     if ((order.provider === 'nexa' || hasCompanyNexaAutomation(ipStock)) && (order.nexaOrderId || order.ipAddress)) {
       return true;
     }
+    if (
+      isRackatoPanelStock(ipStock, order) &&
+      (order.rackatoOrderId || order.rackatoNodeUid || order.ipAddress)
+    ) {
+      return true;
+    }
 
     // Fall back to per-company automation (Virtualizor or reseller HTTP API).
     // This kicks in for:
@@ -1075,7 +1089,7 @@ const OrderDetails = () => {
     //    real service ID, so the legacy provider integration can't act on them.
     //    These would otherwise hit the manual-request fallback or surface a
     //    "No valid API configured" error from the server.
-    if (hasCompanyAnyAutomation(ipStock)) {
+    if (hasCompanyAnyAutomation(mergeAutomationStock(order, ipStock))) {
       console.log('[ORDER-DETAILS] Server management available via company automation (',
         ipStock?.companyAutomation?.provider, ', provider=', provider, ')');
       return true;
