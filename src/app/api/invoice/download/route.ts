@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDataFromToken } from '@/helper/getDataFromToken';
 import connectDB from '@/lib/db';
-import Order from '@/models/orderModel';
 import User from '@/models/userModel';
+import { resolveOrderForUserOrAdmin } from '@/lib/resolveOrderAccess';
 import type { LeanDoc } from '@/types/lean';
 import { jsPDF } from 'jspdf';
 import { getOrdersPageStatus } from '@/lib/orderDeliveryStatus';
@@ -91,23 +90,17 @@ export async function GET(request: NextRequest) {
   try {
     await connectDB();
 
-    const token = request.cookies.get('token')?.value;
-    if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-    let userId: string;
-    try {
-      userId = getDataFromToken(request);
-    } catch {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
-    }
-
     const orderId = new URL(request.url).searchParams.get('orderId');
     const renewalTxnId = new URL(request.url).searchParams.get('renewalTxnId');
     if (!orderId) return NextResponse.json({ error: 'Order ID is required' }, { status: 400 });
 
-    const order = await Order.findOne({ _id: orderId, user: userId }).lean<LeanDoc>();
-    const user = await User.findById(userId).lean<LeanDoc>();
-    if (!order) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
+    const resolved = await resolveOrderForUserOrAdmin(request, orderId, { lean: true });
+    if (resolved.error) return resolved.error;
+
+    const order = resolved.order as LeanDoc;
+    const user = (resolved.isAdmin
+      ? await User.findById((order as any).user).lean<LeanDoc>()
+      : resolved.user) as LeanDoc | null;
     if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
     const renewal = renewalTxnId
