@@ -7,6 +7,7 @@ import { getRazorpayClient } from '@/lib/razorpayClient';
 import { enforceAdmin } from '@/lib/apiSecurity';
 import { resolveOrderRenewalPrice } from '@/lib/orderRenewalPricingServer';
 import { isSlotIpOrder } from '@/lib/slotIpOrder';
+import { renewalBlockMessage } from '@/lib/trialVpsOrder';
 
 const HostycareAPI = require('@/services/hostycareApi');
 const SmartVPSAPI = require('@/services/smartvpsApi');
@@ -92,6 +93,10 @@ async function checkPaymentStatus(pendingRenewal) {
 async function processRenewal(order, paymentInfo) {
   if (isSlotIpOrder(order)) {
     throw new Error('Slot IP orders cannot be renewed');
+  }
+  const renewBlock = await renewalBlockMessage(order);
+  if (renewBlock) {
+    throw new Error(renewBlock);
   }
 
   const provider = await getProviderFromOrder(order);

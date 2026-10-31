@@ -69,6 +69,7 @@ import {
 } from '@/lib/orderDeliveryStatus';
 import { isWithinRenewalWindow } from '@/lib/expiryHelper';
 import { isTrialVpsOrder } from '@/lib/trialVpsOrder';
+import { isNexaOrder } from '@/lib/nexaOrder';
 import { OsIcon, humanizeOsLabel } from '@/components/os/OsIcon';
 
 interface Order {
@@ -320,7 +321,7 @@ const ViewLinux = () => {
 
     const isRenewalEligible = (order: Order | null) => {
         if (!order || !order.expiryDate) return false;
-        if (order.slotIpPackageId || order.provider === 'slotip' || isTrialVpsOrder(order)) return false;
+        if (order.slotIpPackageId || order.provider === 'slotip' || isTrialVpsOrder(order) || isNexaOrder(order)) return false;
         return isWithinRenewalWindow(order.expiryDate);
     };
 

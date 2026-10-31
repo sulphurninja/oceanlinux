@@ -1,4 +1,5 @@
 import { isSlotIpOrder, SLOT_IP_NO_RENEWAL_MESSAGE } from '@/lib/slotIpOrder';
+import { isNexaOrder, NEXA_NO_RENEWAL_MESSAGE, nexaStockRenewalMessage } from '@/lib/nexaOrder';
 
 /** True for admin-upload trial VPS orders (fixed trial period, no renewals). */
 export function isTrialVpsOrder(order) {
@@ -43,5 +44,13 @@ export function isNonRenewablePackageOrder(order) {
 export function nonRenewablePackageMessage(order) {
   if (isTrialVpsOrder(order)) return TRIAL_VPS_NO_RENEWAL_MESSAGE;
   if (isSlotIpOrder(order)) return SLOT_IP_NO_RENEWAL_MESSAGE;
+  if (isNexaOrder(order)) return NEXA_NO_RENEWAL_MESSAGE;
   return '';
+}
+
+/** Slot IP, trial, and Nexa — customer-facing reason, or empty when renewal is allowed. */
+export async function renewalBlockMessage(order) {
+  const direct = nonRenewablePackageMessage(order);
+  if (direct) return direct;
+  return nexaStockRenewalMessage(order);
 }

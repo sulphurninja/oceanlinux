@@ -7,12 +7,7 @@ import { verifyRazorpaySignature } from '@/lib/paymentGateways';
 import { resolveOrderRenewalExpiryDate } from '@/lib/expiryHelper';
 import { assignPanelCredentials } from '@/lib/panelCredentials';
 import { detectCompanyManagedRenewal, resolveRenewalProvider, shouldUseCompanyValidityForRenewal } from '@/lib/companyRenewal';
-import { isSlotIpOrder, SLOT_IP_NO_RENEWAL_MESSAGE } from '@/lib/slotIpOrder';
-import {
-  isNonRenewablePackageOrder,
-  isTrialVpsOrder,
-  TRIAL_VPS_NO_RENEWAL_MESSAGE,
-} from '@/lib/trialVpsOrder';
+import { renewalBlockMessage } from '@/lib/trialVpsOrder';
 import { resolveOrderRenewalPrice } from '@/lib/orderRenewalPricingServer';
 const { customerApiCatchPayload } = require('@/lib/customerFacingErrors');
 import { debitPendingRenewalWallet } from '@/lib/renewalWallet';
@@ -100,12 +95,10 @@ export async function POST(request) {
       );
     }
 
-    if (isNonRenewablePackageOrder(order)) {
+    const renewBlock = await renewalBlockMessage(order);
+    if (renewBlock) {
       return NextResponse.json(
-        {
-          success: false,
-          message: isTrialVpsOrder(order) ? TRIAL_VPS_NO_RENEWAL_MESSAGE : SLOT_IP_NO_RENEWAL_MESSAGE,
-        },
+        { success: false, message: renewBlock },
         { status: 400 }
       );
     }

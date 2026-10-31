@@ -7,12 +7,7 @@ import Reseller from '@/models/resellerModel';
 import ResellerWalletService from '@/services/resellerWalletService';
 import { resolveOrderRenewalExpiryDate, getDaysUntilExpiryIST, isWithinRenewalWindow, RENEWAL_DAYS_BEFORE_EXPIRY } from '@/lib/expiryHelper';
 import { resolveRenewalProvider, detectCompanyManagedRenewal, shouldUseCompanyValidityForRenewal } from '@/lib/companyRenewal';
-import { isSlotIpOrder, SLOT_IP_NO_RENEWAL_MESSAGE } from '@/lib/slotIpOrder';
-import {
-  isNonRenewablePackageOrder,
-  isTrialVpsOrder,
-  TRIAL_VPS_NO_RENEWAL_MESSAGE,
-} from '@/lib/trialVpsOrder';
+import { renewalBlockMessage } from '@/lib/trialVpsOrder';
 import { calculateResellerPlanPrice } from '@/lib/resellerOrderApi';
 import { getCurrentListPriceForOrder } from '@/lib/orderRenewalPricingServer';
 import IPStock from '@/models/ipStockModel';
@@ -134,9 +129,9 @@ export async function renewResellerOrder(reseller, order, orderId) {
     return { ok: false, status, body };
   };
 
-  if (isNonRenewablePackageOrder(order)) {
-    const msg = isTrialVpsOrder(order) ? TRIAL_VPS_NO_RENEWAL_MESSAGE : SLOT_IP_NO_RENEWAL_MESSAGE;
-    return failEarly(400, { success: false, message: msg }, msg);
+  const renewBlock = await renewalBlockMessage(order);
+  if (renewBlock) {
+    return failEarly(400, { success: false, message: renewBlock }, renewBlock);
   }
 
   if (!order.expiryDate) {

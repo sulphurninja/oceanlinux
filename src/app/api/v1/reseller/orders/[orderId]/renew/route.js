@@ -4,7 +4,7 @@ import Order from '@/models/orderModel';
 import { authenticateReseller } from '@/lib/resellerAuth';
 import { renewResellerOrder } from '@/lib/resellerRenewApi';
 import { getDaysUntilExpiry } from '@/lib/expiryHelper';
-import { nonRenewablePackageMessage } from '@/lib/trialVpsOrder';
+import { renewalBlockMessage } from '@/lib/trialVpsOrder';
 
 /** GET — renewal quote / eligibility */
 export async function GET(request, { params }) {
@@ -19,7 +19,7 @@ export async function GET(request, { params }) {
     return NextResponse.json({ success: false, message: 'Order not found' }, { status: 404 });
   }
 
-  const renewBlock = nonRenewablePackageMessage(order);
+  const renewBlock = await renewalBlockMessage(order);
   const renewalPrice = renewBlock ? 0 : Math.ceil(Number(order.price) || 0);
   const daysUntilExpiry = order.expiryDate ? getDaysUntilExpiry(order.expiryDate) : null;
 

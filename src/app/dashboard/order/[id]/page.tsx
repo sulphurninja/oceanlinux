@@ -133,6 +133,7 @@ import {
   isTrialVpsPanelManageOrder,
 } from '@/lib/trialVpsOrder';
 import { isSlotIpOrder } from '@/lib/slotIpOrder';
+import { isNexaOrder } from '@/lib/nexaOrder';
 import { isNetbayProxyManageAvailable, isNetbayProxyOrder } from '@/lib/netbayProxyOrder';
 import { isOrderAwaitingDelivery, isOrderPaid, hasOrderBeenDelivered, shouldPollOrderForDelivery } from '@/lib/orderDeliveryStatus';
 import { openRazorpayModal } from '@/lib/razorpayCheckout';
@@ -2035,7 +2036,7 @@ const OrderDetails = () => {
 
   const isRenewalEligible = (order: Order | null) => {
     if (!order || !order.expiryDate) return false;
-    if (isNonRenewablePackageOrder(order)) return false;
+    if (isNonRenewablePackageOrder(order) || isNexaOrder(order) || hasCompanyNexaAutomation(ipStock)) return false;
     return isWithinRenewalWindow(order.expiryDate);
   };
 
@@ -4660,7 +4661,7 @@ const OrderDetails = () => {
                           </>
                         )}
 
-                        {isExpired(order) && !isRenewalEligible(order) && (
+                        {isExpired(order) && !isRenewalEligible(order) && !isNexaOrder(order) && !nexaProxyOrder && (
                           <div className="flex items-start gap-3 p-4 rounded-md bg-destructive/10 border border-destructive/30">
                             <AlertTriangle className="h-5 w-5 text-destructive mt-0.5 flex-shrink-0" />
                             <div className="space-y-1">
