@@ -20,7 +20,7 @@ const {
   resolveEffectiveResellerPlanType,
   isResellerApiStock,
 } = require('@/lib/resellerApiStockConfig');
-const { usesResellerLiveStock } = require('@/lib/ipStockAvailability');
+const { usesResellerLiveStock, usesResellerPanelLiveStock } = require('@/lib/ipStockAvailability');
 const { toPlainConfigurations, getIpStockMemoryKeys, sanitizeVariantStockMap } = require('@/lib/advpsLiveStock');
 
 const LOG = '[RESELLER-LIVE-STOCK]';
@@ -225,8 +225,8 @@ async function syncResellerIpStockRow(stock, { force = false, memoryOnly = null,
   const isZoneLiveStock =
     stockCfg.zoneId != null || (Array.isArray(stockCfg.zoneIds) && stockCfg.zoneIds.length > 0);
 
-  // Zone plans follow panel ACTIVE/INACTIVE even when wallet live-sync is off.
-  if (!companyUsesResellerLiveStock(company) && !isZoneLiveStock) return stock;
+  // Zone plans follow panel ACTIVE/INACTIVE even when wallet live-sync toggle is off.
+  if (!usesResellerPanelLiveStock(stock, company)) return stock;
 
   // Zone-based PrimeVPS/Hostheaven stock must follow panel ACTIVE/INACTIVE — not manual units.
   if (isZoneLiveStock && stock.availabilityManual === true) {
@@ -345,7 +345,7 @@ async function syncResellerIpStockRow(stock, { force = false, memoryOnly = null,
     Object.assign(updatePayload, storeAutoUnhideUpdate(stock, hybridAvailable));
   }
   // Manual override wins over panel zone status — owner set count by hand.
-  if (usesResellerLiveStock(stock, company) && !stock.availabilityManual) {
+  if (usesResellerPanelLiveStock(stock, company) && !stock.availabilityManual) {
     const { hasUnallocatedCompanyInventory, countUnallocatedInventory } = require('@/lib/companyInventory');
     const invRemaining = hasUnallocatedCompanyInventory(stock) ? countUnallocatedInventory(stock) : 0;
     updatePayload.stockCount =
@@ -374,7 +374,7 @@ async function verifyResellerMemoryInStock(stock, memory, { preferCache = false,
   }
 
   const company = ctx.company;
-  if (!companyUsesResellerLiveStock(company)) {
+  if (!usesResellerPanelLiveStock(stock, company)) {
     return { ok: true, skipped: true, manual: true };
   }
 
@@ -441,12 +441,18 @@ async function refreshResellerStockForCustomer({ force = false } = {}) {
   const companies = companyIds.length
     ? await Company.find({ _id: { $in: companyIds } }).select('resellerApi').lean()
     : [];
-  const liveCompanyIds = new Set(
-    companies.filter(companyUsesResellerLiveStock).map((c) => String(c._id))
-  );
-  const rows = candidates.filter(
-    (r) => liveCompanyIds.has(String(r.company)) && stockHasResellerPanelPlans(r)
-  );
+  const { readResellerApiStockConfig } = require('@/lib/resellerApiStockConfig');
+  const rows = candidates.filter((r) => {
+    if (!stockHasResellerPanelPlans(r)) return false;
+    const company = companies.find((c) => String(c._id) === String(r.company));
+    if (!company?.resellerApi?.enabled) return false;
+    if (companyUsesResellerLiveStock(company)) return true;
+    const cfg = readResellerApiStockConfig(r);
+    return (
+      (Array.isArray(cfg.zoneIds) && cfg.zoneIds.length > 0) ||
+      (cfg.zoneId != null && Number.isFinite(Number(cfg.zoneId)))
+    );
+  });
 
   const rowsByCompany = {};
   for (const row of rows) {

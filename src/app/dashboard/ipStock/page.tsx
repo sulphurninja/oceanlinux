@@ -169,6 +169,7 @@ interface IPStock {
   kurohostUseLiveStockApi?: boolean | null;
   hostdzireUseLiveStockApi?: boolean | null;
   resellerUseLiveStockApi?: boolean | null;
+  resellerPanelLiveStock?: boolean | null;
   serverType: string;
   tags: string[];
   memoryOptions: Record<string, MemoryOptionDetails>;
@@ -207,7 +208,7 @@ function stockHasResellerPanelConfig(stock: IPStock) {
 
 function isResellerLiveStock(stock: IPStock) {
   if (!stockHasResellerPanelConfig(stock)) return false;
-  return stock.resellerUseLiveStockApi === true;
+  return stock.resellerPanelLiveStock === true || stock.resellerUseLiveStockApi === true;
 }
 
 /** Company portal set manual units — overrides live panel stock for store listing. */

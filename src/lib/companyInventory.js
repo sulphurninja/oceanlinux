@@ -111,6 +111,7 @@ function hasUnallocatedCompanyInventory(stock) {
 
 function readLivePanelVariantAvailable(stock, company) {
   const {
+    usesResellerPanelLiveStock,
     usesResellerLiveStock,
     usesNetbayLiveStock,
     usesKurohostLiveStock,
@@ -120,7 +121,7 @@ function readLivePanelVariantAvailable(stock, company) {
   } = require('@/lib/ipStockAvailability');
   const { toPlainConfigurations } = require('@/lib/advpsLiveStock');
 
-  if (usesResellerLiveStock(stock, company) && stockHasResellerPanelPlans(stock)) {
+  if (usesResellerPanelLiveStock(stock, company) && stockHasResellerPanelPlans(stock)) {
     const cfg = toPlainConfigurations(stock.defaultConfigurations)?.resellerApi || {};
     const variants = cfg.variantStock && typeof cfg.variantStock === 'object' ? cfg.variantStock : {};
     return Object.values(variants).some((v) => v && typeof v === 'object' && v.available === true);
@@ -169,6 +170,7 @@ function isCompanyStockPurchasable(stock, company, quantity = 1) {
     return countUnallocatedInventory(stock) >= quantity;
   }
   const {
+    usesResellerPanelLiveStock,
     usesResellerLiveStock,
     usesNetbayLiveStock,
     usesKurohostLiveStock,
@@ -178,7 +180,7 @@ function isCompanyStockPurchasable(stock, company, quantity = 1) {
     stockHasKurohostPlans,
     stockHasHostdzirePlans,
   } = require('@/lib/ipStockAvailability');
-  if (usesResellerLiveStock(stock, company) && stockHasResellerPanelPlans(stock)) {
+  if (usesResellerPanelLiveStock(stock, company) && stockHasResellerPanelPlans(stock)) {
     return readLivePanelVariantAvailable(stock, company);
   }
   if (usesNetbayLiveStock(stock, company) && stockHasNetbayPlans(stock)) {
@@ -320,6 +322,7 @@ async function syncStockCountFromInventory(stockId) {
   stock.stockCount = remaining;
 
   const {
+    usesResellerPanelLiveStock,
     usesResellerLiveStock,
     usesNetbayLiveStock,
     usesKurohostLiveStock,

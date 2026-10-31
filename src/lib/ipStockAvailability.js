@@ -44,6 +44,21 @@ export function usesResellerLiveStock(stock, company) {
   return company.resellerApi.useLiveStockApi === true;
 }
 
+/**
+ * Plan follows PrimeVPS/Hostheaven panel for store availability (wallet live-sync OR zone mapped on stock).
+ */
+export function usesResellerPanelLiveStock(stock, company) {
+  if (!stockHasResellerPanelPlans(stock)) return false;
+  if (!company?.resellerApi?.enabled) return false;
+  if (usesResellerLiveStock(stock, company)) return true;
+  const { readResellerApiStockConfig } = require('@/lib/resellerApiStockConfig');
+  const cfg = readResellerApiStockConfig(stock);
+  return (
+    (Array.isArray(cfg.zoneIds) && cfg.zoneIds.length > 0) ||
+    (cfg.zoneId != null && Number.isFinite(Number(cfg.zoneId)))
+  );
+}
+
 /** IP stock has HostDzire inventory_key configured for place_order auto-buy. */
 export function stockHasHostdzirePlans(stock) {
   const { stockHasHostdzirePlans: hasPlans } = require('@/lib/hostdzireStockConfig');
@@ -95,7 +110,7 @@ export function usesStockCount(stock, company) {
   if (usesNetbayLiveStock(stock, company)) return false;
   if (usesHostdzireLiveStock(stock, company)) return false;
   if (usesKurohostLiveStock(stock, company)) return false;
-  if (usesResellerLiveStock(stock, company)) return false;
+  if (usesResellerPanelLiveStock(stock, company)) return false;
   return !!(stock?.company);
 }
 
@@ -115,7 +130,7 @@ export function getIpStockRemaining(stock, company) {
   if (stock?.company && company) {
     const { isCompanyStockPurchasable } = require('@/lib/companyInventory');
     if (
-      usesResellerLiveStock(stock, company) ||
+      usesResellerPanelLiveStock(stock, company) ||
       usesNetbayLiveStock(stock, company) ||
       usesHostdzireLiveStock(stock, company) ||
       usesKurohostLiveStock(stock, company)

@@ -10,6 +10,7 @@ const { companyUsesResellerLiveStock } = require('@/lib/companyResellerApi');
 const { companyUsesHostdzireLiveStock } = require('@/lib/companyHostdzireApi');
 const {
     usesResellerLiveStock,
+    usesResellerPanelLiveStock,
     usesKurohostLiveStock,
     stockHasResellerPanelPlans,
     stockHasKurohostPlans,
@@ -181,6 +182,9 @@ async function enrichIpStocksWithProviderModes(ipStocks) {
             : null,
         resellerUseLiveStockApi: stock.company
             ? companyUsesResellerLiveStock(companyMap[String(stock.company)])
+            : null,
+        resellerPanelLiveStock: stock.company
+            ? usesResellerPanelLiveStock(stock, companyMap[String(stock.company)])
             : null,
         hostdzireUseLiveStockApi: stock.company
             ? companyUsesHostdzireLiveStock(companyMap[String(stock.company)])

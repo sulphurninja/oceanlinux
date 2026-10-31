@@ -3,7 +3,7 @@ import { resolveCompanySession } from '@/lib/companySession';
 import connectDB from '@/lib/db';
 import IPStock from '@/models/ipStockModel';
 import Company from '@/models/companyModel';
-import { getIpStockRemaining, setIpStockCount, usesStockCount } from '@/lib/ipStockAvailability';
+import { getIpStockRemaining, setIpStockCount, usesStockCount, usesResellerPanelLiveStock } from '@/lib/ipStockAvailability';
 import {
   usesPreconfiguredInventory,
   usesCompanyInventoryFulfillment,
@@ -68,7 +68,7 @@ function serializeInventoryItem(item) {
 }
 
 function readLiveStockSummary(stock, companyDoc) {
-  const liveEnabled = companyUsesResellerLiveStock(companyDoc) && stockHasResellerPanelPlans(stock);
+  const liveEnabled = usesResellerPanelLiveStock(stock, companyDoc) && stockHasResellerPanelPlans(stock);
   if (!liveEnabled) return { enabled: false };
 
   let cfg = stock?.defaultConfigurations?.resellerApi;
@@ -342,14 +342,17 @@ export async function PUT(request) {
     if (!companyDoc) {
       return NextResponse.json({ error: 'Company not found' }, { status: 404 });
     }
-    if (!companyUsesResellerLiveStock(companyDoc)) {
+    const stocks = await IPStock.find({ company: companyDoc._id });
+    const canSyncLive =
+      companyUsesResellerLiveStock(companyDoc) ||
+      stocks.some((s) => usesResellerPanelLiveStock(s, companyDoc));
+    if (!canSyncLive) {
       return NextResponse.json(
-        { error: 'Live stock sync is off. Admin → Companies → PrimeVPS → Reseller API → Live stock ON karo.' },
+        { error: 'Live stock sync is off. Admin → Companies → PrimeVPS → Reseller API → Live stock ON karo, ya IP stock par panel region set karo.' },
         { status: 403 }
       );
     }
 
-    const stocks = await IPStock.find({ company: companyDoc._id });
     for (const stock of stocks) {
       if (stock.availabilityManual) continue;
       const companyCfg = readCompanyConfig(stock);
@@ -501,7 +504,7 @@ const ResellerApi = require('@/services/resellerApi');
 
   // Manual unit stock — blocked for live zone plans (panel controls in/out of stock).
   if (action === 'setStockCount' || (stockCount !== undefined && !action)) {
-    if (companyUsesResellerLiveStock(companyDoc) && stockHasResellerPanelPlans(stock)) {
+    if (usesResellerPanelLiveStock(stock, companyDoc) && stockHasResellerPanelPlans(stock)) {
       const stockCfg = readResellerApiStockConfig(stock);
       if (stockCfg.zoneId != null || (stockCfg.zoneIds?.length ?? 0) > 0) {
         return NextResponse.json(

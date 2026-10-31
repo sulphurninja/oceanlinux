@@ -17,6 +17,7 @@ import {
   usesNetbayLiveStock,
   usesHostdzireLiveStock,
   usesResellerLiveStock,
+  usesResellerPanelLiveStock,
   usesKurohostLiveStock,
   storeAutoUnhideUpdate,
 } from '@/lib/ipStockAvailability';
@@ -182,7 +183,7 @@ function isResellerVariantInStock(stock, memory, company) {
   if (!memory || !isResellerIpStock(stock)) return true;
   const { hasUnallocatedCompanyInventory } = require('@/lib/companyInventory');
   if (hasUnallocatedCompanyInventory(stock)) return true;
-  if (!usesResellerLiveStock(stock, company)) return isIpStockPurchasable(stock, 1, company);
+  if (!usesResellerPanelLiveStock(stock, company)) return isIpStockPurchasable(stock, 1, company);
   if (stock.available) return true;
   const cfg = toPlainConfigurations(stock.defaultConfigurations)?.resellerApi;
   const variant = cfg?.variantStock?.[memory];
@@ -219,7 +220,8 @@ export async function refreshAndVerifyIpStockPurchase(ipStockId, memory) {
   const netbayLive = isNetbayIpStock(stock) && usesNetbayLiveStock(stock, company);
   const hostdzireLive = isHostdzireIpStock(stock) && usesHostdzireLiveStock(stock, company);
   const kurohostLive = isKurohostIpStock(stock) && usesKurohostLiveStock(stock, company);
-  const resellerLive = isResellerIpStock(stock) && usesResellerLiveStock(stock, company);
+  const resellerLive =
+    isResellerIpStock(stock) && usesResellerPanelLiveStock(stock, company);
 
   try {
     if (isAdvpsPlan(stock)) {
