@@ -70,6 +70,19 @@ export default function CompanyPanelZonesTab({
     setZoneIdsDraft(selectedStock.resellerZones?.zoneIds || []);
   }, [selectedStock?._id, selectedStock?.resellerZones?.zoneIds?.join(',')]);
 
+  useEffect(() => {
+    if (!panelZones.length || zoneIdsDraft.length === 0) return;
+    const valid = new Set(panelZones.map((z) => Number(z.id)));
+    const filtered = zoneIdsDraft.filter((id) => valid.has(Number(id)));
+    if (filtered.length !== zoneIdsDraft.length) {
+      const removed = zoneIdsDraft.filter((id) => !valid.has(Number(id)));
+      setZoneIdsDraft(filtered);
+      toast.warning(
+        `Purane region ID panel par nahi: ${removed.join(', ')}. Sahi region select karke Save regions dabao.`,
+      );
+    }
+  }, [panelZones, zoneIdsDraft.length, selectedStock?._id]);
+
   const fetchPanelZones = async (silent = false) => {
     setZonesLoading(true);
     try {
@@ -114,6 +127,9 @@ export default function CompanyPanelZonesTab({
       if (!res.ok) throw new Error(data.error || 'Save failed');
 
       if (data.stock) onStockUpdated(data.stock);
+      if (Array.isArray(data.removedStaleZoneIds) && data.removedStaleZoneIds.length) {
+        toast.warning(`Purane region ID save se hata diye: ${data.removedStaleZoneIds.join(', ')}`);
+      }
       toast.success('Panel regions saved — ab is plan par API se buy hoga');
     } catch (err: any) {
       toast.error(err.message || 'Save failed');

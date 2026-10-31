@@ -42,6 +42,7 @@ const {
 const {
   applyResellerZonesToStockDocument,
   serializeResellerZonesForClient,
+  sanitizeZoneIdsAgainstPanel,
 } = require('@/lib/resellerZoneConfig');
 const { syncResellerIpStockRow, stockHasResellerPanelPlans } = require('@/lib/resellerLiveStock');
 const { readResellerApiStockConfig } = require('@/lib/resellerApiStockConfig');
@@ -460,7 +461,22 @@ const ResellerApi = require('@/services/resellerApi');
       live: ResellerApi.isZoneStatusLive(z.status),
     }));
 
-    applyResellerZonesToStockDocument(stock, ids, panelZones);
+    const { zoneIds: cleanIds, removed: removedStaleZoneIds } = sanitizeZoneIdsAgainstPanel(
+      ids,
+      zonesList
+    );
+    if (!cleanIds.length) {
+      return NextResponse.json(
+        {
+          error:
+            'Koi valid region nahi bacha. Sirf panel list wale regions select karo (purane ID auto hata diye gaye).',
+          removedStaleZoneIds,
+        },
+        { status: 400 }
+      );
+    }
+
+    applyResellerZonesToStockDocument(stock, cleanIds, panelZones);
     await stock.save();
 
     if (stockHasResellerPanelPlans(stock)) {
@@ -475,6 +491,7 @@ const ResellerApi = require('@/services/resellerApi');
     return NextResponse.json({
       success: true,
       message: 'Panel regions saved for this IP stock',
+      removedStaleZoneIds,
       stock: serializeStock(fresh, companyDoc),
     });
   }

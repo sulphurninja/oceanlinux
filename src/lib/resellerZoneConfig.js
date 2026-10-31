@@ -31,6 +31,26 @@ function readResellerApiConfigFromStock(stock) {
   };
 }
 
+/**
+ * Drop zone IDs that no longer exist on the panel (deleted/renumbered regions).
+ * Prevents ghost primaries like ID 34 when the live list only has 1,2,5,6,8.
+ */
+function sanitizeZoneIdsAgainstPanel(zoneIds, zonesList) {
+  const valid = new Set(
+    (zonesList || [])
+      .map((z) => Number(z?.id))
+      .filter((n) => Number.isFinite(n))
+  );
+  const ids = (zoneIds || []).map(Number).filter((n) => Number.isFinite(n));
+  const kept = [];
+  const removed = [];
+  for (const id of ids) {
+    if (valid.has(id)) kept.push(id);
+    else removed.push(id);
+  }
+  return { zoneIds: kept, removed };
+}
+
 function buildResellerZoneConfig(zones, zoneIds) {
   const cleanIds = (zoneIds || []).map(Number).filter((n) => Number.isFinite(n));
   const zoneNames = {};
@@ -93,6 +113,7 @@ function serializeResellerZonesForClient(stock) {
 module.exports = {
   getResellerApiBlock,
   readResellerApiConfigFromStock,
+  sanitizeZoneIdsAgainstPanel,
   buildResellerZoneConfig,
   applyResellerZonesToStockDocument,
   serializeResellerZonesForClient,

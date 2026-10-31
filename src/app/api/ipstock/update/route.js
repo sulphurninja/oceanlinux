@@ -5,7 +5,7 @@ import connectDB from '@/lib/db';
 import IPStock from '@/models/ipStockModel';
 import Company from '@/models/companyModel';
 import { enforceAdmin } from '@/lib/apiSecurity';
-import { usesNetbayLiveStock, usesResellerLiveStock, storeAutoUnhideUpdate } from '@/lib/ipStockAvailability';
+import { usesNetbayLiveStock, usesResellerPanelLiveStock, storeAutoUnhideUpdate } from '@/lib/ipStockAvailability';
 const { usesCompanyInventoryFulfillment, countUnallocatedInventory } = require('@/lib/companyInventory');
 
 const {
@@ -44,6 +44,52 @@ export async function PUT(req, res) {
       ? (company && company !== 'none' ? company : null)
       : existing.company;
 
+    let companyDoc = null;
+    if (resolvedCompany) {
+      companyDoc = await Company.findById(resolvedCompany).select('netbayApi resellerApi').lean();
+    }
+
+    const plainMergedEarly = toPlainConfigurations(mergedDefaults);
+    const resolvedTagsEarly = tags !== undefined ? tags : (existing.tags || []);
+    const hasResellerPlansEarly = !!(
+      plainMergedEarly?.resellerApi ||
+      (resolvedTagsEarly || []).map((t) => String(t).toLowerCase()).some((t) =>
+        t === 'reseller-api' || t === 'primevps' || t === 'primevm'
+      )
+    );
+
+    if (hasResellerPlansEarly && companyDoc?.resellerApi?.enabled && plainMergedEarly?.resellerApi) {
+      const {
+        sanitizeZoneIdsAgainstPanel,
+        buildResellerZoneConfig,
+      } = require('@/lib/resellerZoneConfig');
+      const ResellerApi = require('@/services/resellerApi');
+      const { getCompanyResellerApiConfig } = require('@/lib/companyResellerApi');
+      try {
+        const api = new ResellerApi(getCompanyResellerApiConfig(companyDoc));
+        const zonesList = await api.listZones();
+        const cfg = plainMergedEarly.resellerApi;
+        const configuredIds = Array.isArray(cfg.zoneIds)
+          ? cfg.zoneIds
+          : cfg.zoneId != null
+            ? [cfg.zoneId]
+            : [];
+        const { zoneIds: cleanIds, removed } = sanitizeZoneIdsAgainstPanel(configuredIds, zonesList);
+        if (removed.length) {
+          const zoneBlock = buildResellerZoneConfig(zonesList, cleanIds);
+          mergedDefaults = {
+            ...mergedDefaults,
+            resellerApi: {
+              ...plainMergedEarly.resellerApi,
+              ...zoneBlock,
+            },
+          };
+        }
+      } catch (sanitizeErr) {
+        console.warn('[IPSTOCK-UPDATE] zone sanitize failed:', sanitizeErr.message);
+      }
+    }
+
     const updatePayload = {
       name: mergedName,
       serverType,
@@ -72,11 +118,6 @@ export async function PUT(req, res) {
       )
     );
 
-    let companyDoc = null;
-    if (resolvedCompany) {
-      companyDoc = await Company.findById(resolvedCompany).select('netbayApi resellerApi').lean();
-    }
-
     const netbayLiveStock =
       hasNetbayPlans &&
       usesNetbayLiveStock(
@@ -84,14 +125,14 @@ export async function PUT(req, res) {
         companyDoc
       );
 
-    const resellerLiveStock =
+    const resellerPanelLiveStock =
       hasResellerPlans &&
-      usesResellerLiveStock(
+      usesResellerPanelLiveStock(
         { company: resolvedCompany, tags: resolvedTags, defaultConfigurations: { resellerApi: plainMerged?.resellerApi } },
         companyDoc
       );
 
-    if (resolvedCompany && !netbayLiveStock && !resellerLiveStock) {
+    if (resolvedCompany && !netbayLiveStock && !resellerPanelLiveStock) {
       if (usesCompanyInventoryFulfillment(existing)) {
         // Preconfigured servers: availability is driven by free inventory rows,
         // never by the stockCount field (which drifts stale on unrelated edits).
@@ -107,7 +148,7 @@ export async function PUT(req, res) {
         updatePayload.available = count > 0;
         Object.assign(updatePayload, storeAutoUnhideUpdate(existing, count > 0));
       }
-    } else if (netbayLiveStock || resellerLiveStock) {
+    } else if (netbayLiveStock || resellerPanelLiveStock) {
       // Live stock: availability comes from panel sync — do not zero stockCount on save.
       if (existing.availabilityManual && available !== undefined) {
         updatePayload.available = available;
@@ -140,7 +181,7 @@ export async function PUT(req, res) {
     }
 
     let finalStock = updatedStock;
-    if (resellerLiveStock && hasResellerPlans) {
+    if (resellerPanelLiveStock && hasResellerPlans) {
       try {
         finalStock = await syncResellerIpStockRow(updatedStock, { force: true }) || updatedStock;
       } catch (syncErr) {

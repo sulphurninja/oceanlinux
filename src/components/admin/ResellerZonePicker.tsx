@@ -39,6 +39,9 @@ export function ResellerZonePicker({
   disabled = false,
   loading = false,
 }: ResellerZonePickerProps) {
+  const panelIdSet = new Set(zones.map((z) => Number(z.id)));
+  const orphanIds = zoneIds.filter((id) => !panelIdSet.has(Number(id)));
+
   const toggleZone = (zoneId: number, checked: boolean) => {
     if (checked) {
       if (zoneIds.includes(zoneId)) return;
@@ -58,7 +61,26 @@ export function ResellerZonePicker({
 
   return (
     <div className="space-y-2">
-      <Label className="text-sm">Regions (1 ya zyada — upar wala pehle try hoga)</Label>
+      {orphanIds.length > 0 && (
+        <div className="rounded-md border border-amber-300/80 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-xs text-amber-900 dark:text-amber-100">
+          <p className="font-medium">Purane region ID panel par nahi milte: {orphanIds.join(', ')}</p>
+          <p className="mt-1 text-amber-800/90 dark:text-amber-200/90">
+            Inhe list me tick nahi kar sakte, lekin Priority 1 ban kar stock out kar dete hain. Hatao, phir sahi region
+            select karke Save karo.
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="mt-2 h-7 text-xs"
+            disabled={disabled}
+            onClick={() => onChange(zoneIds.filter((id) => panelIdSet.has(Number(id))))}
+          >
+            Invalid regions hatao
+          </Button>
+        </div>
+      )}
+      <Label className="text-sm">Regions (Priority 1 = store + buy — sirf panel list se)</Label>
       <div className="rounded-md border divide-y max-h-[280px] overflow-y-auto bg-background/80">
         {zones.map((zone) => {
           const zoneId = Number(zone.id);
@@ -136,10 +158,9 @@ export function ResellerZonePicker({
         </p>
       )}
       <p className="text-[11px] text-muted-foreground">
-        Primary inactive ho to agla selected zone par auto-buy try hoga (2, 3, … jitne select karo).
-        Hotstar/Hostheaven par panel region ka naam alag subnet dikhata ho sakta hai (e.g. label 103.170)
-        — Windows 103.109.110 ke liye aksar wahi zone ID chalegi jahan pehle 103.109.110.x VMs bani hon;
-        product title (103.109.110) par trust karo, sirf panel label par nahi.
+        Store aur auto-buy dono sirf Priority 1 (primary) region follow karte hain — doosra zone live hone se plan
+        available nahi hota. Neeche sirf wahi ID select karo jo panel list me dikhen.
+        Hotstar/Hostheaven par region ka naam alag subnet ho sakta hai; product title (103.109, 161.248, …) par trust karo.
       </p>
     </div>
   );
