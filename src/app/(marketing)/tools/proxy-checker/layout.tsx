@@ -1,9 +1,9 @@
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Free Proxy IP Checker | Test Proxy on Google, IRCTC & More | OceanLinux',
+  title: 'Free Proxy IP Checker | IRCTC Proxy Test | OceanLinux',
   description:
-    'Check if your HTTP proxy is working on Google, IRCTC, YouTube, Amazon and more. Paste ip:port:username:password and test multiple websites instantly.',
+    'Check if your proxy opens IRCTC. Paste one ip:port:username:password or a list and see working or dead.',
   keywords: [
     'proxy checker',
     'ip checker',
@@ -15,7 +15,7 @@ export const metadata: Metadata = {
   ],
   openGraph: {
     title: 'Free Proxy IP Checker | OceanLinux',
-    description: 'Test your proxy on Google, IRCTC, YouTube and other sites in one click.',
+    description: 'Test your proxy on IRCTC. Paste one proxy or a list.',
     url: 'https://oceanlinux.com/tools/proxy-checker',
     siteName: 'OceanLinux',
   },

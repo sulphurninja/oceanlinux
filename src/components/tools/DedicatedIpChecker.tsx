@@ -161,7 +161,7 @@ export default function DedicatedIpChecker({ variant = 'marketing' }: { variant?
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
             <p className="text-[11px] font-semibold tracking-wide text-emerald-300">IRCTC CHECK · LIVE</p>
-            <h1 className="mt-1 text-xl font-bold text-white sm:text-2xl">Dedicated IP Checker</h1>
+            <h1 className="mt-1 text-xl font-bold text-white sm:text-2xl">Proxy IP Checker</h1>
             <p className="mt-1 text-sm leading-snug text-white/50">Working tab IRCTC par pass hone se aata hai. Neeche site ka naam likha hai.</p>
           </div>
           {visitorIp && (
