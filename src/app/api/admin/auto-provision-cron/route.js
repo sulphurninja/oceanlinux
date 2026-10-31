@@ -579,10 +579,9 @@ export async function POST(request) {
         const { isIstPeakTrafficHour } = require('@/lib/istPeakTraffic');
         const peakTraffic = isIstPeakTrafficHour();
         if (peakTraffic) {
-            console.log(`[CRON-${cronId}] 8–11 IST: skip bulk Nexa/reseller/slot sync, provision one order only`);
+            console.log(`[CRON-${cronId}] 8–11 IST: skip bulk reseller/slot sync, still copy Nexa IPs already delivered`);
         }
 
-        if (!peakTraffic) {
         try {
             const { syncNexaPendingOrders } = require('@/lib/nexaPendingSync');
             const nexaSync = await syncNexaPendingOrders({ limit: 40 });
@@ -593,6 +592,7 @@ export async function POST(request) {
             console.warn(`[CRON-${cronId}] Nexa pending sync skipped:`, nexaSyncErr.message);
         }
 
+        if (!peakTraffic) {
         try {
             const { syncStuckResellerPendingOrders } = require('@/lib/resellerApiOrderSync');
             const resellerSync = await syncStuckResellerPendingOrders({ limit: 25 });

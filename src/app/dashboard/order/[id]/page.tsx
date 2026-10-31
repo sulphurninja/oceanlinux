@@ -706,7 +706,7 @@ const OrderDetails = () => {
               name: ipStockData.name,
               tags: ipStockData.tags
             });
-            setIpStock(ipStockData);
+            setIpStock(mergeAutomationStock(orderData, ipStockData) || ipStockData);
           } else {
             console.warn('[ORDER-DETAILS] Failed to fetch IPStock data');
           }
