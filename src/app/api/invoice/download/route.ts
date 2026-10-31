@@ -6,7 +6,7 @@ import User from '@/models/userModel';
 import type { LeanDoc } from '@/types/lean';
 import { jsPDF } from 'jspdf';
 import { getOrdersPageStatus } from '@/lib/orderDeliveryStatus';
-import { getOrAssignInvoiceNumber } from '@/lib/invoiceNumber';
+import { getOrAssignInvoiceNumber, getOrAssignRenewalInvoiceNumber } from '@/lib/invoiceNumber';
 import fs from 'fs';
 import path from 'path';
 
@@ -102,6 +102,7 @@ export async function GET(request: NextRequest) {
     }
 
     const orderId = new URL(request.url).searchParams.get('orderId');
+    const renewalTxnId = new URL(request.url).searchParams.get('renewalTxnId');
     if (!orderId) return NextResponse.json({ error: 'Order ID is required' }, { status: 400 });
 
     const order = await Order.findOne({ _id: orderId, user: userId }).lean<LeanDoc>();
@@ -109,7 +110,14 @@ export async function GET(request: NextRequest) {
     if (!order) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
     if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
-    const productName = clean(order.productName || 'N/A');
+    const renewal = renewalTxnId
+      ? ((order as any).renewalPayments || []).find((row: any) => row.renewalTxnId === renewalTxnId)
+      : null;
+    if (renewalTxnId && !renewal) {
+      return NextResponse.json({ error: 'Renewal not found' }, { status: 404 });
+    }
+
+    const productName = clean(renewal ? `${order.productName || 'VPS'} Renewal` : (order.productName || 'N/A'));
     const memory = clean(order.memory || 'N/A');
     const customerName = clean(order.customerName || (user as any).name || 'N/A');
     const customerEmail = clean(order.customerEmail || (user as any).email || 'N/A');
@@ -117,16 +125,21 @@ export async function GET(request: NextRequest) {
     const uname = clean(order.username || '');
     const passwd = clean(order.password || '');
     const os = clean(order.os || '');
-    const txId = clean(order.transactionId || '');
-    const gwOrderId = clean(order.gatewayOrderId || '');
-    const clientTxnId = clean(order.clientTxnId || '');
-    const createdAt = new Date(order.createdAt || new Date());
-    const expiry = order.expiryDate ? new Date(order.expiryDate as any) : null;
+    const txId = clean(renewal ? (renewal.paymentId || '') : (order.transactionId || ''));
+    const gwOrderId = clean(renewal ? (renewal.gatewayOrderId || '') : (order.gatewayOrderId || ''));
+    const clientTxnId = clean(renewal ? (renewal.renewalTxnId || '') : (order.clientTxnId || ''));
+    const createdAt = new Date(renewal ? (renewal.paidAt || new Date()) : (order.createdAt || new Date()));
+    const periodStart = renewal
+      ? new Date(renewal.previousExpiry || renewal.paidAt || new Date())
+      : createdAt;
+    const expiry = renewal
+      ? (renewal.newExpiry ? new Date(renewal.newExpiry) : null)
+      : (order.expiryDate ? new Date(order.expiryDate as any) : null);
     const status = (order.status || 'pending').toString();
 
-    const price = Number(order.price ?? order.originalPrice ?? 0);
-    const originalPrice = Number(order.originalPrice ?? price);
-    const discount = Number(order.promoDiscount ?? 0);
+    const price = Number(renewal ? renewal.amount : (order.price ?? order.originalPrice ?? 0));
+    const originalPrice = Number(renewal ? price : (order.originalPrice ?? price));
+    const discount = renewal ? 0 : Number(order.promoDiscount ?? 0);
     const taxable = ORG.showGST ? price * (100 / (100 + ORG.gstRatePct)) : price;
     const gstAmt = ORG.showGST ? Math.round(price - taxable) : 0;
     const cgst = Math.round(gstAmt / 2);
@@ -141,7 +154,9 @@ export async function GET(request: NextRequest) {
     // Intra-state (same as seller) => CGST + SGST, otherwise IGST.
     const isIntraState = !!custState && custState.trim().toLowerCase() === ORG.state.toLowerCase();
 
-    const invoiceNum = await getOrAssignInvoiceNumber(order);
+    const invoiceNum = renewal
+      ? await getOrAssignRenewalInvoiceNumber(order._id, renewal)
+      : await getOrAssignInvoiceNumber(order);
 
     const doc = new jsPDF();
     const W = 210;
@@ -186,7 +201,7 @@ export async function GET(request: NextRequest) {
     setColor(doc, C.white);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(26);
-    doc.text('INVOICE', R, 24, { align: 'right' });
+    doc.text(renewal ? 'RENEWAL' : 'INVOICE', R, 24, { align: 'right' });
 
     // Invoice number
     setColor(doc, C.greenLt);
@@ -198,7 +213,7 @@ export async function GET(request: NextRequest) {
     // A delivered order means payment is settled → PAID invoice. Every other
     // state (awaiting payment, processing, failed, cancelled) produces a
     // provisional PENDING invoice that clearly shows payment is not yet done.
-    const isPaid = getOrdersPageStatus(order as any) === 'delivered';
+    const isPaid = renewal ? true : getOrdersPageStatus(order as any) === 'delivered';
     const badgeColor = isPaid ? C.green : C.amber;
     const badgeText = isPaid ? 'PAID' : 'PENDING';
     doc.setFont('helvetica', 'bold');
@@ -217,7 +232,7 @@ export async function GET(request: NextRequest) {
     const metaItems = [
       { label: 'INVOICE DATE', value: fmtDate(createdAt) },
       { label: 'PAYMENT STATUS', value: isPaid ? 'Paid' : 'Pending' },
-      { label: 'SERVICE PERIOD', value: expiry ? `${fmtDate(createdAt)} to ${fmtDate(expiry)}` : fmtDate(createdAt) },
+      { label: 'SERVICE PERIOD', value: expiry ? `${fmtDate(periodStart)} to ${fmtDate(expiry)}` : fmtDate(periodStart) },
     ];
 
     // Uneven columns: give service period more room
@@ -355,8 +370,8 @@ export async function GET(request: NextRequest) {
     doc.setFontSize(8.5);
     setColor(doc, C.slate7);
     const periodLines = expiry
-      ? [fmtDate(createdAt), `to ${fmtDate(expiry)}`]
-      : [fmtDate(createdAt)];
+      ? [fmtDate(periodStart), `to ${fmtDate(expiry)}`]
+      : [fmtDate(periodStart)];
     doc.text(periodLines, periodColX, y);
 
     // Amount
@@ -588,7 +603,9 @@ export async function GET(request: NextRequest) {
 
     // ── Output ───────────────────────────────────────────────────────────
     const pdfBuffer = Buffer.from(doc.output('arraybuffer'));
-    const fileName = `oceanlinux-invoice-${invoiceNum}.pdf`;
+    const fileName = renewal
+      ? `oceanlinux-renewal-${invoiceNum}.pdf`
+      : `oceanlinux-invoice-${invoiceNum}.pdf`;
 
     return new NextResponse(pdfBuffer, {
       status: 200,

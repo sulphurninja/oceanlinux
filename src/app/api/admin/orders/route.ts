@@ -411,13 +411,14 @@ export async function GET(request: NextRequest) {
       const WalletRecharge = (await import('@/models/walletRechargeModel')).default;
       const { buildGstExportRows } = require('@/lib/gstExport');
 
-      const [orders, walletRecharges] = await Promise.all([
+      const paidStatuses = ['confirmed', 'active', 'paid', 'completed'];
+      const [orders, walletRecharges, renewalOrders] = await Promise.all([
         Order.find({
-          status: { $in: ['confirmed', 'active', 'paid', 'completed'] },
+          status: { $in: paidStatuses },
           createdAt: { $gte: fromDate, $lte: toDate },
         })
-          .select(EXPORT_SELECT)
-          .populate('user', 'name email billingAddress')
+          .select(`${EXPORT_SELECT} resellerId`)
+          .populate('user', 'name email billingAddress userType')
           .sort({ createdAt: -1 })
           .limit(10000)
           .lean(),
@@ -428,20 +429,51 @@ export async function GET(request: NextRequest) {
             { createdAt: { $gte: fromDate, $lte: toDate } },
           ],
         })
-          .populate('user', 'name email billingAddress')
+          .populate('user', 'name email billingAddress userType')
           .sort({ creditedAt: -1, createdAt: -1 })
+          .limit(10000)
+          .lean(),
+        Order.find({
+          status: { $in: paidStatuses },
+          'renewalPayments.paidAt': { $gte: fromDate, $lte: toDate },
+        })
+          .select('user productName memory customerName resellerId paymentMethod paymentDetails renewalPayments')
+          .populate('user', 'name email billingAddress userType')
           .limit(10000)
           .lean(),
       ]);
 
+      const isResellerGstOrder = (order: any) => {
+        if (order?.user?.userType === 'reseller') return true;
+        const method = String(order?.paymentMethod || '').toLowerCase();
+        if (method === 'reseller_wallet' || method.includes('reseller_wallet')) return true;
+        return Boolean(order?.resellerId || order?.paymentDetails?.purchasedViaResellerApi === true);
+      };
+
       const walletOnlyUserIds = [
         ...new Set(
-          orders
-            .filter((o: any) => {
+          [
+            ...orders.filter((o: any) => {
               const m = String(o.paymentMethod || '').toLowerCase();
+              if (isResellerGstOrder(o)) return false;
               return m === 'wallet' || o.paymentDetails?.walletOnly === true;
+            }),
+            ...renewalOrders.filter((o: any) => !isResellerGstOrder(o)),
+          ]
+            .flatMap((o: any) => {
+              const ids = [];
+              const m = String(o.paymentMethod || '').toLowerCase();
+              if (m === 'wallet' || o.paymentDetails?.walletOnly === true) {
+                ids.push(String(o.user?._id || o.user || ''));
+              }
+              for (const renewal of o.renewalPayments || []) {
+                const paid = new Date(renewal.paidAt || 0).getTime();
+                if (paid < fromDate.getTime() || paid > toDate.getTime()) continue;
+                const rm = String(renewal.paymentMethod || '').toLowerCase();
+                if (rm === 'wallet') ids.push(String(o.user?._id || o.user || ''));
+              }
+              return ids;
             })
-            .map((o: any) => String(o.user?._id || o.user || ''))
             .filter(Boolean),
         ),
       ];
@@ -459,10 +491,24 @@ export async function GET(request: NextRequest) {
               .lean()
           : [];
 
+      const { getOrAssignRenewalInvoiceNumber } = await import('@/lib/invoiceNumber');
+      for (const order of renewalOrders) {
+        if (isResellerGstOrder(order)) continue;
+        for (const renewal of (order as any).renewalPayments || []) {
+          const paid = new Date(renewal.paidAt || 0).getTime();
+          if (paid < fromDate.getTime() || paid > toDate.getTime()) continue;
+          const method = String(renewal.paymentMethod || renewal.paymentDetails?.method || '').toLowerCase();
+          if (method === 'reseller_wallet' || method.includes('reseller_wallet')) continue;
+          renewal.invoiceNumber = await getOrAssignRenewalInvoiceNumber(order._id, renewal);
+        }
+      }
+
       const rows = buildGstExportRows(orders, walletRecharges, {
         gatewayFilter: gateway,
         salesPercent,
         attributionRecharges,
+        renewalOrders,
+        range: { from: fromDate, to: toDate },
       });
 
       return NextResponse.json(

@@ -175,6 +175,7 @@ const orderSchema = new mongoose.Schema({
         providerRenewalResult: { type: mongoose.Schema.Types.Mixed },
         processedViaCompanyApproval: { type: Boolean },
         approvedBy: { type: mongoose.Schema.Types.Mixed },
+        invoiceNumber: { type: String, default: '' },
     }],
 
     // Pending renewal tracking - stores the current renewal transaction awaiting payment

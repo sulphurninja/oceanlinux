@@ -2512,8 +2512,8 @@ const ManageOrders = () => {
                                 <span>Export GST Report</span>
                             </DialogTitle>
                             <DialogDescription className="text-left text-xs leading-relaxed sm:text-sm">
-                                Separate Razorpay and UPI (KwikUPI) GST CSVs. Wallet top-ups use the same gateway.
-                                Wallet purchases follow the user&apos;s latest top-up before that order.
+                                Separate Razorpay and UPI (KwikUPI) GST CSVs. Renewals use the gateway that was paid.
+                                Wallet top-ups use the same gateway. Wallet purchases and wallet renewals follow the user&apos;s latest top-up before that payment.
                             </DialogDescription>
                         </DialogHeader>
                     </div>
@@ -2531,13 +2531,13 @@ const ManageOrders = () => {
                                         {
                                             id: 'razorpay' as const,
                                             title: 'Razorpay Sales',
-                                            hint: 'Razorpay pay, Razorpay wallet top-up, wallet buy after Razorpay top-up',
+                                            hint: 'Razorpay pay, Razorpay renewal, Razorpay wallet top-up, wallet buy or renew after Razorpay top-up',
                                             icon: CreditCard,
                                         },
                                         {
                                             id: 'upi' as const,
                                             title: 'UPI (KwikUPI)',
-                                            hint: 'UPI pay, UPI wallet top-up, wallet buy after UPI top-up',
+                                            hint: 'UPI pay, UPI renewal, UPI wallet top-up, wallet buy or renew after UPI top-up',
                                             icon: Wallet,
                                         },
                                     ] as const

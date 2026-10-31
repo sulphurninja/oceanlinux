@@ -2058,29 +2058,31 @@ const OrderDetails = () => {
     return order.status.toLowerCase() === 'pending';
   };
 
-  const [downloadingInvoice, setDownloadingInvoice] = useState(false);
+  const [downloadingInvoice, setDownloadingInvoice] = useState<string | null>(null);
 
-  const handleDownloadInvoice = async () => {
+  const handleDownloadInvoice = async (renewalTxnId?: string) => {
     if (!order) return;
-    setDownloadingInvoice(true);
+    const key = renewalTxnId || 'order';
+    setDownloadingInvoice(key);
     try {
-      const res = await dashboardFetch(`/api/invoice/download?orderId=${order._id}`);
+      const renewalQuery = renewalTxnId ? `&renewalTxnId=${encodeURIComponent(renewalTxnId)}` : '';
+      const res = await dashboardFetch(`/api/invoice/download?orderId=${order._id}${renewalQuery}`);
       if (!res.ok) throw new Error('Failed to generate invoice');
       const blob = await res.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.style.display = 'none';
       a.href = url;
-      a.download = `invoice-${order._id}.pdf`;
+      a.download = renewalTxnId ? `renewal-invoice-${renewalTxnId}.pdf` : `invoice-${order._id}.pdf`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
-      toast.success('Invoice downloaded!');
+      toast.success(renewalTxnId ? 'Renewal invoice downloaded!' : 'Invoice downloaded!');
     } catch {
       toast.error('Failed to download invoice');
     } finally {
-      setDownloadingInvoice(false);
+      setDownloadingInvoice(null);
     }
   };
 
@@ -3011,6 +3013,16 @@ const OrderDetails = () => {
                             <div>
                               <p className="font-semibold">₹{renewal.amount} paid</p>
                               <p className="text-muted-foreground">{formatDate(renewal.paidAt)}</p>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="mt-2 h-8 px-2 text-xs"
+                                disabled={downloadingInvoice !== null}
+                                onClick={() => handleDownloadInvoice(renewal.renewalTxnId)}
+                              >
+                                {downloadingInvoice === renewal.renewalTxnId ? 'Generating...' : 'Renewal invoice'}
+                              </Button>
                             </div>
                             <div className="text-left sm:text-right">
                               <p className="text-muted-foreground">Extended to</p>
@@ -4671,6 +4683,16 @@ const OrderDetails = () => {
                                 <div>
                                   <p className="font-semibold text-foreground">₹{renewal.amount} paid</p>
                                   <p className="text-muted-foreground mt-0.5">{formatDate(renewal.paidAt)}</p>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="mt-2 h-8 px-2 text-xs"
+                                    disabled={downloadingInvoice !== null}
+                                    onClick={() => handleDownloadInvoice(renewal.renewalTxnId)}
+                                  >
+                                    {downloadingInvoice === renewal.renewalTxnId ? 'Generating...' : 'Renewal invoice'}
+                                  </Button>
                                 </div>
                                 <div className="text-left sm:text-right">
                                   <p className="text-muted-foreground">Extended to</p>
@@ -4688,15 +4710,15 @@ const OrderDetails = () => {
                           variant="outline"
                           size="sm"
                           onClick={handleDownloadInvoice}
-                          disabled={downloadingInvoice}
+                          disabled={downloadingInvoice !== null}
                           className="premium-order-power-btn"
                         >
-                          {downloadingInvoice ? (
+                          {downloadingInvoice === 'order' ? (
                             <Loader2 className="h-4 w-4 animate-spin" />
                           ) : (
                             <Download className="h-4 w-4" />
                           )}
-                          {downloadingInvoice ? 'Generating...' : 'Download Invoice'}
+                          {downloadingInvoice === 'order' ? 'Generating...' : 'Download Invoice'}
                         </Button>
                       </div>
                     </CardContent>
@@ -4709,15 +4731,15 @@ const OrderDetails = () => {
                     type="button"
                     variant="outline"
                     onClick={handleDownloadInvoice}
-                    disabled={downloadingInvoice}
+                    disabled={downloadingInvoice !== null}
                     className="premium-order-power-btn"
                   >
-                    {downloadingInvoice ? (
+                    {downloadingInvoice === 'order' ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
                     ) : (
                       <Download className="h-4 w-4" />
                     )}
-                    {downloadingInvoice ? 'Generating Invoice...' : 'Download Invoice'}
+                    {downloadingInvoice === 'order' ? 'Generating Invoice...' : 'Download Invoice'}
                   </Button>
                 )}
 

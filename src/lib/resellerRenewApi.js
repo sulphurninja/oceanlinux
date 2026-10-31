@@ -187,6 +187,16 @@ export async function renewResellerOrder(reseller, order, orderId) {
   let newExpiryDate = resolveOrderRenewalExpiryDate(currentExpiry, { useCompanyValidity });
 
   logger.logInfo('Provider determined', { provider });
+
+  if (provider === 'smartvps' || provider === 'reseller-api') {
+    const { checkRenewalPanelPresence } = require('@/lib/renewalPanelPresence');
+    const presence = await checkRenewalPanelPresence(order, provider);
+    if (!presence.ok) {
+      logger.logInfo('Renewal blocked, IP not on provider panel', { code: presence.code, provider });
+      return failEarly(400, { success: false, message: presence.message }, presence.message);
+    }
+  }
+
   logger.setPaymentInfo('reseller_wallet', renewalTxnId, renewalPrice, renewalTxnId);
 
   try {

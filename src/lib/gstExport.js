@@ -15,6 +15,27 @@ function cleanProductName(s) {
     .trim();
 }
 
+/** Reseller wallet, reseller API buys, and reseller-account payments stay out of GST. */
+function isResellerOrder(order) {
+  if (order?.user?.userType === 'reseller') return true;
+  const method = String(order?.paymentMethod || '').toLowerCase();
+  if (method === 'reseller_wallet' || method.includes('reseller_wallet')) return true;
+  if (order?.resellerId) return true;
+  const details = order?.paymentDetails || {};
+  if (details.purchasedViaResellerApi === true) return true;
+  if (String(details.method || '').toLowerCase() === 'reseller_wallet') return true;
+  return false;
+}
+
+function isResellerRecharge(recharge) {
+  if (recharge?.user?.userType === 'reseller') return true;
+  const details = recharge?.paymentDetails || {};
+  if (details.reroutedToResellerWallet === true) return true;
+  if (details.resellerId) return true;
+  const method = String(recharge?.paymentMethod || '').toLowerCase();
+  return method.includes('reseller');
+}
+
 /** @returns {'razorpay'|'upi'|'other'|'wallet_unattributed'} */
 function classifyGatewayFromMethod(method, paymentDetails = {}) {
   const m = String(method || '').toLowerCase();
@@ -140,10 +161,46 @@ function formatInvoiceDate(d) {
  * @param {'razorpay'|'upi'|'all'} gatewayFilter
  * @param {object[]} [attributionRecharges] — extra confirmed top-ups for wallet-only order attribution (any date ≤ range end)
  */
+function isResellerRenewal(order, renewal) {
+  if (isResellerOrder(order)) return true;
+  const method = String(renewal?.paymentMethod || renewal?.paymentDetails?.method || '').toLowerCase();
+  return method === 'reseller_wallet' || method.includes('reseller_wallet');
+}
+
+function paymentChannelLabel(gateway) {
+  if (gateway === 'razorpay') return 'Razorpay';
+  if (gateway === 'upi') return 'UPI (KwikUPI)';
+  return gateway;
+}
+
+function renewalInRange(renewal, range) {
+  if (!range) return true;
+  const paid = new Date(renewal?.paidAt || 0).getTime();
+  return paid >= range.from.getTime() && paid <= range.to.getTime();
+}
+
+function classifyRenewalGateway(order, renewal, rechargesByUserId) {
+  const details = {
+    ...(renewal?.paymentDetails || {}),
+    transactionId: renewal?.paymentDetails?.transactionId || renewal?.paymentId || '',
+    paymentId: renewal?.paymentId || renewal?.paymentDetails?.paymentId || '',
+  };
+  return classifyOrderGateway(
+    {
+      paymentMethod: renewal?.paymentMethod || details.method || '',
+      paymentDetails: details,
+      user: order?.user,
+      createdAt: renewal?.paidAt,
+      price: renewal?.amount,
+    },
+    rechargesByUserId,
+  );
+}
+
 function buildGstExportRows(
   orders,
   walletRecharges,
-  { gatewayFilter = 'all', salesPercent = 100, attributionRecharges = [] } = {},
+  { gatewayFilter = 'all', salesPercent = 100, attributionRecharges = [], renewalOrders = [], range = null } = {},
 ) {
   const salesFactor = Math.min(100, Math.max(1, Number(salesPercent) || 100)) / 100;
 
@@ -151,6 +208,7 @@ function buildGstExportRows(
   const seenRecharge = new Set();
   const rechargesByUserId = new Map();
   for (const r of rechargePool) {
+    if (isResellerRecharge(r)) continue;
     const id = String(r._id);
     if (seenRecharge.has(id)) continue;
     seenRecharge.add(id);
@@ -162,6 +220,7 @@ function buildGstExportRows(
   const rows = [];
 
   for (const order of orders || []) {
+    if (isResellerOrder(order)) continue;
     const gateway = classifyOrderGateway(order, rechargesByUserId);
     if (gatewayFilter !== 'all' && gateway !== gatewayFilter) continue;
 
@@ -180,14 +239,46 @@ function buildGstExportRows(
       price,
       originalPrice: order.originalPrice ?? price,
       salesFactor,
-      paymentChannel: gateway === 'razorpay' ? 'Razorpay' : gateway === 'upi' ? 'UPI (KwikUPI)' : gateway,
+      paymentChannel: paymentChannelLabel(gateway),
       entryType: 'VPS Order',
     });
     if (salesPercent !== 100) row['Report Sales %'] = salesPercent;
     rows.push(row);
   }
 
+  for (const order of renewalOrders || []) {
+    if (isResellerOrder(order)) continue;
+    const billing = order.user?.billingAddress || {};
+    const baseName = cleanProductName(order.productName);
+    const itemName = order.memory ? `${baseName} - ${order.memory} Renewal` : `${baseName} Renewal`;
+
+    for (const renewal of order.renewalPayments || []) {
+      if (!renewalInRange(renewal, range)) continue;
+      if (isResellerRenewal(order, renewal)) continue;
+      const gateway = classifyRenewalGateway(order, renewal, rechargesByUserId);
+      if (gatewayFilter !== 'all' && gateway !== gatewayFilter) continue;
+
+      const price = Number(renewal.amount || 0);
+      if (!(price > 0)) continue;
+      const row = buildGstRow({
+        invoiceNo: renewal.invoiceNumber || `OLR-${String(renewal.renewalTxnId || renewal.paymentId || '').slice(-8).toUpperCase()}`,
+        invoiceDate: formatInvoiceDate(renewal.paidAt),
+        partyName: order.customerName || order.user?.name || 'N/A',
+        billing,
+        itemName,
+        price,
+        originalPrice: price,
+        salesFactor,
+        paymentChannel: paymentChannelLabel(gateway),
+        entryType: 'VPS Renewal',
+      });
+      if (salesPercent !== 100) row['Report Sales %'] = salesPercent;
+      rows.push(row);
+    }
+  }
+
   for (const recharge of walletRecharges || []) {
+    if (isResellerRecharge(recharge)) continue;
     const gateway = classifyRechargeGateway(recharge);
     if (gatewayFilter !== 'all' && gateway !== gatewayFilter) continue;
 
@@ -205,7 +296,7 @@ function buildGstExportRows(
       price,
       originalPrice: price,
       salesFactor,
-      paymentChannel: gateway === 'razorpay' ? 'Razorpay' : gateway === 'upi' ? 'UPI (KwikUPI)' : gateway,
+      paymentChannel: paymentChannelLabel(gateway),
       entryType: 'Wallet Top-up',
     });
     if (salesPercent !== 100) row['Report Sales %'] = salesPercent;

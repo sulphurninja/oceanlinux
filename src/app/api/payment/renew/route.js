@@ -105,6 +105,15 @@ export async function POST(request) {
     const provider = await resolveRenewalProvider(order);
     console.log('[RENEWAL-INIT] Provider:', provider, 'companyManaged:', companyCheck.isCompany);
 
+    if (provider === 'smartvps' || provider === 'reseller-api') {
+      const { checkRenewalPanelPresence } = require('@/lib/renewalPanelPresence');
+      const presence = await checkRenewalPanelPresence(order, provider);
+      if (!presence.ok) {
+        console.log('[RENEWAL-INIT] Panel presence blocked renewal:', presence.code, provider);
+        return NextResponse.json({ message: presence.message }, { status: 400 });
+      }
+    }
+
     // 7. For SmartVPS orders, validate that we have the necessary identifiers
     if (provider === 'smartvps' && !companyCheck.isCompany) {
       const serviceIdentifier = order.smartvpsServiceId || order.ipAddress;
