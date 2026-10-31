@@ -71,10 +71,9 @@ export async function POST(request) {
       targets.push(t);
     }
 
-    const results = [];
-    for (const target of targets) {
-      results.push(await checkProxyOnTarget(proxy, target));
-    }
+    const results = await Promise.all(
+      targets.map((target) => checkProxyOnTarget(proxy, target, { timeoutMs: 12000 }))
+    );
 
     const health = deriveHealthFromResults(results);
     const workingCount = results.filter((r) => r.working).length;

@@ -395,7 +395,7 @@ export default function DashboardLayout({
             },
             '/dashboard/proxy-checker': {
                 title: 'Proxy IP Checker',
-                description: 'Test your proxy on IRCTC, Google, YouTube and more',
+                description: 'Working means the proxy opens IRCTC. Paste one IP or a list.',
                 icon: Globe,
             },
             '/dashboard/my-account': {

@@ -40,6 +40,14 @@ const tools = [
     href: "/tools/proxy-checker",
     badge: "New",
     features: ["Multi-site test", "IRCTC & Google", "Live status", "Free & instant"]
+  },
+  {
+    title: "Dedicated IP Checker",
+    description: "Paste one proxy or a list. Working means it opens IRCTC.",
+    icon: Zap,
+    href: "/tools/ip-checker",
+    badge: "Live",
+    features: ["IRCTC check", "Bulk list", "Outgoing IP", "Download working"]
   }
 ];
 

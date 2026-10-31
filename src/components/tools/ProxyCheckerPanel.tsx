@@ -116,7 +116,7 @@ export default function ProxyCheckerPanel({ variant = 'marketing' }: ProxyChecke
       .then((data) => {
         const list: TargetOption[] = data.targets || [];
         setTargets(list);
-        setSelected(new Set(['irctc']));
+        setSelected(new Set(['irctc', 'google']));
       })
       .catch(() => toast.error('Could not load website list'))
       .finally(() => setLoadingTargets(false));
