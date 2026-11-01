@@ -98,6 +98,19 @@ function normalizeSubnet(s) {
   return String(s || '').trim().toLowerCase().replace(/\s+/g, '');
 }
 
+/** Match Nexa subnet labels like 212.11.8.xx vs 212.11.8.0/24 */
+function subnetsMatch(a, b) {
+  const x = normalizeSubnet(a);
+  const y = normalizeSubnet(b);
+  if (!x || !y) return false;
+  if (x === y) return true;
+  const strip = (v) => v.replace(/\.xx$/i, '').replace(/\/\d+$/, '');
+  const px = strip(x);
+  const py = strip(y);
+  if (px && py && (px === py || px.startsWith(py) || py.startsWith(px))) return true;
+  return false;
+}
+
 function buildNexaStockName(plan, pool) {
   const planTitle = String(plan.name || '').trim() === 'Bcast App-login'
     ? '📡 Broadcast Proxy'
@@ -146,7 +159,7 @@ function resolveLiveForStock(stock, nexaCfg, byPool, plans) {
   const plan = plans.find((p) => Number(p.planId) === planId);
   if (!plan) return byPool.get(`plan:${planId}`) || { available: false, stockCount: 0 };
   if (subnet && plan.pools?.length) {
-    const pool = plan.pools.find((p) => normalizeSubnet(p.subnet) === subnet);
+    const pool = plan.pools.find((p) => subnetsMatch(p.subnet, subnet));
     if (pool) return unitsFromNexaPoolAndPlan(pool, plan);
   }
   return byPool.get(`plan:${planId}`) || unitsFromNexaPoolAndPlan(null, plan);
@@ -209,4 +222,5 @@ module.exports = {
   defaultNexaMemoryOptions,
   buildNexaStockDocument,
   normalizeSubnet,
+  subnetsMatch,
 };

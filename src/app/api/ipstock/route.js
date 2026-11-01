@@ -379,7 +379,15 @@ export async function GET(request) {
             }
         }
 
-        if (customerView) {
+        if (customerView && fresh) {
+            try {
+                const { syncNexaStoreAvailability } = require('@/lib/nexaStoreStock');
+                await syncNexaStoreAvailability({ Company, IPStock, force: true });
+                customerCatalogStore().clear();
+            } catch (nexaFreshErr) {
+                console.warn('[IPSTOCK-API] Nexa fresh catalog sync failed:', nexaFreshErr.message);
+            }
+        } else if (customerView) {
             // Nexa getPlans can be slow — never block the catalog response; TTL dedupes calls.
             // Still run during 8–12 IST so Nexa OOS/in-stock mirrors the live panel.
             void (async () => {

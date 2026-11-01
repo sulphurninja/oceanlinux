@@ -966,10 +966,13 @@ function IPStockContent() {
           })
         );
         if (signal.aborted) return;
-        const changed = results.some(
+        const nexaImported = results.some(
+          (row) => row && typeof row === "object" && Number((row as { changed?: number }).changed) > 0
+        );
+        const syncOk = results.some(
           (row) => row && row.skipped !== true && row.throttled !== true && row.success !== false
         );
-        if (manual || changed) {
+        if (manual || nexaImported || syncOk) {
           await reloadIpStocks(signal);
         }
         if (!signal.aborted) {
@@ -996,7 +999,28 @@ function IPStockContent() {
       if (!silent) setIsLoading(false);
     }
 
-    if (skipUpstreamSync && !manual) return catalogOk;
+    if (skipUpstreamSync && !manual) {
+      const generation = ++liveSyncGenerationRef.current;
+      liveSyncAbortRef.current?.abort();
+      const ac = new AbortController();
+      liveSyncAbortRef.current = ac;
+      void (async () => {
+        try {
+          const res = await dashboardFetch("/api/nexa/refresh-stock", {
+            cache: "no-store",
+            signal: ac.signal,
+          });
+          const row = await res.json().catch(() => ({}));
+          if (ac.signal.aborted) return;
+          if (Number(row?.changed) > 0) {
+            await fetchFullCatalog(ac.signal, true);
+          }
+        } catch (err) {
+          if (!ac.signal.aborted) console.warn("[IP Stock] Nexa background catalog sync", err);
+        }
+      })();
+      return catalogOk;
+    }
     if (isIstPeakStoreQuietHours() && !manual) return catalogOk;
 
     const generation = ++liveSyncGenerationRef.current;

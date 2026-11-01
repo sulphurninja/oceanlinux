@@ -9,6 +9,7 @@ const {
   buildNexaStockDocument,
   defaultNexaMemoryOptions,
   unitsFromNexaPoolAndPlan,
+  subnetsMatch,
 } = require('@/lib/nexaCatalogHelpers');
 
 const SYNC_TTL_MS = 60_000;
@@ -100,9 +101,32 @@ function existingKeySet(existingStocks) {
   );
 }
 
-/** Add new Nexa pools under plans we already sell (or bootstrap in-stock pools). */
+function soldNexaPlanIds(existingStocks) {
+  const ids = new Set();
+  for (const stock of existingStocks) {
+    const planId = Number(nexaConfig(stock).planId);
+    if (planId > 0) ids.add(planId);
+  }
+  return ids;
+}
+
+/** Fallback customer price from another subnet on the same Nexa plan (e.g. new Broadcast pool). */
+function siblingNexaSellPrice(existingStocks, planId) {
+  for (const stock of existingStocks) {
+    const nexa = nexaConfig(stock);
+    if (Number(nexa.planId) !== Number(planId)) continue;
+    const fromMem = Number(stock.memoryOptions?.IP?.price ?? stock.memoryOptions?.get?.('IP')?.price);
+    if (Number.isFinite(fromMem) && fromMem > 0) return Math.round(fromMem);
+    const fromCfg = Number(nexa.regularPrice);
+    if (Number.isFinite(fromCfg) && fromCfg > 0) return Math.round(fromCfg);
+  }
+  return 0;
+}
+
+/** Add new in-stock Nexa pools for plans we already list in the store. */
 async function importMissingNexaPools(companyId, plans, existingStocks, IPStock) {
   const keys = existingKeySet(existingStocks);
+  const soldPlanIds = soldNexaPlanIds(existingStocks);
   let created = 0;
 
   const shouldAutoAdd = (plan, pool, live) => {
@@ -110,7 +134,8 @@ async function importMissingNexaPools(companyId, plans, existingStocks, IPStock)
     if (!planId) return false;
     const key = nexaStockKey(planId, pool?.poolId);
     if (keys.has(key)) return false;
-    return live.available;
+    if (!live.available) return false;
+    return soldPlanIds.has(planId);
   };
 
   for (const plan of plans) {
@@ -119,10 +144,25 @@ async function importMissingNexaPools(companyId, plans, existingStocks, IPStock)
       if (pool && (pool.poolId == null || pool.poolId === '')) continue;
       const live = unitsFromNexaPoolAndPlan(pool, plan);
       if (!shouldAutoAdd(plan, pool, live)) continue;
+      let price = nexaStoreSellPrice(pool, plan);
+      if (price <= 0) price = siblingNexaSellPrice(existingStocks, plan.planId);
+      if (price <= 0) {
+        console.warn(
+          '[NEXA-IMPORT] skip pool (no user rate):',
+          plan.planId,
+          pool?.subnet || pool?.name || 'plan-only'
+        );
+        continue;
+      }
       const doc = buildNexaStockDocument(companyId, plan, pool, live);
+      doc.memoryOptions = defaultNexaMemoryOptions(price);
+      doc.hiddenFromStore = false;
+      doc.autoHiddenFromStore = false;
+      doc.defaultConfigurations.nexa.regularPrice = price;
       await IPStock.create(doc);
       keys.add(nexaStockKey(plan.planId, pool?.poolId));
       created += 1;
+      console.log('[NEXA-IMPORT] created store row:', doc.name, 'price', price, 'units', live.stockCount);
     }
   }
   return created;
@@ -170,7 +210,7 @@ function findPlanPoolForStock(stock, plans) {
   }
   const subnet = String(cfg.subnet || '').trim().toLowerCase();
   if (subnet && plan.pools?.length) {
-    const pool = plan.pools.find((p) => String(p.subnet || '').trim().toLowerCase() === subnet);
+    const pool = plan.pools.find((p) => subnetsMatch(p.subnet, cfg.subnet));
     if (pool) return { plan, pool };
   }
   return { plan, pool: plan.pools?.[0] || null };
