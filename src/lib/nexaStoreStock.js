@@ -10,6 +10,7 @@ const {
   defaultNexaMemoryOptions,
   unitsFromNexaPoolAndPlan,
   subnetsMatch,
+  buildNexaStockName,
 } = require('@/lib/nexaCatalogHelpers');
 
 const SYNC_TTL_MS = 60_000;
