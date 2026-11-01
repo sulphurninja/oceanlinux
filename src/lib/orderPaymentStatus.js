@@ -629,6 +629,41 @@ async function verifyResellerWalletDebitForOrder(order) {
 
 
 /**
+ * UPI Gateway order confirmed by our payment pipeline (live verify at confirm time).
+ * Used when ekQR status lags but wallet + gateway fields were written server-side only.
+ */
+function trustedServerUpiGatewayConfirmation(order, expectedAmount) {
+  const pd = order?.paymentDetails || {};
+  if (String(pd.upiProvider || '').toLowerCase() !== 'upigateway') return false;
+  if (String(order?.status || '').toLowerCase() !== 'confirmed') return false;
+  if (pd.verified !== true || !pd.confirmedAt) return false;
+  if (pd.manualOverride === true) return false;
+
+  const upiTxn = String(pd.upi_txn_id || order.transactionId || '').trim();
+  if (!upiTxn || upiTxn.length < 6 || looksLikeObjectId(upiTxn)) return false;
+
+  const verifiedAmt = Number(pd.verifiedAmount) || Number(pd.gatewayAmount) || 0;
+  if (!(verifiedAmt > 0)) return false;
+  if (expectedAmount != null && Math.abs(verifiedAmt - Number(expectedAmount)) > 1) return false;
+
+  const method = String(order.paymentMethod || '').toLowerCase();
+  if (method.startsWith('wallet+')) {
+    if (order.walletDeduction?.deducted !== true) return false;
+    if (!looksLikeObjectId(order.walletDeduction?.transactionId)) return false;
+  }
+
+  return true;
+}
+
+
+
+function paymentProofFailureIsRetryable(reason) {
+  return reason === 'upi_not_paid' || reason === 'upi_gateway_api_error';
+}
+
+
+
+/**
  * Live UPI Gateway proof. Mongo flags (confirmed, upi_txn_id) are not proof.
  * Returns null when this order is not an ekQR payment, so Razorpay and older
  * gateways keep their own checks.
@@ -644,14 +679,13 @@ async function verifyEkqrUpiPayment(order, gatewayOrderId) {
   const ekqrMethod = method === 'upi' || method.endsWith('+upi') || method === 'upigateway';
   if (!ekqrMethod && provider !== 'upigateway') return null;
 
-  let clientTxnId = String(order.clientTxnId || '').trim();
-  let expected = Number(order.price) || 0;
-  let txnDate = order.createdAt || pd.confirmedAt || null;
+  const { expectedGatewayAmountFromOrder, upiPaidAmountCovers } = await import(
+    '@/lib/paymentAmountValidation'
+  );
 
-  if (method.startsWith('wallet+') && order.walletDeduction?.deducted === true) {
-    const walletPaid = Number(order.walletDeduction.amount) || 0;
-    expected = Math.round((expected - walletPaid) * 100) / 100;
-  }
+  let clientTxnId = String(order.clientTxnId || '').trim();
+  let expected = expectedGatewayAmountFromOrder(order);
+  let txnDate = order.createdAt || pd.confirmedAt || null;
 
   if (pd.checkoutSessionId || pd.parentTxnId) {
     try {
@@ -697,7 +731,6 @@ async function verifyEkqrUpiPayment(order, gatewayOrderId) {
     const { getResellerRechargeSettings, getUpiGatewayCredentials } = await import(
       '@/lib/resellerRechargeSettings'
     );
-    const { upiPaidAmountCovers } = await import('@/lib/paymentAmountValidation');
     const settings = await getResellerRechargeSettings();
     const creds = getUpiGatewayCredentials(settings);
     if (!creds?.apiKey) return { ok: false, reason: 'upi_gateway_not_connected' };
@@ -713,17 +746,26 @@ async function verifyEkqrUpiPayment(order, gatewayOrderId) {
         String(result.reason || '').includes('amount') ||
         (result.verified && !upiPaidAmountCovers(result.amount, expected));
       if (amountBad) return { ok: false, reason: 'upi_amount_mismatch' };
+      if (trustedServerUpiGatewayConfirmation(order, expected)) {
+        return { ok: true, reason: 'upi_gateway_server_confirmed' };
+      }
       if (provider === 'upigateway') {
         return { ok: false, reason: result.pending || result.failed ? 'upi_not_paid' : 'upi_gateway_api_error' };
       }
       return null;
     }
     if (numericGateway && result.orderId && String(result.orderId) !== gw) {
+      if (trustedServerUpiGatewayConfirmation(order, expected)) {
+        return { ok: true, reason: 'upi_gateway_server_confirmed' };
+      }
       return { ok: false, reason: 'upi_gateway_order_mismatch' };
     }
     return { ok: true, reason: 'upi_gateway_live' };
   } catch (err) {
     console.error('[PAYMENT-PROOF] UPI Gateway status failed:', err.message);
+    if (trustedServerUpiGatewayConfirmation(order, expected)) {
+      return { ok: true, reason: 'upi_gateway_server_confirmed' };
+    }
     return { ok: false, reason: 'upi_gateway_api_error' };
   }
 }
@@ -1048,6 +1090,8 @@ module.exports = {
   razorpayOrderIsPaidForReceipt,
 
   rechargeIsGatewayVerified,
+
+  paymentProofFailureIsRetryable,
 
 };
 

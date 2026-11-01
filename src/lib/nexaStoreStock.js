@@ -3,6 +3,12 @@ const { getCompanyNexaApiConfig } = require('@/lib/companyNexaApi');
 
 const SYNC_TTL_MS = 60_000;
 
+/** Mirror of ipStockAvailability.storeAutoUnhideUpdate (avoid ESM import from this CJS module). */
+function storeAutoUnhideUpdate(stock, inStock) {
+  if (!inStock || !stock?.autoHiddenFromStore) return {};
+  return { hiddenFromStore: false, autoHiddenFromStore: false };
+}
+
 function nexaConfig(stock) {
   const dc = stock?.defaultConfigurations;
   if (!dc) return {};
@@ -23,9 +29,45 @@ function unitsFromPool(pool) {
   return { available: true, stockCount: Math.min(100000, Math.floor(count)) };
 }
 
+/** Store listing for Nexa Proxy rows: hide when pool is empty, relist when stock returns. */
+function nexaStoreVisibilityPatch(stock, live) {
+  const patch = {
+    available: live.available,
+    stockCount: live.stockCount,
+  };
+  if (live.available) {
+    Object.assign(patch, storeAutoUnhideUpdate(stock, true));
+  } else {
+    patch.hiddenFromStore = true;
+    patch.autoHiddenFromStore = true;
+  }
+  return patch;
+}
+
+function nexaStockNeedsSyncUpdate(stock, patch) {
+  for (const [key, value] of Object.entries(patch)) {
+    if (key === 'stockCount') {
+      if (Number(stock.stockCount) !== Number(value)) return true;
+      continue;
+    }
+    if (Boolean(stock[key]) !== Boolean(value)) return true;
+    if (stock[key] !== value && typeof value !== 'boolean') return true;
+  }
+  return false;
+}
+
+function nexaStockQueryForCompany(companyId) {
+  return {
+    company: companyId,
+    $or: [
+      { tags: 'nexa' },
+      { 'defaultConfigurations.nexa.planId': { $exists: true, $ne: null } },
+    ],
+  };
+}
+
 /**
- * Copy Nexa pool stock onto our IP rows.
- * Out-of-stock pools stay listed, with stockCount 0, so the store shows Sold out.
+ * Copy Nexa pool stock onto our IP rows and hide empty pools from the store.
  */
 async function syncNexaStoreAvailability({ Company, IPStock } = {}) {
   if (!Company || !IPStock) return 0;
@@ -49,18 +91,16 @@ async function syncNexaStoreAvailability({ Company, IPStock } = {}) {
           byPool.set(String(poolId), unitsFromPool(pool));
         }
       }
-      const stocks = await IPStock.find({ company: company._id, tags: 'nexa' })
-        .select('available stockCount defaultConfigurations')
+      const stocks = await IPStock.find(nexaStockQueryForCompany(company._id))
+        .select('available stockCount hiddenFromStore autoHiddenFromStore defaultConfigurations')
         .lean();
       for (const stock of stocks) {
         const poolId = nexaConfig(stock).poolId;
         if (poolId == null || poolId === '') continue;
         const live = byPool.get(String(poolId)) || { available: false, stockCount: 0 };
-        if (stock.available === live.available && Number(stock.stockCount) === live.stockCount) continue;
-        await IPStock.updateOne(
-          { _id: stock._id },
-          { $set: { available: live.available, stockCount: live.stockCount } }
-        );
+        const patch = nexaStoreVisibilityPatch(stock, live);
+        if (!nexaStockNeedsSyncUpdate(stock, patch)) continue;
+        await IPStock.updateOne({ _id: stock._id }, { $set: patch });
         changed += 1;
       }
     }
@@ -100,15 +140,21 @@ async function refreshNexaStockForPurchase(stock, { Company, IPStock } = {}) {
     }
   }
   if (!live) live = { available: false, stockCount: 0 };
-  await IPStock.updateOne(
-    { _id: stock._id },
-    { $set: { available: live.available, stockCount: live.stockCount } }
-  );
-  stock.available = live.available;
-  stock.stockCount = live.stockCount;
+  const patch = nexaStoreVisibilityPatch(stock, live);
+  await IPStock.updateOne({ _id: stock._id }, { $set: patch });
+  stock.available = patch.available;
+  stock.stockCount = patch.stockCount;
+  if ('hiddenFromStore' in patch) stock.hiddenFromStore = patch.hiddenFromStore;
+  if ('autoHiddenFromStore' in patch) stock.autoHiddenFromStore = patch.autoHiddenFromStore;
   if (global.__oceanIpStockCatalog?.clear) global.__oceanIpStockCatalog.clear();
   global.__oceanNexaStockSync = { promise: null, at: 0 };
   return stock;
 }
 
-module.exports = { syncNexaStoreAvailability, refreshNexaStockForPurchase, unitsFromPool };
+module.exports = {
+  syncNexaStoreAvailability,
+  refreshNexaStockForPurchase,
+  unitsFromPool,
+  nexaStoreVisibilityPatch,
+  nexaStockQueryForCompany,
+};

@@ -8,6 +8,12 @@ const { companyUsesResellerLiveStock } = require('@/lib/companyResellerApi');
 const { stockHasNetbayPlans, stockHasResellerPanelPlans } = require('@/lib/ipStockAvailability');
 
 function isStockOutOfStock(stock, companyDoc) {
+  const tags = (stock.tags || []).map((t) => String(t).toLowerCase());
+  const nexaCfg = stock.defaultConfigurations?.nexa || stock.defaultConfigurations?.get?.('nexa');
+  const isNexa = tags.includes('nexa') || !!(nexaCfg && (nexaCfg.planId || nexaCfg.poolId));
+  if (isNexa) {
+    return !stock.available || (Number(stock.stockCount) || 0) <= 0;
+  }
   if (stock.company && companyDoc) {
     if (stockHasNetbayPlans(stock) && companyUsesNetbayLiveStock(companyDoc)) {
       return !stock.available;

@@ -78,6 +78,8 @@ interface Order {
     advpsServiceId?: string;
     advpsOrderId?: string;
     provider?: string;
+    trialManageCompanyId?: string;
+    resellerVmId?: string;
     netbayGroupTag?: string;
     netbayProductKind?: string;
     slotIpPackageId?: string;
@@ -663,6 +665,7 @@ const ManageOrders = () => {
                     provisioningStatus: editingOrder.provisioningStatus,
                     advpsServiceId: editingOrder.advpsServiceId || undefined,
                     advpsOrderId: editingOrder.advpsOrderId || undefined,
+                    trialManageCompanyId: editingOrder.trialManageCompanyId ?? '',
                 })
             });
 
@@ -2282,6 +2285,41 @@ const ManageOrders = () => {
                                                 ))}
                                             </SelectContent>
                                         </Select>
+                                    </div>
+                                    <div className="space-y-2 md:col-span-2">
+                                        <Label>Manage panel (company)</Label>
+                                        <Select
+                                            value={
+                                                editingOrder.trialManageCompanyId
+                                                    ? editingOrder.trialManageCompanyId
+                                                    : '__none__'
+                                            }
+                                            onValueChange={(value) =>
+                                                setEditingOrder({
+                                                    ...editingOrder,
+                                                    trialManageCompanyId:
+                                                        value === '__none__' ? '' : value,
+                                                })
+                                            }
+                                        >
+                                            <SelectTrigger>
+                                                <SelectValue placeholder="Default (from IP stock)" />
+                                            </SelectTrigger>
+                                            <SelectContent className="max-h-[min(420px,70vh)]">
+                                                <SelectItem value="__none__">
+                                                    Default — use IP stock company
+                                                </SelectItem>
+                                                {adminCompanies.map((co) => (
+                                                    <SelectItem key={co._id} value={co._id}>
+                                                        {co.name || co.slug || co._id}
+                                                        {co.slug ? ` (${co.slug})` : ''}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                        <p className="text-xs text-muted-foreground">
+                                            Customer Start/Stop/Sync uses this company&apos;s panel (e.g. Oceanlinux-P → dash.primevm.in, Oceanlinux-C → cloud.primevm.in). Set provider to reseller-api for PrimeVPS panels; netbay/advps use that company&apos;s API when configured.
+                                        </p>
                                     </div>
                                     <div className="space-y-2">
                                         <Label>Operating System *</Label>

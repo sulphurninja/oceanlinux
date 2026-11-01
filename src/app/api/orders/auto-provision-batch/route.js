@@ -103,15 +103,19 @@ export async function POST(request) {
 
       try {
         // PAYMENT PROOF before claiming provisioning lock
-        const { verifyOrderPaymentProof } = require('@/lib/orderPaymentStatus');
+        const { verifyOrderPaymentProof, paymentProofFailureIsRetryable } = require('@/lib/orderPaymentStatus');
         const proof = await verifyOrderPaymentProof(order);
         if (!proof.ok) {
           console.warn(`[BATCH] ⛔ Skip ${order._id}: no payment proof (${proof.reason})`);
-          await Order.findByIdAndUpdate(order._id, {
-            provisioningStatus: 'failed',
-            provisioningError: `PAYMENT_PROOF: ${proof.reason}`,
-            updatedAt: new Date(),
-          });
+          const retryLater =
+            order.status === 'confirmed' && paymentProofFailureIsRetryable(proof.reason);
+          if (!retryLater) {
+            await Order.findByIdAndUpdate(order._id, {
+              provisioningStatus: 'failed',
+              provisioningError: `PAYMENT_PROOF: ${proof.reason}`,
+              updatedAt: new Date(),
+            });
+          }
           results.push({
             orderId: order._id,
             customerEmail: order.user?.email,

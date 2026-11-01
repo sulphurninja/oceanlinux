@@ -1078,6 +1078,22 @@ class AutoProvisioningService {
             }
 
             try {
+              const { paymentProofFailureIsRetryable } = require('@/lib/orderPaymentStatus');
+              const retryLater =
+                paymentCheckOrder.status === 'confirmed' &&
+                paymentProofFailureIsRetryable(proof.reason);
+              if (retryLater) {
+                L.line('⏳ UPI payment proof lag — will retry provision without marking failed');
+                return {
+                  success: false,
+                  paymentRequired: true,
+                  pending: true,
+                  message: 'Payment confirmed; waiting for UPI gateway status sync before provisioning.',
+                  proofReason: proof.reason,
+                  totalTime: Date.now() - startTime,
+                };
+              }
+
               const clearFake = alreadyDelivered
                 ? {
                     provisioningStatus: 'failed',

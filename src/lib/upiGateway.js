@@ -9,6 +9,7 @@
 
 const CREATE_ORDER_URL = 'https://api.ekqr.in/api/create_order';
 const CHECK_STATUS_URL = 'https://api.ekqr.in/api/check_order_status';
+const MERCHANT_CHECK_STATUS_URL = 'https://merchant.upigateway.com/api/check_order_status';
 
 function appBase() {
   const base = process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || 'https://oceanlinux.com';
@@ -46,6 +47,57 @@ function classifyStatus(rawStatus) {
   if (status === 'success' || status === 'paid') return 'success';
   if (status === 'failure' || status === 'failed' || status === 'expired') return 'failed';
   return 'pending';
+}
+
+function verifiedFromStatusRow(row, clientTxnId, expectedAmount) {
+  if (!row || String(row.client_txn_id || '') !== String(clientTxnId)) {
+    return { verified: false, reason: 'transaction id mismatch', failed: true };
+  }
+
+  const kind = classifyStatus(row.status);
+  if (kind === 'pending') {
+    return { verified: false, reason: 'payment pending', pending: true };
+  }
+  if (kind === 'failed') {
+    return { verified: false, reason: row.remark || 'payment failed', failed: true };
+  }
+
+  const paidAmount = Number(row.amount);
+  if (!Number.isFinite(paidAmount) || paidAmount <= 0) {
+    return { verified: false, reason: 'gateway amount missing' };
+  }
+  if (expectedAmount != null && Math.abs(paidAmount - Number(expectedAmount)) > 1) {
+    return { verified: false, reason: 'amount mismatch', failed: true };
+  }
+
+  return {
+    verified: true,
+    amount: paidAmount,
+    transactionId: row.upi_txn_id || String(row.id || ''),
+    orderId: String(row.id || ''),
+    clientTxnId: String(row.client_txn_id),
+  };
+}
+
+async function checkUpiGatewayViaMerchantPortal({ apiKey, clientTxnId, expectedAmount }) {
+  try {
+    const res = await fetch(MERCHANT_CHECK_STATUS_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        key: String(apiKey).trim(),
+        client_txn_id: String(clientTxnId),
+      }),
+      cache: 'no-store',
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data?.status !== true || !data?.data || !data.data.client_txn_id) {
+      return { verified: false, reason: data?.msg || 'payment pending', pending: true };
+    }
+    return verifiedFromStatusRow(data.data, clientTxnId, expectedAmount);
+  } catch {
+    return { verified: false, reason: 'payment pending', pending: true };
+  }
 }
 
 function upiLinkFrom(row) {
@@ -136,36 +188,14 @@ export async function getUpiGatewayOrderStatus({ apiKey, clientTxnId, txnDate, e
       continue;
     }
 
-    const row = data.data;
-    if (String(row.client_txn_id || '') !== String(clientTxnId)) {
-      return { verified: false, reason: 'transaction id mismatch', failed: true };
-    }
-
-    const kind = classifyStatus(row.status);
-    if (kind === 'pending') {
-      last = { verified: false, reason: 'payment pending', pending: true };
-      continue;
-    }
-    if (kind === 'failed') {
-      return { verified: false, reason: row.remark || 'payment failed', failed: true };
-    }
-
-    const paidAmount = Number(row.amount);
-    if (!Number.isFinite(paidAmount) || paidAmount <= 0) {
-      return { verified: false, reason: 'gateway amount missing' };
-    }
-    if (expectedAmount != null && Math.abs(paidAmount - Number(expectedAmount)) > 1) {
-      return { verified: false, reason: 'amount mismatch', failed: true };
-    }
-
-    return {
-      verified: true,
-      amount: paidAmount,
-      transactionId: row.upi_txn_id || String(row.id || ''),
-      orderId: String(row.id || ''),
-      clientTxnId: String(row.client_txn_id),
-    };
+    const parsed = verifiedFromStatusRow(data.data, clientTxnId, expectedAmount);
+    if (parsed.verified) return parsed;
+    if (parsed.failed) return parsed;
+    last = parsed.pending ? parsed : last;
   }
+
+  const merchant = await checkUpiGatewayViaMerchantPortal({ apiKey, clientTxnId, expectedAmount });
+  if (merchant.verified || merchant.failed) return merchant;
 
   return last;
 }

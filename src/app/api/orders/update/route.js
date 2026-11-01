@@ -33,7 +33,7 @@ export async function POST(request) {
   }
 
   try {
-    const { orderId, ipAddress, username, password, status, os, provider, provisioningStatus, advpsServiceId, advpsOrderId } = await request.json();
+    const { orderId, ipAddress, username, password, status, os, provider, provisioningStatus, advpsServiceId, advpsOrderId, trialManageCompanyId } = await request.json();
     if (!orderId) {
       return NextResponse.json(
         { message: 'Missing orderId' },
@@ -52,6 +52,80 @@ export async function POST(request) {
     if (provisioningStatus !== undefined) updateFields.provisioningStatus = provisioningStatus || 'pending';
     if (advpsServiceId !== undefined) updateFields.advpsServiceId = advpsServiceId || '';
     if (advpsOrderId !== undefined) updateFields.advpsOrderId = String(advpsOrderId || '').trim();
+    if (trialManageCompanyId !== undefined) {
+      updateFields.trialManageCompanyId = String(trialManageCompanyId || '').trim();
+    }
+
+    const existingBeforeUpdate = await Order.findById(orderId).select(
+      'status provisioningStatus ipAddress user ipStockId resellerVmId username password os expiryDate provider trialManageCompanyId'
+    ).lean();
+    const wasActive = existingBeforeUpdate?.status === 'active' || existingBeforeUpdate?.provisioningStatus === 'active';
+
+    const manageCompanyChanged =
+      trialManageCompanyId !== undefined &&
+      String(trialManageCompanyId || '').trim() !== String(existingBeforeUpdate?.trialManageCompanyId || '').trim();
+
+    const ipChanged =
+      ipAddress &&
+      String(existingBeforeUpdate?.ipAddress || '').split(':')[0].trim() !==
+        String(ipAddress || '').split(':')[0].trim();
+
+    const resolveManageCompanyId = () => {
+      if (trialManageCompanyId !== undefined) return String(trialManageCompanyId || '').trim();
+      return String(existingBeforeUpdate?.trialManageCompanyId || '').trim();
+    };
+
+    async function relinkResellerVmFromCompany(companyId, ipForLookup) {
+      if (!companyId || !ipForLookup) return;
+      const company = await Company.findById(companyId).select('resellerApi name').lean();
+      const resellerCfg = getCompanyResellerApiConfig(company);
+      if (!resellerCfg) return;
+      const api = new ResellerApi(resellerCfg);
+      const draftOrder = { ...existingBeforeUpdate, ipAddress: ipForLookup };
+      const found = await resolveResellerVmForOrder(api, draftOrder);
+      if (found?.vmId) {
+        const synced = await syncResellerVmCredentials(api, draftOrder, found.vmId);
+        updateFields.resellerVmId = String(synced.vmId || found.vmId);
+        updateFields.provider = updateFields.provider || 'reseller-api';
+        updateFields.ipAddress = synced.updates.ipAddress || ipForLookup;
+        Object.assign(updateFields, synced.updates);
+      } else {
+        updateFields.resellerVmId = '';
+      }
+    }
+
+    if (manageCompanyChanged || ipChanged) {
+      const ipForLookup = ipAddress || existingBeforeUpdate?.ipAddress;
+      const manageId = resolveManageCompanyId();
+      try {
+        if (manageId) {
+          await relinkResellerVmFromCompany(manageId, ipForLookup);
+        } else if (ipChanged && existingBeforeUpdate?.ipStockId) {
+          const ipStock = await IPStock.findById(existingBeforeUpdate.ipStockId).select('company').lean();
+          const company = ipStock?.company
+            ? await Company.findById(ipStock.company).select('resellerApi name').lean()
+            : null;
+          const resellerCfg = getCompanyResellerApiConfig(company);
+          if (resellerCfg) {
+            const api = new ResellerApi(resellerCfg);
+            const draftOrder = { ...existingBeforeUpdate, ipAddress };
+            const found = await resolveResellerVmForOrder(api, draftOrder);
+            if (found?.vmId) {
+              const synced = await syncResellerVmCredentials(api, draftOrder, found.vmId);
+              updateFields.resellerVmId = String(synced.vmId || found.vmId);
+              updateFields.provider = 'reseller-api';
+              updateFields.ipAddress = synced.updates.ipAddress || ipAddress;
+              Object.assign(updateFields, synced.updates);
+            } else {
+              updateFields.resellerVmId = '';
+            }
+          }
+        }
+      } catch (resellerErr) {
+        console.warn('[ORDER-UPDATE] Reseller VM re-link failed:', resellerErr.message);
+        if (manageCompanyChanged) updateFields.resellerVmId = '';
+      }
+    }
 
     // Auto-provision ADVPS when a service ID is set/changed
     const advpsNotes = [];
@@ -181,43 +255,6 @@ export async function POST(request) {
             console.error(`[ADVPS-PROVISION] Background sync failed for ${bgServiceId}:`, bgErr.message);
           }
         })();
-      }
-    }
-
-    const existingBeforeUpdate = await Order.findById(orderId).select(
-      'status provisioningStatus ipAddress user ipStockId resellerVmId username password os expiryDate provider'
-    ).lean();
-    const wasActive = existingBeforeUpdate?.status === 'active' || existingBeforeUpdate?.provisioningStatus === 'active';
-
-    const ipChanged =
-      ipAddress &&
-      String(existingBeforeUpdate?.ipAddress || '').split(':')[0].trim() !==
-        String(ipAddress || '').split(':')[0].trim();
-
-    if (ipChanged && existingBeforeUpdate?.ipStockId) {
-      try {
-        const ipStock = await IPStock.findById(existingBeforeUpdate.ipStockId).select('company').lean();
-        const company = ipStock?.company
-          ? await Company.findById(ipStock.company).select('resellerApi name').lean()
-          : null;
-        const resellerCfg = getCompanyResellerApiConfig(company);
-        if (resellerCfg) {
-          const api = new ResellerApi(resellerCfg);
-          const draftOrder = { ...existingBeforeUpdate, ipAddress };
-          const found = await resolveResellerVmForOrder(api, draftOrder);
-          if (found?.vmId) {
-            const synced = await syncResellerVmCredentials(api, draftOrder, found.vmId);
-            updateFields.resellerVmId = String(synced.vmId || found.vmId);
-            updateFields.provider = 'reseller-api';
-            updateFields.ipAddress = synced.updates.ipAddress || ipAddress;
-            Object.assign(updateFields, synced.updates);
-          } else {
-            updateFields.resellerVmId = '';
-          }
-        }
-      } catch (resellerErr) {
-        console.warn('[ORDER-UPDATE] Reseller VM re-link after IP change failed:', resellerErr.message);
-        updateFields.resellerVmId = '';
       }
     }
 
