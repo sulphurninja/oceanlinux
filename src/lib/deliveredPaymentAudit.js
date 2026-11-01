@@ -207,8 +207,18 @@ const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_RANGE_DAYS = 31;
 
 function parseDay(value, fallback) {
-  const text = String(value || '');
+  const text = String(value || '').trim();
   return DAY.test(text) ? text : fallback;
+}
+
+function parseDayRequired(value, label) {
+  const text = String(value || '').trim();
+  if (!DAY.test(text)) {
+    const err = new Error(`${label} must be YYYY-MM-DD (use the From/To date pickers)`);
+    err.status = 400;
+    throw err;
+  }
+  return text;
 }
 
 function daySpan(fromKey, toKey) {
@@ -223,8 +233,30 @@ function daySpan(fromKey, toKey) {
  */
 async function auditDeliveredPayments(opts = {}) {
   const today = todayKey();
-  let fromKey = parseDay(opts.from || opts.date, today);
-  let toKey = parseDay(opts.to || opts.from || opts.date, fromKey);
+  const hasRange = opts.from != null || opts.to != null || opts.date != null;
+  let fromKey;
+  let toKey;
+  if (hasRange) {
+    if (opts.from != null && opts.from !== '') {
+      fromKey = parseDayRequired(opts.from, 'From');
+    } else if (opts.date != null && opts.date !== '') {
+      fromKey = parseDayRequired(opts.date, 'Date');
+    } else {
+      fromKey = today;
+    }
+    if (opts.to != null && opts.to !== '') {
+      toKey = parseDayRequired(opts.to, 'To');
+    } else if (opts.from != null && opts.from !== '') {
+      toKey = fromKey;
+    } else if (opts.date != null && opts.date !== '') {
+      toKey = fromKey;
+    } else {
+      toKey = fromKey;
+    }
+  } else {
+    fromKey = today;
+    toKey = today;
+  }
   if (fromKey > toKey) {
     const swap = fromKey;
     fromKey = toKey;

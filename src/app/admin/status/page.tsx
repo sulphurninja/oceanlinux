@@ -140,9 +140,10 @@ export default function AdminStatusPage() {
   const [logsLoading, setLogsLoading] = useState(false);
   const [scanLoading, setScanLoading] = useState(false);
   const [auditLoading, setAuditLoading] = useState(false);
-  const todayIst = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
-  const [auditFrom, setAuditFrom] = useState(todayIst);
-  const [auditTo, setAuditTo] = useState(todayIst);
+  const istToday = () =>
+    new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+  const [auditFrom, setAuditFrom] = useState(() => istToday());
+  const [auditTo, setAuditTo] = useState(() => istToday());
   const [audit, setAudit] = useState<DeliveredAudit | null>(null);
   const [logFilter, setLogFilter] = useState<"all" | "anomaly" | "success" | "failed">("anomaly");
   const [txnFilter, setTxnFilter] = useState("");
@@ -247,39 +248,63 @@ export default function AdminStatusPage() {
   const scanDeliveredPayments = async () => {
     const from = auditFrom <= auditTo ? auditFrom : auditTo;
     const to = auditFrom <= auditTo ? auditTo : auditFrom;
+    const dayRe = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dayRe.test(from) || !dayRe.test(to)) {
+      toast.error("Use the From/To date pickers (YYYY-MM-DD). Re-select the dates and scan again.");
+      return;
+    }
     const span =
       Math.round((new Date(`${to}T00:00:00+05:30`).getTime() - new Date(`${from}T00:00:00+05:30`).getTime()) / 86400000) +
       1;
-    if (!from || !to || span > 31) {
+    if (!from || !to || !Number.isFinite(span) || span < 1 || span > 31) {
       toast.error("Pick a From and To date, at most 31 days apart");
       return;
     }
+    const ac = new AbortController();
+    const timeoutId = window.setTimeout(() => ac.abort(), 4 * 60 * 1000);
     try {
       setAuditLoading(true);
+      setAudit(null);
+      toast.info(`Scanning ${from} → ${to}… can take 1–3 minutes on busy days`, { duration: 8000 });
       const res = await fetch("/api/admin/delivered-payment-audit", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ from, to }),
+        signal: ac.signal,
       });
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.success) {
-        toast.error(data?.message || "Delivered payment scan failed");
+        const gate = data?.code === "ADMIN_GATE_REQUIRED";
+        toast.error(
+          gate
+            ? "Admin panel password required — open /admin/login first, then scan again"
+            : data?.message || `Delivered payment scan failed (HTTP ${res.status})`
+        );
         return;
       }
       setAudit(data);
       if ((data.doubtCount || 0) > 0) {
         toast.warning(
-          `${data.doubtCount} delivered order(s) have no traced Razorpay or wallet payment`
+          `${data.doubtCount} delivered order(s) have no traced Razorpay or wallet payment (${data.date})`
+        );
+      } else if ((data.unverifiedCount || 0) > 0) {
+        toast.warning(
+          `Checked ${data.checked} orders — ${data.unverifiedCount} could not reach Razorpay (see Unverified)`
         );
       } else {
         toast.success(
-          `Checked ${data.checked} delivered orders on ${data.date} — payment source looks clean`
+          `Checked ${data.checked} order(s) for ${data.date} — payment source looks clean`
         );
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Delivered payment scan failed");
+      if (err instanceof Error && err.name === "AbortError") {
+        toast.error("Scan timed out after 4 minutes — try a shorter date range or retry");
+      } else {
+        toast.error(err instanceof Error ? err.message : "Delivered payment scan failed");
+      }
     } finally {
+      window.clearTimeout(timeoutId);
       setAuditLoading(false);
     }
   };
@@ -574,7 +599,12 @@ export default function AdminStatusPage() {
           </div>
         </CardHeader>
         <CardContent>
-          {!audit ? (
+          {auditLoading ? (
+            <p className="text-sm text-muted-foreground flex items-center gap-2">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              Scanning delivered orders and checking Razorpay / wallet proof…
+            </p>
+          ) : !audit ? (
             <p className="text-sm text-muted-foreground">
               Set From and To, then scan. One day is fine; 1st to 10th is one scan.
             </p>

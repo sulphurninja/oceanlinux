@@ -15,18 +15,23 @@ export async function POST(request) {
     await connectDB();
 
     const body = await request.json().catch(() => ({}));
+    const started = Date.now();
     const result = await auditDeliveredPayments({
       date: body?.date,
       from: body?.from,
       to: body?.to,
     });
+    console.log(
+      `[DELIVERED-PAYMENT-AUDIT] ${result.from}→${result.to} checked=${result.checked} doubt=${result.doubtCount} ms=${Date.now() - started}`
+    );
 
     return NextResponse.json({ success: true, ...result });
   } catch (error) {
     console.error('[DELIVERED-PAYMENT-AUDIT]', error);
+    const status = error.status && Number(error.status) >= 400 && Number(error.status) < 600 ? error.status : 500;
     return NextResponse.json(
       { success: false, message: error.message || 'Audit failed' },
-      { status: error.status || 500 }
+      { status }
     );
   }
 }
