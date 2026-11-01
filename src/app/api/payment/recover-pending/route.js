@@ -9,6 +9,7 @@ import {
   recoverPendingWalletRecharge,
 } from '@/lib/paymentDispatch';
 import { enforceCronSecret } from '@/lib/apiSecurity';
+const { tryPeakCronSkip } = require('@/lib/peakCronGuard');
 
 /**
  * POST /api/payment/recover-pending
@@ -24,6 +25,11 @@ import { enforceCronSecret } from '@/lib/apiSecurity';
 export async function POST(request) {
   const cronDenied = enforceCronSecret(request);
   if (cronDenied) return cronDenied;
+
+  const peakSkip = tryPeakCronSkip();
+  if (peakSkip) {
+    return NextResponse.json(peakSkip);
+  }
 
   await connectDB();
 

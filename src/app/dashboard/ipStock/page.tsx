@@ -117,6 +117,20 @@ declare global {
 
 /** Catalog paints from Mongo. Provider sync runs only when the user hits Refresh. */
 const LIVE_SYNC_TIMEOUT_MS = 12_000;
+
+/** 08:00–11:59 IST — skip background panel sync on store load (matches server peak guard). */
+function isIstPeakStoreQuietHours() {
+  const hour = Number(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Kolkata',
+      hour: 'numeric',
+      hour12: false,
+    }).format(new Date())
+  );
+  const h = hour === 24 ? 0 : hour;
+  return h >= 8 && h < 12;
+}
+
 const ipStockRequests = new Map<string, Promise<{ ok: boolean; status: number; data: unknown }>>();
 
 function fetchIpStockCatalog(url: string) {
@@ -132,12 +146,15 @@ function fetchIpStockCatalog(url: string) {
 }
 
 const LIVE_STOCK_SYNC_ENDPOINTS = [
+  '/api/nexa/refresh-stock',
   '/api/advps/refresh-stock',
   '/api/reseller-panel/refresh-stock',
   '/api/kurohost/refresh-stock',
   '/api/hostdzire/refresh-stock',
   '/api/smartvps/sync',
 ] as const;
+
+const LIVE_STOCK_SYNC_ENDPOINTS_PEAK = ['/api/nexa/refresh-stock'] as const;
 
 interface MemoryOptionDetails {
   price: number | null;
@@ -922,9 +939,12 @@ function IPStockContent() {
     const syncLiveStock = async (signal: AbortSignal, generation: number) => {
       setIsRefreshingStock(true);
       const timeoutMs = manual ? 20_000 : LIVE_SYNC_TIMEOUT_MS;
+      const endpoints = isIstPeakStoreQuietHours() && !manual
+        ? [...LIVE_STOCK_SYNC_ENDPOINTS_PEAK]
+        : [...LIVE_STOCK_SYNC_ENDPOINTS];
       try {
         const results = await Promise.all(
-          LIVE_STOCK_SYNC_ENDPOINTS.map(async (url) => {
+          endpoints.map(async (url) => {
             if (signal.aborted) return { skipped: true };
             const timeoutCtrl = new AbortController();
             const timeoutId = window.setTimeout(() => timeoutCtrl.abort(), timeoutMs);
@@ -977,6 +997,7 @@ function IPStockContent() {
     }
 
     if (skipUpstreamSync && !manual) return catalogOk;
+    if (isIstPeakStoreQuietHours() && !manual) return catalogOk;
 
     const generation = ++liveSyncGenerationRef.current;
     liveSyncAbortRef.current?.abort();

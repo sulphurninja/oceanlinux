@@ -24,8 +24,20 @@ function istPeakSkipBody() {
   };
 }
 
+/** In-memory store catalog TTL — longer during morning traffic (8–12 IST). */
+function getCustomerCatalogCacheTtlMs(date = new Date()) {
+  return isIstPeakTrafficHour(date) ? 5 * 60 * 1000 : 20 * 1000;
+}
+
+/** Serve last catalog up to this age during peak while a refresh runs (avoid herd). */
+function getCustomerCatalogStaleServeMaxMs() {
+  return 10 * 60 * 1000;
+}
+
 module.exports = {
   isIstPeakTrafficHour,
   istPeakSkipBody,
   getHourInTimeZone,
+  getCustomerCatalogCacheTtlMs,
+  getCustomerCatalogStaleServeMaxMs,
 };

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import { checkAdvpsPendingOrders } from '@/lib/advpsPendingOrdersCron';
 import { enforceCronSecret } from '@/lib/apiSecurity';
+const { tryPeakCronSkip } = require('@/lib/peakCronGuard');
 
 /**
  * ADVPS-only follow-up cron: completes orders stuck in ADVPS_PENDING (awaiting IP/assignment).
@@ -10,6 +11,11 @@ import { enforceCronSecret } from '@/lib/apiSecurity';
 export async function POST(request) {
   const cronDenied = enforceCronSecret(request);
   if (cronDenied) return cronDenied;
+
+  const peakSkip = tryPeakCronSkip();
+  if (peakSkip) {
+    return NextResponse.json(peakSkip);
+  }
 
   const cronId = Math.random().toString(36).substring(2, 8);
   const started = Date.now();

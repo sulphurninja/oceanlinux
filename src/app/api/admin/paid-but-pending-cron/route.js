@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import { enforceCronSecret } from '@/lib/apiSecurity';
 import { runPaidButPendingScan } from '@/lib/paidButPendingScan';
+const { tryPeakCronSkip } = require('@/lib/peakCronGuard');
 
 export const maxDuration = 300;
 
@@ -15,6 +16,11 @@ export const maxDuration = 300;
 export async function GET(request) {
   const denied = enforceCronSecret(request);
   if (denied) return denied;
+
+  const peakSkip = tryPeakCronSkip();
+  if (peakSkip) {
+    return NextResponse.json(peakSkip);
+  }
 
   try {
     await connectDB();

@@ -5,6 +5,7 @@ import WalletRecharge from '@/models/walletRechargeModel';
 import { refundAndFailCheckoutSession } from '@/lib/paymentDispatch';
 import { sweepAbandonedBuyNowOrders } from '@/lib/cancelPendingOrder';
 import { enforceCronSecret } from '@/lib/apiSecurity';
+const { tryPeakCronSkip } = require('@/lib/peakCronGuard');
 
 /**
  * POST /api/cart/checkout/sweep
@@ -20,6 +21,11 @@ import { enforceCronSecret } from '@/lib/apiSecurity';
 export async function POST(request) {
   const cronDenied = enforceCronSecret(request);
   if (cronDenied) return cronDenied;
+
+  const peakSkip = tryPeakCronSkip();
+  if (peakSkip) {
+    return NextResponse.json(peakSkip);
+  }
 
   await connectDB();
 

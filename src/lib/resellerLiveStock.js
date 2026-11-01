@@ -20,6 +20,7 @@ const {
   resolveEffectiveResellerPlanType,
   isResellerApiStock,
   resolveLiveResellerZonesInPriorityOrder,
+  stockNameRequiresMappedZone,
 } = require('@/lib/resellerApiStockConfig');
 const { usesResellerLiveStock, usesResellerPanelLiveStock } = require('@/lib/ipStockAvailability');
 const { toPlainConfigurations, getIpStockMemoryKeys, sanitizeVariantStockMap } = require('@/lib/advpsLiveStock');
@@ -212,6 +213,19 @@ async function checkResellerVariantStock(api, { stockCfg, memory, zonesList = nu
     (stockCfg?.zoneId != null && Number.isFinite(Number(stockCfg.zoneId)))
   ) {
     return checkResellerZoneStock(api, { stockCfg, memory, zonesList });
+  }
+  if (stock && stockNameRequiresMappedZone(stock)) {
+    return {
+      memory,
+      available: false,
+      stockMode: 'zone',
+      zoneId: null,
+      zoneOk: false,
+      unitsAvailable: 0,
+      reason: 'Region-specific plan has no panel zone mapped on this IP stock',
+      message: 'Out of stock (region not configured on panel)',
+      checkedAt: new Date().toISOString(),
+    };
   }
   return checkResellerWalletStock(api, { stockCfg, memory, stock });
 }

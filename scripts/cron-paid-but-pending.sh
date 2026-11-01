@@ -30,6 +30,14 @@ fi
 : "${CRON_SECRET:?CRON_SECRET not set in $ENV_FILE}"
 PORT="${PORT:-3000}"
 
+# 8–12 IST: EC2 minute crons hammer Node during morning store traffic — defer to off-peak.
+IST_HOUR="$(TZ=Asia/Kolkata date +%H 2>/dev/null || true)"
+IST_HOUR="${IST_HOUR#0}"
+if [ -n "$IST_HOUR" ] && [ "$IST_HOUR" -ge 8 ] && [ "$IST_HOUR" -lt 12 ]; then
+  echo "[cron-paid-but-pending] skip ist_peak_8_12 $(date -Iseconds)"
+  exit 0
+fi
+
 # Proactive QR refresh before Vyapar 2-min expiry
 curl -fsS -m 120 \
   -H "x-cron-secret: ${CRON_SECRET}" \

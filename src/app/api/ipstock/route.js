@@ -160,16 +160,36 @@ function enrichIpStocksForStore(ipStocks) {
     });
 }
 
+function companyModesCacheStore() {
+    if (!global.__oceanCompanyModesCache) {
+        global.__oceanCompanyModesCache = { at: 0, map: {} };
+    }
+    return global.__oceanCompanyModesCache;
+}
+
+const COMPANY_MODES_CACHE_TTL_MS = 5 * 60 * 1000;
+
 async function enrichIpStocksWithProviderModes(ipStocks) {
     const companyIds = [...new Set(
         ipStocks.filter((s) => s.company).map((s) => String(s.company))
     )];
     if (!companyIds.length) return ipStocks;
 
-    const companies = await Company.find({ _id: { $in: companyIds } })
-        .select('netbayApi kurohostApi hostdzireApi resellerApi')
-        .lean();
-    const companyMap = Object.fromEntries(companies.map((c) => [String(c._id), c]));
+    const cache = companyModesCacheStore();
+    const now = Date.now();
+    const stale = !cache.at || now - cache.at > COMPANY_MODES_CACHE_TTL_MS;
+    const missing = companyIds.filter((id) => !cache.map[id]);
+    if (stale || missing.length) {
+        const fetchIds = stale ? companyIds : missing;
+        const companies = await Company.find({ _id: { $in: fetchIds } })
+            .select('netbayApi kurohostApi hostdzireApi resellerApi')
+            .lean();
+        for (const c of companies) {
+            cache.map[String(c._id)] = c;
+        }
+        cache.at = now;
+    }
+    const companyMap = cache.map;
 
     return ipStocks.map((stock) => ({
         ...stock,
@@ -308,6 +328,11 @@ export async function GET(request) {
         }
 
         const catalogKey = customerView ? '__base' : '';
+        const { isIstPeakTrafficHour, getCustomerCatalogCacheTtlMs, getCustomerCatalogStaleServeMaxMs } =
+            require('@/lib/istPeakTraffic');
+        const catalogTtlMs = getCustomerCatalogCacheTtlMs();
+        const peakTrafficNow = isIstPeakTrafficHour();
+
         const personalizeCatalog = async (rows) => {
             if (!customerView || !Array.isArray(rows)) return rows;
             try {
@@ -322,39 +347,52 @@ export async function GET(request) {
         const catalogResponse = async (rowsOrJson) => {
             const rows = typeof rowsOrJson === 'string' ? JSON.parse(rowsOrJson) : rowsOrJson;
             const payload = await personalizeCatalog(rows);
+            const headers = { 'Content-Type': 'application/json' };
+            if (customerView && peakTrafficNow) {
+                headers['Cache-Control'] = 'private, max-age=45, stale-while-revalidate=120';
+            }
             return new Response(JSON.stringify(payload), {
                 status: 200,
-                headers: { 'Content-Type': 'application/json' },
+                headers,
             });
         };
         if (customerView && !fresh) {
             const hit = customerCatalogStore().get(catalogKey);
-            if (hit?.body && Date.now() - hit.at < 20000) {
+            const ageMs = hit?.at ? Date.now() - hit.at : Infinity;
+            if (hit?.body && ageMs < catalogTtlMs) {
+                return catalogResponse(hit.body);
+            }
+            if (
+                peakTrafficNow &&
+                hit?.body &&
+                ageMs < getCustomerCatalogStaleServeMaxMs() &&
+                hit?.promise
+            ) {
                 return catalogResponse(hit.body);
             }
             if (hit?.promise) {
                 const shared = await hit.promise;
                 return catalogResponse(shared);
             }
+            if (peakTrafficNow && hit?.body && ageMs < getCustomerCatalogStaleServeMaxMs()) {
+                return catalogResponse(hit.body);
+            }
         }
 
         if (customerView) {
-            const { isIstPeakTrafficHour } = require('@/lib/istPeakTraffic');
-            // Do not hold the store or dashboard behind Nexa getPlans (20–45s).
-            // During 8–11 IST skip even the background call so Node stays free.
-            if (!isIstPeakTrafficHour()) {
-                void (async () => {
-                    try {
-                        const { syncNexaStoreAvailability } = require('@/lib/nexaStoreStock');
-                        const nexaChanged = await syncNexaStoreAvailability({ Company, IPStock });
-                        if (nexaChanged > 0) {
-                            customerCatalogStore().clear();
-                        }
-                    } catch (nexaStockErr) {
-                        console.warn('[IPSTOCK-API] Nexa stock sync failed:', nexaStockErr.message);
+            // Nexa getPlans can be slow — never block the catalog response; TTL dedupes calls.
+            // Still run during 8–12 IST so Nexa OOS/in-stock mirrors the live panel.
+            void (async () => {
+                try {
+                    const { syncNexaStoreAvailability } = require('@/lib/nexaStoreStock');
+                    const nexaChanged = await syncNexaStoreAvailability({ Company, IPStock });
+                    if (nexaChanged > 0) {
+                        customerCatalogStore().clear();
                     }
-                })();
-            }
+                } catch (nexaStockErr) {
+                    console.warn('[IPSTOCK-API] Nexa stock sync failed:', nexaStockErr.message);
+                }
+            })();
         }
 
         let resolveCatalog;
@@ -367,7 +405,7 @@ export async function GET(request) {
             customerCatalogStore().set(catalogKey, { promise, reject: rejectCatalog, at: 0, body: null });
         }
 
-        if (customerView) {
+        if (customerView && !peakTrafficNow) {
             // Don't block the catalog read on this write. A plan that just
             // came back in stock shows on the next load instead of every
             // visitor waiting on the update.
@@ -385,8 +423,7 @@ export async function GET(request) {
                 .select('-inventoryItems')
                 .lean()
                 .maxTimeMS(10000);
-            const { isIstPeakTrafficHour: peakNow } = require('@/lib/istPeakTraffic');
-            const countRowsPromise = peakNow()
+            const countRowsPromise = peakTrafficNow
                 ? Promise.resolve([])
                 : IPStock.aggregate([
                 {

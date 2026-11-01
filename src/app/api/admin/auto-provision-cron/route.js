@@ -590,17 +590,30 @@ export async function POST(request) {
         const { isIstPeakTrafficHour } = require('@/lib/istPeakTraffic');
         const peakTraffic = isIstPeakTrafficHour();
         if (peakTraffic) {
-            console.log(`[CRON-${cronId}] 8–11 IST: skip bulk reseller/slot sync, still copy Nexa IPs already delivered`);
+            console.log(`[CRON-${cronId}] 8–12 IST: skip bulk reseller/slot sync; still Nexa pending IP copy + provision locked orders`);
         }
 
         try {
             const { syncNexaPendingOrders } = require('@/lib/nexaPendingSync');
-            const nexaSync = await syncNexaPendingOrders({ limit: 40 });
+            const nexaLimit = peakTraffic ? 25 : 40;
+            const nexaSync = await syncNexaPendingOrders({ limit: nexaLimit });
             if (nexaSync.length) {
                 console.log(`[CRON-${cronId}] Nexa pending sync:`, JSON.stringify(nexaSync));
             }
         } catch (nexaSyncErr) {
             console.warn(`[CRON-${cronId}] Nexa pending sync skipped:`, nexaSyncErr.message);
+        }
+
+        try {
+            const Company = (await import('@/models/companyModel')).default;
+            const IPStock = require('@/models/ipStockModel');
+            const { syncNexaStoreAvailability } = require('@/lib/nexaStoreStock');
+            const nexaStockChanged = await syncNexaStoreAvailability({ Company, IPStock });
+            if (nexaStockChanged > 0) {
+                console.log(`[CRON-${cronId}] Nexa store stock rows updated: ${nexaStockChanged}`);
+            }
+        } catch (nexaStockErr) {
+            console.warn(`[CRON-${cronId}] Nexa store stock sync skipped:`, nexaStockErr.message);
         }
 
         if (!peakTraffic) {

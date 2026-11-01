@@ -21,6 +21,10 @@
       "schedule": "15 0,7,13,19 * * *"
     },
     {
+      "path": "/api/nexa/refresh-stock?force=1",
+      "schedule": "*/3 * * * *"
+    },
+    {
       "path": "/api/netbay/refresh-stock?force=1",
       "schedule": "*/8 * * * *"
     },

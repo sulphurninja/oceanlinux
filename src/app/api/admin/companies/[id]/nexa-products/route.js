@@ -6,6 +6,14 @@ import { enforceAdmin } from '@/lib/apiSecurity';
 const NexaApi = require('@/services/nexaApi');
 const { getCompanyNexaApiConfig } = require('@/lib/companyNexaApi');
 const IPStock = require('@/models/ipStockModel');
+const {
+  mapPlansPayload,
+  nexaStoreSellPrice,
+  stockUnits,
+  nexaStockKey,
+  buildNexaStockName,
+  buildNexaStockDocument,
+} = require('@/lib/nexaCatalogHelpers');
 
 function mapPool(pool) {
   return {
@@ -93,14 +101,6 @@ function stockUnits(value, inStock) {
   return Math.min(100000, Math.floor(n));
 }
 
-function sellPrice(pool, plan) {
-  const regular = Number(pool?.regularPrice ?? plan.regularPrice);
-  if (Number.isFinite(regular) && regular > 0) return Math.round(regular);
-  const api = Number(pool?.apiPrice ?? plan.apiPrice);
-  if (Number.isFinite(api) && api > 0) return Math.round(api);
-  return 0;
-}
-
 function targetsForPlan(plan, poolId) {
   if (poolId != null && poolId !== '') {
     const pool = (plan.pools || []).find((row) => Number(row.poolId) === Number(poolId));
@@ -152,63 +152,29 @@ export async function POST(request, { params }) {
       .lean();
     const existingKeys = new Set(existing.map((stock) => {
       const nexa = asConfigObject(stock.defaultConfigurations).nexa || {};
-      return `${nexa.planId}:${nexa.poolId ?? ''}`;
+      return nexaStockKey(nexa.planId, nexa.poolId);
     }));
 
     const created = [];
     const skipped = [];
     for (const { plan, pool } of targets) {
       const planId = Number(plan.planId);
-      const poolKey = pool?.poolId != null ? Number(pool.poolId) : '';
-      const key = `${planId}:${poolKey}`;
-      const planTitle = String(plan.name || '').trim() === 'Bcast App-login'
-        ? '📡 Broadcast Proxy'
-        : plan.name;
-      const rawLabel = [planTitle, pool?.subnet || pool?.name].filter(Boolean).join(' — ');
-      const planEmoji = {
-        'Diamond IPs': '💎',
-        Broadcast: '📡',
-        'Premium Native IPs': '⭐',
-        'Web Login': '🔐',
-      }[String(plan.name || '').trim()];
-      const label = planEmoji && !String(rawLabel).startsWith(planEmoji)
-        ? rawLabel.replace(String(plan.name).trim(), `${planEmoji} ${String(plan.name).trim()}`)
-        : rawLabel;
+      const key = nexaStockKey(planId, pool?.poolId);
+      const label = buildNexaStockName(plan, pool);
       if (existingKeys.has(key)) {
         skipped.push(label);
         continue;
       }
 
       const units = stockUnits(pool?.stock ?? plan.stock, pool ? pool.inStock !== false : plan.inStock !== false);
-      const price = sellPrice(pool, plan);
-      const protocol = NexaApi.normalizeOrderProtocol(
-        (plan.protocols || []).includes('SOCKS5') ? 'SOCKS5' : ((plan.protocols || [])[0] || plan.protocol || 'SOCKS5')
-      );
-      const doc = await IPStock.create({
-        name: label || `Nexa plan ${planId}`,
-        description: '',
-        available: units > 0,
-        stockCount: units,
-        hiddenFromStore: false,
-        company: company._id,
-        serverType: 'Proxy',
-        tags: ['nexa'],
-        memoryOptions: { IP: { price } },
-        promoCodes: [
-          { code: 'OCEAN50', discount: 50, discountType: 'fixed', isActive: true },
-        ],
-        defaultConfigurations: {
-          nexa: {
-            planId,
-            poolId: pool?.poolId != null ? Number(pool.poolId) : null,
-            protocol,
-            tier: plan.tier || '',
-            controlMode: plan.controlMode || '',
-            subnet: pool?.subnet || plan.subnet || '',
-            apiPrice: Number(pool?.apiPrice ?? plan.apiPrice) || 0,
-          },
-        },
-      });
+      const price = nexaStoreSellPrice(pool, plan);
+      const live = { available: units > 0, stockCount: units };
+      const docFields = buildNexaStockDocument(company._id, plan, pool, live);
+      if (price <= 0) {
+        skipped.push(`${label} (no Nexa user rate — set price manually)`);
+        continue;
+      }
+      const doc = await IPStock.create(docFields);
       existingKeys.add(key);
       created.push({ id: String(doc._id), name: doc.name, price, stockCount: units });
     }
