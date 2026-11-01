@@ -112,9 +112,11 @@ function subnetsMatch(a, b) {
 }
 
 function buildNexaStockName(plan, pool) {
-  const planTitle = String(plan.name || '').trim() === 'Bcast App-login'
-    ? '📡 Broadcast Proxy'
-    : plan.name;
+  const rawName = String(plan.name || '').trim();
+  const planTitle =
+    rawName === 'Bcast App-login' || rawName === 'Broadcast'
+      ? '📡 Broadcast Proxy'
+      : plan.name;
   const rawLabel = [planTitle, pool?.subnet || pool?.name].filter(Boolean).join(' — ');
   const planEmoji = {
     'Diamond IPs': '💎',

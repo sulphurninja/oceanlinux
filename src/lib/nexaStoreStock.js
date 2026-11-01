@@ -40,8 +40,14 @@ function nexaStoreVisibilityPatch(stock, live) {
     available: live.available,
     stockCount: live.stockCount,
   };
+  const hasNexaPlan = Number(nexaConfig(stock).planId) > 0;
   if (live.available) {
     Object.assign(patch, storeAutoUnhideUpdate(stock, true));
+    // Rows hidden while OOS often keep autoHiddenFromStore=false; still relist when Nexa has stock.
+    if (hasNexaPlan && stock.hiddenFromStore) {
+      patch.hiddenFromStore = false;
+      patch.autoHiddenFromStore = false;
+    }
   } else {
     patch.hiddenFromStore = true;
     patch.autoHiddenFromStore = true;
@@ -60,6 +66,10 @@ function nexaStockNeedsSyncUpdate(stock, patch) {
   for (const [key, value] of Object.entries(patch)) {
     if (key === 'stockCount') {
       if (Number(stock.stockCount) !== Number(value)) return true;
+      continue;
+    }
+    if (key === 'hiddenFromStore' || key === 'autoHiddenFromStore') {
+      if (Boolean(stock[key]) !== Boolean(value)) return true;
       continue;
     }
     if (Boolean(stock[key]) !== Boolean(value)) return true;
@@ -171,7 +181,16 @@ async function importMissingNexaPools(companyId, plans, existingStocks, IPStock)
 async function applyNexaLiveToStock(IPStock, stock, live, plan, pool) {
   const patch = nexaStoreVisibilityPatch(stock, live);
   const customerPrice = nexaStoreSellPrice(pool, plan);
-  if (!patchNeedsApply(stock, patch, customerPrice)) return false;
+  const sellPrice =
+    customerPrice > 0
+      ? customerPrice
+      : Number(stock.memoryOptions?.IP?.price ?? stock.memoryOptions?.get?.('IP')?.price) || 0;
+
+  if (!patchNeedsApply(stock, patch, sellPrice || customerPrice)) {
+    if (!(live.available && stock.hiddenFromStore && Number(nexaConfig(stock).planId) > 0)) {
+      return false;
+    }
+  }
 
   const iso = new Date().toISOString();
   const cfg = { ...nexaConfig(stock) };
@@ -180,7 +199,8 @@ async function applyNexaLiveToStock(IPStock, stock, live, plan, pool) {
   cfg.lastStockSync = iso;
   cfg.livePoolStock = live.stockCount;
   cfg.liveInStock = live.available;
-  if (customerPrice > 0) cfg.regularPrice = customerPrice;
+  const priceForStore = sellPrice > 0 ? sellPrice : customerPrice;
+  if (priceForStore > 0) cfg.regularPrice = priceForStore;
   if (pool?.apiPrice != null || plan?.apiPrice != null) {
     cfg.apiPrice = Number(pool?.apiPrice ?? plan?.apiPrice) || cfg.apiPrice || 0;
   }
@@ -192,8 +212,12 @@ async function applyNexaLiveToStock(IPStock, stock, live, plan, pool) {
   };
   if (patch.hiddenFromStore != null) $set.hiddenFromStore = patch.hiddenFromStore;
   if (patch.autoHiddenFromStore != null) $set.autoHiddenFromStore = patch.autoHiddenFromStore;
-  if (customerPrice > 0) {
-    $set['memoryOptions.IP'] = { price: customerPrice };
+  if (priceForStore > 0) {
+    $set['memoryOptions.IP'] = { price: priceForStore };
+  }
+  if (plan?.planId) {
+    const nextName = buildNexaStockName(plan, pool);
+    if (nextName && nextName !== stock.name) $set.name = nextName;
   }
 
   await IPStock.updateOne({ _id: stock._id }, { $set });
