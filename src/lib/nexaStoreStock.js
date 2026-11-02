@@ -194,9 +194,11 @@ async function applyNexaLiveToStock(IPStock, stock, live, plan, pool) {
     customerPrice > 0
       ? customerPrice
       : Number(stock.memoryOptions?.IP?.price ?? stock.memoryOptions?.get?.('IP')?.price) || 0;
+  const nextName = plan?.planId ? buildNexaStockName(plan, pool) : '';
+  const nameNeedsUpdate = !!(nextName && nextName !== stock.name);
 
   if (!patchNeedsApply(stock, patch, sellPrice || customerPrice)) {
-    if (!(live.available && stock.hiddenFromStore && Number(nexaConfig(stock).planId) > 0)) {
+    if (!(live.available && stock.hiddenFromStore && Number(nexaConfig(stock).planId) > 0) && !nameNeedsUpdate) {
       return false;
     }
   }
@@ -224,10 +226,7 @@ async function applyNexaLiveToStock(IPStock, stock, live, plan, pool) {
   if (priceForStore > 0) {
     $set['memoryOptions.IP'] = { price: priceForStore };
   }
-  if (plan?.planId) {
-    const nextName = buildNexaStockName(plan, pool);
-    if (nextName && nextName !== stock.name) $set.name = nextName;
-  }
+  if (nameNeedsUpdate) $set.name = nextName;
 
   await IPStock.updateOne({ _id: stock._id }, { $set });
   return true;
