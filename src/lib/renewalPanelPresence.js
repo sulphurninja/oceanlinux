@@ -65,29 +65,33 @@ async function checkSmartVpsPresence(order) {
   }
 }
 
-async function resellerIpOnPanel(api, ip) {
+async function resellerIpOnPanel(api, ip, order = null) {
   const ResellerApi = require('../services/resellerApi');
   const cleanIp = String(ip || '').split(':')[0].trim();
-  let page = 0;
-  let totalPages = 1;
-  const pageSize = 100;
-  const maxPages = 80;
+  if (!cleanIp) return { found: false, complete: true };
 
-  while (page < totalPages && page < maxPages) {
-    const data = await api.getOrderOverviewPage(page, pageSize);
-    const orders = data?.orders || data?.content || data?.items || [];
-    totalPages = Number(data?.totalPages || data?.totalPage || data?.pages || 1) || 1;
-
-    for (const row of orders) {
-      const ips = ResellerApi.extractOverviewRowIps(row);
-      if (ips.includes(cleanIp)) return { found: true, complete: true };
+  const savedVmId = order?.resellerVmId ? String(order.resellerVmId).trim() : '';
+  if (savedVmId) {
+    try {
+      const details = await api.getVmDetails(savedVmId);
+      const detailIp = String(details?.ipAddress || details?.ip || '').split(':')[0].trim();
+      if (details && (!detailIp || detailIp === cleanIp)) {
+        return { found: true, complete: true };
+      }
+    } catch (_) {
+      /* vm id stale — fall through to IP index */
     }
-
-    page += 1;
-    if (!orders.length) return { found: false, complete: true };
   }
 
-  return { found: false, complete: page >= totalPages };
+  try {
+    const found = await api.findVmByIp(cleanIp, { maxPages: 500, pageSize: 100, skipCache: true });
+    if (found?.vmId) return { found: true, complete: true };
+  } catch (err) {
+    console.warn('[RENEWAL-PRESENCE] findVmByIp failed:', err.message);
+    return { found: false, complete: false };
+  }
+
+  return { found: false, complete: true };
 }
 
 async function checkResellerPanelPresence(order) {
@@ -102,7 +106,7 @@ async function checkResellerPanelPresence(order) {
       console.warn('[RENEWAL-PRESENCE] Reseller panel unavailable:', error);
       return { ok: false, code: 'verify_failed', message: VERIFY_MESSAGE };
     }
-    const found = await resellerIpOnPanel(api, ip);
+    const found = await resellerIpOnPanel(api, ip, order);
     if (found.found) return { ok: true };
     if (!found.complete) {
       return { ok: false, code: 'verify_failed', message: VERIFY_MESSAGE };

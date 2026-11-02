@@ -378,7 +378,7 @@ class ResellerApi {
    * Results are cached per panel account so status/stop polling does not
    * re-scan every order page on each request (~14s without cache).
    */
-  async findVmByIp(ip, { maxPages = 50, pageSize = 50, skipCache = false } = {}) {
+  async findVmByIp(ip, { maxPages = 500, pageSize = 100, skipCache = false } = {}) {
     const cleanIp = String(ip || '').split(':')[0].trim();
     if (!cleanIp) return null;
 

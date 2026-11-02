@@ -460,7 +460,7 @@ async function hydrateProvisionedRow(api, row, order = null) {
 async function findProvisionedVmByPurchaseRef(
   api,
   purchaseRefs,
-  { order = null, locationCtx = {}, maxPages = 3 } = {}
+  { order = null, locationCtx = {}, maxPages = 500 } = {}
 ) {
   const { resellerGroupId, resellerOrderId, resellerVmId } = purchaseRefs || {};
   if (!resellerGroupId && !resellerOrderId && !resellerVmId) return null;
@@ -641,8 +641,28 @@ async function resolveResellerVmForOrder(resellerApi, order) {
   }
 
   if (wantedIp) {
-    const foundByIp = await resellerApi.findVmByIp(wantedIp);
+    const foundByIp = await resellerApi.findVmByIp(wantedIp, { maxPages: 500, pageSize: 100, skipCache: true });
     if (foundByIp) return foundByIp;
+  }
+
+  const purchaseRefs = {
+    resellerOrderId: order?.resellerOrderId,
+    resellerGroupId: order?.resellerGroupId,
+    resellerVmId: order?.resellerVmId,
+  };
+  if (purchaseRefs.resellerOrderId || purchaseRefs.resellerGroupId) {
+    const byRef = await findProvisionedVmByPurchaseRef(resellerApi, purchaseRefs, {
+      order,
+      maxPages: 500,
+    });
+    if (byRef?.vmId) {
+      return {
+        vmId: String(byRef.vmId),
+        ip: cleanOrderIp(byRef.ip) || wantedIp || '',
+        raw: byRef.raw || null,
+        details: byRef.details || null,
+      };
+    }
   }
 
   const err = new Error(
@@ -1508,6 +1528,42 @@ async function healResellerVmIdLinks({ limit = 50 } = {}) {
 
     const entry = ipIndex.get(ip);
     if (!entry?.vmId) {
+      const purchaseRefs = {
+        resellerOrderId: order.resellerOrderId,
+        resellerGroupId: order.resellerGroupId,
+      };
+      if (purchaseRefs.resellerOrderId || purchaseRefs.resellerGroupId) {
+        try {
+          const api = new ResellerApi(cfg);
+          const byRef = await findProvisionedVmByPurchaseRef(api, purchaseRefs, {
+            order,
+            maxPages: 500,
+          });
+          if (byRef?.vmId) {
+            const synced = await syncResellerVmCredentials(api, order, String(byRef.vmId));
+            await Order.findByIdAndUpdate(order._id, {
+              $set: {
+                ...synced.updates,
+                resellerVmId: String(synced.vmId || byRef.vmId),
+                provider: 'reseller-api',
+                lastSyncTime: new Date(),
+              },
+            });
+            results.push({
+              orderId: String(order._id),
+              ip,
+              ok: true,
+              vmId: String(synced.vmId || byRef.vmId),
+              via: 'purchase_ref',
+              changes: synced.changes,
+            });
+            continue;
+          }
+        } catch (err) {
+          results.push({ orderId: String(order._id), ip, ok: false, error: err.message });
+          continue;
+        }
+      }
       results.push({ orderId: String(order._id), ip, ok: false, error: 'ip_not_on_panel' });
       continue;
     }

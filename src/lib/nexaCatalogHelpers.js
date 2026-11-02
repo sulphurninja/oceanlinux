@@ -116,7 +116,11 @@ function buildNexaStockName(plan, pool) {
   let planTitle = rawName;
   if (rawName === 'Bcast App-login' || rawName === 'Broadcast') {
     planTitle = '📡 Broadcast Proxy';
-  } else if (/web login/i.test(rawName) || String(plan.category || '').trim() === 'Native IP') {
+  } else if (/^Premium Native IPs$/i.test(rawName)) {
+    planTitle = '⭐ Premium Native IPs';
+  } else if (/web login/i.test(rawName)) {
+    planTitle = '🌐 Web & App Access Proxies';
+  } else if (String(plan.category || '').trim() === 'Native IP') {
     planTitle = '🌐 Web & App Access Proxies';
   }
   const rawLabel = [planTitle, pool?.subnet || pool?.name].filter(Boolean).join(' — ');
