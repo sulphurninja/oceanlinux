@@ -113,10 +113,12 @@ function subnetsMatch(a, b) {
 
 function buildNexaStockName(plan, pool) {
   const rawName = String(plan.name || '').trim();
-  const planTitle =
-    rawName === 'Bcast App-login' || rawName === 'Broadcast'
-      ? '📡 Broadcast Proxy'
-      : plan.name;
+  let planTitle = rawName;
+  if (rawName === 'Bcast App-login' || rawName === 'Broadcast') {
+    planTitle = '📡 Broadcast Proxy';
+  } else if (/web login/i.test(rawName) || String(plan.category || '').trim() === 'Native IP') {
+    planTitle = '🌐 Web & App Access Proxies';
+  }
   const rawLabel = [planTitle, pool?.subnet || pool?.name].filter(Boolean).join(' — ');
   const planEmoji = {
     'Diamond IPs': '💎',

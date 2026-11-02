@@ -15,7 +15,7 @@ const {
 
 const SYNC_TTL_MS = 60_000;
 const SYNC_TTL_PEAK_MS = 90_000;
-const CUSTOMER_REFRESH_INTERVAL_MS = 3 * 60 * 1000;
+const CUSTOMER_REFRESH_INTERVAL_MS = 90_000;
 
 function storeAutoUnhideUpdate(stock, inStock) {
   if (!inStock || !stock?.autoHiddenFromStore) return {};
@@ -134,10 +134,17 @@ function siblingNexaSellPrice(existingStocks, planId) {
   return 0;
 }
 
-/** Add new in-stock Nexa pools for plans we already list in the store. */
+function companyListsNexaInStore(existingStocks) {
+  return existingStocks.some(
+    (s) => Number(nexaConfig(s).planId) > 0 || (Array.isArray(s.tags) && s.tags.includes('nexa'))
+  );
+}
+
+/** Add new in-stock Nexa pools (existing plan or brand-new plan when Nexa catalog is already live). */
 async function importMissingNexaPools(companyId, plans, existingStocks, IPStock) {
   const keys = existingKeySet(existingStocks);
   const soldPlanIds = soldNexaPlanIds(existingStocks);
+  const nexaLive = companyListsNexaInStore(existingStocks);
   let created = 0;
 
   const shouldAutoAdd = (plan, pool, live) => {
@@ -146,7 +153,8 @@ async function importMissingNexaPools(companyId, plans, existingStocks, IPStock)
     const key = nexaStockKey(planId, pool?.poolId);
     if (keys.has(key)) return false;
     if (!live.available) return false;
-    return soldPlanIds.has(planId);
+    if (soldPlanIds.has(planId)) return true;
+    return nexaLive;
   };
 
   for (const plan of plans) {

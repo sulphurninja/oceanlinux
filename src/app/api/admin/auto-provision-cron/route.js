@@ -608,7 +608,7 @@ export async function POST(request) {
             const Company = (await import('@/models/companyModel')).default;
             const IPStock = require('@/models/ipStockModel');
             const { syncNexaStoreAvailability } = require('@/lib/nexaStoreStock');
-            const nexaStockChanged = await syncNexaStoreAvailability({ Company, IPStock });
+            const nexaStockChanged = await syncNexaStoreAvailability({ Company, IPStock, force: true });
             if (nexaStockChanged > 0) {
                 console.log(`[CRON-${cronId}] Nexa store stock rows updated: ${nexaStockChanged}`);
             }

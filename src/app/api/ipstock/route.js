@@ -389,11 +389,19 @@ export async function GET(request) {
             }
         } else if (customerView) {
             // Nexa getPlans can be slow — never block the catalog response; TTL dedupes calls.
-            // Still run during 8–12 IST so Nexa OOS/in-stock mirrors the live panel.
             void (async () => {
                 try {
                     const { syncNexaStoreAvailability } = require('@/lib/nexaStoreStock');
-                    const nexaChanged = await syncNexaStoreAvailability({ Company, IPStock });
+                    if (!global.__oceanNexaCatalogBgForce) global.__oceanNexaCatalogBgForce = { at: 0 };
+                    const bg = global.__oceanNexaCatalogBgForce;
+                    const now = Date.now();
+                    const forceBg = !bg.at || now - bg.at > 120_000;
+                    const nexaChanged = await syncNexaStoreAvailability({
+                        Company,
+                        IPStock,
+                        force: forceBg,
+                    });
+                    if (forceBg) bg.at = now;
                     if (nexaChanged > 0) {
                         customerCatalogStore().clear();
                     }
