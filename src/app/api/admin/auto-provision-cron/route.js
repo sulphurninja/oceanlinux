@@ -168,6 +168,36 @@ async function validateOrderConfiguration(order) {
                 isRackato: true,
             };
         }
+
+        const {
+            isResellerApiStock,
+            readResellerApiStockConfig,
+        } = require('@/lib/resellerApiStockConfig');
+        const stockResellerCfg = readResellerApiStockConfig(ipStock);
+        const isResellerApi =
+            order.provider === 'reseller-api' ||
+            isResellerApiStock(ipStock, null) ||
+            stockResellerCfg?.zoneId != null ||
+            (Array.isArray(stockResellerCfg?.zoneIds) && stockResellerCfg.zoneIds.length > 0);
+
+        if (isResellerApi) {
+            const zoneOk =
+                stockResellerCfg?.zoneId != null ||
+                (Array.isArray(stockResellerCfg?.zoneIds) && stockResellerCfg.zoneIds.length > 0);
+            if (!zoneOk) {
+                return {
+                    valid: false,
+                    reason: `Reseller panel zone not mapped on ${ipStock.name}. Set region/zone in admin IP stock.`,
+                };
+            }
+            console.log('[VALIDATION] ✅ Reseller-api / Hostheaven stock — skip Hostycare product ID check');
+            return {
+                valid: true,
+                productId: 'reseller-api',
+                ipStock: ipStock.name,
+                isResellerApi: true,
+            };
+        }
         
         // STEP 2: Parse memory options from IPStock
         let memoryOptions = {};

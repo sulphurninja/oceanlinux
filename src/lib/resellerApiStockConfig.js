@@ -210,7 +210,9 @@ function resolvePriceIdsForMemory(stockCfg, memory) {
  * Best-effort ISO pick from a zone catalog for the order OS family.
  */
 function resolveZoneIsoIdFromCatalog(isos, { isWindows, orderOs } = {}) {
-  const list = Array.isArray(isos) ? isos : (isos?.isos || []);
+  const list = Array.isArray(isos)
+    ? isos
+    : (isos?.isos || isos?.content || isos?.data || []);
   if (!list.length) return null;
 
   const os = String(orderOs || '').toLowerCase();
@@ -225,7 +227,8 @@ function resolveZoneIsoIdFromCatalog(isos, { isWindows, orderOs } = {}) {
     )?.id ?? null;
   }
   if (os.includes('centos')) {
-    return pick((i) => /centos/i.test(isoName(i)))?.id ?? null;
+    const centosId = pick((i) => /centos/i.test(isoName(i)))?.id;
+    if (centosId != null) return centosId;
   }
   if (os.includes('24')) {
     return (
@@ -234,10 +237,14 @@ function resolveZoneIsoIdFromCatalog(isos, { isWindows, orderOs } = {}) {
     )?.id ?? null;
   }
   // Ubuntu 22 — do NOT match bare "22" (false match on "Windows 2022")
-  return (
+  const picked =
     pick((i) => /ubuntu\s*22|ubuntu22/i.test(isoName(i))) ||
-    pick((i) => isoType(i) === 'UBUNTU')
-  )?.id ?? null;
+    pick((i) => isoType(i) === 'UBUNTU') ||
+    pick((i) => /ubuntu/i.test(isoName(i))) ||
+    pick((i) => isoType(i) === 'LINUX') ||
+    list.find((i) => !isoType(i).includes('WINDOWS'));
+  if (picked?.id != null) return picked.id;
+  return list[0]?.id ?? null;
 }
 
 /**
