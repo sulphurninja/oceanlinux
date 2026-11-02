@@ -3245,7 +3245,22 @@ class AutoProvisioningService {
           L.line(
             `[RESELLER-API] Stored vmId ${vmIdKnown} invalid for this purchase — polling overview for correct VM`
           );
-          resellerVmId = '';
+          const orderIp = String(order.ipAddress || '').split(':')[0].trim();
+          if (orderIp) {
+            try {
+              const byIp = await api.findVmByIp(orderIp, { maxPages: 80, skipCache: true });
+              if (byIp?.vmId) {
+                resellerVmId = String(byIp.vmId);
+                L.line(`[RESELLER-API] Recovered vmId ${resellerVmId} from panel IP ${orderIp}`);
+              } else {
+                resellerVmId = '';
+              }
+            } catch {
+              resellerVmId = '';
+            }
+          } else {
+            resellerVmId = '';
+          }
         }
       }
 

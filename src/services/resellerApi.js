@@ -378,7 +378,7 @@ class ResellerApi {
    * Results are cached per panel account so status/stop polling does not
    * re-scan every order page on each request (~14s without cache).
    */
-  async findVmByIp(ip, { maxPages = 20, pageSize = 50, skipCache = false } = {}) {
+  async findVmByIp(ip, { maxPages = 50, pageSize = 50, skipCache = false } = {}) {
     const cleanIp = String(ip || '').split(':')[0].trim();
     if (!cleanIp) return null;
 
@@ -398,28 +398,18 @@ class ResellerApi {
       totalPages = Number(data?.totalPages || data?.totalPage || 1) || 1;
 
       for (const o of orders) {
-        const candidates = [
-          o?.ip,
-          o?.ipAddress,
-          o?.primaryIp,
-          o?.mainIp,
-          ...(Array.isArray(o?.ips) ? o.ips : []),
-        ]
-          .filter(Boolean)
-          .map(v => String(v).split(':')[0].trim());
-
-        if (candidates.includes(cleanIp)) {
-          const vmId = o?.virtualMachineId || o?.vmId || o?.id || o?.vmid;
-          if (vmId == null) continue;
-          const found = {
-            vmId: String(vmId),
-            ip: cleanIp,
-            serverName: o?.serverName || o?.vmName || o?.hostname || '',
-            raw: o,
-          };
-          VM_IP_CACHE.set(cacheKey, { found, at: Date.now() });
-          return found;
-        }
+        const candidates = ResellerApi.extractOverviewRowIps(o);
+        if (!candidates.includes(cleanIp)) continue;
+        const vmId = o?.virtualMachineId || o?.vmId || o?.id || o?.vmid;
+        if (vmId == null) continue;
+        const found = {
+          vmId: String(vmId),
+          ip: cleanIp,
+          serverName: o?.serverName || o?.vmName || o?.hostname || '',
+          raw: o,
+        };
+        VM_IP_CACHE.set(cacheKey, { found, at: Date.now() });
+        return found;
       }
       page++;
       if (totalPages <= page) break;

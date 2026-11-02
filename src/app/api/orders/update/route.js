@@ -89,7 +89,7 @@ export async function POST(request) {
         updateFields.provider = updateFields.provider || 'reseller-api';
         updateFields.ipAddress = synced.updates.ipAddress || ipForLookup;
         Object.assign(updateFields, synced.updates);
-      } else {
+      } else if (!existingBeforeUpdate?.resellerVmId) {
         updateFields.resellerVmId = '';
       }
     }
@@ -116,14 +116,13 @@ export async function POST(request) {
               updateFields.provider = 'reseller-api';
               updateFields.ipAddress = synced.updates.ipAddress || ipAddress;
               Object.assign(updateFields, synced.updates);
-            } else {
+            } else if (!existingBeforeUpdate?.resellerVmId) {
               updateFields.resellerVmId = '';
             }
           }
         }
       } catch (resellerErr) {
         console.warn('[ORDER-UPDATE] Reseller VM re-link failed:', resellerErr.message);
-        if (manageCompanyChanged) updateFields.resellerVmId = '';
       }
     }
 

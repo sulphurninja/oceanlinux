@@ -618,10 +618,15 @@ export async function POST(request) {
 
         if (!peakTraffic) {
         try {
-            const { syncStuckResellerPendingOrders } = require('@/lib/resellerApiOrderSync');
+            const { syncStuckResellerPendingOrders, healResellerVmIdLinks } = require('@/lib/resellerApiOrderSync');
             const resellerSync = await syncStuckResellerPendingOrders({ limit: 25 });
             if (resellerSync.length) {
                 console.log(`[CRON-${cronId}] Reseller pending sync:`, JSON.stringify(resellerSync));
+            }
+            const healed = await healResellerVmIdLinks({ limit: 40 });
+            const linked = healed.filter((r) => r.ok);
+            if (linked.length) {
+                console.log(`[CRON-${cronId}] Reseller vmId heal:`, JSON.stringify(linked));
             }
         } catch (resellerSyncErr) {
             console.warn(`[CRON-${cronId}] Reseller pending sync skipped:`, resellerSyncErr.message);

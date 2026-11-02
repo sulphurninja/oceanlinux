@@ -1438,6 +1438,106 @@ async function maybeSyncResellerOrderOnFetch(order) {
   }
 }
 
+/**
+ * Re-link Hostheaven/PrimeVPS vmId on active orders when panel overview shows the IP
+ * but OceanLinux lost resellerVmId (admin relink miss, stale validation, etc.).
+ */
+async function healResellerVmIdLinks({ limit = 50 } = {}) {
+  const Order = (await import('@/models/orderModel')).default;
+  const Company = (await import('@/models/companyModel')).default;
+  const { getManageCompanyIdForOrder } = require('@/lib/orderManageCompany');
+  const { getCompanyResellerApiConfig } = require('@/lib/companyResellerApi');
+
+  const candidates = await Order.find({
+    status: { $in: ['active', 'confirmed'] },
+    ipAddress: { $exists: true, $nin: ['', null] },
+    $and: [
+      {
+        $or: [
+          { provider: 'reseller-api' },
+          { resellerOrderId: { $exists: true, $nin: [null, ''] } },
+        ],
+      },
+      {
+        $or: [{ resellerVmId: { $in: [null, ''] } }, { resellerVmId: { $exists: false } }],
+      },
+    ],
+  })
+    .sort({ updatedAt: -1 })
+    .limit(limit)
+    .lean();
+
+  if (!candidates.length) return [];
+
+  const companyCache = new Map();
+  const indexCache = new Map();
+  const results = [];
+
+  for (const order of candidates) {
+    const ip = cleanOrderIp(order.ipAddress);
+    if (!ip) continue;
+
+    const companyId = await getManageCompanyIdForOrder(order);
+    if (!companyId) {
+      results.push({ orderId: String(order._id), ip, ok: false, error: 'no_manage_company' });
+      continue;
+    }
+
+    let company = companyCache.get(companyId);
+    if (!company) {
+      company = await Company.findById(companyId).select('resellerApi name').lean();
+      companyCache.set(companyId, company);
+    }
+    const cfg = getCompanyResellerApiConfig(company);
+    if (!cfg) {
+      results.push({ orderId: String(order._id), ip, ok: false, error: 'reseller_api_off' });
+      continue;
+    }
+
+    let ipIndex = indexCache.get(companyId);
+    if (!ipIndex) {
+      try {
+        const api = new ResellerApi(cfg);
+        ipIndex = await api.buildVmIpIndex({ maxPages: 500, pageSize: 100 });
+        indexCache.set(companyId, ipIndex);
+      } catch (err) {
+        results.push({ orderId: String(order._id), ip, ok: false, error: err.message });
+        continue;
+      }
+    }
+
+    const entry = ipIndex.get(ip);
+    if (!entry?.vmId) {
+      results.push({ orderId: String(order._id), ip, ok: false, error: 'ip_not_on_panel' });
+      continue;
+    }
+
+    try {
+      const api = new ResellerApi(cfg);
+      const synced = await syncResellerVmCredentials(api, order, String(entry.vmId));
+      await Order.findByIdAndUpdate(order._id, {
+        $set: {
+          ...synced.updates,
+          resellerVmId: String(synced.vmId || entry.vmId),
+          provider: 'reseller-api',
+          lastSyncTime: new Date(),
+        },
+      });
+      results.push({
+        orderId: String(order._id),
+        ip,
+        ok: true,
+        vmId: String(synced.vmId || entry.vmId),
+        changes: synced.changes,
+      });
+    } catch (err) {
+      results.push({ orderId: String(order._id), ip, ok: false, error: err.message });
+    }
+  }
+
+  return results;
+}
+
 module.exports = {
   sleep,
   resolveResellerApiConfigFromCompany,
@@ -1456,6 +1556,7 @@ module.exports = {
   renewResellerPanelVm,
   completeResellerPendingOrder,
   syncStuckResellerPendingOrders,
+  healResellerVmIdLinks,
   scheduleResellerPendingCompletion,
   maybeSyncResellerOrderOnFetch,
 };
