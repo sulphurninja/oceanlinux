@@ -1316,7 +1316,28 @@ const ManageOrders = () => {
                                 <div className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">{stats.pending}</div>
                             </CardContent>
                         </Card>
-                        <Card>
+                        <Card
+                            role="button"
+                            tabIndex={0}
+                            title="Auto-provision failed on panel"
+                            onClick={() => {
+                                setFilters((prev) => ({
+                                    ...prev,
+                                    provisioningStatus: prev.provisioningStatus === 'failed' ? '' : 'failed',
+                                }));
+                                setPagination((prev) => ({ ...prev, page: 1 }));
+                            }}
+                            onKeyDown={(event) => {
+                                if (event.key !== 'Enter' && event.key !== ' ') return;
+                                event.preventDefault();
+                                setFilters((prev) => ({
+                                    ...prev,
+                                    provisioningStatus: prev.provisioningStatus === 'failed' ? '' : 'failed',
+                                }));
+                                setPagination((prev) => ({ ...prev, page: 1 }));
+                            }}
+                            className={`cursor-pointer ${filters.provisioningStatus === 'failed' ? 'ring-2 ring-red-500' : ''}`}
+                        >
                             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                                 <CardTitle className="text-sm font-medium">Failed</CardTitle>
                             </CardHeader>
@@ -1327,7 +1348,7 @@ const ManageOrders = () => {
                         <Card
                             role="button"
                             tabIndex={0}
-                            title="In provisioning, IP not assigned yet"
+                            title="Paid, IP not assigned yet — pending queue or actively provisioning"
                             onClick={() => {
                                 setFilters((prev) => ({
                                     ...prev,
@@ -1438,7 +1459,7 @@ const ManageOrders = () => {
                                                     <SelectItem value="All">All provisioning</SelectItem>
                                                     <SelectItem value="active">Auto-Active</SelectItem>
                                                     <SelectItem value="provisioning">Auto-Provisioning</SelectItem>
-                                                    <SelectItem value="no_ip">Provisioning, no IP</SelectItem>
+                                                    <SelectItem value="no_ip">Provisioning queue (paid, no IP)</SelectItem>
                                                     <SelectItem value="failed">Auto-Failed</SelectItem>
                                                     <SelectItem value="manual_setup">Manual Setup</SelectItem>
                                                     <SelectItem value="not_provisioned">Not Provisioned</SelectItem>

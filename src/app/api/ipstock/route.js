@@ -19,6 +19,20 @@ const {
 const { syncResellerIpStockRow } = require('@/lib/resellerLiveStock');
 const { syncKurohostIpStockRow } = require('@/lib/kurohostLiveStock');
 const { getCompanyFulfillmentMode, countUnallocatedInventory, usesPreconfiguredInventory, inventoryDrivesStoreAvailability } = require('@/lib/companyInventory');
+const { readResellerApiStockConfig, stockNameRequiresMappedZone } = require('@/lib/resellerApiStockConfig');
+
+/** Region titles (e.g. "… - Mumbai | Starter …") must not list when no panel zone is mapped. */
+function customerHideRegionResellerPlanWithoutZone(stock) {
+    if (!stock?.company || !stockHasResellerPanelPlans(stock)) return false;
+    if (!stockNameRequiresMappedZone(stock)) return false;
+    const cfg = readResellerApiStockConfig(stock);
+    const zoneMapped =
+        cfg?.zoneId != null ||
+        (Array.isArray(cfg?.zoneIds) && cfg.zoneIds.length > 0);
+    if (zoneMapped) return false;
+    const inv = Number(stock.inventoryAvailable ?? 0);
+    return inv <= 0;
+}
 
 function toPlainMap(value) {
     if (!value) return {};

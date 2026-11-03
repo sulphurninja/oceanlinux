@@ -228,6 +228,18 @@ function isResellerLiveStock(stock: IPStock) {
   return stock.resellerPanelLiveStock === true || stock.resellerUseLiveStockApi === true;
 }
 
+/** Matches server `stockNameRequiresMappedZone` — wallet must not sell region-titled plans without zoneIds. */
+function stockNameRequiresMappedZone(stock: IPStock) {
+  return /\s-\s[A-Za-z][A-Za-z0-9\s.]+\s\|\s/.test(String(stock.name || ''));
+}
+
+function resellerPlanHasMappedZone(stock: IPStock) {
+  const cfg = stock.defaultConfigurations?.resellerApi;
+  if (!cfg) return false;
+  if (cfg.zoneId != null && Number.isFinite(Number(cfg.zoneId))) return true;
+  return Array.isArray(cfg.zoneIds) && cfg.zoneIds.length > 0;
+}
+
 /** Company portal set manual units — overrides live panel stock for store listing. */
 function usesCompanyManualUnits(stock: IPStock) {
   if (!stock.company) return false;
@@ -300,6 +312,10 @@ function isHostdzireMemoryInStock(stock: IPStock, memory: string) {
 function isResellerMemoryInStock(stock: IPStock, memory: string) {
   const savedVps = stock.inventoryAvailable ?? 0;
   if (savedVps > 0) return true;
+
+  if (stockNameRequiresMappedZone(stock) && !resellerPlanHasMappedZone(stock)) {
+    return false;
+  }
 
   const reseller = stock.defaultConfigurations?.resellerApi;
   const variant = reseller?.variantStock?.[memory];
@@ -992,13 +1008,13 @@ function IPStockContent() {
           await reloadIpStocks(signal);
         }
         if (!signal.aborted) {
-          writeDashboardCache(DASHBOARD_CACHE_KEYS.stockSyncedAt, Date.now());
+        writeDashboardCache(DASHBOARD_CACHE_KEYS.stockSyncedAt, Date.now());
         }
       } catch (e) {
         if (!signal.aborted) console.warn("[IP Stock] Live stock sync error", e);
       } finally {
         if (liveSyncGenerationRef.current === generation) {
-          setIsRefreshingStock(false);
+        setIsRefreshingStock(false);
         }
       }
     };
@@ -1313,7 +1329,7 @@ function IPStockContent() {
     setWalletLoaded(false);
     fetchWalletSummary()
       .then((w) => {
-        if (w) setWalletBalance(w.balance);
+      if (w) setWalletBalance(w.balance);
       })
       .finally(() => setWalletLoaded(true));
   }, [showDialog]);
@@ -2237,13 +2253,13 @@ function IPStockContent() {
                           verifyingPurchaseKey={verifyingPurchaseKey}
                         />
                       ) : (
-                        <CompactServerPlanRow
+                      <CompactServerPlanRow
                           key={row.stock._id}
                           stock={row.stock}
                           categoryTab={activeTab}
-                          onBuyNow={handleBuyNow}
-                          verifyingPurchaseKey={verifyingPurchaseKey}
-                        />
+                        onBuyNow={handleBuyNow}
+                        verifyingPurchaseKey={verifyingPurchaseKey}
+                      />
                       )
                     ))}
                   </div>
@@ -3173,7 +3189,7 @@ const CompactServerPlanRow = memo(function CompactServerPlanRow({
         ? 'border-l-emerald-400 hover:border-emerald-400/40'
         : 'border-l-red-500 premium-ipstock-row-sold-out'
     )}>
-      <div
+      <div 
         className={cn(
           'p-3 grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_auto] gap-2.5 sm:gap-3 sm:items-center',
           inStock ? 'cursor-pointer' : 'cursor-default'
@@ -3377,7 +3393,7 @@ const CompactServerPlanRow = memo(function CompactServerPlanRow({
                           ? cn('premium-ipstock-range-row', !memoryInStock && 'premium-ipstock-range-row--out')
                           : cn(
                               'border transition-colors',
-                              memoryInStock
+                        memoryInStock
                                 ? 'bg-white/[0.04] border-white/10 hover:border-emerald-400/35'
                                 : 'bg-white/[0.02] border-red-400/10 opacity-80'
                             )

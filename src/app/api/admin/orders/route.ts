@@ -124,21 +124,34 @@ function paymentFilterClause(value: string | null) {
   return null;
 }
 
-function provisioningWithoutIpClause() {
+/** Paid, no IP yet — pending queue + actively provisioning (excludes failed). */
+function provisionQueueClause() {
   return {
-    provisioningStatus: 'provisioning',
-    $or: [
-      { ipAddress: { $exists: false } },
-      { ipAddress: null },
-      { ipAddress: '' },
-      { ipAddress: /^\s*$/ },
+    $and: [
+      { status: { $in: ['confirmed', 'paid', 'completed'] } },
+      {
+        $or: [
+          { ipAddress: { $exists: false } },
+          { ipAddress: null },
+          { ipAddress: '' },
+          { ipAddress: /^\s*$/ },
+        ],
+      },
+      { provisioningStatus: { $ne: 'failed' } },
+      {
+        $or: [
+          { provisioningStatus: { $in: ['pending', 'provisioning'] } },
+          { provisioningStatus: { $exists: false } },
+          { provisioningStatus: null },
+        ],
+      },
     ],
   };
 }
 
 function provisioningFilterClause(value: string | null) {
   if (!value) return null;
-  if (value === 'no_ip') return provisioningWithoutIpClause();
+  if (value === 'no_ip' || value === 'awaiting') return provisionQueueClause();
   if (value === 'not_provisioned') {
     return {
       autoProvisioned: { $ne: true },
@@ -340,7 +353,7 @@ async function fetchGlobalStats() {
     return cached.stats;
   }
 
-  const [[rows], provisioningNoIp] = await Promise.all([
+  const [[rows], provisioningQueue] = await Promise.all([
     Order.aggregate([
     {
       $group: {
@@ -378,7 +391,7 @@ async function fetchGlobalStats() {
       },
     },
   ]).option({ maxTimeMS: 8000 }),
-    Order.countDocuments(provisioningWithoutIpClause()).maxTimeMS(8000),
+    Order.countDocuments(provisionQueueClause()).maxTimeMS(8000),
   ]);
 
   const stats = {
@@ -387,7 +400,7 @@ async function fetchGlobalStats() {
     confirmed: rows?.confirmed || 0,
     active: rows?.active || 0,
     failed: rows?.failed || 0,
-    provisioning: provisioningNoIp || 0,
+    provisioning: provisioningQueue || 0,
     totalRevenue: rows?.totalRevenue || 0,
   };
   g.__oceanAdminOrderStatsNoIp = { at: Date.now(), stats };

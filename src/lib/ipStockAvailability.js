@@ -159,6 +159,18 @@ export function isIpStockHiddenFromStore(stock) {
 /** Restore store listing when live stock returns after bulk "hide out of stock". */
 export function storeAutoUnhideUpdate(stock, inStock) {
   if (!inStock || !stock?.autoHiddenFromStore) return {};
+  try {
+    const { stockNameRequiresMappedZone, readResellerApiStockConfig } = require('@/lib/resellerApiStockConfig');
+    if (stockNameRequiresMappedZone(stock)) {
+      const cfg = readResellerApiStockConfig(stock);
+      const zoneMapped =
+        (Array.isArray(cfg.zoneIds) && cfg.zoneIds.length > 0) ||
+        (cfg.zoneId != null && Number.isFinite(Number(cfg.zoneId)));
+      if (!zoneMapped) return {};
+    }
+  } catch {
+    /* ignore */
+  }
   return { hiddenFromStore: false, autoHiddenFromStore: false };
 }
 
