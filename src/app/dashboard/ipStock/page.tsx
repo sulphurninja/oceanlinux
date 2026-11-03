@@ -298,9 +298,22 @@ function isHostdzireMemoryInStock(stock: IPStock, memory: string) {
 }
 
 function isResellerMemoryInStock(stock: IPStock, memory: string) {
-  if (stock.available) return true;
+  const savedVps = stock.inventoryAvailable ?? 0;
+  if (savedVps > 0) return true;
+
   const reseller = stock.defaultConfigurations?.resellerApi;
   const variant = reseller?.variantStock?.[memory];
+  const panelLive =
+    isResellerLiveStock(stock) ||
+    stock.resellerPanelLiveStock === true ||
+    stock.resellerUseLiveStockApi === true;
+
+  if (panelLive && variant && typeof variant === 'object') {
+    if (variant.available === true) return true;
+    if (variant.available === false) return false;
+  }
+
+  if (stock.available) return true;
   if (variant?.available === true) return true;
   if (!variant) return stock.available !== false;
   if (variant.skipped || variant.available === null) {

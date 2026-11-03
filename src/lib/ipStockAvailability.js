@@ -162,17 +162,30 @@ export function storeAutoUnhideUpdate(stock, inStock) {
   return { hiddenFromStore: false, autoHiddenFromStore: false };
 }
 
-/** Bulk hide sets autoHiddenFromStore — relist on store when stock is back (manual units or live sync). */
+/** Bulk hide sets autoHiddenFromStore — relist only when the plan is genuinely purchasable. */
 export async function relistAutoHiddenStocksNowInStock() {
-  const result = await IPStock.updateMany(
-    {
-      autoHiddenFromStore: true,
-      hiddenFromStore: true,
-      $or: [{ stockCount: { $gt: 0 } }, { available: true }],
-    },
-    { $set: { hiddenFromStore: false, autoHiddenFromStore: false } }
-  );
-  return result.modifiedCount ?? 0;
+  const Company = (await import('@/models/companyModel')).default;
+  const candidates = await IPStock.find({
+    autoHiddenFromStore: true,
+    hiddenFromStore: true,
+  }).lean();
+
+  let relisted = 0;
+  for (const stock of candidates) {
+    let company = null;
+    if (stock.company) {
+      company = await Company.findById(stock.company)
+        .select('resellerApi netbayApi kurohostApi hostdzireApi')
+        .lean();
+    }
+    if (!isIpStockPurchasable(stock, 1, company)) continue;
+    await IPStock.updateOne(
+      { _id: stock._id },
+      { $set: { hiddenFromStore: false, autoHiddenFromStore: false } }
+    );
+    relisted += 1;
+  }
+  return relisted;
 }
 
 export async function applyAutoStoreRelist(stockOrId, inStock) {

@@ -72,6 +72,8 @@ function stockHasLivePanelPlan(stock) {
  */
 function inventoryDrivesStoreAvailability(stock) {
   if (!usesPreconfiguredInventory(stock)) return false;
+  // Saved VPS rows always count on the store, even for reseller-api tagged plans.
+  if (countUnallocatedInventory(stock) > 0) return true;
   if (readCompanyConfig(stock).fulfillmentMode === 'inventory') return true;
   if (stockHasLivePanelPlan(stock)) return false;
   return true;
@@ -122,6 +124,17 @@ function readLivePanelVariantAvailable(stock, company) {
   const { toPlainConfigurations } = require('@/lib/advpsLiveStock');
 
   if (usesResellerPanelLiveStock(stock, company) && stockHasResellerPanelPlans(stock)) {
+    const {
+      stockNameRequiresMappedZone,
+      readResellerApiStockConfig,
+    } = require('@/lib/resellerApiStockConfig');
+    const stockCfg = readResellerApiStockConfig(stock);
+    const zoneMapped =
+      stockCfg?.zoneId != null ||
+      (Array.isArray(stockCfg?.zoneIds) && stockCfg.zoneIds.length > 0);
+    if (stockNameRequiresMappedZone(stock) && !zoneMapped) {
+      return hasUnallocatedCompanyInventory(stock);
+    }
     const cfg = toPlainConfigurations(stock.defaultConfigurations)?.resellerApi || {};
     const variants = cfg.variantStock && typeof cfg.variantStock === 'object' ? cfg.variantStock : {};
     return Object.values(variants).some((v) => v && typeof v === 'object' && v.available === true);

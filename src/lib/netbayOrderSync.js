@@ -202,6 +202,54 @@ async function syncNetbayOrderFromApi(order) {
   }
 }
 
+/**
+ * Paid orders where Netbay already created a service but OceanLinux has no IP yet.
+ * Fetches panel details only — never POST /purchase (no double charge).
+ */
+async function syncStuckNetbayPendingOrders({ limit = 25 } = {}) {
+  const orders = await Order.find({
+    status: 'confirmed',
+    netbayServiceId: { $exists: true, $nin: [null, ''] },
+    ipAddress: { $in: [null, ''] },
+    provisioningStatus: { $in: ['failed', 'provisioning', 'pending'] },
+  })
+    .sort({ updatedAt: 1 })
+    .limit(limit)
+    .lean();
+
+  const results = [];
+
+  for (const order of orders) {
+    try {
+      const sync = await syncNetbayOrderFromApi(order);
+      if (!sync.ok) {
+        results.push({ orderId: String(order._id), action: 'skip', error: sync.error });
+        continue;
+      }
+
+      const ip = sync.dbUpdates?.ipAddress;
+      if (ip && !order.ipAddress) {
+        const { finalizeIpAssignmentForOrder } = require('@/lib/orderIpOwnership');
+        await finalizeIpAssignmentForOrder(order, ip, sync.dbUpdates);
+        results.push({ orderId: String(order._id), action: 'assigned', ip });
+      } else if (sync.changes?.length) {
+        await commitPanelSyncToOrder(order, sync.dbUpdates);
+        results.push({ orderId: String(order._id), action: 'synced', changes: sync.changes });
+      } else {
+        results.push({
+          orderId: String(order._id),
+          action: 'pending',
+          serviceId: order.netbayServiceId,
+        });
+      }
+    } catch (err) {
+      results.push({ orderId: String(order._id), action: 'error', error: err.message });
+    }
+  }
+
+  return results;
+}
+
 /** Sync all active Netbay orders — expiry + credentials from upstream. */
 async function syncAllNetbayOrdersFromApi() {
   const orders = await Order.find({
@@ -267,6 +315,7 @@ module.exports = {
   resolveNetbayPowerState,
   applyNetbayServiceToOrderUpdates,
   syncNetbayOrderFromApi,
+  syncStuckNetbayPendingOrders,
   syncAllNetbayOrdersFromApi,
   commitNetbayOrderSync,
 };

@@ -305,7 +305,18 @@ async function syncResellerIpStockRow(stock, { force = false, memoryOnly = null,
     } catch (err) {
       console.warn(`${LOG} check failed for ${stock.name} ${memory}:`, err.message);
       const prev = prevReseller.variantStock?.[memory];
-      if (prev?.available === true && isRecentStockSync(prevReseller.lastStockSync)) {
+      const regionNeedsZone =
+        stock &&
+        stockNameRequiresMappedZone(stock) &&
+        !(
+          stockCfg.zoneId != null ||
+          (Array.isArray(stockCfg.zoneIds) && stockCfg.zoneIds.length > 0)
+        );
+      if (
+        !regionNeedsZone &&
+        prev?.available === true &&
+        isRecentStockSync(prevReseller.lastStockSync)
+      ) {
         variantResults[memory] = { ...prev, checkedAt: new Date().toISOString() };
         upstreamYes += 1;
       } else {
@@ -339,6 +350,36 @@ async function syncResellerIpStockRow(stock, { force = false, memoryOnly = null,
 
   const primaryResult = variantResults[memoriesToCheck[0]] || {};
 
+  const { hasUnallocatedCompanyInventory, countUnallocatedInventory } = require('@/lib/companyInventory');
+  const invRemaining = hasUnallocatedCompanyInventory(stock) ? countUnallocatedInventory(stock) : 0;
+
+  // Region titles ("… - Mumbai | Starter …") must not show in stock from wallet alone.
+  if (stockNameRequiresMappedZone(stock) && !isZoneLiveStock && invRemaining <= 0) {
+    for (const key of Object.keys(variantResults)) {
+      const row = variantResults[key];
+      if (!row || typeof row !== 'object') continue;
+      variantResults[key] = {
+        ...row,
+        available: false,
+        stockMode: 'zone',
+        zoneOk: false,
+        unitsAvailable: 0,
+        reason: row.reason || 'Region-specific plan has no panel zone mapped on this IP stock',
+        message: 'Out of stock (region not configured or inactive on panel)',
+        checkedAt: new Date().toISOString(),
+      };
+    }
+  }
+
+  const effectiveAvailable =
+    stockNameRequiresMappedZone(stock) && !isZoneLiveStock
+      ? invRemaining > 0 ||
+        Object.values(variantResults).some((v) => v && v.available === true)
+      : shouldAvailable;
+
+  const regionBlockedOnPanel =
+    stockNameRequiresMappedZone(stock) && invRemaining <= 0 && !effectiveAvailable;
+
   const updatePayload = {
     defaultConfigurations: {
       ...defaults,
@@ -346,27 +387,27 @@ async function syncResellerIpStockRow(stock, { force = false, memoryOnly = null,
         ...stockCfg,
         ...(lastZoneName ? { zoneName: lastZoneName } : {}),
         lastStockSync: new Date().toISOString(),
-        lastStockMode: primaryResult.stockMode || (stockCfg.zoneId != null ? 'zone' : 'wallet'),
+        lastStockMode: regionBlockedOnPanel
+          ? 'zone'
+          : primaryResult.stockMode || (stockCfg.zoneId != null ? 'zone' : 'wallet'),
         variantStock: sanitizeVariantStockMap(variantResults),
       },
     },
   };
 
   if (!stock.availabilityManual) {
-    const { hasUnallocatedCompanyInventory, countUnallocatedInventory } = require('@/lib/companyInventory');
-    const invRemaining = hasUnallocatedCompanyInventory(stock) ? countUnallocatedInventory(stock) : 0;
-    const hybridAvailable = shouldAvailable || invRemaining > 0;
+    const hybridAvailable = effectiveAvailable || invRemaining > 0;
     updatePayload.available = hybridAvailable;
-    // Live panel stock: when region/zone is live, plan must show on the store.
-    const { storeAutoUnhideUpdate } = require('@/lib/ipStockAvailability');
-    Object.assign(updatePayload, storeAutoUnhideUpdate(stock, hybridAvailable));
-  }
-  // Manual override wins over panel zone status — owner set count by hand.
-  if (usesResellerPanelLiveStock(stock, company) && !stock.availabilityManual) {
-    const { hasUnallocatedCompanyInventory, countUnallocatedInventory } = require('@/lib/companyInventory');
-    const invRemaining = hasUnallocatedCompanyInventory(stock) ? countUnallocatedInventory(stock) : 0;
     updatePayload.stockCount =
-      invRemaining > 0 ? invRemaining : shouldAvailable ? Math.max(1, maxUnits) : 0;
+      invRemaining > 0 ? invRemaining : hybridAvailable ? Math.max(1, maxUnits) : 0;
+
+    const { storeAutoUnhideUpdate } = require('@/lib/ipStockAvailability');
+    if (hybridAvailable) {
+      Object.assign(updatePayload, storeAutoUnhideUpdate(stock, true));
+    } else if (regionBlockedOnPanel) {
+      updatePayload.hiddenFromStore = true;
+      updatePayload.autoHiddenFromStore = true;
+    }
   }
 
   await IPStock.findByIdAndUpdate(stock._id, updatePayload);
@@ -400,7 +441,13 @@ async function verifyResellerMemoryInStock(stock, memory, { preferCache = false,
   const cacheFresh = isRecentStockSync(defaults.lastStockSync);
 
   if (preferCache && cacheFresh && cached?.available === true) {
-    return { ok: true, result: cached, fromCache: true };
+    const stockCfg = readResellerApiStockConfig(stock);
+    const zoneMapped =
+      stockCfg?.zoneId != null ||
+      (Array.isArray(stockCfg?.zoneIds) && stockCfg.zoneIds.length > 0);
+    if (!(stockNameRequiresMappedZone(stock) && !zoneMapped)) {
+      return { ok: true, result: cached, fromCache: true };
+    }
   }
 
   try {

@@ -1173,6 +1173,18 @@ class AutoProvisioningService {
               netbayServiceId: { $in: [null, ''] },
               kurohostInstanceId: { $in: [null, ''] },
               provisioningError: { $not: /^PENDING:/ }
+            },
+            // Cron placeholder lock — resume Netbay/Nexa/reseller buy already placed
+            {
+              provisioningStatus: 'provisioning',
+              ipAddress: { $in: [null, ''] },
+              $or: [
+                { netbayServiceId: { $nin: [null, ''] } },
+                { nexaOrderId: { $nin: [null, ''] } },
+                { resellerOrderId: { $nin: [null, ''] } },
+                { advpsOrderId: { $nin: [null, ''] } },
+                { rackatoOrderId: { $nin: [null, ''] } },
+              ],
             }
           ],
           // Extra safety: Don't provision if already has IP address
@@ -1242,6 +1254,19 @@ class AutoProvisioningService {
           L.line(`\n⚠️⚠️⚠️ ORDER ALREADY HAS IP ADDRESS ⚠️⚠️⚠️`);
           L.kv('  → IP Address', existingOrder.ipAddress);
           L.line(`⚠️⚠️⚠️ SKIPPING PROVISIONING ⚠️⚠️⚠️\n`);
+
+          if (
+            existingOrder.provisioningStatus !== 'active' ||
+            existingOrder.status === 'confirmed'
+          ) {
+            await Order.findByIdAndUpdate(existingOrder._id, {
+              $set: {
+                provisioningStatus: 'active',
+                provisioningError: '',
+                ...(existingOrder.status === 'confirmed' ? { status: 'active' } : {}),
+              },
+            });
+          }
 
           return {
             success: true,

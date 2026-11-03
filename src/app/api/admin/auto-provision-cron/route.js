@@ -39,6 +39,9 @@ function shouldSkipAutoRetry(order) {
     if (order.provisioningStatus === 'active' && order.ipAddress) {
         return { skip: true, reason: 'already_active' };
     }
+    if (order.ipAddress) {
+        return { skip: true, reason: 'has_ip_sync_only' };
+    }
     if (order.provider === 'nexa' || order.nexaOrderId) {
         const err = String(order.provisioningError || '');
         if (order.nexaOrderId || err.startsWith('PENDING:') || /unable to process order transaction/i.test(err)) {
@@ -140,6 +143,41 @@ async function validateOrderConfiguration(order) {
                 productId: 'netbay-proxy',
                 ipStock: ipStock.name,
                 isNetbayProxy: true,
+            };
+        }
+
+        const { stockHasNetbayPlans } = require('@/lib/ipStockAvailability');
+        if (
+            order.provider === 'netbay' ||
+            order.netbayServiceId ||
+            stockHasNetbayPlans(ipStock)
+        ) {
+            console.log('[VALIDATION] ✅ Netbay VPS stock — skip Hostycare product ID check');
+            return {
+                valid: true,
+                productId: 'netbay',
+                ipStock: ipStock.name,
+                isNetbay: true,
+            };
+        }
+
+        let nexaCfg = ipStock.defaultConfigurations?.nexa;
+        if (!nexaCfg && typeof ipStock.defaultConfigurations?.get === 'function') {
+            nexaCfg = ipStock.defaultConfigurations.get('nexa');
+        }
+        const taggedNexa = (ipStock.tags || []).some((t) => String(t).toLowerCase() === 'nexa');
+        if (
+            order.provider === 'nexa' ||
+            order.nexaOrderId ||
+            taggedNexa ||
+            Number(nexaCfg?.planId) > 0
+        ) {
+            console.log('[VALIDATION] ✅ Nexa stock — skip Hostycare product ID check');
+            return {
+                valid: true,
+                productId: 'nexa',
+                ipStock: ipStock.name,
+                isNexa: true,
             };
         }
 
@@ -500,7 +538,18 @@ async function acquireDatabaseLock() {
                 const isSmartVpsLike =
                     candidate.provider === 'smartvps' ||
                     String(candidate.productName || '').includes('🌊');
-                if (isSmartVpsLike || candidate.provider === 'rackato' || candidate.rackatoOrderId) {
+                const isExternalPanel =
+                    isSmartVpsLike ||
+                    candidate.provider === 'rackato' ||
+                    candidate.rackatoOrderId ||
+                    candidate.provider === 'netbay' ||
+                    candidate.netbayServiceId ||
+                    candidate.provider === 'nexa' ||
+                    candidate.nexaOrderId ||
+                    candidate.provider === 'reseller-api' ||
+                    candidate.resellerOrderId ||
+                    candidate.resellerVmId;
+                if (isExternalPanel) {
                     console.log(`[LOCK] ⏭️ Not marking ${candidate.provider || 'provider'} order as CONFIG-failed — will retry next run`);
                     continue;
                 }
@@ -624,6 +673,30 @@ export async function POST(request) {
         }
 
         try {
+            const ipButFailed = await Order.updateMany(
+                {
+                    status: { $in: ['confirmed', 'active'] },
+                    ipAddress: { $nin: [null, ''] },
+                    provisioningStatus: 'failed',
+                },
+                {
+                    $set: {
+                        provisioningStatus: 'active',
+                        provisioningError: '',
+                        status: 'active',
+                    },
+                }
+            );
+            if (ipButFailed.modifiedCount > 0) {
+                console.log(
+                    `[CRON-${cronId}] Healed ${ipButFailed.modifiedCount} orders that already had IP (no re-provision)`
+                );
+            }
+        } catch (healIpErr) {
+            console.warn(`[CRON-${cronId}] IP+failed heal skipped:`, healIpErr.message);
+        }
+
+        try {
             const { syncNexaPendingOrders } = require('@/lib/nexaPendingSync');
             const nexaLimit = peakTraffic ? 25 : 40;
             const nexaSync = await syncNexaPendingOrders({ limit: nexaLimit });
@@ -632,6 +705,44 @@ export async function POST(request) {
             }
         } catch (nexaSyncErr) {
             console.warn(`[CRON-${cronId}] Nexa pending sync skipped:`, nexaSyncErr.message);
+        }
+
+        try {
+            const { syncStuckNetbayPendingOrders } = require('@/lib/netbayOrderSync');
+            const netbayHeal = await syncStuckNetbayPendingOrders({ limit: peakTraffic ? 15 : 25 });
+            const assigned = netbayHeal.filter((r) => r.action === 'assigned');
+            if (assigned.length) {
+                console.log(`[CRON-${cronId}] Netbay stuck heal (no re-purchase):`, JSON.stringify(assigned));
+            }
+        } catch (netbayHealErr) {
+            console.warn(`[CRON-${cronId}] Netbay stuck heal skipped:`, netbayHealErr.message);
+        }
+
+        try {
+            const staleConfig = await Order.updateMany(
+                {
+                    status: 'confirmed',
+                    ipAddress: { $in: [null, ''] },
+                    provisioningStatus: 'failed',
+                    provisioningError: { $regex: /^CONFIG: Missing hostycareProductId/i },
+                    provider: {
+                        $in: ['netbay', 'nexa', 'reseller-api', 'smartvps', 'rackato', 'advps'],
+                    },
+                },
+                {
+                    $set: {
+                        provisioningStatus: 'pending',
+                        provisioningError: '',
+                    },
+                }
+            );
+            if (staleConfig.modifiedCount > 0) {
+                console.log(
+                    `[CRON-${cronId}] Cleared stale Hostycare CONFIG failures on ${staleConfig.modifiedCount} non-Hostycare orders (safe retry, no double buy if service id already set)`
+                );
+            }
+        } catch (staleErr) {
+            console.warn(`[CRON-${cronId}] Stale CONFIG cleanup skipped:`, staleErr.message);
         }
 
         try {
