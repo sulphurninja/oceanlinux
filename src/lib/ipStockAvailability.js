@@ -153,6 +153,12 @@ export function isIpStockHiddenFromStore(stock) {
     const tags = Array.isArray(stock?.tags) ? stock.tags : [];
     if (tags.some((tag) => String(tag).toLowerCase() === 'nexa')) return false;
   }
+  try {
+    const { regionResellerPlanMustHideFromStore } = require('@/lib/resellerApiStockConfig');
+    if (regionResellerPlanMustHideFromStore(stock)) return true;
+  } catch {
+    /* ignore */
+  }
   return !!stock?.hiddenFromStore;
 }
 

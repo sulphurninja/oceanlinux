@@ -553,7 +553,15 @@ async function verifyResellerMemoryInStock(stock, memory, { preferCache = false,
 
     return { ok: true, result };
   } catch (err) {
-    if (cacheFresh && cached?.available === true) {
+    const stockCfg = readResellerApiStockConfig(stock);
+    const zoneMapped =
+      stockCfg?.zoneId != null ||
+      (Array.isArray(stockCfg?.zoneIds) && stockCfg.zoneIds.length > 0);
+    if (
+      cacheFresh &&
+      cached?.available === true &&
+      !(stockNameRequiresMappedZone(stock) && !zoneMapped)
+    ) {
       return { ok: true, result: cached, fromCache: true };
     }
     return { ok: false, message: err.message || 'Unable to verify stock right now' };
@@ -657,7 +665,48 @@ async function refreshResellerStockForCustomer({ force = false } = {}) {
   } catch (err) {
     console.warn(`${LOG} auto-relist after refresh failed:`, err.message);
   }
+  try {
+    result.regionPlanHealed = await healMislistedRegionResellerStocks({ force: true });
+  } catch (err) {
+    console.warn(`${LOG} region-plan heal after refresh failed:`, err.message);
+  }
   return result;
+}
+
+const REGION_PLAN_HEAL_TTL_MS = 45 * 1000;
+
+/** Fix DB rows wallet-sync wrongly relisted (runs even if an old worker missed syncResellerIpStockRow guard). */
+async function healMislistedRegionResellerStocks({ force = false } = {}) {
+  if (!global.__regionPlanStoreHeal) global.__regionPlanStoreHeal = { at: 0, healed: 0 };
+  const gate = global.__regionPlanStoreHeal;
+  const now = Date.now();
+  if (!force && gate.at && now - gate.at < REGION_PLAN_HEAL_TTL_MS) {
+    return { skipped: true, healed: gate.healed || 0 };
+  }
+
+  const { regionResellerPlanMustHideFromStore } = require('@/lib/resellerApiStockConfig');
+  const candidates = await IPStock.find({
+    company: { $ne: null },
+    $or: [{ hiddenFromStore: { $ne: true } }, { available: true }, { stockCount: { $gt: 0 } }],
+  })
+    .select('name company availabilityManual stockCount defaultConfigurations inventoryItems hiddenFromStore available')
+    .lean();
+
+  let healed = 0;
+  for (const row of candidates) {
+    if (!regionResellerPlanMustHideFromStore(row)) continue;
+    await persistRegionPlanNeedsMappedZone(
+      row,
+      readResellerApiStockConfig(row),
+      toPlainConfigurations(row.defaultConfigurations) || {},
+      toPlainConfigurations(row.defaultConfigurations)?.resellerApi || {}
+    );
+    healed += 1;
+  }
+
+  gate.at = now;
+  gate.healed = healed;
+  return { healed };
 }
 
 async function restoreResellerManualStockAvailability(companyId) {
@@ -683,4 +732,5 @@ module.exports = {
   refreshResellerStockForCustomer,
   restoreResellerManualStockAvailability,
   checkResellerVariantStock,
+  healMislistedRegionResellerStocks,
 };

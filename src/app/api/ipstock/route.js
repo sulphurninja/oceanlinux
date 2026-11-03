@@ -19,19 +19,10 @@ const {
 const { syncResellerIpStockRow } = require('@/lib/resellerLiveStock');
 const { syncKurohostIpStockRow } = require('@/lib/kurohostLiveStock');
 const { getCompanyFulfillmentMode, countUnallocatedInventory, usesPreconfiguredInventory, inventoryDrivesStoreAvailability } = require('@/lib/companyInventory');
-const { readResellerApiStockConfig, stockNameRequiresMappedZone } = require('@/lib/resellerApiStockConfig');
+const { readResellerApiStockConfig, stockNameRequiresMappedZone, regionResellerPlanMustHideFromStore } = require('@/lib/resellerApiStockConfig');
 
-/** Region titles (e.g. "… - Mumbai | Starter …") must not list when no panel zone is mapped. */
 function customerHideRegionResellerPlanWithoutZone(stock) {
-    if (!stock?.company || !stockHasResellerPanelPlans(stock)) return false;
-    if (!stockNameRequiresMappedZone(stock)) return false;
-    const cfg = readResellerApiStockConfig(stock);
-    const zoneMapped =
-        cfg?.zoneId != null ||
-        (Array.isArray(cfg?.zoneIds) && cfg.zoneIds.length > 0);
-    if (zoneMapped) return false;
-    const inv = Number(stock.inventoryAvailable ?? 0);
-    return inv <= 0;
+    return regionResellerPlanMustHideFromStore(stock);
 }
 
 function toPlainMap(value) {
@@ -436,12 +427,18 @@ export async function GET(request) {
         }
 
         if (customerView && !peakTrafficNow) {
-            // Don't block the catalog read on this write. A plan that just
-            // came back in stock shows on the next load instead of every
-            // visitor waiting on the update.
             void relistAutoHiddenStocksNowInStock().catch((relistErr) => {
                 console.warn('[IPSTOCK-API] auto-relist hidden in-stock plans failed:', relistErr.message);
             });
+            void (async () => {
+                try {
+                    const { healMislistedRegionResellerStocks } = require('@/lib/resellerLiveStock');
+                    await healMislistedRegionResellerStocks();
+                    customerCatalogStore().clear();
+                } catch (healErr) {
+                    console.warn('[IPSTOCK-API] region-plan store heal failed:', healErr.message);
+                }
+            })();
         }
 
         let ipStocks;
@@ -487,6 +484,7 @@ export async function GET(request) {
                 stock.inventoryItemCount = counts.inventoryItemCount;
                 stock.inventoryAvailable = counts.inventoryAvailable;
             }
+            ipStocks = ipStocks.filter((s) => !customerHideRegionResellerPlanWithoutZone(s));
         } else {
             ipStocks = await IPStock.find(query).lean().maxTimeMS(10000);
         }
@@ -509,7 +507,10 @@ export async function GET(request) {
         }
 
         const withModes = await enrichIpStocksWithProviderModes(ipStocks);
-        const enriched = customerView ? enrichIpStocksForStore(withModes) : withModes;
+        let enriched = customerView ? enrichIpStocksForStore(withModes) : withModes;
+        if (customerView && Array.isArray(enriched)) {
+            enriched = enriched.filter((s) => !customerHideRegionResellerPlanWithoutZone(s));
+        }
         const baseJson = JSON.stringify(enriched);
         if (customerView) {
             customerCatalogStore().set(catalogKey, { at: Date.now(), body: baseJson, promise: null });
