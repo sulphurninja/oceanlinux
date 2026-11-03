@@ -81,13 +81,49 @@ function readLiveStockSummary(stock, companyDoc) {
     (v) => v && typeof v === 'object' && !v.mirroredFrom
   ) || Object.values(variantStock)[0] || null;
 
+  const {
+    readResellerApiStockConfig,
+    stockNameRequiresMappedZone,
+    regionResellerPlanMustHideFromStore,
+  } = require('@/lib/resellerApiStockConfig');
+  const stockCfg = readResellerApiStockConfig(stock);
+  const zoneMapped =
+    (Array.isArray(stockCfg.zoneIds) && stockCfg.zoneIds.length > 0) ||
+    (stockCfg.zoneId != null && Number.isFinite(Number(stockCfg.zoneId)));
+
+  const regionBlocked = regionResellerPlanMustHideFromStore({
+    ...stock,
+    inventoryAvailable: countUnallocatedInventory(stock),
+  });
+
+  let zoneLive = false;
+  if (stock.availabilityManual === true && Math.max(0, Number(stock.stockCount) || 0) > 0) {
+    zoneLive = false;
+  } else if (regionBlocked) {
+    zoneLive = false;
+  } else if (stockNameRequiresMappedZone(stock) && !zoneMapped) {
+    zoneLive = false;
+  } else if (zoneMapped) {
+    zoneLive =
+      primary?.zoneOk === true ||
+      (primary?.stockMode === 'zone' && primary?.available === true);
+  } else {
+    zoneLive = primary?.available === true && primary?.stockMode !== 'wallet'
+      ? true
+      : primary?.available === true && !stockNameRequiresMappedZone(stock);
+  }
+
   return {
     enabled: true,
     manualOverride: stock.availabilityManual === true,
-    zoneLive: primary?.available === true,
+    zoneLive,
+    zoneMapped,
+    regionBlocked,
     zoneName: primary?.zoneName || cfg?.zoneName || null,
     zoneStatus: primary?.zoneStatus || null,
-    message: primary?.message || primary?.reason || null,
+    message: regionBlocked
+      ? 'Map panel zone on this plan — wallet is not this IP region'
+      : primary?.message || primary?.reason || null,
     lastSync: cfg?.lastStockSync || null,
   };
 }

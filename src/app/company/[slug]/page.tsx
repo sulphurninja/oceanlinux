@@ -1320,7 +1320,11 @@ export default function CompanyDashboard() {
               const live = stock.liveStock;
               const usesLivePanel = live?.enabled && !live.manualOverride;
               const invFree = stock.inventoryAvailable ?? 0;
-              const inStock = usesLivePanel ? (!!live?.zoneLive || invFree > 0) : (invFree > 0 || count > 0);
+              const inStock = live?.manualOverride
+                ? count > 0 || invFree > 0
+                : usesLivePanel
+                  ? (!!live?.zoneLive || invFree > 0)
+                  : invFree > 0 || count > 0;
               const hasPreconfig = stock.usesPreconfiguredInventory;
               const form = getInventoryForm(stock);
               const osOptions = osOptionsForStock(stock.serverType);
@@ -1345,12 +1349,20 @@ export default function CompanyDashboard() {
                             <Badge className="text-[10px] h-4 bg-emerald-500/10 text-emerald-700">
                               {invFree > 0
                                 ? `${invFree} saved VPS · then panel`
-                                : usesLivePanel
+                                : live?.manualOverride
+                                  ? `${count} manual units`
+                                : usesLivePanel && live?.zoneLive
                                   ? 'Live on panel'
+                                  : usesLivePanel && live?.regionBlocked
+                                    ? 'Zone not mapped'
+                                  : usesLivePanel
+                                    ? 'Panel out of stock'
                                   : `${count} in stock`}
                             </Badge>
                           ) : (
-                            <Badge className="text-[10px] h-4 bg-red-500/10 text-red-600">Out of stock</Badge>
+                            <Badge className="text-[10px] h-4 bg-red-500/10 text-red-600">
+                              {live?.regionBlocked ? 'Zone not mapped' : 'Out of stock'}
+                            </Badge>
                           )}
                           {usesLivePanel && live?.zoneName && (
                             <Badge variant="outline" className="text-[10px] h-4">{live.zoneName}</Badge>
