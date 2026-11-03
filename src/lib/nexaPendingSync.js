@@ -119,16 +119,16 @@ async function holdNexaOrder(order, extra = {}) {
 async function applyNexaRow(order, row) {
   const nexaOrderId = String(NexaApi.extractOrderId(row) || '');
   const status = String(row.status || '').trim();
-  if (isNexaDeadStatus(status)) {
-    await Order.findByIdAndUpdate(order._id, {
-      provisioningStatus: 'failed',
-      provisioningError: `Nexa order ${nexaOrderId} is ${status}.`,
-      nexaOrderId: nexaOrderId || undefined,
-      provider: 'nexa',
-      autoProvisioned: true,
-    });
-    return { action: 'failed', nexaOrderId };
-  }
+    if (isNexaDeadStatus(status)) {
+      await Order.findByIdAndUpdate(order._id, {
+        provisioningStatus: 'failed',
+        provisioningError: `Nexa order ${nexaOrderId} is ${status}.`,
+        nexaOrderId: nexaOrderId || undefined,
+        provider: 'nexa',
+        autoProvisioned: true,
+      });
+      return { action: 'failed', dead: true, nexaOrderId };
+    }
 
   const delivered = NexaApi.extractPurchaseDelivery(row);
   const displayIp = displayIpFromDelivery(delivered);

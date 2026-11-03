@@ -1850,7 +1850,10 @@ class AutoProvisioningService {
     let claimOrder = order;
     if (isNexaHeldOrder(order)) {
       const resumed = await resumeNexaOrder(order, ipStock, { holdIfMissing: true });
-      if (!(resumed.dead && resumed.action === 'failed' && !order.ipAddress)) {
+      const cancelledBuyAgain =
+        !order.ipAddress &&
+        (resumed.dead === true || resumed.action === 'failed');
+      if (!cancelledBuyAgain) {
         L.line('[NEXA] order already accepted — poll only, no second purchase');
         return asResumeResult(resumed);
       }

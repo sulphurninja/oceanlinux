@@ -43,8 +43,9 @@ function shouldSkipAutoRetry(order) {
         return { skip: true, reason: 'has_ip_sync_only' };
     }
     if (order.provider === 'nexa' || order.nexaOrderId) {
-        const err = String(order.provisioningError || '');
-        if (order.nexaOrderId || err.startsWith('PENDING:') || /unable to process order transaction/i.test(err)) {
+        const nexaErr = String(order.provisioningError || '');
+        const nexaDead = /is cancelled|is canceled|is failed|is refunded|is rejected/i.test(nexaErr);
+        if (!nexaDead && (order.nexaOrderId || nexaErr.startsWith('PENDING:') || /unable to process order transaction/i.test(nexaErr))) {
             return { skip: true, reason: 'nexa_waiting_delivery' };
         }
     }
