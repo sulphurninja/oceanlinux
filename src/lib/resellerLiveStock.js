@@ -272,6 +272,8 @@ async function persistRegionPlanNeedsMappedZone(stock, stockCfg, defaults, prevR
     stockCount: 0,
     hiddenFromStore: true,
     autoHiddenFromStore: true,
+    // Stops older workers that still wallet-sync: they skip when manual units are set.
+    availabilityManual: true,
     defaultConfigurations: {
       ...defaults,
       resellerApi: {
@@ -306,8 +308,20 @@ async function syncResellerIpStockRow(stock, { force = false, memoryOnly = null,
     await IPStock.findByIdAndUpdate(stock._id, { availabilityManual: false });
     stock.availabilityManual = false;
   } else if (stock.availabilityManual === true) {
-    const { applyAutoStoreRelist } = require('@/lib/ipStockAvailability');
     const count = Math.max(0, Number(stock.stockCount) || 0);
+    const { hasUnallocatedCompanyInventory, countUnallocatedInventory } = require('@/lib/companyInventory');
+    const inv = hasUnallocatedCompanyInventory(stock) ? countUnallocatedInventory(stock) : 0;
+    // Manual units of 0 on a region plan is a wallet lock, not "in stock".
+    if (stockNameRequiresMappedZone(stock) && !isZoneLiveStock && count <= 0 && inv <= 0) {
+      const defaultsEarly = toPlainConfigurations(stock.defaultConfigurations) || {};
+      return persistRegionPlanNeedsMappedZone(
+        stock,
+        stockCfg,
+        defaultsEarly,
+        defaultsEarly.resellerApi || {}
+      );
+    }
+    const { applyAutoStoreRelist } = require('@/lib/ipStockAvailability');
     await applyAutoStoreRelist(stock._id, count > 0 || stock.available === true);
     return IPStock.findById(stock._id).lean();
   }
