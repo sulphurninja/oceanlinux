@@ -6,16 +6,25 @@ const { renewResellerPanelVm } = require('@/lib/resellerApiOrderSync');
 const { calculateCompanyRenewalExpiryDate } = require('@/lib/expiryHelper');
 
 async function resolveResellerApiForOrder(order) {
-  if (!order?.ipStockId) {
-    return { api: null, ipStock: null, error: 'Order has no linked IP stock' };
+  if (!order) {
+    return { api: null, ipStock: null, error: 'Missing order' };
   }
 
-  const ipStock = await IPStock.findById(order.ipStockId).lean();
-  if (!ipStock?.company) {
-    return { api: null, ipStock, error: 'IP stock is not linked to a company' };
+  let ipStock = null;
+  if (order.ipStockId) {
+    ipStock = await IPStock.findById(order.ipStockId).lean();
   }
 
-  const company = await Company.findById(ipStock.company).select('resellerApi name').lean();
+  const { getManageCompanyDocForOrder } = require('@/lib/orderManageCompany');
+  let company = await getManageCompanyDocForOrder(order);
+  if (!company && ipStock?.company) {
+    company = await Company.findById(ipStock.company).select('resellerApi name').lean();
+  }
+
+  if (!company) {
+    return { api: null, ipStock, error: 'Order has no manage company or linked IP stock' };
+  }
+
   const cfg = getCompanyResellerApiConfig(company);
   if (!cfg) {
     return {

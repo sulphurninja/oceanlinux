@@ -69,7 +69,7 @@ export async function GET(request, { params }) {
             }
         }
 
-        if (!order.companyAutomation?.enabled && order.ipStockId) {
+        if (!order.companyAutomation?.enabled && order.ipStockId && !order.trialManageCompanyId) {
             try {
                 const ipStock = await IPStock.findById(order.ipStockId).select('company').lean();
                 if (ipStock?.company) {

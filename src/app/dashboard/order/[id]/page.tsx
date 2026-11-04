@@ -178,9 +178,13 @@ type CompanyAutomationMeta = NonNullable<IPStock['companyAutomation']>;
 
 /** Prefer IP stock automation; fall back to order GET payload (trial company manage). */
 function resolveOrderCompanyAutomation(
-  order: Pick<Order, 'companyAutomation'> | null,
+  order: Pick<Order, 'companyAutomation' | 'trialManageCompanyId'> | null,
   stock: IPStock | null,
 ): CompanyAutomationMeta | null | undefined {
+  const manageOverride = !!String(order?.trialManageCompanyId || '').trim();
+  if (manageOverride && order?.companyAutomation?.enabled) {
+    return order.companyAutomation;
+  }
   if (stock?.companyAutomation?.enabled) return stock.companyAutomation;
   if (order?.companyAutomation?.enabled) return order.companyAutomation;
   return stock?.companyAutomation ?? order?.companyAutomation ?? null;
