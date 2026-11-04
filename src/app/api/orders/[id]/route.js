@@ -69,6 +69,24 @@ export async function GET(request, { params }) {
             }
         }
 
+        if (!order.companyAutomation?.enabled && order.ipStockId) {
+            try {
+                const ipStock = await IPStock.findById(order.ipStockId).select('company').lean();
+                if (ipStock?.company) {
+                    const company = await Company.findById(ipStock.company)
+                        .select('virtualizors virtualizor resellerApi netbayApi kurohostApi joyApi hostdzireApi rackatoApi nexaApi name')
+                        .lean();
+                    const { buildCompanyAutomationMetaForOrder } = require('@/lib/companyAutomationMeta');
+                    const meta = buildCompanyAutomationMetaForOrder(company, order);
+                    if (meta) {
+                        order = { ...order, companyAutomation: meta };
+                    }
+                }
+            } catch (metaErr) {
+                console.warn('[orders/:id] stock company automation meta failed:', metaErr.message);
+            }
+        }
+
         const { attachProviderCompanyNames } = require('@/lib/attachProviderCompanyName');
         const [named] = await attachProviderCompanyNames([order]);
 

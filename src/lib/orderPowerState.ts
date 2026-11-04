@@ -42,6 +42,7 @@ export function getProviderFromOrder(
 
   if (order.provider === 'netbay') return 'netbay';
   if (order.provider === 'kurohost') return 'kurohost';
+  if (String(order.provider || '').toLowerCase() === 'reseller-api') return 'oceanlinux';
   if (order.provider === 'rackato' || order.rackatoOrderId || order.rackatoNodeUid) return 'oceanlinux';
   if (isRackatoPanelStock(ipStock, order)) return 'oceanlinux';
   if (order.provider === 'advps') return 'advps';

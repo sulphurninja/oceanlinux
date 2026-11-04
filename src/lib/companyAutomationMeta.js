@@ -146,6 +146,18 @@ function buildCompanyAutomationMetaForOrder(company, order) {
     }
   }
 
+  if (order?.resellerVmId || String(order?.provider || '').toLowerCase() === 'reseller-api') {
+    const reseller = getCompanyResellerApiConfig(company);
+    if (reseller) {
+      return {
+        provider: 'reseller-api',
+        enabled: true,
+        companyName: company?.name,
+        label: reseller.label || null,
+      };
+    }
+  }
+
   for (const meta of collectCompanyAutomationCandidates(company)) {
     if (providerUsableForOrder(meta.provider, order)) return meta;
   }
