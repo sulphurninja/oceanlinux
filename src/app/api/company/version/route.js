@@ -6,7 +6,11 @@ export const revalidate = 0;
 
 export async function GET() {
   return NextResponse.json(
-    { ordersFilter: COMPANY_FILTER_VERSION, visibleStatuses: COMPANY_VISIBLE_ORDER_STATUSES },
+    {
+      ordersFilter: COMPANY_FILTER_VERSION,
+      visibleStatuses: COMPANY_VISIBLE_ORDER_STATUSES,
+      managePanelRouting: 2,
+    },
     {
       headers: {
         'Cache-Control': 'no-store',

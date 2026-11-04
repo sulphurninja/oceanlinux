@@ -16,9 +16,18 @@ async function resolveResellerApiForOrder(order) {
   }
 
   const { getManageCompanyDocForOrder } = require('@/lib/orderManageCompany');
+  const manageOverride = String(order.trialManageCompanyId || '').trim();
   let company = await getManageCompanyDocForOrder(order);
-  if (!company && ipStock?.company) {
+  // Never fall back to IP-stock company when admin set Manage panel — VM may live on another panel.
+  if (!company && !manageOverride && ipStock?.company) {
     company = await Company.findById(ipStock.company).select('resellerApi name').lean();
+  }
+  if (manageOverride && !company) {
+    return {
+      api: null,
+      ipStock,
+      error: `Manage panel company ${manageOverride} not found or unavailable`,
+    };
   }
 
   if (!company) {

@@ -72,18 +72,35 @@ async function fetchResellerExpiryByIp(company, ipAddress, { vmId = null } = {})
   if (savedVmId) {
     let expiryDate = null;
     let resolvedIp = cleanIp;
+    let details = null;
     try {
-      const details = await api.getVmDetails(savedVmId);
+      details = await api.getVmDetails(savedVmId);
       expiryDate = ResellerApi.extractVmExpiryDate(details);
       resolvedIp = cleanIpAddress(details?.ipAddress || details?.ip) || cleanIp;
     } catch {
       /* details optional */
     }
     if (!expiryDate) {
-      const found = await api.findVmByIp(cleanIp, { skipCache: true });
+      const found = await api.findVmByIp(cleanIp, { skipCache: true, maxPages: 500 });
       if (found) {
-        expiryDate = ResellerApi.extractVmExpiryDate(found.raw);
+        expiryDate = ResellerApi.extractVmExpiryDate(found.raw, details);
         resolvedIp = found.ip || cleanIp;
+      }
+    }
+    if (!expiryDate) {
+      try {
+        const index = await api.buildVmIpIndex({ maxPages: 100, pageSize: 100 });
+        const byIp = index.get(cleanIp);
+        const byVm =
+          byIp ||
+          [...index.values()].find((row) => String(row?.vmId || '') === savedVmId);
+        if (byVm) {
+          expiryDate =
+            byVm.expiryDate || ResellerApi.extractVmExpiryDate(byVm.raw, details);
+          resolvedIp = byVm.ip || cleanIp;
+        }
+      } catch {
+        /* index optional */
       }
     }
     if (!expiryDate) {

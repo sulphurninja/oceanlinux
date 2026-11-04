@@ -74,12 +74,11 @@ async function resellerIpOnPanel(api, ip, order = null) {
   if (savedVmId) {
     try {
       const details = await api.getVmDetails(savedVmId);
-      const detailIp = String(details?.ipAddress || details?.ip || '').split(':')[0].trim();
-      if (details && (!detailIp || detailIp === cleanIp)) {
+      if (details && typeof details === 'object' && !Array.isArray(details)) {
         return { found: true, complete: true };
       }
     } catch (_) {
-      /* vm id stale — fall through to IP index */
+      /* vm id stale on this panel — fall through to IP index */
     }
   }
 
@@ -101,9 +100,12 @@ async function checkResellerPanelPresence(order) {
   }
   try {
     const { resolveResellerApiForOrder } = require('./resellerPanelRenewal');
-    const { api, error } = await resolveResellerApiForOrder(order);
+    const { api, error, company } = await resolveResellerApiForOrder(order);
     if (!api) {
-      console.warn('[RENEWAL-PRESENCE] Reseller panel unavailable:', error);
+      console.warn('[RENEWAL-PRESENCE] Reseller panel unavailable:', error, {
+        manageCompany: company?.name,
+        trialManageCompanyId: order?.trialManageCompanyId || '',
+      });
       return { ok: false, code: 'verify_failed', message: VERIFY_MESSAGE };
     }
     const found = await resellerIpOnPanel(api, ip, order);
