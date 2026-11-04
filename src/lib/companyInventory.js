@@ -135,6 +135,7 @@ function readLivePanelVariantAvailable(stock, company) {
     if (stockNameRequiresMappedZone(stock) && !zoneMapped) {
       return hasUnallocatedCompanyInventory(stock);
     }
+    if (hasUnallocatedCompanyInventory(stock)) return true;
     const cfg = toPlainConfigurations(stock.defaultConfigurations)?.resellerApi || {};
     const variants = cfg.variantStock && typeof cfg.variantStock === 'object' ? cfg.variantStock : {};
     return Object.values(variants).some((v) => v && typeof v === 'object' && v.available === true);

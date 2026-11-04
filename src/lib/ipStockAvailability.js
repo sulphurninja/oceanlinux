@@ -154,6 +154,10 @@ export function isIpStockHiddenFromStore(stock) {
     if (tags.some((tag) => String(tag).toLowerCase() === 'nexa')) return false;
   }
   try {
+    if (stock?.company) {
+      const { countUnallocatedInventory } = require('@/lib/companyInventory');
+      if (countUnallocatedInventory(stock) > 0) return false;
+    }
     const { regionResellerPlanMustHideFromStore } = require('@/lib/resellerApiStockConfig');
     if (regionResellerPlanMustHideFromStore(stock)) return true;
   } catch {

@@ -329,6 +329,15 @@ async function syncResellerIpStockRow(stock, { force = false, memoryOnly = null,
   const defaultsEarly = toPlainConfigurations(stock.defaultConfigurations) || {};
   const prevEarly = defaultsEarly.resellerApi || {};
   const { hasUnallocatedCompanyInventory, countUnallocatedInventory } = require('@/lib/companyInventory');
+  // Batch refresh passes a lean snapshot — re-read inventory so a row added seconds ago is not wiped.
+  if (stock?.company && stock?._id) {
+    try {
+      const freshInv = await IPStock.findById(stock._id).select('inventoryItems').lean();
+      if (freshInv?.inventoryItems) stock.inventoryItems = freshInv.inventoryItems;
+    } catch {
+      /* ignore */
+    }
+  }
   const invSnapshot = hasUnallocatedCompanyInventory(stock) ? countUnallocatedInventory(stock) : 0;
 
   // Never wallet-sync region-titled plans (… - Mumbai | …) without mapped zoneIds — panel wallet ≠ this IP.
@@ -492,20 +501,37 @@ async function syncResellerIpStockRow(stock, { force = false, memoryOnly = null,
     updatePayload.stockCount = nextStockCount;
 
     const { storeAutoUnhideUpdate } = require('@/lib/ipStockAvailability');
-    if (hybridAvailable) {
+    if (invRemaining > 0 && stock.company) {
+      // Saved VPS in manage-servers must stay purchasable even when panel zones are inactive/missing.
+      updatePayload.available = true;
+      updatePayload.stockCount = invRemaining;
+      updatePayload.hiddenFromStore = false;
+      updatePayload.autoHiddenFromStore = false;
+    } else if (hybridAvailable) {
       const mayRelist =
         !regionBlockedOnPanel &&
         (!stockNameRequiresMappedZone(stock) || isZoneLiveStock || invRemaining > 0);
       if (mayRelist) {
         Object.assign(updatePayload, storeAutoUnhideUpdate(stock, true));
       }
-    } else if (regionBlockedOnPanel || (stockNameRequiresMappedZone(stock) && !isZoneLiveStock)) {
+    } else if (
+      invRemaining <= 0 &&
+      (regionBlockedOnPanel || (stockNameRequiresMappedZone(stock) && !isZoneLiveStock))
+    ) {
       updatePayload.hiddenFromStore = true;
       updatePayload.autoHiddenFromStore = true;
     }
   }
 
   await IPStock.findByIdAndUpdate(stock._id, updatePayload);
+  if (stock.company && invRemaining > 0) {
+    try {
+      const { syncStockCountFromInventory } = require('@/lib/companyInventory');
+      return syncStockCountFromInventory(stock._id);
+    } catch {
+      /* ignore */
+    }
+  }
   return IPStock.findById(stock._id);
 }
 

@@ -96,8 +96,11 @@ function readLiveStockSummary(stock, companyDoc) {
     inventoryAvailable: countUnallocatedInventory(stock),
   });
 
+  const savedUnits = countUnallocatedInventory(stock);
   let zoneLive = false;
-  if (stock.availabilityManual === true && Math.max(0, Number(stock.stockCount) || 0) > 0) {
+  if (savedUnits > 0) {
+    zoneLive = true;
+  } else if (stock.availabilityManual === true && Math.max(0, Number(stock.stockCount) || 0) > 0) {
     zoneLive = false;
   } else if (regionBlocked) {
     zoneLive = false;
