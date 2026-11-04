@@ -13,6 +13,7 @@ export async function POST(request) {
     if (denied) return denied;
 
     await connectDB();
+    require('@/models/userModel').default;
 
     const body = await request.json().catch(() => ({}));
     const started = Date.now();

@@ -77,6 +77,13 @@ interface PaymentOrderLog {
   createdAt: string;
 }
 
+interface PaymentLogSummary {
+  total: number;
+  successCount: number;
+  anomalyCount: number;
+  failedCount: number;
+}
+
 interface DeliveredDoubt {
   orderId: string;
   ip: string;
@@ -103,6 +110,79 @@ interface DeliveredAudit {
   bySource: Record<string, number>;
   doubt: DeliveredDoubt[];
   unverified: DeliveredDoubt[];
+  doubtTruncated?: boolean;
+  unverifiedTruncated?: boolean;
+}
+
+function enumerateIstDays(from: string, to: string): string[] {
+  const out: string[] = [];
+  let cur = from;
+  while (cur <= to) {
+    out.push(cur);
+    const d = new Date(`${cur}T12:00:00+05:30`);
+    d.setDate(d.getDate() + 1);
+    cur = d.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+  }
+  return out;
+}
+
+function mergeDeliveredAudit(
+  prev: DeliveredAudit | null,
+  next: DeliveredAudit
+): DeliveredAudit {
+  if (!prev) return next;
+  const bySource = { ...prev.bySource };
+  for (const [k, v] of Object.entries(next.bySource || {})) {
+    bySource[k] = (bySource[k] || 0) + v;
+  }
+  const doubt = [...prev.doubt, ...next.doubt].sort((a, b) => b.price - a.price);
+  const unverified = [...prev.unverified, ...next.unverified];
+  return {
+    date: `${prev.from || prev.date} → ${next.to || next.date}`,
+    from: prev.from || prev.date.split(" → ")[0],
+    to: next.to || next.date,
+    checked: prev.checked + next.checked,
+    okCount: prev.okCount + next.okCount,
+    doubtCount: prev.doubtCount + next.doubtCount,
+    unverifiedCount: prev.unverifiedCount + next.unverifiedCount,
+    doubtInr: (prev.doubtInr || 0) + (next.doubtInr || 0),
+    bySource,
+    doubt: doubt.slice(0, 250),
+    unverified: unverified.slice(0, 250),
+    doubtTruncated: prev.doubtTruncated || next.doubtTruncated || doubt.length > 250,
+    unverifiedTruncated:
+      prev.unverifiedTruncated || next.unverifiedTruncated || unverified.length > 250,
+  };
+}
+
+function renderAuditRows(rows: DeliveredDoubt[]) {
+  if (rows.length === 0) {
+    return (
+      <p className="p-4 text-sm text-muted-foreground">None in this category for the range.</p>
+    );
+  }
+  return (
+    <ul className="divide-y">
+      {rows.map((row) => (
+        <li key={row.orderId} className="px-3 py-2 text-sm">
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-mono font-semibold">
+              {row.ip || (row.status === "cancelled" ? "cancelled · no IP" : "no IP")}
+            </span>
+            <span className="tabular-nums text-red-600">₹{row.price.toLocaleString("en-IN")}</span>
+          </div>
+          <p className="truncate text-xs text-muted-foreground">
+            {row.email || row.name || "—"} · {row.product}
+          </p>
+          <p className="text-[11px] text-muted-foreground">
+            {row.day ? `${row.day} · ` : ""}
+            {row.method || "no method"}
+            {row.status === "cancelled" ? " · cancelled" : ""} · {row.reason}
+          </p>
+        </li>
+      ))}
+    </ul>
+  );
 }
 
 const statusBadge = (status: string) => {
@@ -145,6 +225,7 @@ export default function AdminStatusPage() {
   const [auditFrom, setAuditFrom] = useState(() => istToday());
   const [auditTo, setAuditTo] = useState(() => istToday());
   const [audit, setAudit] = useState<DeliveredAudit | null>(null);
+  const [auditScanError, setAuditScanError] = useState<string | null>(null);
   const [logFilter, setLogFilter] = useState<"all" | "anomaly" | "success" | "failed">("anomaly");
   const [txnFilter, setTxnFilter] = useState("");
   const [selectedLog, setSelectedLog] = useState<PaymentOrderLog | null>(null);
@@ -260,51 +341,88 @@ export default function AdminStatusPage() {
       toast.error("Pick a From and To date, at most 31 days apart");
       return;
     }
-    const ac = new AbortController();
-    const timeoutId = window.setTimeout(() => ac.abort(), 4 * 60 * 1000);
+
+    const days = enumerateIstDays(from, to);
+    const perDayTimeoutMs = 3 * 60 * 1000;
+
     try {
       setAuditLoading(true);
       setAudit(null);
-      toast.info(`Scanning ${from} → ${to}… can take 1–3 minutes on busy days`, { duration: 8000 });
-      const res = await fetch("/api/admin/delivered-payment-audit", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ from, to }),
-        signal: ac.signal,
-      });
-      const data = await res.json().catch(() => null);
-      if (!res.ok || !data?.success) {
-        const gate = data?.code === "ADMIN_GATE_REQUIRED";
-        toast.error(
-          gate
-            ? "Admin panel password required — open /admin/login first, then scan again"
-            : data?.message || `Delivered payment scan failed (HTTP ${res.status})`
-        );
-        return;
+      setAuditScanError(null);
+      toast.info(
+        span > 1
+          ? `Scanning ${days.length} days (${from} → ${to})… one day at a time`
+          : `Scanning ${from}…`,
+        { duration: 8000 }
+      );
+
+      let merged: DeliveredAudit | null = null;
+
+      for (let i = 0; i < days.length; i++) {
+        const day = days[i];
+        const ac = new AbortController();
+        const timeoutId = window.setTimeout(() => ac.abort(), perDayTimeoutMs);
+        try {
+          const res = await fetch("/api/admin/delivered-payment-audit", {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ from: day, to: day }),
+            signal: ac.signal,
+          });
+          const data = (await res.json().catch(() => null)) as (DeliveredAudit & {
+            success?: boolean;
+            message?: string;
+            code?: string;
+          }) | null;
+
+          if (!res.ok || !data?.success) {
+            const gate = data?.code === "ADMIN_GATE_REQUIRED";
+            const msg = gate
+              ? "Admin panel password required — open /admin/login first"
+              : data?.message || `Scan failed for ${day} (HTTP ${res.status})`;
+            setAuditScanError(msg);
+            toast.error(msg);
+            return;
+          }
+
+          const { success: _s, message: _m, code: _c, ...auditPayload } = data;
+          merged = mergeDeliveredAudit(merged, auditPayload as DeliveredAudit);
+          if (days.length > 1) {
+            setAudit(merged);
+            toast.info(`Day ${i + 1}/${days.length} done (${day})`, { duration: 2500 });
+          }
+        } catch (err) {
+          if (err instanceof Error && err.name === "AbortError") {
+            const msg = `Day ${day} timed out — try fewer days or retry`;
+            setAuditScanError(msg);
+            toast.error(msg);
+          } else {
+            const msg = err instanceof Error ? err.message : "Delivered payment scan failed";
+            setAuditScanError(msg);
+            toast.error(msg);
+          }
+          return;
+        } finally {
+          window.clearTimeout(timeoutId);
+        }
       }
-      setAudit(data);
-      if ((data.doubtCount || 0) > 0) {
-        toast.warning(
-          `${data.doubtCount} delivered order(s) have no traced Razorpay or wallet payment (${data.date})`
-        );
-      } else if ((data.unverifiedCount || 0) > 0) {
-        toast.warning(
-          `Checked ${data.checked} orders — ${data.unverifiedCount} could not reach Razorpay (see Unverified)`
-        );
-      } else {
-        toast.success(
-          `Checked ${data.checked} order(s) for ${data.date} — payment source looks clean`
-        );
-      }
-    } catch (err) {
-      if (err instanceof Error && err.name === "AbortError") {
-        toast.error("Scan timed out after 4 minutes — try a shorter date range or retry");
-      } else {
-        toast.error(err instanceof Error ? err.message : "Delivered payment scan failed");
+
+      if (merged) {
+        setAudit(merged);
+        if ((merged.doubtCount || 0) > 0) {
+          toast.warning(
+            `${merged.doubtCount} order(s) with no traced payment (${merged.date})`
+          );
+        } else if ((merged.unverifiedCount || 0) > 0) {
+          toast.warning(
+            `Checked ${merged.checked} — ${merged.unverifiedCount} need Razorpay re-check (see Unverified)`
+          );
+        } else {
+          toast.success(`Checked ${merged.checked} order(s) for ${merged.date} — looks clean`);
+        }
       }
     } finally {
-      window.clearTimeout(timeoutId);
       setAuditLoading(false);
     }
   };
@@ -605,9 +723,16 @@ export default function AdminStatusPage() {
               Scanning delivered orders and checking Razorpay / wallet proof…
             </p>
           ) : !audit ? (
-            <p className="text-sm text-muted-foreground">
-              Set From and To, then scan. One day is fine; 1st to 10th is one scan.
-            </p>
+            <div className="space-y-2">
+              {auditScanError ? (
+                <p className="text-sm text-red-600">{auditScanError}</p>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  Set From and To, then scan. One day is fine; 1st to 10th runs day-by-day so results
+                  show up even on slow servers.
+                </p>
+              )}
+            </div>
           ) : (
             <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
               <div className="space-y-3">
@@ -633,42 +758,28 @@ export default function AdminStatusPage() {
                 </div>
                 {audit.unverifiedCount > 0 ? (
                   <p className="text-xs text-amber-600">
-                    {audit.unverifiedCount} could not be checked (Razorpay API). Run the scan again.
+                    {audit.unverifiedCount} could not be fully checked (Razorpay API). Listed below —
+                    re-run scan or verify manually.
                   </p>
                 ) : null}
               </div>
-              <div className="rounded-lg border min-h-[220px] max-h-[420px] overflow-y-auto">
-                <div className="sticky top-0 border-b bg-background px-3 py-2 text-sm font-medium">
-                  Doubtful IPs
+              <div className="space-y-3 min-h-[220px] max-h-[520px] overflow-y-auto">
+                <div className="rounded-lg border">
+                  <div className="sticky top-0 border-b bg-background px-3 py-2 text-sm font-medium">
+                    Doubtful / untraced ({audit.doubtCount})
+                    {audit.doubtTruncated ? " · first 250 shown" : ""}
+                  </div>
+                  {renderAuditRows(audit.doubt || [])}
                 </div>
-                {audit.doubt.length === 0 ? (
-                  <p className="p-4 text-sm text-muted-foreground">
-                    No untraced payments in this range.
-                  </p>
-                ) : (
-                  <ul className="divide-y">
-                    {audit.doubt.map((row) => (
-                      <li key={row.orderId} className="px-3 py-2 text-sm">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="font-mono font-semibold">
-                            {row.ip || (row.status === "cancelled" ? "cancelled · no IP" : "no IP")}
-                          </span>
-                          <span className="tabular-nums text-red-600">
-                            ₹{row.price.toLocaleString("en-IN")}
-                          </span>
-                        </div>
-                        <p className="truncate text-xs text-muted-foreground">
-                          {row.email || row.name || "—"} · {row.product}
-                        </p>
-                        <p className="text-[11px] text-muted-foreground">
-                          {row.day ? `${row.day} · ` : ""}
-                          {row.method || "no method"}
-                          {row.status === "cancelled" ? " · cancelled" : ""} · {row.reason}
-                        </p>
-                      </li>
-                    ))}
-                  </ul>
-                )}
+                {(audit.unverifiedCount || 0) > 0 ? (
+                  <div className="rounded-lg border border-amber-500/30">
+                    <div className="sticky top-0 border-b bg-background px-3 py-2 text-sm font-medium text-amber-700 dark:text-amber-400">
+                      Unverified — needs review ({audit.unverifiedCount})
+                      {audit.unverifiedTruncated ? " · first 250 shown" : ""}
+                    </div>
+                    {renderAuditRows(audit.unverified || [])}
+                  </div>
+                ) : null}
               </div>
             </div>
           )}

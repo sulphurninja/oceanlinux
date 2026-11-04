@@ -170,21 +170,34 @@ function upiGatewayPaid(order) {
 }
 
 /** Scan-only: Razorpay says paid, even when the receipt was overwritten by a renewal or cart line. */
+const razorpayCapturedCache = new Map();
+
 async function razorpayCaptured(gatewayOrderId) {
   const id = String(gatewayOrderId || '').trim();
   if (!id.startsWith('order_')) return false;
+  if (razorpayCapturedCache.has(id)) return razorpayCapturedCache.get(id);
   try {
     const { getRazorpayClient } = require('@/lib/razorpayClient');
     const razorpay = getRazorpayClient();
-    if (!razorpay) return false;
+    if (!razorpay) {
+      razorpayCapturedCache.set(id, false);
+      return false;
+    }
     const rzpOrder = await razorpay.orders.fetch(id);
-    if (rzpOrder?.status === 'paid') return true;
+    if (rzpOrder?.status === 'paid') {
+      razorpayCapturedCache.set(id, true);
+      return true;
+    }
     if (rzpOrder?.status === 'attempted') {
       const payments = await razorpay.orders.fetchPayments(id);
-      return (payments?.items || []).some((p) => p.status === 'captured');
+      const paid = (payments?.items || []).some((p) => p.status === 'captured');
+      razorpayCapturedCache.set(id, paid);
+      return paid;
     }
+    razorpayCapturedCache.set(id, false);
     return false;
   } catch {
+    razorpayCapturedCache.set(id, false);
     return false;
   }
 }
@@ -233,6 +246,7 @@ function daySpan(fromKey, toKey) {
  * YYYY-MM-DD in IST. `from`+`to` is inclusive. A single `date` still works.
  */
 async function auditDeliveredPayments(opts = {}) {
+  razorpayCapturedCache.clear();
   const today = todayKey();
   const hasRange = opts.from != null || opts.to != null || opts.date != null;
   let fromKey;
@@ -312,7 +326,7 @@ async function auditDeliveredPayments(opts = {}) {
     return inRange(confirmedDay);
   });
 
-  const rows = await mapPool(fresh, 4, async (order) => {
+  const rows = await mapPool(fresh, 10, async (order) => {
     const user = order.user && typeof order.user === 'object' ? order.user : null;
     const base = {
       orderId: String(order._id),
@@ -422,6 +436,10 @@ async function auditDeliveredPayments(opts = {}) {
     bySource[r.source] = (bySource[r.source] || 0) + 1;
   }
 
+  const LIST_CAP = 250;
+  const doubtTrim = doubt.slice(0, LIST_CAP);
+  const unverifiedTrim = unverified.slice(0, LIST_CAP);
+
   return {
     date: rangeLabel,
     from: fromKey,
@@ -433,8 +451,10 @@ async function auditDeliveredPayments(opts = {}) {
     unverifiedCount: unverified.length,
     doubtInr: doubt.reduce((s, r) => s + r.price, 0),
     bySource,
-    doubt,
-    unverified,
+    doubt: doubtTrim,
+    unverified: unverifiedTrim,
+    doubtTruncated: doubt.length > LIST_CAP,
+    unverifiedTruncated: unverified.length > LIST_CAP,
   };
 }
 
