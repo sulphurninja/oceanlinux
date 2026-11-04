@@ -45,7 +45,7 @@ const {
   sanitizeZoneIdsAgainstPanel,
 } = require('@/lib/resellerZoneConfig');
 const { syncResellerIpStockRow, stockHasResellerPanelPlans } = require('@/lib/resellerLiveStock');
-const { readResellerApiStockConfig } = require('@/lib/resellerApiStockConfig');
+const { readResellerApiStockConfig, stockNameRequiresMappedZone } = require('@/lib/resellerApiStockConfig');
 const ResellerApi = require('@/services/resellerApi');
 const {
   fetchResellerCredentialsByIp,
@@ -706,7 +706,8 @@ const ResellerApi = require('@/services/resellerApi');
     if (mergeResult.error) {
       return NextResponse.json({ error: mergeResult.error }, { status: 400 });
     }
-    if (inventoryFullAccess && (mergeResult.added > 0 || mergeResult.updated > 0)) {
+    const inventoryChanged = mergeResult.added > 0 || mergeResult.updated > 0;
+    if (inventoryChanged && (inventoryFullAccess || stockNameRequiresMappedZone(stock))) {
       await syncManualUnitsAfterInventoryChange(stockId);
     }
     let synced = await syncStockCountFromInventory(stockId);
