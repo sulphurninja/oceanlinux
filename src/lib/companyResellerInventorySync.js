@@ -54,6 +54,23 @@ function createResellerApiClient(company) {
   });
 }
 
+/** Manage panel (company) override, then IP stock owner — for panel sync/renew/expiry. */
+async function resolveResellerCompanyForOrder(order, companyDoc = null) {
+  if (companyDoc && getCompanyResellerApiConfig(companyDoc)) return companyDoc;
+
+  const { getManageCompanyDocForOrder } = require('@/lib/orderManageCompany');
+  const managed = await getManageCompanyDocForOrder(order);
+  if (managed && getCompanyResellerApiConfig(managed)) return managed;
+
+  if (!order?.ipStockId) return null;
+  const IPStock = require('@/models/ipStockModel');
+  const Company = (await import('@/models/companyModel')).default;
+  const ipStock = await IPStock.findById(order.ipStockId).select('company').lean();
+  if (!ipStock?.company) return null;
+  const stockCo = await Company.findById(ipStock.company).select('resellerApi name').lean();
+  return getCompanyResellerApiConfig(stockCo) ? stockCo : null;
+}
+
 function cleanIpAddress(ipAddress) {
   return String(ipAddress || '').split(':')[0].trim();
 }
@@ -389,9 +406,8 @@ async function syncSingleOrderExpiryFromPanel(order, { force = false, companyDoc
   const ipStock = await IPStock.findById(order.ipStockId).select('company inventoryItems').lean();
   if (!ipStock?.company) return { order, synced: false };
 
-  const company =
-    companyDoc || (await Company.findById(ipStock.company).select('resellerApi name').lean());
-  if (!getCompanyResellerApiConfig(company)) return { order, synced: false };
+  const company = await resolveResellerCompanyForOrder(order, companyDoc);
+  if (!company) return { order, synced: false };
 
   const ip = cleanIpAddress(order.ipAddress);
   let siblings = [order];
@@ -566,15 +582,10 @@ async function resolveRenewalExpiryFromPanel(order, calculatedExpiry, { panelRen
 
   if (order?.ipAddress && order?.ipStockId) {
     try {
-      const IPStock = require('@/models/ipStockModel');
-      const Company = (await import('@/models/companyModel')).default;
-      const ipStock = await IPStock.findById(order.ipStockId).select('company').lean();
-      if (ipStock?.company) {
-        const company = await Company.findById(ipStock.company).select('resellerApi name').lean();
-        if (getCompanyResellerApiConfig(company)) {
-          const panel = await fetchResellerExpiryByIp(company, order.ipAddress, { vmId: order.resellerVmId });
-          panelExpiry = panel?.expiryDate || null;
-        }
+      const company = await resolveResellerCompanyForOrder(order);
+      if (company) {
+        const panel = await fetchResellerExpiryByIp(company, order.ipAddress, { vmId: order.resellerVmId });
+        panelExpiry = panel?.expiryDate || null;
       }
     } catch {
       // fall back below

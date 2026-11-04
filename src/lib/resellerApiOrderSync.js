@@ -1125,8 +1125,13 @@ async function completeResellerPendingOrder(order, ipStock, { api: existingApi =
 
   let api = existingApi;
   if (!api) {
-    if (!ipStock?.company) return { success: false, error: 'No company on IP stock' };
-    const company = await Company.findById(ipStock.company).select('resellerApi name').lean();
+    const Company = (await import('@/models/companyModel')).default;
+    const { getManageCompanyDocForOrder } = require('@/lib/orderManageCompany');
+    let company = await getManageCompanyDocForOrder(order);
+    if (!company && ipStock?.company) {
+      company = await Company.findById(ipStock.company).select('resellerApi name').lean();
+    }
+    if (!company) return { success: false, error: 'No manage company or IP stock company' };
     const cfg = getCompanyResellerApiConfig(company);
     if (!cfg) return { success: false, error: 'Reseller API not configured' };
     api = new ResellerApi(cfg);
