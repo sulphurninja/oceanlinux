@@ -5,6 +5,7 @@
  */
 
 const Order = require('@/models/orderModel').default;
+require('@/models/userModel').default;
 const Wallet = require('@/models/walletModel').default;
 const WalletRecharge = require('@/models/walletRechargeModel').default;
 const { verifyOrderPaymentProof } = require('@/lib/orderPaymentStatus');
