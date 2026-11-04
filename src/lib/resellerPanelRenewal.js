@@ -57,7 +57,8 @@ async function resolveResellerApiForOrder(order) {
 async function executeResellerPanelUpstreamRenewal(order, { months = 1, Order, companyId } = {}) {
   let { api, ipStock, error } = await resolveResellerApiForOrder(order);
 
-  if (!api && companyId) {
+  const manageOverride = String(order?.trialManageCompanyId || '').trim();
+  if (!api && companyId && !manageOverride) {
     const company = await Company.findById(companyId).select('resellerApi name').lean();
     const cfg = getCompanyResellerApiConfig(company);
     if (cfg) {

@@ -144,7 +144,7 @@ export async function detectCompanyManagedRenewal(order) {
       return {
         isCompany: false,
         hostdzireAutoRenew: true,
-        companyId: ipStock?.company || null,
+        companyId: String(order.trialManageCompanyId || '').trim() || ipStock?.company || null,
         stockName: ipStock?.name || '',
       };
     }
@@ -154,14 +154,18 @@ export async function detectCompanyManagedRenewal(order) {
   const ipStock = await IPStock.findById(order.ipStockId)
     .select('company name tags defaultConfigurations provider')
     .lean();
-  if (!ipStock?.company) return { isCompany: false };
+  if (!ipStock?.company && !String(order.trialManageCompanyId || '').trim()) {
+    return { isCompany: false };
+  }
+
+  const companyId = String(order.trialManageCompanyId || '').trim() || ipStock.company;
 
   if (await isHostdzireDirectRenewEligible(order, ipStock)) {
     return {
       isCompany: false,
       hostdzireAutoRenew: true,
-      companyId: ipStock.company,
-      stockName: ipStock.name || '',
+      companyId,
+      stockName: ipStock?.name || '',
     };
   }
 
@@ -169,15 +173,15 @@ export async function detectCompanyManagedRenewal(order) {
     return {
       isCompany: false,
       hostheavenAutoRenew: true,
-      companyId: ipStock.company,
-      stockName: ipStock.name || '',
+      companyId,
+      stockName: ipStock?.name || '',
     };
   }
 
   return {
     isCompany: true,
-    companyId: ipStock.company,
-    stockName: ipStock.name || '',
+    companyId,
+    stockName: ipStock?.name || '',
   };
 }
 
