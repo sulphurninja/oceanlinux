@@ -70,13 +70,27 @@ async function fetchResellerExpiryByIp(company, ipAddress, { vmId = null } = {})
   const api = createResellerApiClient(company);
   const savedVmId = vmId ? String(vmId).trim() : '';
   if (savedVmId) {
-    const details = await api.getVmDetails(savedVmId);
-    const expiryDate = ResellerApi.extractVmExpiryDate(details);
+    let expiryDate = null;
+    let resolvedIp = cleanIp;
+    try {
+      const details = await api.getVmDetails(savedVmId);
+      expiryDate = ResellerApi.extractVmExpiryDate(details);
+      resolvedIp = cleanIpAddress(details?.ipAddress || details?.ip) || cleanIp;
+    } catch {
+      /* details optional */
+    }
+    if (!expiryDate) {
+      const found = await api.findVmByIp(cleanIp, { skipCache: true });
+      if (found) {
+        expiryDate = ResellerApi.extractVmExpiryDate(found.raw);
+        resolvedIp = found.ip || cleanIp;
+      }
+    }
     if (!expiryDate) {
       throw new Error(`Panel did not return expiry for VM ${savedVmId}`);
     }
     return {
-      ipAddress: cleanIpAddress(details?.ipAddress || details?.ip) || cleanIp,
+      ipAddress: resolvedIp,
       expiryDate,
       vmId: savedVmId,
     };

@@ -1039,19 +1039,44 @@ async function renewResellerPanelVm({ api, order, ipStock, Order, companyCoupon 
 
   let newExpiryDate = null;
   try {
-    const freshOverview = await resolveOverviewRowForVm(api, vmId, { maxPages: 5 });
-    newExpiryDate = ResellerApi.extractVmExpiryDate(freshOverview?.raw, freshOverview);
+    const cleanIp = String(order.ipAddress || order.ip || '')
+      .split(':')[0]
+      .trim();
+    if (cleanIp) {
+      const found = await api.findVmByIp(cleanIp, { skipCache: true });
+      if (found?.raw) {
+        newExpiryDate = ResellerApi.extractVmExpiryDate(found.raw);
+      }
+    }
+    if (!newExpiryDate) {
+      const freshOverview = await resolveOverviewRowForVm(api, vmId, { maxPages: 80 });
+      newExpiryDate = ResellerApi.extractVmExpiryDate(freshOverview);
+    }
     if (!newExpiryDate) {
       const details = await api.getVmDetails(vmId);
       newExpiryDate = ResellerApi.extractVmExpiryDate(details);
     }
   } catch (_) { /* best effort */ }
 
-  if (!newExpiryDate) {
+  const renewResponseExpiry = (() => {
     const { parseHostheavenExpiryDate } = require('@/lib/expiryHelper');
-    newExpiryDate =
+    return (
       parseHostheavenExpiryDate(renewRes?.newExpiry || renewRes?.expiresAt) ||
-      ResellerApi.extractVmExpiryDate(overviewRow?.raw, overviewRow);
+      ResellerApi.extractVmExpiryDate(renewRes)
+    );
+  })();
+
+  if (!newExpiryDate) {
+    newExpiryDate = renewResponseExpiry || ResellerApi.extractVmExpiryDate(overviewRow);
+  } else if (renewResponseExpiry) {
+    const overviewMs = newExpiryDate.getTime();
+    const responseMs = renewResponseExpiry.getTime();
+    // Hostheaven upgrade-renew JSON `newExpiry` can be ~1 month ahead of overview `expiresAt`.
+    if (responseMs - overviewMs > 20 * 86400000) {
+      console.warn(
+        `[RESELLER-RENEW] VM ${vmId} renew response expiry ${renewResponseExpiry.toISOString()} ignored; using overview ${newExpiryDate.toISOString()}`
+      );
+    }
   }
 
   const panelExpiryAfter = panelExpiryMs(newExpiryDate);
