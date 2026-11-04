@@ -182,8 +182,8 @@ function resolveOrderCompanyAutomation(
   stock: IPStock | null,
 ): CompanyAutomationMeta | null | undefined {
   const manageOverride = !!String(order?.trialManageCompanyId || '').trim();
-  if (manageOverride && order?.companyAutomation?.enabled) {
-    return order.companyAutomation;
+  if (manageOverride) {
+    return order?.companyAutomation?.enabled ? order.companyAutomation : null;
   }
   if (stock?.companyAutomation?.enabled) return stock.companyAutomation;
   if (order?.companyAutomation?.enabled) return order.companyAutomation;

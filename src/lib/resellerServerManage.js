@@ -287,34 +287,12 @@ export function getResellerManagementCapabilities(order, ipStock = null) {
 export async function loadOrderIpStock(order) {
   if (!order?.ipStockId) return null;
   const stock = await IPStock.findById(order.ipStockId).lean();
-  if (!stock?.company) return stock;
-
-  const company = await Company.findById(stock.company)
-    .select('virtualizors virtualizor resellerApi netbayApi kurohostApi joyApi name')
-    .lean();
-
-  let companyAutomation = null;
-  if (company) {
-    const hasVirtualizor =
-      (Array.isArray(company.virtualizors) && company.virtualizors.length > 0) ||
-      !!company.virtualizor?.host;
-    const hasResellerApi = company.resellerApi?.enabled;
-    const hasNetbay = company.netbayApi?.enabled;
-    const hasKurohost = !!getCompanyKurohostApiConfig(company);
-    const hasJoy = !!getCompanyJoyApiConfig(company);
-    if (hasVirtualizor) {
-      companyAutomation = { enabled: true, provider: 'virtualizor' };
-    } else if (hasResellerApi) {
-      companyAutomation = { enabled: true, provider: 'reseller-api' };
-    } else if (hasNetbay) {
-      companyAutomation = { enabled: true, provider: 'netbay' };
-    } else if (hasKurohost) {
-      companyAutomation = { enabled: true, provider: 'kurohost' };
-    } else if (hasJoy) {
-      companyAutomation = { enabled: true, provider: 'joy' };
-    }
-  }
-
+  const { getManageCompanyDocForOrder } = require('@/lib/orderManageCompany');
+  const { buildCompanyAutomationMetaForOrder } = require('@/lib/companyAutomationMeta');
+  const company = await getManageCompanyDocForOrder(order);
+  const companyAutomation = company
+    ? buildCompanyAutomationMetaForOrder(company, order)
+    : null;
   return { ...stock, company, companyAutomation };
 }
 

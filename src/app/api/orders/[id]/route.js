@@ -7,6 +7,7 @@ const { sanitizeOrderForCustomer } = require('@/lib/customerFacingErrors');
 const Company = require('@/models/companyModel');
 const IPStock = require('@/models/ipStockModel');
 const { resolveJoyApiForOrder } = require('@/lib/companyJoyApi');
+const { attachManageCompanyAutomation } = require('@/lib/orderManageCompany');
 
 export async function GET(request, { params }) {
     try {
@@ -54,36 +55,11 @@ export async function GET(request, { params }) {
             };
         }
 
-        if (!order.companyAutomation?.enabled && order.trialManageCompanyId) {
+        if (!order.companyAutomation?.enabled) {
             try {
-                const { buildCompanyAutomationMetaForOrder } = require('@/lib/companyAutomationMeta');
-                const company = await Company.findById(order.trialManageCompanyId)
-                    .select('virtualizors virtualizor resellerApi netbayApi kurohostApi joyApi hostdzireApi rackatoApi nexaApi name')
-                    .lean();
-                const meta = buildCompanyAutomationMetaForOrder(company, order);
-                if (meta) {
-                    order = { ...order, companyAutomation: meta };
-                }
+                order = await attachManageCompanyAutomation(order);
             } catch (metaErr) {
-                console.warn('[orders/:id] trial company automation meta failed:', metaErr.message);
-            }
-        }
-
-        if (!order.companyAutomation?.enabled && order.ipStockId && !order.trialManageCompanyId) {
-            try {
-                const ipStock = await IPStock.findById(order.ipStockId).select('company').lean();
-                if (ipStock?.company) {
-                    const company = await Company.findById(ipStock.company)
-                        .select('virtualizors virtualizor resellerApi netbayApi kurohostApi joyApi hostdzireApi rackatoApi nexaApi name')
-                        .lean();
-                    const { buildCompanyAutomationMetaForOrder } = require('@/lib/companyAutomationMeta');
-                    const meta = buildCompanyAutomationMetaForOrder(company, order);
-                    if (meta) {
-                        order = { ...order, companyAutomation: meta };
-                    }
-                }
-            } catch (metaErr) {
-                console.warn('[orders/:id] stock company automation meta failed:', metaErr.message);
+                console.warn('[orders/:id] manage company automation meta failed:', metaErr.message);
             }
         }
 

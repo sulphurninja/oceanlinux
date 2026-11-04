@@ -892,9 +892,9 @@ async function renewResellerPanelVm({ api, order, ipStock, Order, companyCoupon 
   });
 
   let couponSource = companyCoupon;
-  if (!couponSource && ipStock?.company) {
-    const Company = (await import('@/models/companyModel')).default;
-    const company = await Company.findById(ipStock.company).select('resellerApi').lean();
+  if (!couponSource) {
+    const { getManageCompanyDocForOrder } = require('@/lib/orderManageCompany');
+    const company = await getManageCompanyDocForOrder(order);
     const cfg = getCompanyResellerApiConfig(company);
     if (cfg) {
       couponSource = { couponCode: cfg.couponCode, couponByMemory: cfg.couponByMemory };

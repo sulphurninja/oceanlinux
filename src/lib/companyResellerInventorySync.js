@@ -54,23 +54,6 @@ function createResellerApiClient(company) {
   });
 }
 
-/** Manage panel (company) override, then IP stock owner — for panel sync/renew/expiry. */
-async function resolveResellerCompanyForOrder(order, companyDoc = null) {
-  if (companyDoc && getCompanyResellerApiConfig(companyDoc)) return companyDoc;
-
-  const { getManageCompanyDocForOrder } = require('@/lib/orderManageCompany');
-  const managed = await getManageCompanyDocForOrder(order);
-  if (managed && getCompanyResellerApiConfig(managed)) return managed;
-
-  if (!order?.ipStockId) return null;
-  const IPStock = require('@/models/ipStockModel');
-  const Company = (await import('@/models/companyModel')).default;
-  const ipStock = await IPStock.findById(order.ipStockId).select('company').lean();
-  if (!ipStock?.company) return null;
-  const stockCo = await Company.findById(ipStock.company).select('resellerApi name').lean();
-  return getCompanyResellerApiConfig(stockCo) ? stockCo : null;
-}
-
 function cleanIpAddress(ipAddress) {
   return String(ipAddress || '').split(':')[0].trim();
 }
@@ -406,6 +389,7 @@ async function syncSingleOrderExpiryFromPanel(order, { force = false, companyDoc
   const ipStock = await IPStock.findById(order.ipStockId).select('company inventoryItems').lean();
   if (!ipStock?.company) return { order, synced: false };
 
+  const { resolveResellerCompanyForOrder } = require('@/lib/orderManageCompany');
   const company = await resolveResellerCompanyForOrder(order, companyDoc);
   if (!company) return { order, synced: false };
 
@@ -489,19 +473,26 @@ async function syncUserHostheavenOrderExpiries(orders) {
   if (!stockIds.length) return { orders, updated: 0, extended: 0 };
 
   const stocks = await IPStock.find({ _id: { $in: stockIds } }).select('company inventoryItems').lean();
-  const stockToCompany = new Map(stocks.map((s) => [String(s._id), String(s.company)]));
   const { ownerByIp, ownerByItemId } = buildInventoryOwnerMaps(stocks);
   const ordersByIp = groupOrdersByIp(orders);
   const syncCtx = { ownerByIp, ownerByItemId, ordersByIp };
 
-  const companyIds = [...new Set(stocks.map((s) => String(s.company)).filter(Boolean))];
-  const companies = await Company.find({ _id: { $in: companyIds } }).select('resellerApi name').lean();
+  const { getManageCompanyIdForOrder } = require('@/lib/orderManageCompany');
+  const manageIds = new Set();
+  for (const order of orders) {
+    if (!order?.ipAddress || !order?.ipStockId) continue;
+    const manageId = await getManageCompanyIdForOrder(order);
+    if (manageId) manageIds.add(manageId);
+  }
+  if (!manageIds.size) return { orders, updated: 0, extended: 0 };
+
+  const companies = await Company.find({ _id: { $in: [...manageIds] } }).select('resellerApi name').lean();
   const companyById = new Map(companies.map((c) => [String(c._id), c]));
 
   const byCompany = new Map();
   for (const order of orders) {
     if (!order?.ipAddress || !order?.ipStockId) continue;
-    const companyId = stockToCompany.get(String(order.ipStockId));
+    const companyId = await getManageCompanyIdForOrder(order);
     if (!companyId || !getCompanyResellerApiConfig(companyById.get(companyId))) continue;
     const bucket = byCompany.get(companyId) || [];
     bucket.push(order);
@@ -582,6 +573,7 @@ async function resolveRenewalExpiryFromPanel(order, calculatedExpiry, { panelRen
 
   if (order?.ipAddress && order?.ipStockId) {
     try {
+      const { resolveResellerCompanyForOrder } = require('@/lib/orderManageCompany');
       const company = await resolveResellerCompanyForOrder(order);
       if (company) {
         const panel = await fetchResellerExpiryByIp(company, order.ipAddress, { vmId: order.resellerVmId });

@@ -101,24 +101,10 @@ export async function POST(request) {
         if (manageId) {
           await relinkResellerVmFromCompany(manageId, ipForLookup);
         } else if (ipChanged && existingBeforeUpdate?.ipStockId) {
-          const ipStock = await IPStock.findById(existingBeforeUpdate.ipStockId).select('company').lean();
-          const company = ipStock?.company
-            ? await Company.findById(ipStock.company).select('resellerApi name').lean()
-            : null;
-          const resellerCfg = getCompanyResellerApiConfig(company);
-          if (resellerCfg) {
-            const api = new ResellerApi(resellerCfg);
-            const draftOrder = { ...existingBeforeUpdate, ipAddress };
-            const found = await resolveResellerVmForOrder(api, draftOrder);
-            if (found?.vmId) {
-              const synced = await syncResellerVmCredentials(api, draftOrder, found.vmId);
-              updateFields.resellerVmId = String(synced.vmId || found.vmId);
-              updateFields.provider = 'reseller-api';
-              updateFields.ipAddress = synced.updates.ipAddress || ipAddress;
-              Object.assign(updateFields, synced.updates);
-            } else if (!existingBeforeUpdate?.resellerVmId) {
-              updateFields.resellerVmId = '';
-            }
+          const { getManageCompanyIdForOrder } = require('@/lib/orderManageCompany');
+          const stockManageId = await getManageCompanyIdForOrder(existingBeforeUpdate);
+          if (stockManageId) {
+            await relinkResellerVmFromCompany(stockManageId, ipForLookup);
           }
         }
       } catch (resellerErr) {
