@@ -495,11 +495,12 @@ export class VirtualizorAPI {
    */
   static extractVpsPowerCandidate(vm) {
     if (!vm || typeof vm !== 'object') return null;
-    // listvs `status` is the account flag (1 = not suspended). On Proxmox the
-    // live power is `machine_status` (0 = off, 1 = on).
-    const fields = vm.machine_status !== undefined && vm.machine_status !== null && vm.machine_status !== ''
-      ? [vm.machine_status]
-      : [vm.vps_status, vm.power, vm.running, vm.state, vm.cached_status, vm.status];
+    if (String(vm.suspended) === '1' || String(vm.band_suspend) === '1') return 'suspended';
+    // Virtualizor panel Online/Offline is listvs `status` (1 = on, 0 = off).
+    // On Proxmox (proxk) `machine_status` stays "0" for running VMs, so it
+    // cannot override status or every online server shows offline.
+    if (vm.status !== undefined && vm.status !== null && vm.status !== '') return vm.status;
+    const fields = [vm.machine_status, vm.vps_status, vm.power, vm.running, vm.state, vm.cached_status];
     for (const value of fields) {
       if (value !== undefined && value !== null && value !== '') return value;
     }
@@ -516,7 +517,11 @@ export class VirtualizorAPI {
       if (['installing', 'rebooting', 'starting', 'stopping', 'busy', 'processing', 'pending', 'reinstalling'].includes(s)) return 'busy';
       return 'unknown';
     }
-    if (typeof raw === 'number') return raw === 1 ? 'running' : 'stopped';
+    if (typeof raw === 'number') {
+      if (raw === 1) return 'running';
+      if (raw === 2) return 'suspended';
+      return 'stopped';
+    }
     if (typeof raw === 'boolean') return raw ? 'running' : 'stopped';
     if (typeof raw === 'object') {
       const candidate = raw.status ?? raw.state ?? raw.running ?? raw.power ?? raw.vps_status;
