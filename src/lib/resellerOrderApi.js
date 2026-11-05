@@ -11,6 +11,7 @@ import ResellerWalletService from '@/services/resellerWalletService';
 import { normalizeOs } from '@/lib/v1ServerApi';
 import { getCustomPriceForStockMemory } from '@/lib/resellerPlanGroups';
 import { nonRenewablePackageMessage } from '@/lib/trialVpsOrder';
+import { buildRenewalQuote } from '@/lib/resellerPanelApi';
 
 const SlotIPPackage = require('@/models/slotIpPackageModel');
 
@@ -225,9 +226,12 @@ export function formatResellerProduct(stock, reseller) {
 export function sanitizeResellerOrder(order) {
   if (!order) return null;
   const o = order.toObject ? order.toObject() : order;
+  const quote = buildRenewalQuote(o);
   return {
     id: String(o._id),
     _id: String(o._id),
+    quote,
+    renewalQuote: quote,
     productType: o.slotIpPackageId ? 'slotip' : (o.netbayProductKind === 'proxy' ? 'proxy' : 'vps'),
     renewable: !nonRenewablePackageMessage(o),
     slotIpPackageId: o.slotIpPackageId ? String(o.slotIpPackageId) : null,

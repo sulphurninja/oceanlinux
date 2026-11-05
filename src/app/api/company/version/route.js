@@ -10,6 +10,7 @@ export async function GET() {
       ordersFilter: COMPANY_FILTER_VERSION,
       visibleStatuses: COMPANY_VISIBLE_ORDER_STATUSES,
       managePanelRouting: 3,
+    renewalQuote: 1,
     },
     {
       headers: {

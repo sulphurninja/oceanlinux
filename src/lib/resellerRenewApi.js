@@ -12,6 +12,7 @@ import { calculateResellerPlanPrice } from '@/lib/resellerOrderApi';
 import { getCurrentListPriceForOrder } from '@/lib/orderRenewalPricingServer';
 import IPStock from '@/models/ipStockModel';
 import { notifyRenewalCompleted } from '@/lib/renewalNotifications';
+import { buildRenewalQuote } from '@/lib/resellerPanelApi';
 
 const HostycareAPI = require('@/services/hostycareApi');
 const SmartVpsAPI = require('@/services/smartvpsApi');
@@ -290,6 +291,7 @@ export async function renewResellerOrder(reseller, order, orderId) {
 
   const freshReseller = await Reseller.findById(reseller._id).lean();
 
+  const quote = buildRenewalQuote({ ...order, price: renewalPrice });
   return {
     ok: true,
     status: 200,
@@ -301,6 +303,8 @@ export async function renewResellerOrder(reseller, order, orderId) {
       orderId,
       renewalTxnId,
       amount: renewalPrice,
+      ...quote,
+      quote,
       previousExpiry: currentExpiry,
       newExpiryDate,
       providerRenewalSuccess,

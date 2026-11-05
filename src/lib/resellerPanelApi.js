@@ -28,14 +28,52 @@ export const RESELLER_PANEL_ENDPOINTS = [
   { method: 'POST', path: '/addons', description: 'Buy a rotation pack from reseller wallet' },
 ];
 
+/** Quote object reseller panels require before they will call renew. */
+export function buildRenewalQuote(order) {
+  const o = order?.toObject ? order.toObject() : order || {};
+  const renewBlock = nonRenewablePackageMessage(o);
+  const amount = renewBlock ? 0 : Math.ceil(Number(o.price) || 0);
+  const eligible = !renewBlock && !!o.expiryDate && amount > 0;
+  const currency = 'INR';
+  const eligibility = {
+    eligible,
+    renewable: eligible,
+    canRenew: eligible,
+    reason: renewBlock || null,
+  };
+  const priceDetails = {
+    amount,
+    baseAmount: amount,
+    discount: 0,
+    totalAmount: amount,
+    renewalPrice: amount,
+    price: amount,
+    currency,
+    memory: o.memory || null,
+  };
+  return {
+    eligible,
+    renewable: eligible,
+    eligibility,
+    price: amount,
+    renewalPrice: amount,
+    currency,
+    priceDetails,
+    expiryDate: o.expiryDate || null,
+    provider: o.provider || null,
+  };
+}
+
 export function orderToVm(order) {
   if (!order) return null;
   const o = order.toObject ? order.toObject() : order;
   const meta = o.apiMetadata || {};
-  const renewBlock = nonRenewablePackageMessage(o);
+  const quote = buildRenewalQuote(o);
   return {
     id: String(o._id),
-    renewable: !renewBlock,
+    renewable: quote.renewable,
+    quote,
+    renewalQuote: quote,
     planId: o.ipStockId ? String(o.ipStockId) : o.slotIpPackageId ? String(o.slotIpPackageId) : null,
     name: o.productName,
     memory: o.memory,
