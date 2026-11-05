@@ -22,16 +22,31 @@ export async function GET(request, { params }) {
   const renewBlock = await renewalBlockMessage(order);
   const renewalPrice = renewBlock ? 0 : Math.ceil(Number(order.price) || 0);
   const daysUntilExpiry = order.expiryDate ? getDaysUntilExpiry(order.expiryDate) : null;
+  const eligible = renewBlock ? false : !!(order.expiryDate && renewalPrice > 0);
+  const currency = auth.reseller.wallet?.currency || 'INR';
 
   return NextResponse.json({
     success: true,
     orderId: params.orderId,
-    eligible: renewBlock ? false : !!order.expiryDate,
-    renewable: !renewBlock,
+    eligible,
+    renewable: eligible,
+    eligibility: {
+      eligible,
+      renewable: eligible,
+      reason: renewBlock || null,
+    },
     renewalPrice,
-    currency: auth.reseller.wallet?.currency || 'INR',
+    price: renewalPrice,
+    currency,
+    priceDetails: {
+      amount: renewalPrice,
+      renewalPrice,
+      currency,
+      memory: order.memory || null,
+    },
     expiryDate: order.expiryDate,
     daysUntilExpiry,
+    provider: order.provider || null,
     message: renewBlock || 'POST to this endpoint to renew using reseller wallet',
   });
 }

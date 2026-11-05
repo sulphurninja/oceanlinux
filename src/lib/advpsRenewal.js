@@ -59,10 +59,11 @@ async function executeAdvpsUpstreamRenewal(api, order, { Order } = {}) {
   });
 
   try {
+    // ADVPS applies its own default validity. Do not send serviceValidities —
+    // a custom validity without their quote is rejected as a missing price/eligibility quote.
     const result = await api.renewServices({
       orderId: advpsOrderId,
       serviceIds: [serviceId],
-      serviceValidities: [{ serviceId, validity: 30 }],
     });
     validateAdvpsRenewalResult(result);
     return {
