@@ -98,6 +98,22 @@ async function resolvePriceIds(api, stockCfg, memory, stock) {
  */
 async function checkResellerZoneStock(api, { stockCfg, memory, zonesList = null }) {
   const zones = zonesList || (await api.listZones());
+  // This panel sometimes returns [] for a moment while the zone is still ACTIVE.
+  // An empty list is not "zone missing" — wiping stock here is what kept Cloud/Prime out.
+  if (!Array.isArray(zones) || zones.length === 0) {
+    return {
+      memory,
+      available: false,
+      stockMode: 'zone',
+      zoneId: stockCfg?.zoneId ?? null,
+      zoneOk: false,
+      unitsAvailable: 0,
+      emptyZoneList: true,
+      reason: 'Panel zone list was empty',
+      message: 'Zone list empty — keeping the last panel status',
+      checkedAt: new Date().toISOString(),
+    };
+  }
   const { configured, checked, live } = resolveLiveResellerZonesInPriorityOrder(stockCfg, zones);
   const firstLive = live[0] || null;
 
@@ -369,6 +385,20 @@ async function syncResellerIpStockRow(stock, { force = false, memoryOnly = null,
       console.warn(`${LOG} listZones failed for ${stock.name}:`, err.message);
     }
   }
+  if (isZoneLiveStock && Array.isArray(resolvedZones) && resolvedZones.length === 0) {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      try {
+        const again = await ctx.api.listZones();
+        if (Array.isArray(again) && again.length > 0) {
+          resolvedZones = again;
+          break;
+        }
+      } catch {
+        /* keep the empty list and do not wipe the last zone status */
+      }
+    }
+  }
 
   const plainVariantStock = sanitizeVariantStockMap(
     prevReseller.variantStock && typeof prevReseller.variantStock === 'object'
@@ -388,6 +418,15 @@ async function syncResellerIpStockRow(stock, { force = false, memoryOnly = null,
         zonesList: resolvedZones,
         stock,
       });
+      if (result?.emptyZoneList) {
+        const prev = prevReseller.variantStock?.[memory];
+        if (prev && typeof prev === 'object') {
+          variantResults[memory] = { ...prev, checkedAt: new Date().toISOString() };
+          if (prev.available) upstreamYes += 1;
+          else upstreamNo += 1;
+          continue;
+        }
+      }
       variantResults[memory] = result;
       if (result.zoneName) lastZoneName = result.zoneName;
       if (result.available) upstreamYes += 1;
