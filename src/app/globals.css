@@ -836,10 +836,7 @@ html {
     border-top-color: rgba(5, 150, 105, 0.6) !important;
     border-right-color: rgba(5, 150, 105, 0.6) !important;
     border-bottom-color: rgba(5, 150, 105, 0.6) !important;
-    box-shadow:
-      0 1px 0 rgba(255, 255, 255, 1) inset,
-      0 2px 4px rgba(6, 78, 59, 0.12),
-      0 14px 30px -10px rgba(6, 78, 59, 0.32);
+    box-shadow: none !important;
   }
 
   /* Light theme: SOLD-OUT rows are flat, grey and dashed so they read as unavailable */
@@ -868,9 +865,7 @@ html {
     border-top-color: rgba(52, 211, 153, 0.55) !important;
     border-right-color: rgba(52, 211, 153, 0.55) !important;
     border-bottom-color: rgba(52, 211, 153, 0.55) !important;
-    box-shadow:
-      0 1px 0 rgba(255, 255, 255, 0.12) inset,
-      0 14px 34px -12px rgba(0, 0, 0, 0.6);
+    box-shadow: none !important;
   }
 
   /* Dark theme: SOLD-OUT rows are dim and dashed */
@@ -904,12 +899,28 @@ html {
     @apply opacity-55 saturate-[0.6] grayscale-[0.25];
   }
 
-  /* Blur on every plan card repaints the whole page while scrolling.
-     Do not use content-visibility here: the browser draws the empty card
-     box first and fills the name and price a frame later. */
+  /* A long plan list cannot blur or animate shadows. Those effects repaint
+     every card on each scroll frame, which is the hang. */
+  .premium-ipstock-page .premium-dashboard-card,
   .premium-ipstock-page .premium-dashboard-card.border-l-4 {
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
+    transition: none;
+    box-shadow: none !important;
+  }
+
+  .premium-ipstock-page .premium-dashboard-card:hover {
+    box-shadow: none !important;
+  }
+
+  .premium-ipstock-section-jump {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: var(--pd-sidebar-bg);
+  }
+
+  .premium-ipstock-section-jump-link {
+    animation: none;
   }
 
   .premium-ipstock-tag-section {

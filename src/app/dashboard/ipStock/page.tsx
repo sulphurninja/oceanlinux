@@ -802,6 +802,62 @@ function groupStocksByTags(stocks: IPStock[]) {
   return { grouped, untagged };
 }
 
+function PlanSectionJump({ links }: { links: { id: string; label: string; short: string }[] }) {
+  const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (links.length < 2) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+        const nextId = visible[0]?.target.id;
+        if (nextId) setActiveSectionId((current) => (current === nextId ? current : nextId));
+      },
+      { rootMargin: '-120px 0px -60% 0px' }
+    );
+    for (const link of links) {
+      const el = document.getElementById(link.id);
+      if (el) observer.observe(el);
+    }
+    return () => observer.disconnect();
+  }, [links]);
+
+  if (links.length < 2) return null;
+
+  return (
+    <nav
+      aria-label="Plan sections"
+      className="sticky top-[6.5rem] z-30 mb-4 hidden w-full min-w-0 max-w-full premium-ipstock-section-jump lg:flex lg:flex-wrap"
+    >
+      <span className="premium-ipstock-jump-label">Jump to</span>
+      <div className="premium-ipstock-jump-track">
+        {links.map((link) => (
+          <a
+            key={link.id}
+            href={`#${link.id}`}
+            title={link.label}
+            aria-current={activeSectionId === link.id ? 'true' : undefined}
+            className="premium-ipstock-section-jump-link"
+          >
+            {link.short}
+          </a>
+        ))}
+      </div>
+      <button
+        type="button"
+        className="premium-ipstock-jump-top"
+        onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+        title="Back to filters"
+      >
+        <ArrowUp className="h-3.5 w-3.5" aria-hidden />
+        <span className="hidden xl:inline">Top</span>
+      </button>
+    </nav>
+  );
+}
+
 export default function IPStockPage() {
   return (
     <Suspense fallback={<PlanListSkeleton />}>
@@ -1295,25 +1351,6 @@ function IPStockContent() {
   }, [activeTab, slotPackages.length, proxyIpStocks.length, trialPackages.length, tagGroupedStocks, tagSectionTitles]);
 
   const [showBackToTop, setShowBackToTop] = useState(false);
-  const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (sectionJumpLinks.length < 2) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const visible = entries
-          .filter((e) => e.isIntersecting)
-          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
-        if (visible[0]) setActiveSectionId(visible[0].target.id);
-      },
-      { rootMargin: '-120px 0px -60% 0px' }
-    );
-    for (const link of sectionJumpLinks) {
-      const el = document.getElementById(link.id);
-      if (el) observer.observe(el);
-    }
-    return () => observer.disconnect();
-  }, [sectionJumpLinks]);
 
   useEffect(() => {
     const onScroll = () => setShowBackToTop(window.scrollY > 480);
@@ -2116,37 +2153,7 @@ function IPStockContent() {
               ) : null}
             </p>
 
-            {sectionJumpLinks.length > 1 && (
-              <nav
-                aria-label="Plan sections"
-                className="sticky top-[6.5rem] z-30 mb-4 hidden w-full min-w-0 max-w-full premium-ipstock-section-jump lg:flex lg:flex-wrap"
-              >
-                <span className="premium-ipstock-jump-label">Jump to</span>
-                <div className="premium-ipstock-jump-track">
-                  {sectionJumpLinks.map((link, index) => (
-                    <a
-                      key={link.id}
-                      href={`#${link.id}`}
-                      title={link.label}
-                      aria-current={activeSectionId === link.id ? 'true' : undefined}
-                      className="premium-ipstock-section-jump-link"
-                      style={{ animationDelay: `${index * 45}ms` }}
-                    >
-                      {link.short}
-                    </a>
-                  ))}
-                </div>
-                <button
-                  type="button"
-                  className="premium-ipstock-jump-top"
-                  onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-                  title="Back to filters"
-                >
-                  <ArrowUp className="h-3.5 w-3.5" aria-hidden />
-                  <span className="hidden xl:inline">Top</span>
-                </button>
-              </nav>
-            )}
+            <PlanSectionJump links={sectionJumpLinks} />
 
             {/* Plan listings */}
             <div>
@@ -2732,7 +2739,7 @@ const TrialVpsPlanRow = memo(function TrialVpsPlanRow({
   return (
     <div
       className={cn(
-        'premium-dashboard-card rounded-lg transition-all overflow-hidden border-l-4',
+        'premium-dashboard-card rounded-lg overflow-hidden border-l-4',
         inStock
           ? 'border-l-violet-400 hover:border-violet-400/40'
           : 'border-l-red-500 premium-ipstock-row-sold-out'
@@ -2957,7 +2964,7 @@ const NexaPlanGroupRow = memo(function NexaPlanGroupRow({
 
   return (
     <div className={cn(
-      'premium-dashboard-card rounded-lg transition-all overflow-hidden border-l-4',
+      'premium-dashboard-card rounded-lg overflow-hidden border-l-4',
       inStock
         ? 'border-l-emerald-400 hover:border-emerald-400/40'
         : 'border-l-red-500 premium-ipstock-row-sold-out'
@@ -3184,7 +3191,7 @@ const CompactServerPlanRow = memo(function CompactServerPlanRow({
 
   return (
     <div className={cn(
-      'premium-dashboard-card rounded-lg transition-all overflow-hidden border-l-4',
+      'premium-dashboard-card rounded-lg overflow-hidden border-l-4',
       inStock
         ? 'border-l-emerald-400 hover:border-emerald-400/40'
         : 'border-l-red-500 premium-ipstock-row-sold-out'
