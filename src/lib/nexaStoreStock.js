@@ -35,23 +35,14 @@ function asConfigObject(value) {
   return typeof value === 'object' ? value : {};
 }
 
-/** Store listing for Nexa rows: hide when pool empty, relist when stock returns. */
+/** Stock count only. Hide is the admin "Hide out of stock" button, never a sync. */
 function nexaStoreVisibilityPatch(stock, live) {
   const patch = {
     available: live.available,
     stockCount: live.stockCount,
   };
-  const hasNexaPlan = Number(nexaConfig(stock).planId) > 0;
   if (live.available) {
     Object.assign(patch, storeAutoUnhideUpdate(stock, true));
-    // Rows hidden while OOS often keep autoHiddenFromStore=false; still relist when Nexa has stock.
-    if (hasNexaPlan && stock.hiddenFromStore) {
-      patch.hiddenFromStore = false;
-      patch.autoHiddenFromStore = false;
-    }
-  } else {
-    patch.hiddenFromStore = true;
-    patch.autoHiddenFromStore = true;
   }
   return patch;
 }
@@ -205,10 +196,8 @@ async function applyNexaLiveToStock(IPStock, stock, live, plan, pool) {
   const nextName = plan?.planId ? buildNexaStockName(plan, pool) : '';
   const nameNeedsUpdate = !!(nextName && nextName !== stock.name);
 
-  if (!patchNeedsApply(stock, patch, sellPrice || customerPrice)) {
-    if (!(live.available && stock.hiddenFromStore && Number(nexaConfig(stock).planId) > 0) && !nameNeedsUpdate) {
-      return false;
-    }
+  if (!patchNeedsApply(stock, patch, sellPrice || customerPrice) && !nameNeedsUpdate) {
+    return false;
   }
 
   const iso = new Date().toISOString();
