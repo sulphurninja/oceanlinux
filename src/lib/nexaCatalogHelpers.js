@@ -112,28 +112,10 @@ function subnetsMatch(a, b) {
 }
 
 function buildNexaStockName(plan, pool) {
-  const rawName = String(plan.name || '').trim();
-  let planTitle = rawName;
-  if (rawName === 'Bcast App-login' || rawName === 'Broadcast') {
-    planTitle = '📡 Broadcast Proxy';
-  } else if (/^Premium Native IPs$/i.test(rawName)) {
-    planTitle = '⭐ Premium Native IPs';
-  } else if (/web login/i.test(rawName)) {
-    planTitle = '🌐 Web & App Access Proxies';
-  } else if (String(plan.category || '').trim() === 'Native IP') {
-    planTitle = '🌐 Web & App Access Proxies';
-  }
-  const rawLabel = [planTitle, pool?.subnet || pool?.name].filter(Boolean).join(' — ');
-  const planEmoji = {
-    'Diamond IPs': '💎',
-    Broadcast: '📡',
-    'Premium Native IPs': '⭐',
-    'Web Login': '🔐',
-  }[String(plan.name || '').trim()];
-  if (planEmoji && !String(rawLabel).startsWith(planEmoji)) {
-    return rawLabel.replace(String(plan.name).trim(), `${planEmoji} ${String(plan.name).trim()}`);
-  }
-  return rawLabel || `Nexa plan ${plan.planId}`;
+  const planTitle = String(plan.name || '').trim();
+  const range = String(pool?.subnet || pool?.name || plan.subnet || '').trim();
+  const label = [planTitle, range].filter(Boolean).join(' — ');
+  return label || `Nexa plan ${plan.planId}`;
 }
 
 function buildPoolStockMapFromPlans(plans) {

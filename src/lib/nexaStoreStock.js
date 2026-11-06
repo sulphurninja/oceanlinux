@@ -152,6 +152,14 @@ async function importMissingNexaPools(companyId, plans, existingStocks, IPStock)
     if (!planId) return false;
     const key = nexaStockKey(planId, pool?.poolId);
     if (keys.has(key)) return false;
+    const subnet = pool?.subnet || plan.subnet || '';
+    const sameSubnet = subnet && existingStocks.some((stock) => {
+      const cfg = nexaConfig(stock);
+      return Number(cfg.planId) === planId && subnetsMatch(cfg.subnet, subnet);
+    });
+    // Nexa replaces a pool id for the same subnet. The existing row is updated
+    // in place; a second product would show the same IP range twice.
+    if (sameSubnet) return false;
     if (!live.available) return false;
     if (soldPlanIds.has(planId)) return true;
     return nexaLive;

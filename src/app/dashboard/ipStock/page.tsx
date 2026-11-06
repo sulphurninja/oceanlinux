@@ -585,9 +585,6 @@ function nexaGroupKey(stock: IPStock): string | null {
   const nexa = stock.defaultConfigurations?.nexa;
   const isNexa = tags.includes('nexa') || nexa?.planId || nexa?.poolId;
   if (!isNexa) return null;
-  const planId = Number(nexa?.planId);
-  // Nexa "Broadcast" (62) and "Bcast App-login" (78) — one store card, multiple subnets.
-  if (planId === 62 || planId === 78) return 'plan:nexa-broadcast';
   if (nexa?.planId != null && String(nexa.planId) !== '') return `plan:${nexa.planId}`;
   const parts = String(stock.name || '').split(' — ');
   if (parts.length > 1) return `name:${parts.slice(0, -1).join(' — ').trim().toLowerCase()}`;
