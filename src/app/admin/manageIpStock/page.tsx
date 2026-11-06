@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -20,7 +20,7 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import Link from 'next/link';
-import { X, ExternalLink, Zap, BookOpen, Copy, RefreshCw, Loader2, Cloud, EyeOff, Eye, Globe, Tags } from 'lucide-react';
+import { X, ExternalLink, Zap, BookOpen, Copy, RefreshCw, Loader2, Cloud, EyeOff, Eye, Globe, Tags, Search } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ResellerZonePicker, buildResellerZoneConfig } from '@/components/admin/ResellerZonePicker';
 
@@ -373,6 +373,8 @@ const ManageIpStock = () => {
     const [bulkPromoDialogOpen, setBulkPromoDialogOpen] = useState(false);
     const [bulkPromoDrafts, setBulkPromoDrafts] = useState<BulkPromoDraft[]>([emptyBulkPromoDraft()]);
     const [applyingBulkPromos, setApplyingBulkPromos] = useState(false);
+    const [stockQuery, setStockQuery] = useState('');
+    const [stockView, setStockView] = useState<'all' | 'in' | 'out' | 'hidden'>('all');
 
     const outOfStockVisibleCount = ipStocks.filter(
         (stock) => !stock.hiddenFromStore && isStockOutOfStock(stock, companies)
@@ -1232,8 +1234,24 @@ const ManageIpStock = () => {
         }
     };
 
-    const allStockIds = ipStocks.map((stock) => stock._id);
-    const allSelected = ipStocks.length > 0 && selectedStockIds.length === ipStocks.length;
+    const visibleStocks = useMemo(() => {
+        const q = stockQuery.trim().toLowerCase();
+        return ipStocks.filter((stock) => {
+            const out = isStockOutOfStock(stock, companies);
+            if (stockView === 'in' && out) return false;
+            if (stockView === 'out' && !out) return false;
+            if (stockView === 'hidden' && !stock.hiddenFromStore) return false;
+            if (!q) return true;
+            const companyName = companies.find((company) => company._id === stock.company)?.name || '';
+            return [stock.name, stock.serverType, resellerZoneLabel(stock), companyName, ...(stock.tags || [])]
+                .join(' ')
+                .toLowerCase()
+                .includes(q);
+        });
+    }, [ipStocks, stockQuery, stockView, companies]);
+    const inStockCount = ipStocks.filter((stock) => !isStockOutOfStock(stock, companies)).length;
+    const allStockIds = visibleStocks.map((stock) => stock._id);
+    const allSelected = visibleStocks.length > 0 && visibleStocks.every((stock) => selectedStockIds.includes(stock._id));
     const someSelected = selectedStockIds.length > 0 && !allSelected;
 
     const toggleStockSelection = (stockId: string, checked: boolean) => {
@@ -1347,90 +1365,106 @@ const ManageIpStock = () => {
     };
 
     return (
-        <div className='w-full'>
-            <div className='h-[63px] flex gap-2 items-center justify-between border dark:border-none-b p-4'>
-                <h1 className='text-xl'>Manage IP Stock</h1>
-                <div className="flex items-center gap-2">
-                    <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="gap-1.5"
-                        onClick={openBulkPromoDialog}
-                        disabled={selectedStockIds.length === 0}
-                    >
-                        <Tags className="h-4 w-4" />
-                        Bulk Promos ({selectedStockIds.length})
-                    </Button>
-                    <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="gap-1.5"
-                        onClick={() => setUnhideOutDialogOpen(true)}
-                        disabled={outOfStockHiddenCount === 0 || unhidingOutOfStock}
-                    >
-                        <Eye className="h-4 w-4" />
-                        Show out of stock ({outOfStockHiddenCount})
-                    </Button>
-                    <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="gap-1.5"
-                        onClick={() => setHideOutDialogOpen(true)}
-                        disabled={outOfStockVisibleCount === 0 || hidingOutOfStock}
-                    >
-                        <EyeOff className="h-4 w-4" />
-                        Hide out of stock ({outOfStockVisibleCount})
-                    </Button>
-                    <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="gap-1.5"
-                        onClick={() => void refreshLivePanelStock()}
-                        disabled={refreshingLiveStock}
-                    >
-                        {refreshingLiveStock ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                            <RefreshCw className="h-4 w-4" />
-                        )}
-                        Sync PrimeVPS stock
-                    </Button>
+        <div className="min-h-full bg-muted/30">
+            <div className="border-b bg-background px-6 py-5">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                    <div>
+                        <h1 className="text-lg font-semibold tracking-tight">IP stock</h1>
+                        <p className="mt-1 text-sm text-muted-foreground">Plans, prices, and what customers can see on the store.</p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                        {[
+                            { label: 'Plans', value: ipStocks.length },
+                            { label: 'In stock', value: inStockCount },
+                            { label: 'Out of stock', value: ipStocks.length - inStockCount },
+                            { label: 'Hidden', value: ipStocks.filter((stock) => stock.hiddenFromStore).length },
+                        ].map((stat) => (
+                            <div key={stat.label} className="min-w-[92px] rounded-lg border bg-background px-3 py-2">
+                                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{stat.label}</p>
+                                <p className="text-lg font-semibold tabular-nums">{stat.value}</p>
+                            </div>
+                        ))}
+                    </div>
                 </div>
             </div>
-            <div className='mx-12 mt-6'>
-                <Table className='w-full border dark:border-none'>
+            <div className="space-y-4 px-6 py-5">
+                <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+                    <div className="flex flex-1 flex-col gap-2 sm:flex-row sm:items-center">
+                        <div className="relative w-full sm:max-w-sm">
+                            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                            <Input
+                                value={stockQuery}
+                                onChange={(e) => setStockQuery(e.target.value)}
+                                placeholder="Search name, company, region"
+                                className="h-9 pl-9"
+                            />
+                        </div>
+                        <Select value={stockView} onValueChange={(value) => setStockView(value as 'all' | 'in' | 'out' | 'hidden')}>
+                            <SelectTrigger className="h-9 w-full sm:w-[160px]">
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">All plans</SelectItem>
+                                <SelectItem value="in">In stock</SelectItem>
+                                <SelectItem value="out">Out of stock</SelectItem>
+                                <SelectItem value="hidden">Hidden</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                        <Button type="button" variant="outline" size="sm" className="gap-1.5" onClick={openBulkPromoDialog} disabled={selectedStockIds.length === 0}>
+                            <Tags className="h-4 w-4" />
+                            Promos ({selectedStockIds.length})
+                        </Button>
+                        <Button type="button" variant="outline" size="sm" className="gap-1.5" onClick={() => setUnhideOutDialogOpen(true)} disabled={outOfStockHiddenCount === 0 || unhidingOutOfStock}>
+                            <Eye className="h-4 w-4" />
+                            Show out ({outOfStockHiddenCount})
+                        </Button>
+                        <Button type="button" variant="outline" size="sm" className="gap-1.5" onClick={() => setHideOutDialogOpen(true)} disabled={outOfStockVisibleCount === 0 || hidingOutOfStock}>
+                            <EyeOff className="h-4 w-4" />
+                            Hide out ({outOfStockVisibleCount})
+                        </Button>
+                        <Button type="button" size="sm" className="gap-1.5" onClick={() => void refreshLivePanelStock()} disabled={refreshingLiveStock}>
+                            {refreshingLiveStock ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                            Sync stock
+                        </Button>
+                    </div>
+                </div>
+                <div className="overflow-hidden rounded-xl border bg-background">
+                <Table className="w-full">
                     <TableHeader>
-                        <TableRow>
+                        <TableRow className="bg-muted/40 hover:bg-muted/40">
                             <TableHead className="w-10">
                                 <Checkbox
                                     checked={allSelected ? true : someSelected ? 'indeterminate' : false}
                                     onCheckedChange={(checked) => toggleSelectAllStocks(checked === true)}
-                                    aria-label="Select all IP stocks"
+                                    aria-label="Select visible IP stocks"
                                 />
                             </TableHead>
-                            <TableHead>Name</TableHead>
+                            <TableHead>Plan</TableHead>
                             <TableHead>Type</TableHead>
                             <TableHead>Region</TableHead>
-                            <TableHead>Available</TableHead>
+                            <TableHead>Stock</TableHead>
                             <TableHead>Store</TableHead>
                             <TableHead>4 GB</TableHead>
                             <TableHead>8 GB</TableHead>
                             <TableHead>16 GB</TableHead>
-                            <TableHead>Auto-Provision</TableHead>
-                            <TableHead>Promo Codes</TableHead>
-                            <TableHead>Edit</TableHead>
-                            <TableHead>Clone</TableHead>
-                            <TableHead>Delete</TableHead>
+                            <TableHead>Provision</TableHead>
+                            <TableHead>Promos</TableHead>
+                            <TableHead className="text-right">Actions</TableHead>
                         </TableRow>
                     </TableHeader>
 
                     <TableBody>
-                        {ipStocks.map(stock => (
-                            <TableRow key={stock._id} data-selected={selectedStockIds.includes(stock._id)}>
+                        {visibleStocks.length === 0 ? (
+                            <TableRow>
+                                <TableCell colSpan={12} className="h-24 text-center text-sm text-muted-foreground">
+                                    No plans match this search.
+                                </TableCell>
+                            </TableRow>
+                        ) : null}
+                        {visibleStocks.map(stock => (
+                            <TableRow key={stock._id} data-selected={selectedStockIds.includes(stock._id)} className="data-[selected=true]:bg-muted/50">
                                 <TableCell>
                                     <Checkbox
                                         checked={selectedStockIds.includes(stock._id)}
@@ -1439,17 +1473,15 @@ const ManageIpStock = () => {
                                     />
                                 </TableCell>
                                 <TableCell>
-                                    <div>
-                                        <div className="font-medium">{stock.name}</div>
-                                        {stock.description && (
-                                            <div className="text-sm text-gray-500 max-w-xs truncate">
-                                                {stock.description}
-                                            </div>
-                                        )}
+                                    <div className="max-w-[280px]">
+                                        <div className="truncate font-medium">{stock.name}</div>
+                                        <div className="truncate text-xs text-muted-foreground">
+                                            {companies.find((company) => company._id === stock.company)?.name || 'No company'}
+                                        </div>
                                     </div>
                                 </TableCell>
                                 <TableCell>
-                                    <Badge variant={stock.serverType === 'VPS' ? 'default' : 'secondary'}>
+                                    <Badge variant="outline" className="font-normal">
                                         {stock.serverType}
                                     </Badge>
                                 </TableCell>
@@ -1491,15 +1523,15 @@ const ManageIpStock = () => {
                                 </TableCell>
                                 <TableCell>
                                     {stock.hiddenFromStore ? (
-                                        <Badge variant="secondary">Hidden</Badge>
+                                        <Badge className="border-transparent bg-rose-600 text-white hover:bg-rose-600">Hidden</Badge>
                                     ) : (
-                                        <Badge variant="outline" className="text-green-700 border-green-200">Visible</Badge>
+                                        <Badge className="border-transparent bg-green-800 text-white hover:bg-green-800">Visible</Badge>
                                     )}
                                 </TableCell>
                                 {Object.entries(stock.memoryOptions).map(([memory, details]) => (
                                     <TableCell key={memory}>
                                         <div>
-                                            <div className="font-medium">₹{details.price}</div>
+                                            <div className="font-medium tabular-nums">₹{details.price}</div>
                                             {details.hostycareProductId && (
                                                 <div className="text-xs text-blue-600 flex items-center gap-1">
                                                     <ExternalLink className="w-3 h-3" />
@@ -1532,21 +1564,20 @@ const ManageIpStock = () => {
                                 </TableCell>
 
                                 <TableCell>
-                                    <Button onClick={() => handleEdit(stock)}>Edit</Button>
-                                </TableCell>
-                                <TableCell>
-                                    <Button variant="outline" onClick={() => openCloneDialog(stock)} className="gap-1.5">
-                                        <Copy className="h-3.5 w-3.5" />
-                                        Clone
-                                    </Button>
-                                </TableCell>
-                                <TableCell>
-                                    <Button onClick={() => handleDelete(stock._id)}>Delete</Button>
+                                    <div className="flex justify-end gap-1.5">
+                                        <Button size="sm" variant="outline" onClick={() => handleEdit(stock)}>Edit</Button>
+                                        <Button size="sm" variant="ghost" onClick={() => openCloneDialog(stock)} className="gap-1.5">
+                                            <Copy className="h-3.5 w-3.5" />
+                                            Clone
+                                        </Button>
+                                        <Button size="sm" variant="ghost" className="text-red-600 hover:bg-red-50 hover:text-red-700" onClick={() => handleDelete(stock._id)}>Delete</Button>
+                                    </div>
                                 </TableCell>
                             </TableRow>
                         ))}
                     </TableBody>
                 </Table>
+                </div>
 
                 {isDialogOpen && currentStock && (
                     <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
