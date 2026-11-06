@@ -223,11 +223,6 @@ function stockHasResellerPanelConfig(stock: IPStock) {
   return tags.includes('reseller-api') || tags.includes('primevps') || tags.includes('primevm');
 }
 
-function isResellerLiveStock(stock: IPStock) {
-  if (!stockHasResellerPanelConfig(stock)) return false;
-  return stock.resellerPanelLiveStock === true || stock.resellerUseLiveStockApi === true;
-}
-
 /** Matches server `stockNameRequiresMappedZone` — wallet must not sell region-titled plans without zoneIds. */
 function stockNameRequiresMappedZone(stock: IPStock) {
   return /\s-\s[A-Za-z][A-Za-z0-9\s.]+\s\|\s/.test(String(stock.name || ''));
@@ -250,15 +245,16 @@ function usesCompanyManualUnits(stock: IPStock) {
 }
 
 function isCompanyStock(stock: IPStock) {
+  if (stockHasResellerPanelConfig(stock)) return false;
   if (usesCompanyManualUnits(stock)) return true;
-  return !!stock.company && !isNetbayLiveStock(stock) && !isHostdzireLiveStock(stock) && !isKurohostLiveStock(stock) && !isResellerLiveStock(stock);
+  return !!stock.company && !isNetbayLiveStock(stock) && !isHostdzireLiveStock(stock) && !isKurohostLiveStock(stock) && !stockHasResellerPanelConfig(stock);
 }
 
 function getStockUnitsRemaining(stock: IPStock) {
   if (usesCompanyManualUnits(stock)) {
     return Math.max(0, stock.stockCount ?? 0);
   }
-  if (isNetbayLiveStock(stock) || isHostdzireLiveStock(stock) || isKurohostLiveStock(stock) || isResellerLiveStock(stock)) {
+  if (isNetbayLiveStock(stock) || isHostdzireLiveStock(stock) || isKurohostLiveStock(stock) || stockHasResellerPanelConfig(stock)) {
     return stock.available ? Number.POSITIVE_INFINITY : 0;
   }
   if (isCompanyStock(stock)) {
@@ -325,26 +321,17 @@ function isResellerMemoryInStock(stock: IPStock, memory: string) {
 
   const reseller = stock.defaultConfigurations?.resellerApi;
   const variant = reseller?.variantStock?.[memory];
-  const panelLive =
-    isResellerLiveStock(stock) ||
-    stock.resellerPanelLiveStock === true ||
-    stock.resellerUseLiveStockApi === true;
-
-  if (panelLive && variant && typeof variant === 'object') {
-    if (variant.available === true) return true;
-    if (variant.available === false) return false;
+  if (variant?.available === true || variant?.zoneOk === true) return true;
+  if (stock.available === true) return true;
+  if (!variant) {
+    return resellerVariantValues(stock).some((row) => row?.available === true);
   }
-
-  if (stock.available) return true;
-  if (variant?.available === true) return true;
-  if (!variant) return stock.available !== false;
   if (variant.skipped || variant.available === null) {
     for (const fallback of ['2GB', '4GB', '8GB']) {
       if (reseller?.variantStock?.[fallback]?.available === true) return true;
     }
-    return false;
   }
-  return variant.available === true;
+  return false;
 }
 
 function pricedMemoryKeys(stock: IPStock) {
@@ -383,7 +370,7 @@ function isStockPurchasable(stock: IPStock, memory?: string) {
     );
     return variants.some((v) => v?.available === true);
   }
-  if (isResellerLiveStock(stock)) {
+  if (stockHasResellerPanelConfig(stock)) {
     if (memory) return isResellerMemoryInStock(stock, memory);
     const sellable = pricedMemoryKeys(stock);
     if (sellable.length) return sellable.some((key) => isResellerMemoryInStock(stock, key));
@@ -3115,7 +3102,7 @@ const CompactServerPlanRow = memo(function CompactServerPlanRow({
   const manualUnits = usesCompanyManualUnits(stock);
   const showUnits = manualUnits && unitsLeft > 0 && Number.isFinite(unitsLeft);
   const isNetbay = isNetbayLiveStock(stock);
-  const isReseller = isResellerLiveStock(stock);
+  const isReseller = stockHasResellerPanelConfig(stock);
   const isOceanSmartVps = isOceanSmartVpsPlan(stock);
 
   const memoryOptions = sortMemoryOptionEntries(
