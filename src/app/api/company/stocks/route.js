@@ -277,17 +277,15 @@ export async function PUT(request) {
     const stocks = await IPStock.find({ company: companyDoc._id });
     for (const stock of stocks) {
       if (mode === 'manual') {
-        const count = Math.max(0, Math.floor(Number(stock.stockCount) || 0));
+        // Live zone sync stores 1 to mean "panel has this plan". That is not a unit count.
         stock.availabilityManual = true;
-        stock.available = count > 0;
-        stock.stockCount = count;
+        stock.available = false;
+        stock.stockCount = 0;
         const companyCfg = mergeCompanyConfig(stock, { fulfillmentMode: 'units' });
         stock.defaultConfigurations.set('company', companyCfg);
         stock.markModified('defaultConfigurations');
-        if (count <= 0) {
-          stock.hiddenFromStore = false;
-          stock.autoHiddenFromStore = false;
-        }
+        stock.hiddenFromStore = false;
+        stock.autoHiddenFromStore = false;
       } else if (stockHasResellerPanelPlans(stock)) {
         stock.availabilityManual = false;
         const companyCfg = readCompanyConfig(stock);
