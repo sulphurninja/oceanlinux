@@ -322,7 +322,11 @@ async function syncResellerIpStockRow(stock, { force = false, memoryOnly = null,
       );
     }
     const { applyAutoStoreRelist } = require('@/lib/ipStockAvailability');
-    await applyAutoStoreRelist(stock._id, count > 0 || stock.available === true);
+    const listed = count > 0 || inv > 0;
+    if (!listed && stock.available !== false) {
+      await IPStock.findByIdAndUpdate(stock._id, { available: false });
+    }
+    await applyAutoStoreRelist(stock._id, listed);
     return IPStock.findById(stock._id).lean();
   }
 

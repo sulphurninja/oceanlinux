@@ -152,6 +152,19 @@ export function formatResellerSlotProduct(pkg, reseller) {
   };
 }
 
+function resellerPlanInStock(stock) {
+  if (!stock || stock.available === false) return false;
+  const { regionResellerPlanMustHideFromStore } = require('@/lib/resellerApiStockConfig');
+  if (regionResellerPlanMustHideFromStore(stock)) return false;
+  const free = Array.isArray(stock.inventoryItems)
+    ? stock.inventoryItems.filter((item) => item && !item.allocated).length
+    : 0;
+  if (stock.availabilityManual === true && free <= 0 && Math.max(0, Number(stock.stockCount) || 0) <= 0) {
+    return false;
+  }
+  return true;
+}
+
 export function formatResellerProduct(stock, reseller) {
   const obj = stock.toObject ? stock.toObject() : stock;
   const options = memoryOptionsToObject(obj.memoryOptions);
@@ -217,8 +230,8 @@ export function formatResellerProduct(stock, reseller) {
     description: publicDescription,
     serverType: obj.serverType,
     tags: publicTags,
-    available: !!obj.available,
-    inStock: !!obj.available,
+    available: resellerPlanInStock(obj),
+    inStock: resellerPlanInStock(obj),
     memoryOptions,
   };
 }
