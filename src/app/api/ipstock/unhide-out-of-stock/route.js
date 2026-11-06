@@ -52,7 +52,7 @@ export async function POST(request) {
     const ids = toUnhide.map((s) => s._id);
     const result = await IPStock.updateMany(
       { _id: { $in: ids } },
-      { $set: { hiddenFromStore: false, autoHiddenFromStore: false } }
+      { $set: { hiddenFromStore: false, autoHiddenFromStore: false, hiddenByAdmin: false } }
     );
 
     return NextResponse.json({

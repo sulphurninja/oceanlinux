@@ -167,7 +167,7 @@ export async function PUT(req, res) {
     if ('hiddenFromStore' in reqBody) {
       await IPStock.collection.updateOne(
         { _id: new mongoose.Types.ObjectId(String(_id)) },
-        { $set: { hiddenFromStore: reqBody.hiddenFromStore === true, autoHiddenFromStore: false } }
+        { $set: { hiddenFromStore: reqBody.hiddenFromStore === true, autoHiddenFromStore: false, hiddenByAdmin: reqBody.hiddenFromStore === true } }
       );
     }
 

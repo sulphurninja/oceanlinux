@@ -15,6 +15,8 @@ const IPStockSchema = new mongoose.Schema({
   hiddenFromStore: { type: Boolean, default: false },
   /** Set by bulk "hide out of stock" — cleared when live stock / units return. */
   autoHiddenFromStore: { type: Boolean, default: false },
+  /** Admin pressed Hide. Stock sync must not set this, and must not be undone. */
+  hiddenByAdmin: { type: Boolean, default: false },
   /** Units remaining for company-managed stock. Only enforced when `company` is set. */
   stockCount: { type: Number, default: 0, min: 0 },
   company: { type: mongoose.Schema.Types.ObjectId, ref: 'Company', default: null },

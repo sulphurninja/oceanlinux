@@ -19,7 +19,7 @@ const CUSTOMER_REFRESH_INTERVAL_MS = 90_000;
 
 function storeAutoUnhideUpdate(stock, inStock) {
   if (!inStock || !stock?.autoHiddenFromStore) return {};
-  return { hiddenFromStore: false, autoHiddenFromStore: false };
+  return { hiddenFromStore: false, autoHiddenFromStore: false, hiddenByAdmin: false };
 }
 
 function nexaConfig(stock) {

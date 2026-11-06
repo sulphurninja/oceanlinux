@@ -188,7 +188,7 @@ export function storeAutoUnhideUpdate(stock, inStock) {
   } catch {
     /* ignore */
   }
-  return { hiddenFromStore: false, autoHiddenFromStore: false };
+  return { hiddenFromStore: false, autoHiddenFromStore: false, hiddenByAdmin: false };
 }
 
 /** Bulk hide sets autoHiddenFromStore — relist only when the plan is genuinely purchasable. */
@@ -210,7 +210,7 @@ export async function relistAutoHiddenStocksNowInStock() {
     if (!isIpStockPurchasable(stock, 1, company)) continue;
     await IPStock.updateOne(
       { _id: stock._id },
-      { $set: { hiddenFromStore: false, autoHiddenFromStore: false } }
+      { $set: { hiddenFromStore: false, autoHiddenFromStore: false, hiddenByAdmin: false } }
     );
     relisted += 1;
   }
@@ -223,7 +223,7 @@ export async function applyAutoStoreRelist(stockOrId, inStock) {
   if (!id) return;
   await IPStock.updateOne(
     { _id: id, autoHiddenFromStore: true },
-    { $set: { hiddenFromStore: false, autoHiddenFromStore: false } }
+    { $set: { hiddenFromStore: false, autoHiddenFromStore: false, hiddenByAdmin: false } }
   );
 }
 
