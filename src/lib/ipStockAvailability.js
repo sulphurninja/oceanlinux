@@ -315,19 +315,35 @@ export async function setIpStockCount(stockId, stockCount) {
 /** Set the same manual stock count on every plan linked to a company. */
 export async function setAllCompanyIpStockCounts(companyId, stockCount, company) {
   const count = Math.max(0, Math.floor(Number(stockCount) || 0));
-  const stocks = await IPStock.find({ company: companyId }).lean();
-  const ids = stocks.filter((s) => usesStockCount(s, company)).map((s) => s._id);
-  if (ids.length === 0) return [];
+  const stocks = await IPStock.find({ company: companyId });
+  if (stocks.length === 0) return [];
 
-  await IPStock.collection.updateMany(
-    { _id: { $in: ids } },
-    { $set: { stockCount: count, available: count > 0, availabilityManual: true } }
-  );
-  if (count > 0) {
-    await IPStock.updateMany(
-      { _id: { $in: ids }, autoHiddenFromStore: true },
-      { $set: { hiddenFromStore: false, autoHiddenFromStore: false } }
+  // Zone plans were skipped before, so a bulk 0 left them at 1 from the panel sync.
+  const lockManual = company?.resellerApi?.enabled && company.resellerApi.useLiveStockApi !== true;
+  if (lockManual) {
+    const Company = (await import('@/models/companyModel')).default;
+    await Company.updateOne(
+      { _id: companyId },
+      { $set: { 'resellerApi.stockMode': 'manual', 'resellerApi.useLiveStockApi': false } }
     );
+    if (company.resellerApi) company.resellerApi.stockMode = 'manual';
   }
-  return IPStock.find({ _id: { $in: ids } }).sort({ name: 1 });
+
+  const { mergeCompanyConfig } = require('@/lib/companyInventory');
+  for (const stock of stocks) {
+    stock.stockCount = count;
+    stock.available = count > 0;
+    stock.availabilityManual = true;
+    const companyCfg = mergeCompanyConfig(stock, { fulfillmentMode: 'units' });
+    if (typeof stock.defaultConfigurations?.set === 'function') {
+      stock.defaultConfigurations.set('company', companyCfg);
+    }
+    stock.markModified('defaultConfigurations');
+    await stock.save();
+  }
+
+  if (global.__oceanCompanyModesCache) global.__oceanCompanyModesCache = { at: 0, map: {} };
+  if (global.__oceanIpStockCatalog?.clear) global.__oceanIpStockCatalog.clear();
+
+  return IPStock.find({ company: companyId }).sort({ name: 1 });
 }
