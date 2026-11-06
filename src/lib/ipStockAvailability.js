@@ -164,6 +164,12 @@ export function isIpStockHiddenFromStore(stock) {
   } catch {
     /* ignore */
   }
+  if (stock?.company) {
+    const tags = Array.isArray(stock.tags) ? stock.tags : [];
+    const resellerTag = tags.some((tag) => ['reseller-api', 'primevps', 'primevm'].includes(String(tag).toLowerCase()));
+    const cfg = stock.defaultConfigurations?.resellerApi;
+    if (resellerTag || (cfg && typeof cfg === 'object')) return false;
+  }
   return !!stock?.hiddenFromStore;
 }
 

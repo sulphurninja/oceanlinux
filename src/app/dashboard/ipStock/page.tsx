@@ -241,6 +241,17 @@ function resellerPlanHasMappedZone(stock: IPStock) {
 }
 
 /** Company portal set manual units — overrides live panel stock for store listing. */
+function resellerCompanyPlan(stock: IPStock) {
+  if (!stock.company) return false;
+  const tags = (stock.tags || []).map((tag) => String(tag).toLowerCase());
+  if (tags.some((tag) => tag === 'reseller-api' || tag === 'primevps' || tag === 'primevm')) return true;
+  return !!stock.defaultConfigurations?.resellerApi;
+}
+
+function listedOnStore(stock: IPStock) {
+  return !stock.hiddenFromStore || resellerCompanyPlan(stock);
+}
+
 function usesCompanyManualUnits(stock: IPStock) {
   if (!stock.company) return false;
   return stock.availabilityManual === true;
@@ -963,7 +974,7 @@ function IPStockContent() {
     const manual = options?.manual ?? false;
 
     const parseIpStockRows = (ipData: unknown): IPStock[] =>
-      (Array.isArray(ipData) ? ipData : []).filter((s) => !s.hiddenFromStore);
+      (Array.isArray(ipData) ? ipData : []).filter((s) => listedOnStore(s));
 
     const applyCatalogPayload = (
       ipRows: IPStock[],
@@ -1181,7 +1192,7 @@ function IPStockContent() {
   }, [loadPlans]);
 
   const filteredIpStocks = useMemo(() => {
-    let filtered = ipStocks.filter((stock) => !stock.hiddenFromStore);
+    let filtered = ipStocks.filter((stock) => listedOnStore(stock));
 
     if (activeTab === 'Trial') {
       filtered = [];
@@ -1271,7 +1282,7 @@ function IPStockContent() {
   );
 
   const visibleStocks = useMemo(
-    () => ipStocks.filter((stock) => !stock.hiddenFromStore),
+    () => ipStocks.filter((stock) => listedOnStore(stock)),
     [ipStocks]
   );
 
