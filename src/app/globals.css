@@ -904,13 +904,12 @@ html {
     @apply opacity-55 saturate-[0.6] grayscale-[0.25];
   }
 
-  /* Plan rows are a long list. Blur on every card forces a full-page repaint
-     while scrolling, which is what makes this page feel stuck. */
+  /* Blur on every plan card repaints the whole page while scrolling.
+     Do not use content-visibility here: the browser draws the empty card
+     box first and fills the name and price a frame later. */
   .premium-ipstock-page .premium-dashboard-card.border-l-4 {
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
-    content-visibility: auto;
-    contain-intrinsic-size: auto 96px;
   }
 
   .premium-ipstock-tag-section {
