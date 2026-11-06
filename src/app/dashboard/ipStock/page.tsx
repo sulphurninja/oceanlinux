@@ -315,14 +315,15 @@ function isResellerMemoryInStock(stock: IPStock, memory: string) {
   const savedVps = stock.inventoryAvailable ?? 0;
   if (savedVps > 0) return true;
 
-  if (stockNameRequiresMappedZone(stock) && !resellerPlanHasMappedZone(stock)) {
-    return false;
-  }
-
   const reseller = stock.defaultConfigurations?.resellerApi;
   const variant = reseller?.variantStock?.[memory];
   if (variant?.available === true || variant?.zoneOk === true) return true;
   if (stock.available === true) return true;
+
+  if (stockNameRequiresMappedZone(stock) && !resellerPlanHasMappedZone(stock)) {
+    return false;
+  }
+
   if (!variant) {
     return resellerVariantValues(stock).some((row) => row?.available === true);
   }

@@ -80,8 +80,14 @@ function slimDefaultConfigurationsForStore(defaultConfigurations) {
     }
 
     if (dc.resellerApi && typeof dc.resellerApi === 'object') {
+        const zoneIds = Array.isArray(dc.resellerApi.zoneIds)
+            ? dc.resellerApi.zoneIds.map((id) => Number(id)).filter((id) => Number.isFinite(id))
+            : [];
+        const zoneId = Number(dc.resellerApi.zoneId);
         slim.resellerApi = {
             variantStock: slimVariantStock(dc.resellerApi.variantStock),
+            ...(Number.isFinite(zoneId) ? { zoneId } : {}),
+            ...(zoneIds.length ? { zoneIds } : {}),
         };
     }
 
