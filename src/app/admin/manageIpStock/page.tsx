@@ -1523,9 +1523,9 @@ const ManageIpStock = () => {
                                 </TableCell>
                                 <TableCell>
                                     {stock.hiddenFromStore ? (
-                                        <Badge className="border-transparent bg-rose-600 text-white hover:bg-rose-600">Hidden</Badge>
+                                        <Badge variant="outline" className="border-0 shadow-none" style={{ backgroundColor: '#b91c1c', color: '#ffffff' }}>Hidden</Badge>
                                     ) : (
-                                        <Badge className="border-transparent bg-green-800 text-white hover:bg-green-800">Visible</Badge>
+                                        <Badge variant="outline" className="border-0 shadow-none" style={{ backgroundColor: '#166534', color: '#ffffff' }}>Visible</Badge>
                                     )}
                                 </TableCell>
                                 {Object.entries(stock.memoryOptions).map(([memory, details]) => (
