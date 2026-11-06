@@ -1383,13 +1383,10 @@ export default function CompanyDashboard() {
             ) : stocks.map((stock) => {
               const count = stock.stockCount ?? 0;
               const live = stock.liveStock;
-              const usesLivePanel = live?.enabled && !live.manualOverride;
+              const zoneCanSell = !!live?.enabled && !!live?.zoneLive;
+              const usesLivePanel = !!live?.enabled;
               const invFree = stock.inventoryAvailable ?? 0;
-              const inStock = live?.manualOverride
-                ? count > 0 || invFree > 0
-                : usesLivePanel
-                  ? (!!live?.zoneLive || invFree > 0)
-                  : invFree > 0 || count > 0;
+              const inStock = count > 0 || invFree > 0 || zoneCanSell;
               const hasPreconfig = stock.usesPreconfiguredInventory;
               const form = getInventoryForm(stock);
               const osOptions = osOptionsForStock(stock.serverType);
@@ -1414,9 +1411,11 @@ export default function CompanyDashboard() {
                             <Badge className="text-[10px] h-4 bg-emerald-500/10 text-emerald-700">
                               {invFree > 0
                                 ? `${invFree} saved VPS · then panel`
-                                : live?.manualOverride
+                                : count > 0 && zoneCanSell
+                                  ? `${count} units first, then panel`
+                                : count > 0
                                   ? `${count} manual units`
-                                : usesLivePanel && live?.zoneLive
+                                : zoneCanSell
                                   ? 'Live on panel'
                                   : usesLivePanel && live?.regionBlocked
                                     ? 'Zone not mapped'
@@ -1451,32 +1450,25 @@ export default function CompanyDashboard() {
                       >
                         {expanded ? 'Hide' : 'Manage servers'}
                       </Button>
-                      {usesLivePanel ? (
-                        <div className="text-xs text-muted-foreground max-w-[220px] text-right">
-                          Panel zone controls stock
-                          {live?.zoneName ? ` · ${live.zoneName}` : ''}
-                        </div>
-                      ) : (
-                        <>
-                          <Label htmlFor={`stock-${stock._id}`} className="text-xs text-muted-foreground whitespace-nowrap">Units</Label>
-                          <Input
-                            id={`stock-${stock._id}`}
-                            type="number"
-                            min={0}
-                            step={1}
-                            value={stockCountDrafts[stock._id] ?? String(count)}
-                            onChange={(e) => setStockCountDrafts(prev => ({ ...prev, [stock._id]: e.target.value }))}
-                            className="w-24 h-9"
-                          />
-                          <Button
-                            size="sm"
-                            onClick={() => updateStockCount(stock._id)}
-                            disabled={savingStockId === stock._id}
-                          >
-                            {savingStockId === stock._id ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save'}
-                          </Button>
-                        </>
-                      )}
+                      <div className="flex items-center gap-2">
+                        <Label htmlFor={`stock-${stock._id}`} className="text-xs text-muted-foreground whitespace-nowrap">Units</Label>
+                        <Input
+                          id={`stock-${stock._id}`}
+                          type="number"
+                          min={0}
+                          step={1}
+                          value={stockCountDrafts[stock._id] ?? String(count)}
+                          onChange={(e) => setStockCountDrafts(prev => ({ ...prev, [stock._id]: e.target.value }))}
+                          className="w-24 h-9"
+                        />
+                        <Button
+                          size="sm"
+                          onClick={() => updateStockCount(stock._id)}
+                          disabled={savingStockId === stock._id}
+                        >
+                          {savingStockId === stock._id ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save'}
+                        </Button>
+                      </div>
                     </div>
                   </div>
 

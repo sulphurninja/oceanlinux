@@ -706,11 +706,6 @@ const ManageIpStock = () => {
             ? companies.find((co) => co._id === currentStock.company)
             : null;
         const companyHasResellerApi = !!(editCompany?.resellerApi?.enabled);
-        const companyUsesResellerLiveStock = !!(
-            editCompany?.resellerApi?.enabled && editCompany?.resellerApi?.useLiveStockApi
-        );
-        const liveResellerStock =
-            companyUsesResellerLiveStock && stockHasResellerPanelConfig(currentStock);
         if (companyHasResellerApi && stockHasResellerPanelConfig(currentStock) && resellerCfg.zoneId == null) {
             toast.error('Sync regions karo aur panel se zone select karo');
             return;
@@ -734,14 +729,14 @@ const ManageIpStock = () => {
                 name: currentStock.name,
                 description: currentStock.description,
                 available: currentStock.available,
-                availabilityManual: liveResellerStock ? false : currentStock.availabilityManual,
+                availabilityManual: currentStock.availabilityManual === true,
                 serverType: currentStock.serverType,
                 tags: currentStock.tags,
                 memoryOptions: currentStock.memoryOptions,
                 promoCodes: currentStock.promoCodes,
                 defaultConfigurations,
                 company: currentStock.company ?? null,
-                stockCount: liveResellerStock ? 1 : currentStock.stockCount,
+                stockCount: currentStock.stockCount,
                 hiddenFromStore: currentStock.hiddenFromStore === true,
             };
 
@@ -1601,8 +1596,24 @@ const ManageIpStock = () => {
                                                     </p>
                                                 )}
                                                 <p className="text-xs text-muted-foreground">
-                                                    Auto-synced from primevm GET /api/users/zones. Use <strong>Sync PrimeVPS stock</strong> above or customer page refresh.
+                                                    Zone sells after these units are finished. 0 units and an active zone still sells.
                                                 </p>
+                                                <Label className="mt-2">Units (sell first)</Label>
+                                                <Input
+                                                    type="number"
+                                                    min={0}
+                                                    step={1}
+                                                    value={currentStock.stockCount ?? 0}
+                                                    onChange={(e) => {
+                                                        const stockCount = Math.max(0, Math.floor(Number(e.target.value) || 0));
+                                                        setCurrentStock({
+                                                            ...currentStock,
+                                                            stockCount,
+                                                            availabilityManual: true,
+                                                            available: stockCount > 0 || currentStock.available,
+                                                        });
+                                                    }}
+                                                />
                                             </div>
                                         ) : currentStock.company ? (
                                             <>

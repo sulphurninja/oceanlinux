@@ -310,8 +310,8 @@ function isHostdzireMemoryInStock(stock: IPStock, memory: string) {
 }
 
 function isResellerMemoryInStock(stock: IPStock, memory: string) {
-  if (usesCompanyManualUnits(stock)) {
-    return getStockUnitsRemaining(stock) > 0;
+  if (usesCompanyManualUnits(stock) && getStockUnitsRemaining(stock) > 0) {
+    return true;
   }
   const savedVps = stock.inventoryAvailable ?? 0;
   if (savedVps > 0) return true;
@@ -351,8 +351,8 @@ function pricedMemoryKeys(stock: IPStock) {
 }
 
 function isStockPurchasable(stock: IPStock, memory?: string) {
-  if (usesCompanyManualUnits(stock)) {
-    return getStockUnitsRemaining(stock) > 0;
+  if (usesCompanyManualUnits(stock) && getStockUnitsRemaining(stock) > 0) {
+    return true;
   }
   const savedVps = stock.inventoryAvailable ?? 0;
   if (savedVps > 0) return true;
@@ -3110,7 +3110,7 @@ const CompactServerPlanRow = memo(function CompactServerPlanRow({
   const [isExpanded, setIsExpanded] = useState(false);
   const unitsLeft = getStockUnitsRemaining(stock);
   const manualUnits = usesCompanyManualUnits(stock);
-  const showUnits = manualUnits && Number.isFinite(unitsLeft) && unitsLeft < Number.POSITIVE_INFINITY;
+  const showUnits = manualUnits && unitsLeft > 0 && Number.isFinite(unitsLeft);
   const isNetbay = isNetbayLiveStock(stock);
   const isReseller = isResellerLiveStock(stock);
   const isOceanSmartVps = isOceanSmartVpsPlan(stock);

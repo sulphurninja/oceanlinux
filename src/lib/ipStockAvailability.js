@@ -269,7 +269,7 @@ export async function decrementIpStockForOrder(order) {
   if (!order?.ipStockId) return { success: true, skipped: true };
   if (order.inventoryDecremented) return { success: true, alreadyDone: true };
 
-  const stock = await IPStock.findById(order.ipStockId).select('company stockCount').lean();
+  const stock = await IPStock.findById(order.ipStockId).select('company stockCount availabilityManual').lean();
   let company = null;
   if (stock?.company) {
     const Company = (await import('@/models/companyModel')).default;
@@ -277,6 +277,10 @@ export async function decrementIpStockForOrder(order) {
   }
   if (!stock || !usesStockCount(stock, company)) {
     return { success: true, skipped: true };
+  }
+  // Units are gone. Live zone, when active, still provisions this order.
+  if (Math.max(0, Number(stock.stockCount) || 0) < 1) {
+    return { success: true, skipped: true, remaining: 0 };
   }
 
   const updated = await IPStock.findOneAndUpdate(

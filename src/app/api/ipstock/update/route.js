@@ -149,8 +149,13 @@ export async function PUT(req, res) {
         Object.assign(updatePayload, storeAutoUnhideUpdate(existing, count > 0));
       }
     } else if (netbayLiveStock || resellerPanelLiveStock) {
-      // Live stock: availability comes from panel sync — do not zero stockCount on save.
-      if (existing.availabilityManual && available !== undefined) {
+      // Live stock: optional units sell first, then the panel zone. Do not wipe that count on save.
+      if (reqBody.availabilityManual === true) {
+        const count = Math.max(0, Math.floor(Number(stockCount) || 0));
+        updatePayload.availabilityManual = true;
+        updatePayload.stockCount = count;
+        updatePayload.available = count > 0 || existing.available === true;
+      } else if (existing.availabilityManual && available !== undefined) {
         updatePayload.available = available;
       }
     } else if (available !== undefined) {

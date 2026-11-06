@@ -302,11 +302,8 @@ async function syncResellerIpStockRow(stock, { force = false, memoryOnly = null,
   // Zone plans follow panel ACTIVE/INACTIVE even when wallet live-sync toggle is off.
   if (!usesResellerPanelLiveStock(stock, company)) return stock;
 
-  // Zone-based PrimeVPS/Hostheaven stock must follow panel ACTIVE/INACTIVE — not manual units.
-  if (isZoneLiveStock && stock.availabilityManual === true) {
-    await IPStock.findByIdAndUpdate(stock._id, { availabilityManual: false });
-    stock.availabilityManual = false;
-  } else if (stock.availabilityManual === true) {
+  // Manual units sell first. Zone status still refreshes below and sells after the units hit 0.
+  if (!isZoneLiveStock && stock.availabilityManual === true) {
     const count = Math.max(0, Number(stock.stockCount) || 0);
     const { hasUnallocatedCompanyInventory, countUnallocatedInventory } = require('@/lib/companyInventory');
     const inv = hasUnallocatedCompanyInventory(stock) ? countUnallocatedInventory(stock) : 0;
@@ -526,8 +523,12 @@ async function syncResellerIpStockRow(stock, { force = false, memoryOnly = null,
       updatePayload.stockCount = 0;
       updatePayload.hiddenFromStore = false;
       updatePayload.autoHiddenFromStore = false;
-      updatePayload.availabilityManual = false;
     }
+  } else {
+    const units = Math.max(0, Number(stock.stockCount) || 0);
+    updatePayload.available = units > 0 || effectiveAvailable;
+    updatePayload.hiddenFromStore = false;
+    updatePayload.autoHiddenFromStore = false;
   }
 
   await IPStock.findByIdAndUpdate(stock._id, updatePayload);

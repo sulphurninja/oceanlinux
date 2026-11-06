@@ -177,12 +177,6 @@ function shouldAssignCompanyInventoryForOrder(stock, company) {
 /** Store can sell if saved VPS rows exist OR live panel zone/wallet says in stock. */
 function isCompanyStockPurchasable(stock, company, quantity = 1) {
   if (!stock?.company) return false;
-  if (usesCompanyUnitFulfillment(stock)) {
-    return Math.max(0, Number(stock.stockCount) || 0) >= quantity;
-  }
-  if (hasUnallocatedCompanyInventory(stock)) {
-    return countUnallocatedInventory(stock) >= quantity;
-  }
   const {
     usesResellerPanelLiveStock,
     usesResellerLiveStock,
@@ -194,6 +188,19 @@ function isCompanyStockPurchasable(stock, company, quantity = 1) {
     stockHasKurohostPlans,
     stockHasHostdzirePlans,
   } = require('@/lib/ipStockAvailability');
+  if (usesCompanyUnitFulfillment(stock)) {
+    const units = Math.max(0, Number(stock.stockCount) || 0);
+    if (units >= quantity) return true;
+    // Company-wide Manual switch: 0 units is stock out, even if the zone is active.
+    if (company?.resellerApi?.stockMode === 'manual') return false;
+    if (usesResellerPanelLiveStock(stock, company) && stockHasResellerPanelPlans(stock)) {
+      return readLivePanelVariantAvailable(stock, company);
+    }
+    return false;
+  }
+  if (hasUnallocatedCompanyInventory(stock)) {
+    return countUnallocatedInventory(stock) >= quantity;
+  }
   if (usesResellerPanelLiveStock(stock, company) && stockHasResellerPanelPlans(stock)) {
     return readLivePanelVariantAvailable(stock, company);
   }

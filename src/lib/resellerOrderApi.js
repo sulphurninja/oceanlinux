@@ -152,16 +152,19 @@ export function formatResellerSlotProduct(pkg, reseller) {
   };
 }
 
+function resellerZoneVariantLive(stock) {
+  const raw = stock?.defaultConfigurations?.resellerApi?.variantStock || {};
+  return Object.values(raw).some((row) => row && typeof row === 'object' && row.available === true);
+}
+
 function resellerPlanInStock(stock) {
-  if (!stock || stock.available === false) return false;
+  if (!stock) return false;
+  const units = Math.max(0, Number(stock.stockCount) || 0);
+  if (stock.availabilityManual === true && units > 0) return true;
+  if (stock.availabilityManual === true && units <= 0 && resellerZoneVariantLive(stock)) return true;
+  if (stock.available === false) return false;
   const { regionResellerPlanMustHideFromStore } = require('@/lib/resellerApiStockConfig');
   if (regionResellerPlanMustHideFromStore(stock)) return false;
-  const free = Array.isArray(stock.inventoryItems)
-    ? stock.inventoryItems.filter((item) => item && !item.allocated).length
-    : 0;
-  if (stock.availabilityManual === true && Math.max(0, Number(stock.stockCount) || 0) <= 0) {
-    return false;
-  }
   return true;
 }
 

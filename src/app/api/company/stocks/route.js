@@ -100,8 +100,6 @@ function readLiveStockSummary(stock, companyDoc) {
   let zoneLive = false;
   if (savedUnits > 0) {
     zoneLive = true;
-  } else if (stock.availabilityManual === true && Math.max(0, Number(stock.stockCount) || 0) > 0) {
-    zoneLive = false;
   } else if (regionBlocked) {
     zoneLive = false;
   } else if (stockNameRequiresMappedZone(stock) && !zoneMapped) {
@@ -626,21 +624,8 @@ const ResellerApi = require('@/services/resellerApi');
     }
   }
 
-  // Manual unit stock — blocked for live zone plans (panel controls in/out of stock).
+  // Manual units sell first. On Live API, an active zone keeps selling after the units reach 0.
   if (action === 'setStockCount' || (stockCount !== undefined && !action)) {
-    if (usesResellerPanelLiveStock(stock, companyDoc) && stockHasResellerPanelPlans(stock)) {
-      const stockCfg = readResellerApiStockConfig(stock);
-      if (stockCfg.zoneId != null || (stockCfg.zoneIds?.length ?? 0) > 0) {
-        return NextResponse.json(
-          {
-            error:
-              'Live zone stock is controlled by panel region status. Use "Sync live stock" — do not set manual units.',
-          },
-          { status: 400 }
-        );
-      }
-    }
-
     const count = Math.max(0, Math.floor(Number(stockCount) || 0));
     const companyCfg = mergeCompanyConfig(stock, { fulfillmentMode: 'units' });
     stock.defaultConfigurations.set('company', companyCfg);
