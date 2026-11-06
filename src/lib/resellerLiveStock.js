@@ -270,10 +270,9 @@ async function persistRegionPlanNeedsMappedZone(stock, stockCfg, defaults, prevR
   await IPStock.findByIdAndUpdate(stock._id, {
     available: false,
     stockCount: 0,
-    hiddenFromStore: true,
-    autoHiddenFromStore: true,
-    // Stops older workers that still wallet-sync: they skip when manual units are set.
-    availabilityManual: true,
+    hiddenFromStore: false,
+    autoHiddenFromStore: false,
+    availabilityManual: false,
     defaultConfigurations: {
       ...defaults,
       resellerApi: {
@@ -504,7 +503,6 @@ async function syncResellerIpStockRow(stock, { force = false, memoryOnly = null,
     }
     updatePayload.stockCount = nextStockCount;
 
-    const { storeAutoUnhideUpdate } = require('@/lib/ipStockAvailability');
     if (invRemaining > 0 && stock.company) {
       // Saved VPS in manage-servers must stay purchasable even when panel zones are inactive/missing.
       updatePayload.available = true;
@@ -516,14 +514,19 @@ async function syncResellerIpStockRow(stock, { force = false, memoryOnly = null,
         !regionBlockedOnPanel &&
         (!stockNameRequiresMappedZone(stock) || isZoneLiveStock || invRemaining > 0);
       if (mayRelist) {
-        Object.assign(updatePayload, storeAutoUnhideUpdate(stock, true));
+        updatePayload.hiddenFromStore = false;
+        updatePayload.autoHiddenFromStore = false;
       }
     } else if (
       invRemaining <= 0 &&
       (regionBlockedOnPanel || (stockNameRequiresMappedZone(stock) && !isZoneLiveStock))
     ) {
-      updatePayload.hiddenFromStore = true;
-      updatePayload.autoHiddenFromStore = true;
+      // Same as Host Heaven: inactive zone stays on the store as stock out.
+      updatePayload.available = false;
+      updatePayload.stockCount = 0;
+      updatePayload.hiddenFromStore = false;
+      updatePayload.autoHiddenFromStore = false;
+      updatePayload.availabilityManual = false;
     }
   }
 

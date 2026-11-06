@@ -449,28 +449,10 @@ function stockNameRequiresMappedZone(stock) {
 }
 
 /**
- * Store must not list region-titled reseller plans without zoneIds (wallet ≠ that IP).
- * Manual units or saved inventory rows still show when owner set them.
+ * Region plans stay on the store. Inactive or unmapped zone is stock out, not hidden.
  */
-function regionResellerPlanMustHideFromStore(stock) {
-  if (!stock?.company) return false;
-  if (!stockNameRequiresMappedZone(stock)) return false;
-  const cfg = readResellerApiStockConfig(stock);
-  const zoneMapped =
-    (Array.isArray(cfg.zoneIds) && cfg.zoneIds.length > 0) ||
-    (cfg.zoneId != null && Number.isFinite(Number(cfg.zoneId)));
-  if (zoneMapped) return false;
-  if (stock.availabilityManual === true && Math.max(0, Number(stock.stockCount) || 0) > 0) {
-    return false;
-  }
-  const inv =
-    typeof stock.inventoryAvailable === 'number'
-      ? stock.inventoryAvailable
-      : Array.isArray(stock.inventoryItems)
-        ? stock.inventoryItems.filter((i) => !i.allocated).length
-        : 0;
-  if (inv > 0) return false;
-  return true;
+function regionResellerPlanMustHideFromStore() {
+  return false;
 }
 
 module.exports = {
