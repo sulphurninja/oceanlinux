@@ -30,14 +30,6 @@ const navLinkClass =
 export default function Header() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [resourcesOpen, setResourcesOpen] = useState(false);
-  const [scrolled, setScrolled] = useState(false);
-
-  useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 20);
-    onScroll();
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
-  }, []);
 
   useEffect(() => {
     document.body.style.overflow = isMenuOpen ? "hidden" : "";
@@ -49,8 +41,7 @@ export default function Header() {
   return (
     <header
       className={cn(
-        "sticky top-0 z-50 w-full transition-all duration-300 premium-header",
-        scrolled && "premium-header--scrolled"
+        "sticky top-0 z-50 w-full premium-header"
       )}
     >
       <div
@@ -62,8 +53,7 @@ export default function Header() {
         {/* Utility row — hides on scroll for compact sticky bar */}
         <div
           className={cn(
-            "hidden lg:flex justify-between items-center text-sm border-b border-white/[0.05] overflow-hidden transition-all duration-300",
-            scrolled ? "max-h-0 py-0 opacity-0 border-transparent" : "max-h-10 py-2 opacity-100"
+            "hidden lg:flex justify-between items-center text-sm border-b border-white/[0.05] py-2"
           )}
         >
           <a
@@ -90,8 +80,7 @@ export default function Header() {
         {/* Main nav */}
         <div
           className={cn(
-            "flex justify-between items-center gap-3 transition-all duration-300",
-            scrolled ? "py-2.5" : "py-3 sm:py-3.5"
+            "flex justify-between items-center gap-3 py-3 sm:py-3.5"
           )}
         >
           <Link href="/" className="flex items-center gap-2.5 sm:gap-3 min-w-0 shrink group">
