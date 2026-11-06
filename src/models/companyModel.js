@@ -45,6 +45,8 @@ const companyResellerApiSchema = new mongoose.Schema({
   password: { type: String, default: '' },
   /** When true, IP stock follows GET /api/users/zones (per-plan zoneId) or wallet fallback. */
   useLiveStockApi: { type: Boolean, default: false },
+  /** Company portal switch. manual = Units field, 0 means stock out. Unset keeps the older zone behaviour. */
+  stockMode: { type: String, enum: ['live', 'manual'] },
   /** Default Hostheaven upstream coupon for auto-buy when stock has none set. */
   couponCode: { type: String, default: '' },
   /** Per-RAM panel coupons, e.g. { "4GB": "OCEAN199", "8GB": "WINPROMO" }. */
@@ -188,7 +190,8 @@ if (
     !mongoose.models.Company.schema.paths['hostdzireApi.apiKey'] ||
     !mongoose.models.Company.schema.paths['rackatoApi.keyId'] ||
     !mongoose.models.Company.schema.paths['nexaApi.apiKey'] ||
-    !mongoose.models.Company.schema.paths['resellerApi.useLiveStockApi'])
+    !mongoose.models.Company.schema.paths['resellerApi.useLiveStockApi'] ||
+    !mongoose.models.Company.schema.paths['resellerApi.stockMode'])
 ) {
   delete mongoose.models.Company;
 }

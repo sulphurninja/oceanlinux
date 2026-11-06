@@ -50,6 +50,7 @@ export function usesResellerLiveStock(stock, company) {
 export function usesResellerPanelLiveStock(stock, company) {
   if (!stockHasResellerPanelPlans(stock)) return false;
   if (!company?.resellerApi?.enabled) return false;
+  if (company.resellerApi.stockMode === 'manual') return false;
   if (usesResellerLiveStock(stock, company)) return true;
   const { readResellerApiStockConfig } = require('@/lib/resellerApiStockConfig');
   const cfg = readResellerApiStockConfig(stock);

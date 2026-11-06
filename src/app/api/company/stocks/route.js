@@ -233,12 +233,14 @@ export async function GET() {
     const hasResellerSync = !!resellerCfg;
     const hasLiveStockSync = companyUsesResellerLiveStock(companyDoc);
     const hasPortalBulkPromos = companyHasPortalBulkPromos(companyDoc);
+    const stockMode = companyDoc?.resellerApi?.stockMode === 'manual' ? 'manual' : 'live';
 
     return NextResponse.json({
       stocks: stocks.map((s) => serializeStock(s, companyDoc)),
       hasResellerSync,
       hasPortalBulkPromos,
       hasLiveStockSync,
+      stockMode,
       hasInventoryFullAccess: companyHasPortalInventoryFullAccess(companyDoc),
       resellerLabel: resellerCfg?.label || 'Hostheaven',
     }, {
@@ -259,7 +261,75 @@ export async function PUT(request) {
 
   await connectDB();
   const body = await request.json();
-  const { stockId, stockCount, action, items, bulkLines, removeItemId, ipAddress, addToInventory, fulfillmentMode, zoneIds, stockIds, promo, promos } = body;
+  const { stockId, stockCount, action, items, bulkLines, removeItemId, ipAddress, addToInventory, fulfillmentMode, zoneIds, stockIds, promo, promos, stockMode } = body;
+
+  if (action === 'setStockMode') {
+    const mode = stockMode === 'manual' ? 'manual' : 'live';
+    const companyDoc = await Company.findById(company.id);
+    if (!companyDoc?.resellerApi?.enabled) {
+      return NextResponse.json({ error: 'Reseller API is not enabled for this company.' }, { status: 400 });
+    }
+    companyDoc.resellerApi.stockMode = mode;
+    companyDoc.resellerApi.useLiveStockApi = mode === 'live';
+    companyDoc.markModified('resellerApi');
+    await companyDoc.save();
+
+    const stocks = await IPStock.find({ company: companyDoc._id });
+    for (const stock of stocks) {
+      if (mode === 'manual') {
+        const count = Math.max(0, Math.floor(Number(stock.stockCount) || 0));
+        stock.availabilityManual = true;
+        stock.available = count > 0;
+        stock.stockCount = count;
+        const companyCfg = mergeCompanyConfig(stock, { fulfillmentMode: 'units' });
+        stock.defaultConfigurations.set('company', companyCfg);
+        stock.markModified('defaultConfigurations');
+        if (count <= 0) {
+          stock.hiddenFromStore = false;
+          stock.autoHiddenFromStore = false;
+        }
+      } else if (stockHasResellerPanelPlans(stock)) {
+        stock.availabilityManual = false;
+        const companyCfg = readCompanyConfig(stock);
+        if (companyCfg.fulfillmentMode === 'units') {
+          const nextCfg = { ...companyCfg };
+          delete nextCfg.fulfillmentMode;
+          stock.defaultConfigurations.set('company', nextCfg);
+          stock.markModified('defaultConfigurations');
+        }
+      }
+      await stock.save();
+    }
+
+    if (mode === 'live') {
+      let zonesList = null;
+      try {
+        const cfg = getCompanyResellerApiConfig(companyDoc);
+        if (cfg) zonesList = await new ResellerApi(cfg).listZones();
+      } catch (err) {
+        console.warn('[company/stocks setStockMode] listZones failed:', err.message);
+      }
+      for (const stock of stocks) {
+        if (!stockHasResellerPanelPlans(stock)) continue;
+        try {
+          await syncResellerIpStockRow(stock, { force: true, zonesList });
+        } catch (err) {
+          console.warn('[company/stocks setStockMode] sync failed:', stock._id, err.message);
+        }
+      }
+    }
+
+    if (global.__oceanCompanyModesCache) global.__oceanCompanyModesCache = { at: 0, map: {} };
+    if (global.__oceanIpStockCatalog?.clear) global.__oceanIpStockCatalog.clear();
+
+    const leanCompany = companyDoc.toObject();
+    const fresh = await IPStock.find({ company: companyDoc._id }).sort({ name: 1 }).lean();
+    return NextResponse.json({
+      success: true,
+      stockMode: mode,
+      stocks: fresh.map((s) => serializeStock(s, leanCompany)),
+    });
+  }
 
   if (action === 'syncAllResellerExpiries') {
     const companyDoc = await Company.findById(company.id)
@@ -579,6 +649,10 @@ const ResellerApi = require('@/services/resellerApi');
     stock.stockCount = count;
     stock.available = count > 0;
     stock.availabilityManual = true;
+    if (count <= 0 && companyDoc?.resellerApi?.stockMode === 'manual') {
+      stock.hiddenFromStore = false;
+      stock.autoHiddenFromStore = false;
+    }
     if (count > 0 && stock.autoHiddenFromStore) {
       stock.hiddenFromStore = false;
       stock.autoHiddenFromStore = false;

@@ -310,6 +310,9 @@ function isHostdzireMemoryInStock(stock: IPStock, memory: string) {
 }
 
 function isResellerMemoryInStock(stock: IPStock, memory: string) {
+  if (usesCompanyManualUnits(stock)) {
+    return getStockUnitsRemaining(stock) > 0;
+  }
   const savedVps = stock.inventoryAvailable ?? 0;
   if (savedVps > 0) return true;
 
@@ -348,11 +351,11 @@ function pricedMemoryKeys(stock: IPStock) {
 }
 
 function isStockPurchasable(stock: IPStock, memory?: string) {
-  const savedVps = stock.inventoryAvailable ?? 0;
-  if (savedVps > 0) return true;
   if (usesCompanyManualUnits(stock)) {
     return getStockUnitsRemaining(stock) > 0;
   }
+  const savedVps = stock.inventoryAvailable ?? 0;
+  if (savedVps > 0) return true;
   if (isNetbayLiveStock(stock)) {
     if (memory) return isNetbayMemoryInStock(stock, memory);
     if (stock.available) return true;

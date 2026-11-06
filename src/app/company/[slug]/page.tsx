@@ -366,6 +366,8 @@ export default function CompanyDashboard() {
   const [hasResellerSync, setHasResellerSync] = useState(false);
   const [hasPortalBulkPromos, setHasPortalBulkPromos] = useState(false);
   const [hasLiveStockSync, setHasLiveStockSync] = useState(false);
+  const [stockMode, setStockMode] = useState<'live' | 'manual'>('live');
+  const [savingStockMode, setSavingStockMode] = useState(false);
   const [resellerLabel, setResellerLabel] = useState('Hostheaven');
   const [syncingStockId, setSyncingStockId] = useState<string | null>(null);
   const [syncingAllExpiries, setSyncingAllExpiries] = useState(false);
@@ -479,6 +481,7 @@ export default function CompanyDashboard() {
         setHasResellerSync(!!payload.hasResellerSync);
         setHasPortalBulkPromos(!!payload.hasPortalBulkPromos);
         setHasLiveStockSync(!!payload.hasLiveStockSync);
+        setStockMode(payload.stockMode === 'manual' ? 'manual' : 'live');
         setResellerLabel(payload.resellerLabel || 'Hostheaven');
       }
     } else {
@@ -545,6 +548,35 @@ export default function CompanyDashboard() {
       toast.error('Failed to update stock');
     } finally {
       setSavingStockId(null);
+    }
+  };
+
+  const changeStockMode = async (mode: 'live' | 'manual') => {
+    if (mode === stockMode || savingStockMode) return;
+    setSavingStockMode(true);
+    try {
+      const res = await fetch('/api/company/stocks', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'setStockMode', stockMode: mode }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(friendlyCompanyError(data.error));
+        return;
+      }
+      const nextMode = data.stockMode === 'manual' ? 'manual' : 'live';
+      setStockMode(nextMode);
+      setHasLiveStockSync(nextMode === 'live');
+      if (Array.isArray(data.stocks)) {
+        setStocks(data.stocks);
+        setStockCountDrafts(Object.fromEntries(data.stocks.map((s: Stock) => [s._id, String(s.stockCount ?? 0)])));
+      }
+      toast.success(mode === 'live' ? 'Live API stock is on' : 'Manual stock is on. Units 0 means stock out.');
+    } catch {
+      toast.error('Could not change stock mode');
+    } finally {
+      setSavingStockMode(false);
     }
   };
 
@@ -1209,12 +1241,45 @@ export default function CompanyDashboard() {
         {/* ── Stocks Tab ── */}
         {tab === 'stocks' && (
           <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_340px] gap-4 items-start">
-            {hasLiveStockSync && (
+            {hasResellerSync && (
               <div className="xl:col-span-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-4 py-3">
                 <div className="min-w-0">
-                  <p className="text-sm font-medium text-emerald-800 dark:text-emerald-200">PrimeVPS live stock</p>
+                  <p className="text-sm font-medium text-emerald-800 dark:text-emerald-200">Stock source</p>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    Panel zone ACTIVE/INACTIVE se auto in/out of stock (har 5 min sync). Manual Units mat dabao — zone hi control karega.
+                    {stockMode === 'live'
+                      ? 'Live API stock is on. Panel zone decides in stock or stock out.'
+                      : 'Manual stock is on. Set Units to 0 and that plan is stock out, even if the panel has stock.'}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={stockMode === 'live' ? 'default' : 'outline'}
+                    className={stockMode === 'live' ? 'bg-emerald-600 hover:bg-emerald-700' : ''}
+                    onClick={() => changeStockMode('live')}
+                    disabled={savingStockMode}
+                  >
+                    {savingStockMode && stockMode !== 'live' ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Live API'}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={stockMode === 'manual' ? 'default' : 'outline'}
+                    onClick={() => changeStockMode('manual')}
+                    disabled={savingStockMode}
+                  >
+                    {savingStockMode && stockMode !== 'manual' ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Manual'}
+                  </Button>
+                </div>
+              </div>
+            )}
+            {hasLiveStockSync && stockMode === 'live' && (
+              <div className="xl:col-span-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-lg border px-4 py-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">Refresh live stock</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Pull the latest in-stock and stock-out state from the panel.
                   </p>
                 </div>
                 <Button

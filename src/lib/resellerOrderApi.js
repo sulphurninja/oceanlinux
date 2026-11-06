@@ -159,7 +159,7 @@ function resellerPlanInStock(stock) {
   const free = Array.isArray(stock.inventoryItems)
     ? stock.inventoryItems.filter((item) => item && !item.allocated).length
     : 0;
-  if (stock.availabilityManual === true && free <= 0 && Math.max(0, Number(stock.stockCount) || 0) <= 0) {
+  if (stock.availabilityManual === true && Math.max(0, Number(stock.stockCount) || 0) <= 0) {
     return false;
   }
   return true;
