@@ -9,7 +9,6 @@ const IPStock = require('@/models/ipStockModel');
 const {
   mapPlansPayload,
   nexaStoreSellPrice,
-  stockUnits,
   nexaStockKey,
   buildNexaStockName,
   buildNexaStockDocument,
