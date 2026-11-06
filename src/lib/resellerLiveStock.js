@@ -267,11 +267,12 @@ async function persistRegionPlanNeedsMappedZone(stock, stockCfg, defaults, prevR
     }
   }
 
+  const keepAdminHide = stock.hiddenFromStore === true || stock.hiddenByAdmin === true;
   await IPStock.findByIdAndUpdate(stock._id, {
     available: false,
     stockCount: 0,
-    hiddenFromStore: false,
-    autoHiddenFromStore: false,
+    hiddenFromStore: keepAdminHide ? true : false,
+    autoHiddenFromStore: keepAdminHide ? stock.autoHiddenFromStore === true : false,
     availabilityManual: false,
     defaultConfigurations: {
       ...defaults,
@@ -518,17 +519,17 @@ async function syncResellerIpStockRow(stock, { force = false, memoryOnly = null,
       invRemaining <= 0 &&
       (regionBlockedOnPanel || (stockNameRequiresMappedZone(stock) && !isZoneLiveStock))
     ) {
-      // Same as Host Heaven: inactive zone stays on the store as stock out.
+      // Out of stock stays listed until an admin hides it. Do not clear that hide.
       updatePayload.available = false;
       updatePayload.stockCount = 0;
-      updatePayload.hiddenFromStore = false;
-      updatePayload.autoHiddenFromStore = false;
     }
   } else {
     const units = Math.max(0, Number(stock.stockCount) || 0);
     updatePayload.available = units > 0 || effectiveAvailable;
-    updatePayload.hiddenFromStore = false;
-    updatePayload.autoHiddenFromStore = false;
+    if (units > 0 || effectiveAvailable) {
+      updatePayload.hiddenFromStore = false;
+      updatePayload.autoHiddenFromStore = false;
+    }
   }
 
   await IPStock.findByIdAndUpdate(stock._id, updatePayload);

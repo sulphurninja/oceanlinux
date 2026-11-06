@@ -310,16 +310,7 @@ export async function GET(request) {
             searchParams.get('includeHidden') === '1' ||
             searchParams.get('includeHidden') === 'true';
 
-        const resellerCompanies = await Company.find({ 'resellerApi.enabled': true, isActive: { $ne: false } })
-            .select('_id')
-            .lean();
-        const resellerCompanyIds = resellerCompanies.map((company) => company._id);
-        let query = {
-            $or: [
-                { hiddenFromStore: { $ne: true } },
-                { company: { $in: resellerCompanyIds } },
-            ],
-        };
+        let query = { hiddenFromStore: { $ne: true } };
         let customerView = true;
         if (includeHidden) {
             const admin = await requireAdmin(request);
@@ -337,7 +328,6 @@ export async function GET(request) {
                 $or: [
                     { hiddenFromStore: { $ne: true } },
                     { tags: 'nexa' },
-                    { company: { $in: resellerCompanyIds } },
                 ],
             };
         }
