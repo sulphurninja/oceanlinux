@@ -62,8 +62,11 @@ function shouldSkipAutoRetry(order) {
         };
     }
     const last = order.lastProvisionAttempt ? new Date(order.lastProvisionAttempt).getTime() : 0;
-    if (last && Date.now() - last < 4 * 60 * 1000) {
-        return { skip: true, reason: 'cooldown_4min' };
+    // Provision refuses a lock for 5 minutes after lastProvisionAttempt.
+    // A 4-minute skip let the 5-minute cron grab the order, stamp
+    // "CRON: Processing...", then walk away when provision said it was busy.
+    if (last && Date.now() - last < 6 * 60 * 1000) {
+        return { skip: true, reason: 'cooldown_6min' };
     }
     return { skip: false };
 }
@@ -838,7 +841,30 @@ export async function POST(request) {
 
                 const provisionResult = await provisioningService.provisionServer(lockedOrder._id.toString());
 
-                if (provisionResult.nexaPending || provisionResult.pending || provisionResult.alreadyProvisioning) {
+                if (provisionResult.alreadyProvisioning) {
+                    const orderTime = Date.now() - orderStartTime;
+                    const previousError = String(lockedOrder.provisioningError || '');
+                    const restoreError = previousError && previousError !== 'CRON: Processing...'
+                        ? previousError
+                        : 'CRON: skipped, another provision attempt is still inside the lock window';
+                    await Order.findByIdAndUpdate(lockedOrder._id, {
+                        provisioningStatus: 'failed',
+                        provisioningError: restoreError,
+                    });
+                    console.log(`[CRON-${cronId}] Provision lock still held — restored previous error instead of leaving CRON: Processing...`);
+                    result = {
+                        orderId: lockedOrder._id.toString(),
+                        success: false,
+                        alreadyProvisioning: true,
+                        attempts: attempt,
+                        processingTime: orderTime,
+                        error: restoreError,
+                        productId: lockedOrder._validationInfo.productId
+                    };
+                    break;
+                }
+
+                if (provisionResult.nexaPending || provisionResult.pending) {
                     success = true;
                     const orderTime = Date.now() - orderStartTime;
                     console.log(`[CRON-${cronId}] Order stays provisioning until the IP is delivered`);
