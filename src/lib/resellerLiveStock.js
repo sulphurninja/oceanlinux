@@ -98,8 +98,7 @@ async function resolvePriceIds(api, stockCfg, memory, stock) {
  */
 async function checkResellerZoneStock(api, { stockCfg, memory, zonesList = null }) {
   const zones = zonesList || (await api.listZones());
-  // This panel sometimes returns [] for a moment while the zone is still ACTIVE.
-  // An empty list is not "zone missing" — wiping stock here is what kept Cloud/Prime out.
+  // No zones in the response means the mapped region is gone. Stock goes out.
   if (!Array.isArray(zones) || zones.length === 0) {
     return {
       memory,
@@ -110,7 +109,7 @@ async function checkResellerZoneStock(api, { stockCfg, memory, zonesList = null 
       unitsAvailable: 0,
       emptyZoneList: true,
       reason: 'Panel zone list was empty',
-      message: 'Zone list empty — keeping the last panel status',
+      message: 'Out of stock (zone missing on panel)',
       checkedAt: new Date().toISOString(),
     };
   }
@@ -395,7 +394,7 @@ async function syncResellerIpStockRow(stock, { force = false, memoryOnly = null,
           break;
         }
       } catch {
-        /* keep the empty list and do not wipe the last zone status */
+        /* keep the empty list; stock is marked out below */
       }
     }
   }
@@ -418,15 +417,6 @@ async function syncResellerIpStockRow(stock, { force = false, memoryOnly = null,
         zonesList: resolvedZones,
         stock,
       });
-      if (result?.emptyZoneList) {
-        const prev = prevReseller.variantStock?.[memory];
-        if (prev && typeof prev === 'object') {
-          variantResults[memory] = { ...prev, checkedAt: new Date().toISOString() };
-          if (prev.available) upstreamYes += 1;
-          else upstreamNo += 1;
-          continue;
-        }
-      }
       variantResults[memory] = result;
       if (result.zoneName) lastZoneName = result.zoneName;
       if (result.available) upstreamYes += 1;

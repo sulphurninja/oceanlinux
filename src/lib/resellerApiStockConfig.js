@@ -170,10 +170,26 @@ function resolveLiveResellerZonesInPriorityOrder(stockCfg, zonesList) {
 /**
  * Auto-buy tries selected regions in priority order (1, 2, 3…).
  * Only zones the owner selected on the IP stock — never random panel regions.
+ * An inactive zone, a zone missing from the list, or an empty list is not buyable.
  */
 async function resolveResellerZoneCandidatesForPurchase(api, stockCfg, { zonesList = null } = {}) {
-  const zones = zonesList || (await api.listZones());
-  return resolveLiveResellerZonesInPriorityOrder(stockCfg, zones).live;
+  let zones = zonesList || (await api.listZones());
+  if (!zonesList && (!Array.isArray(zones) || zones.length === 0)) {
+    for (let attempt = 0; attempt < 2 && (!Array.isArray(zones) || zones.length === 0); attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      try {
+        zones = await api.listZones();
+      } catch {
+        /* a failed retry still counts as no zones */
+      }
+    }
+  }
+
+  const resolved = resolveLiveResellerZonesInPriorityOrder(stockCfg, zones);
+  if (resolved.live.length) return resolved.live;
+
+  // Inactive, missing from the list, or an empty list: nothing to buy.
+  return [];
 }
 
 function parseMemoryGb(memory) {
